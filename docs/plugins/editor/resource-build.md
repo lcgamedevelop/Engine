@@ -42,7 +42,7 @@ keep = []
 - 显式 `[[common.items]]` 必须写 `roots` 数组。`roots = []` 表示有意不选择该项的项目入口；仍可用 `keep` 选择动态资源。空项目集合不会移除引擎必需的内置资源基线。
 - 普通资源逻辑路径相对项目资源根，例如 `scenes/main.scene`；不带 `project/`。`builtin://` 是引擎保留域，`editor://` 仅属于编辑器，不能作为运行构建入口。
 - `roots` 是入口；`keep` 补充无法静态发现的动态加载资源。两者均递归包含真实运行依赖，不需手写每张间接贴图、每个材质或 Shader。
-- `storage = "files"` 保持 `gen/<完整GUID>` 散文件；`storage = "package"` 按 GUID 排序串联完整 `ERS1` 实体，输出为 `packs/<构建项名>-<指纹>`，无后缀。catalog 记录实体的包内偏移和长度，不增加包内目录。
+- `storage = "files"` 保持 `gen/<完整GUID>` 散文件；`storage = "package"` 按 GUID 排序串联完整 `ERS2` 实体，输出为 `packs/<构建项名>-<指纹>`，无后缀。catalog 记录实体的包内偏移和长度，不增加包内目录。
 
 构建项名称只使用小写字母、数字、连字符或下划线；`builtin` 保留给引擎。未知字段、重复名称、错误类型、越界路径和项目子路径中的符号链接均拒绝。清单不接受 `target_platform`；平台只由调用参数指定，支持 `macos/ios/windows/android/linux`，省略时采用宿主平台。默认输出 `cache/build/<platform>`；高级配置可在 `[common]` 下选填 `output = "cache/build/<专用目录>"`，不能覆盖导入缓存或内置 Shader 工具缓存。
 

@@ -1,4 +1,4 @@
-"""Copy loose files or package members from a v2 catalog and transactionally update Android built-in assets while preserving v8."""
+"""Copy loose files or package members from the current catalog and transactionally update Android built-in assets while preserving v8."""
 
 import argparse
 import json
@@ -147,7 +147,7 @@ def main():
     parser.add_argument(
         "--manifest", type=Path, help="Project build manifest; defaults to settings/editor-resource-build.toml"
     )
-    parser.add_argument("--resource-root", type=Path, help="Existing v2 runtime package directory; skips the builder")
+    parser.add_argument("--resource-root", type=Path, help="Existing current-format runtime package directory; skips the builder")
     arguments = parser.parse_args()
     receipt = prepare(
         arguments.project,

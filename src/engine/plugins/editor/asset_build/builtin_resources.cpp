@@ -236,7 +236,7 @@ bool prepare_builtin_resources(std::string_view target, const std::filesystem::p
             error = "cannot encode builtin resource: " + entry->path;
             return false;
         }
-        entry->format_version = 1;
+        entry->format_version = 2;
         entry->content_hash = pipeline::hash_bytes(entity);
         entry->content_size = entity.size();
         entry->location = std::make_unique<schema::FileLocationT>();

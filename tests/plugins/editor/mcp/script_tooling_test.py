@@ -108,7 +108,7 @@ def check_compiler_inputs(root, project, temporary):
 
 
 def resource_payload(entity):
-    require(entity[:4] == b"ERS1" and len(entity) >= 8, "invalid resource entity framing")
+    require(entity[:4] == b"ERS2" and len(entity) >= 8, "invalid resource entity framing")
     header_size = int.from_bytes(entity[4:8], "little") + 8
     require(8 < header_size <= len(entity), "invalid bounded resource header")
     return entity[header_size:]

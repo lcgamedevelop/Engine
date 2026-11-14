@@ -65,7 +65,7 @@ target_link_libraries(engine_resource PRIVATE example::example)
 
 | 用途 | 固定依赖 | 来源与维护 |
 | --- | --- | --- |
-| 基础格式与 JSON | fmt 12.2.0、nlohmann-json 3.12.0 | baseline；保留该版的 port 修复。 |
+| JSON | nlohmann-json 3.12.0 | baseline；保留该版的 port 修复。 |
 | 异步日志 | Quill 13.1.0 | baseline；LogSystem 通过官方 Sink 扩展点保留无异常文件/平台输出契约。 |
 | 平台窗口与输入 | SDL 3.4.20 | overlay；含同版 Android Java glue 与 Windows 文件共享修复。 |
 | 渲染及图像工具 | bgfx.cmake 1.167.9605-606（API 167） | overlay；bgfx/bx/bimg/shaderc 来自同一正式归档。 |

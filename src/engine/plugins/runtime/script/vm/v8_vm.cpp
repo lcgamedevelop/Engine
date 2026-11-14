@@ -1,4 +1,5 @@
 #include "plugins/runtime/script/vm/script_vm.hpp"
+#include "plugins/runtime/script/vm/text_encoding.hpp"
 
 #include "runtime/app/app.hpp"
 #include "runtime/resource/virtual_file_system.hpp"
@@ -10,6 +11,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -24,6 +26,9 @@ namespace engine::plugins::script::vm
 {
 namespace
 {
+namespace fs = std::filesystem;
+
+#if defined(SDL_PLATFORM_ANDROID) && ENGINE_V8_HAS_I18N
 bool read_file_text(const std::filesystem::path& path, std::string& output)
 {
     output.clear();
@@ -39,9 +44,6 @@ bool read_file_text(const std::filesystem::path& path, std::string& output)
     return true;
 }
 
-namespace fs = std::filesystem;
-
-#if defined(SDL_PLATFORM_ANDROID) && ENGINE_V8_HAS_I18N
 [[nodiscard]] bool contained_file(const fs::path& root, std::string_view relative, fs::path& path,
                                   bool directory = false)
 {
@@ -256,6 +258,19 @@ std::shared_ptr<V8Process> v8_process()
         return js_string(isolate, *text).ToLocal(&result) ? v8::MaybeLocal<v8::Value>(result)
                                                           : v8::MaybeLocal<v8::Value>();
     }
+    if (const auto* bytes = std::get_if<ByteBuffer>(&value.data))
+    {
+        if (bytes->size() > maximum_byte_size)
+        {
+            return {};
+        }
+        const auto buffer = v8::ArrayBuffer::New(isolate, bytes->size());
+        if (!bytes->empty())
+        {
+            std::memcpy(buffer->Data(), bytes->data(), bytes->size());
+        }
+        return v8::Uint8Array::New(buffer, 0, bytes->size());
+    }
     if (const auto* items = std::get_if<NativeValue::Array>(&value.data))
     {
         if (items->size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
@@ -392,6 +407,14 @@ public:
         {
             return false;
         }
+        {
+            const v8::String::ValueView units(arguments_.GetIsolate(),
+                                              arguments_[index].As<v8::String>());
+            if (!units.is_one_byte() && !valid_utf16({units.data16(), units.length()}))
+            {
+                return false;
+            }
+        }
         const v8::String::Utf8Value value(arguments_.GetIsolate(), arguments_[index]);
         if (*value == nullptr || static_cast<std::size_t>(value.length()) > maximum_text_size)
         {
@@ -401,6 +424,28 @@ public:
         return true;
     }
 
+    bool bytes(int index, ByteBuffer& output) const override
+    {
+        output.clear();
+        if (!valid_index(index) || !arguments_[index]->IsUint8Array())
+        {
+            return false;
+        }
+        const auto view = arguments_[index].As<v8::Uint8Array>();
+        const auto buffer = view->Buffer();
+        if (buffer->WasDetached() || buffer->GetBackingStore()->IsShared() ||
+            view->ByteLength() > maximum_byte_size)
+        {
+            return false;
+        }
+        output.resize(view->ByteLength());
+        if (!output.empty() && view->CopyContents(output.data(), output.size()) != output.size())
+        {
+            output.clear();
+            return false;
+        }
+        return true;
+    }
     void set_return(const NativeValue& value) const override
     {
         v8::Local<v8::Value> result;

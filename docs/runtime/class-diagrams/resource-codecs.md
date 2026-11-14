@@ -2,7 +2,7 @@
 
 [类图索引](../../class-diagrams/index.md) · [统一生命周期](resource-lifecycle.md) · [资源对象](resource.md) · [核心读取](resource-system.md) · [资源插件](../../plugins/runtime/class-diagrams/resource-graph.md)
 
-当前契约已实现；验证范围见[测试文档](../../testing.md)。 覆盖当前 asset_catalog.fbs 的全部 21 种 AssetKind。生命周期一致；数据表示和合法性规则由各自类型处理器负责。
+当前契约已实现；验证范围见[测试文档](../../testing.md)。 覆盖当前 asset_catalog.fbs 的全部 20 种 AssetKind。生命周期一致；数据表示和合法性规则由各自类型处理器负责。
 
 ## 最小扩展接口
 
@@ -19,14 +19,14 @@ classDiagram
     class MeshResourceCodec
     class MovieResourceCodec
     class TerrainResourceCodec
-    class JsonResourceCodec
+    class SourceResourceCodec
     class ResourceSystem
     class Resource
     class AssetEntryT
     ResourceCodec <|-- MeshResourceCodec
     ResourceCodec <|-- MovieResourceCodec
     ResourceCodec <|-- TerrainResourceCodec
-    ResourceCodec <|-- JsonResourceCodec
+    ResourceCodec <|-- SourceResourceCodec
     ResourceSystem *-- ResourceCodec : 宿主 add 类型并冻结登记
     ResourceCodec ..> AssetEntryT : 只读本项元数据
     ResourceCodec ..> Resource : 输出独占规范载荷
@@ -49,7 +49,7 @@ classDiagram
 
 | AssetKind | 规范 DataT | 处理器 | 实现归属与主要校验 |
 | --- | --- | --- | --- |
-| source | ByteBuffer | SourceResourceCodec | 核心；明确的原始字节资源，不负责离线导入 |
+| source | ByteBuffer | SourceResourceCodec | 核心；原始字节允许为空，至多 64 MiB；不检查文本编码或配置语法 |
 | script | ByteBuffer | ScriptResourceCodec | 核心；已发布脚本载荷编码和依赖，VM 编译/执行归 script 插件 |
 | scene | SceneDataT | SceneResourceCodec | 核心；节点/组件持久结构、稳定局部身份与声明引用 |
 | mesh | MeshDataT | MeshResourceCodec | 核心；顶点/索引布局、范围、子网格 |
@@ -65,7 +65,6 @@ classDiagram
 | effect | EffectAssetDataT | EffectResourceCodec | plugins/runtime/effects；FlatBuffers、特效载荷和资源绑定 |
 | terrain | TerrainAssetDataT | TerrainResourceCodec | plugins/runtime/terrain；网格维度、采样量、数值与范围 |
 | destruction | DestructionAssetDataT | DestructionResourceCodec | plugins/runtime/destruction；碎片网格、连接索引和物理参数 |
-| json | ByteBuffer | JsonResourceCodec | 核心；UTF-8 与完整 JSON 语法，业务解释另属调用方 |
 | light_probe | LightProbeDataT | LightProbeResourceCodec | 核心；探针采样、尺寸与系数范围 |
 | prefab | PrefabDataT | PrefabResourceCodec | 核心；模板身份、局部引用和声明依赖 |
 | animation_retarget_profile | AnimationRetargetProfileDataT | AnimationRetargetResourceCodec | 核心；源/目标骨架身份与映射合法性 |
@@ -84,7 +83,7 @@ flowchart LR
 
 处理器缺失必须返回 unsupported_type；未知 Kind 同样失败，不能降级成 bytes 后宣称 ready。未选择某个插件时，其格式实现与第三方依赖不能被链接进核心。
 
-扩展新类型时只增加该类型的 schema/规范载荷声明（若是新持久模型）、独立处理器和显式登记；新增 AssetKind 按现有序列化兼容规则追加。Resource、ResourceLoader、ResourceGraphSystem 的接口及计数算法不随类型数量增长。
+扩展新类型时只增加该类型的 schema/规范载荷声明（若是新持久模型）、独立处理器和显式登记；AssetKind 调整时同步当前目录／实体版本并重建产物。Resource、ResourceLoader、ResourceGraphSystem 的接口及计数算法不随类型数量增长。
 
 ## 解码实现精简目标
 

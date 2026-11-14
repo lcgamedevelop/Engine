@@ -108,9 +108,9 @@ Android 同步由电脑上的编辑器 MCP 经 adb 完成，iOS 通过所选应�
 - [地形运行时](runtime/class-diagrams/terrain.md)、[地形制作](editor/class-diagrams/terrain-editor.md)与[地形脚本接口](runtime/class-diagrams/terrain-script-api.md)。
 - [建筑破坏组件与系统](runtime/class-diagrams/destruction.md)、[Blast 图](runtime/class-diagrams/destruction-graph.md)、[官方预破碎](editor/class-diagrams/destruction-authoring.md)与[编辑器事务/MCP](editor/class-diagrams/destruction-editor.md)。
 - [资源构建](editor/resource-build.md)、[资源同步](editor/class-diagrams/asset-sync-system.md)。
-- [统一资源导入](editor/asset-import.md)与[插件归属类图](editor/class-diagrams/asset-import.md)：FBX/USD/字体/UI/JSON 五种实现共用一个编辑器插件，保留类型职责及现有接口。
+- [统一资源导入](editor/asset-import.md)与[插件归属类图](editor/class-diagrams/asset-import.md)：FBX/USD/字体/UI 等格式实现共用一个编辑器插件，保留类型职责及现有接口。
 - [字体导入](editor/class-diagrams/font-importer.md)、[UI 导入](editor/class-diagrams/ui-importer.md)、[核心字体](../runtime/class-diagrams/font-system.md)与[场景界面](../runtime/class-diagrams/ui-system.md)。
-- [JSON 导入](editor/class-diagrams/json-importer.md)与[JSON 脚本接口](runtime/class-diagrams/json-script-api.md)：统一资源导入插件内校验配置，原生资源载荷和静态脚本读取复用现有契约。
+- [通用数据导入](../editor/class-diagrams/source-importer.md)、[资源文本／二进制读取](runtime/class-diagrams/resources-script-api.md)与[文件操作](runtime/class-diagrams/file-script-api.md)：原始字节和实际文件分别经所属接口读取，配置解析归项目 TS。
 - [跨层完整引用关系](../class-diagrams/references.md)。
 
 模型格式以导入器 id 区分，FBX/USD 可同时产出 `model`。宿主通过 `add_importer` 装配新格式，现有同 id 才使用 `set_importer`；管线统一管理子 GUID、缓存和发布。格式解析器不进入运行包，后续格式遵循同一扩展契约，见[FBX](editor/class-diagrams/fbx-importer.md)及[USD](editor/class-diagrams/usd-import.md)。

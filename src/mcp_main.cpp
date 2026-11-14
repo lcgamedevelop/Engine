@@ -56,7 +56,6 @@
 #if ENGINE_HAS_ASSET_IMPORT_PLUGIN
 #include "plugins/editor/asset_import/fbx_importer.hpp"
 #include "plugins/editor/asset_import/font_importer.hpp"
-#include "plugins/editor/asset_import/json_importer.hpp"
 #include "plugins/editor/asset_import/movie_importer.hpp"
 #include "plugins/editor/asset_import/ui_importer.hpp"
 #include "plugins/editor/asset_import/usd_importer.hpp"
@@ -281,13 +280,6 @@ int main(int argc, char** argv)
     if (!pipeline.add_importer(ui_importer))
     {
         std::fputs("Cannot register ui importer\n", stderr);
-        return 1;
-    }
-    std::unique_ptr<engine::editor::asset_pipeline::AssetImporter> json_importer =
-        std::make_unique<engine::plugins::asset_import::JsonImporter>();
-    if (!pipeline.add_importer(json_importer))
-    {
-        std::fputs("Cannot register JSON importer\n", stderr);
         return 1;
     }
     std::unique_ptr<engine::editor::asset_pipeline::AssetImporter> movie_importer =

@@ -4,7 +4,6 @@
 #include "runtime/resource/codecs/animation_retarget_resource_codec.hpp"
 #include "runtime/resource/codecs/audio_resource_codec.hpp"
 #include "runtime/resource/codecs/font_resource_codec.hpp"
-#include "runtime/resource/codecs/json_resource_codec.hpp"
 #include "runtime/resource/codecs/light_probe_resource_codec.hpp"
 #include "runtime/resource/codecs/material_resource_codec.hpp"
 #include "runtime/resource/codecs/mesh_resource_codec.hpp"
@@ -35,7 +34,6 @@ bool register_runtime_resource_codecs(engine::ResourceSystem& resources)
 {
     if (!resources.add<engine::SourceResourceCodec>() ||
         !resources.add<engine::ScriptResourceCodec>() ||
-        !resources.add<engine::JsonResourceCodec>() ||
         !resources.add<engine::SceneResourceCodec>() ||
         !resources.add<engine::PrefabResourceCodec>() ||
         !resources.add<engine::MeshResourceCodec>() ||

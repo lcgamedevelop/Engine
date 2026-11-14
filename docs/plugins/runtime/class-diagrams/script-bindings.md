@@ -45,7 +45,7 @@ classDiagram
 
 InputBinding 提供统一输入能力，BindingContext 借用 InputSystem 并清理本 Run 创建的通道与捕获；公开方法、数据依赖与失败语义见[输入脚本接口](input-script-api.md)。
 
-JsonBinding 的公开方法与 `Json.ParseResource(handle): unknown` 门面只在 [JSON 资源脚本接口](json-script-api.md)定义。它复用 BindingContext 的活动回调检查和已注入 ResourceLoader 的已加载资源查询，不增加上下文服务、字段或第二套 JSON 值模型。
+文件操作使用 [FileBinding / File](file-script-api.md)，由 [ResourcesBinding](resources-script-api.md) 提供已加载资源的文本／二进制读取。文件错误和资源错误分别归当前 BindingContext，不由静态绑定实例跨 Run 保存。
 
 运行控制继续复用现有系统，窗口绑定、退出入口和生命周期见
 [运行时控制脚本接口](runtime-controls-script-api.md)。单线程场景操作由已有 SceneBinding 转发，
@@ -102,6 +102,10 @@ classDiagram
         +storage() KeyValueStore&
         +set_storage_error(string_view error) void
         +storage_error() const string&
+        +set_file_error(string_view error) void
+        +file_error() const string&
+        +set_resource_error(string_view error) void
+        +resource_error() string_view
         +scene_id() uint64_t
         +set_scene_id(uint64_t value) void
         +find_node(uint64_t scene_id, uint64_t node_id) Node
@@ -188,7 +192,9 @@ classDiagram
 
 以上帮助入口全部为静态方法，返回值均不可忽略；数字和文本读取失败将输出重置为零值或空字符串。`current` 的 `require_callable` 默认 true；只有 Debug 日志使用 false，允许当前活动模块顶层记录日志。上下文必须 active，操作场景还必须处于可调用作用域。停止 Run 时先执行关闭回调和绑定清理，再释放 VM 与任务队列，随后撤销上下文活性并仅清理其拥有的场景。
 
-原生注册由 `ScriptVm::function/integer/string` 完成；回调参数可携带 int32 标签供同类操作区分。所有 native 属性只读、不可删除，已有名称直接失败；注册表完成全部绑定后调用 `seal_bindings`。`Arguments::set_return` 只接收原生 `NativeValue`，其中 uint64 标识转换成 BigInt，Object/Array 用于 UI 事件及值对象，默认空值返回 null；具体 VM 负责临时值的创建与回收。
+set_file_error / file_error 管理独占文件错误字符串；set_resource_error 使用既有资源错误字符串，resource_error 只读借用。两个 setter 接收 string_view 并复制，两个 getter 为 const noexcept，查询返回 nodiscard；借用仅有效到下一次对应操作或 Run 结束。文件绑定不新增服务指针、任务域、挂载或文件句柄所有权。
+
+原生注册由 `ScriptVm::function/integer/string` 完成；回调参数可携带 int32 标签供同类操作区分。所有 native 属性只读、不可删除，已有名称直接失败；注册表完成全部绑定后调用 `seal_bindings`。`Arguments::set_return` 只接收原生 `NativeValue`，其中 uint64 转换成 BigInt，Object/Array 用于 UI 事件及值对象，默认空值返回 null；具体 VM 负责临时值的创建与回收。字节值及失败返回的契约见[VM 数据桥](script-vm.md#文本与二进制数据桥)。
 
 ```mermaid
 classDiagram
@@ -199,7 +205,8 @@ classDiagram
     class AppBinding
     class WindowBinding
     class StorageBinding
-    class JsonBinding
+    class FileBinding
+    class ResourcesBinding
     class EngineBinding
     class DebugBinding
     class GameplayBinding
@@ -229,7 +236,8 @@ classDiagram
     ScriptBinding <|-- AppBinding
     ScriptBinding <|-- WindowBinding
     ScriptBinding <|-- StorageBinding
-    ScriptBinding <|-- JsonBinding
+    ScriptBinding <|-- FileBinding
+    ScriptBinding <|-- ResourcesBinding
     ScriptBinding <|-- EngineBinding
     ScriptBinding <|-- DebugBinding
     ScriptBinding <|-- GameplayBinding

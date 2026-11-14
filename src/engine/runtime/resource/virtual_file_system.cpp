@@ -626,18 +626,31 @@ bool VirtualFileSystem::read(const schema::FileLocationT& location, std::uint64_
     return true;
 }
 
-bool VirtualFileSystem::read_file(const std::filesystem::path& path, ByteBuffer& output)
+bool VirtualFileSystem::read_file(const std::filesystem::path& path, ByteBuffer& output,
+                                  std::string* error)
 {
     output.clear();
+    if (error)
+    {
+        error->clear();
+    }
+    const auto failed = [error](std::string_view message)
+    {
+        if (error)
+        {
+            error->assign(message);
+        }
+        return false;
+    };
     auto stream = open_file(path);
     if (!stream)
     {
-        return false;
+        return failed("Cannot open file for reading");
     }
     const Sint64 size = SDL_GetIOSize(stream.get());
     if (size < 0 || static_cast<std::uint64_t>(size) > maximum_read_size)
     {
-        return false;
+        return failed("Cannot determine file size or file exceeds 64 MiB");
     }
     output.resize(static_cast<std::size_t>(size));
     bool success = read_exact(stream.get(), output);
@@ -651,7 +664,7 @@ bool VirtualFileSystem::read_file(const std::filesystem::path& path, ByteBuffer&
     if (!success || !closed)
     {
         output.clear();
-        return false;
+        return failed("Cannot read or close the complete file");
     }
     return true;
 }

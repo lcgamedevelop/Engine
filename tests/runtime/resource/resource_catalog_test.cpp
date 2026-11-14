@@ -246,7 +246,7 @@ bool external_builtins(ResourceSystem& resources, const std::filesystem::path& r
     external_mesh.vertices.front() = {vertex.x() + 2.0F, vertex.y(),  vertex.z(),
                                       vertex.nx(),       vertex.ny(), vertex.nz()};
     Fixture fixture;
-    fixture.data.schema_version = 2;
+    fixture.data.schema_version = 3;
     fixture.data.revision = "external-builtins";
     fixture.data.target_platform = platform();
     const ByteBuffer invalid_payload{std::byte{1}, std::byte{2}};
@@ -321,7 +321,7 @@ bool external_builtins(ResourceSystem& resources, const std::filesystem::path& r
         return false;
     }
     Fixture valid;
-    valid.data.schema_version = 2;
+    valid.data.schema_version = 3;
     valid.data.revision = "external-cube";
     valid.data.target_platform = platform();
     if (!valid.add(cube_guid, cube_path, schema::AssetKind::mesh, pack(external_mesh, "EMSH")) ||
@@ -404,7 +404,7 @@ bool run(const std::filesystem::path& root)
         }
     }
     Fixture fixture;
-    fixture.data.schema_version = 2;
+    fixture.data.schema_version = 3;
     fixture.data.revision = "test-revision";
     fixture.data.target_platform = platform();
     if (!fixture.add(shader_guid, shader.path, schema::AssetKind::shader, pack(shader, "ESHD"),
@@ -572,7 +572,7 @@ bool run(const std::filesystem::path& root)
         return false;
     }
     schema::AssetCatalogDataT empty;
-    empty.schema_version = 2;
+    empty.schema_version = 3;
     empty.revision = "empty";
     empty.target_platform = platform();
     std::unique_ptr<Resource> builtin;

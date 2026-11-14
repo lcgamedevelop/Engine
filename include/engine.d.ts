@@ -28,6 +28,10 @@ declare module "engine" {
         private constructor();
         static Load(pathOrGuid: string): ResourceHandle | null;
         static BeginLoad(pathOrGuid: string): ResourceRequest | null;
+        /** Copies a loaded source resource as strict UTF-8, up to 4 MiB. No format parsing. */
+        static ReadText(resource: ResourceHandle): string | null;
+        /** Copies a loaded source resource, up to 64 MiB. The bytes outlive the handle. */
+        static ReadBytes(resource: ResourceHandle): Uint8Array | null;
         static Retain(handle: ResourceHandle): ResourceHandle | null;
         static Release(handle: ResourceHandle): boolean;
         static readonly lastError: string | null;
@@ -112,12 +116,33 @@ declare module "engine" {
         static SetMouseMode(mode: MouseMode): boolean;
     }
 
-    /** Standard catalog resource, parsed into a fresh JS value. No filesystem access. */
-    export class Json {
+    export type FileKind = "file" | "directory" | "symlink" | "other";
+    export interface FileEntry {
+        readonly path: string;
+        readonly kind: FileKind;
+        /** Byte size for regular files, otherwise zero. */
+        readonly size: bigint;
+    }
+    /** Synchronous native file operations. Absolute UTF-8 paths; active callbacks only. */
+    export class File {
         private constructor();
-        /** Active callbacks only; missing/wrong-kind/invalid resources return null.
-         * JSON null also returns null. Validate the unknown result in project code. */
-        static ParseResource(resource: ResourceHandle): unknown;
+        static ReadText(path: string): string | null;
+        static ReadBytes(path: string): Uint8Array | null;
+        /** Atomically replaces a regular file; the parent directory must exist. */
+        static WriteText(path: string, text: string): boolean;
+        static WriteBytes(path: string, bytes: Uint8Array): boolean;
+        /** Inspects the entry itself without following its final symbolic link. */
+        static Stat(path: string): FileEntry | null;
+        /** Lists direct children in UTF-8 name order. No recursion. */
+        static List(path: string): FileEntry[] | null;
+        static CreateDirectory(path: string): boolean;
+        /** Copies a regular file without replacing an existing destination. */
+        static Copy(source: string, destination: string): boolean;
+        /** Same-filesystem move; an existing destination is rejected. */
+        static Move(source: string, destination: string): boolean;
+        /** Removes a file, link or empty directory. Missing paths succeed. */
+        static Remove(path: string): boolean;
+        static readonly lastError: string | null;
     }
 
     /** Per-run string storage. Methods require an active gameplay or component callback. */

@@ -3,7 +3,6 @@
   "version-string": "0.1.0",
   "builtin-baseline": "8450b1326545e5e933c36d698c74df072ffca6d0",
   "dependencies": [
-    "fmt",
     "nlohmann-json"
   ],
   "features": {

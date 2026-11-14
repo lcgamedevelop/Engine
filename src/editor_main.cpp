@@ -85,7 +85,6 @@
 #if ENGINE_HAS_ASSET_IMPORT_PLUGIN
 #include "plugins/editor/asset_import/fbx_importer.hpp"
 #include "plugins/editor/asset_import/font_importer.hpp"
-#include "plugins/editor/asset_import/json_importer.hpp"
 #include "plugins/editor/asset_import/movie_importer.hpp"
 #include "plugins/editor/asset_import/ui_importer.hpp"
 #include "plugins/editor/asset_import/usd_importer.hpp"
@@ -123,7 +122,6 @@
 #endif
 
 #include <SDL3/SDL_main.h>
-#include <fmt/base.h>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -148,9 +146,10 @@ using engine::PathUtils;
 
 void print_usage()
 {
-    fmt::print("Usage: editor_app --project <project-directory> "
+    std::fputs("Usage: editor_app --project <project-directory> "
                "[--runtime-dir <persistent-directory>] [--frames <positive-count>] [--width "
-               "<pixels>] [--height <pixels>] [--workers <0..64>]\n");
+               "<pixels>] [--height <pixels>] [--workers <0..64>]\n",
+               stdout);
 }
 
 int run_editor(const fs::path& project_root, engine::editor::EditorEnvironment& environment,
@@ -330,13 +329,6 @@ int run_editor(const fs::path& project_root, engine::editor::EditorEnvironment& 
         if (!pipeline.add_importer(ui_importer))
         {
             std::fputs("Cannot register ui importer\n", stderr);
-            return 1;
-        }
-        std::unique_ptr<engine::editor::asset_pipeline::AssetImporter> json_importer =
-            std::make_unique<engine::plugins::asset_import::JsonImporter>();
-        if (!pipeline.add_importer(json_importer))
-        {
-            std::fputs("Cannot register JSON importer\n", stderr);
             return 1;
         }
         std::unique_ptr<engine::editor::asset_pipeline::AssetImporter> movie_importer =
@@ -915,7 +907,7 @@ int main(int argc, char* argv[])
             const auto parsed = std::from_chars(value.data(), value.data() + value.size(), count);
             if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() || count > 64)
             {
-                fmt::print(stderr, "Worker limit must be within 0..64 (0 is automatic)\n");
+                std::fputs("Worker limit must be within 0..64 (0 is automatic)\n", stderr);
                 return 2;
             }
             worker_override = count;
@@ -934,7 +926,7 @@ int main(int argc, char* argv[])
             if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() ||
                 pixels < 320 || pixels > 8192)
             {
-                fmt::print(stderr, "Window dimension must be within 320..8192 pixels\n");
+                std::fputs("Window dimension must be within 320..8192 pixels\n", stderr);
                 return 2;
             }
             (argument == "--width" ? width_override : height_override) = pixels;

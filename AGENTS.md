@@ -64,7 +64,7 @@
 - 图片格式、压缩模式、质量、颜色空间及 mipmap 等导入参数放在资源相邻 `.meta`；参数变化触发对应 GUID 缓存增量生成。
 - 资源描述文件使用 TOML 内容并只保留 .scene/.mesh/.shader/.material/.meta 类型后缀，不追加 .toml。Schema 源文件按使用范围放在 include/schemas/runtime/ 与 include/schemas/editor/；编辑器 Schema 可引用运行时 Schema，运行时 Schema 与目标仅依赖运行时数据。项目生成物必须为 cache/gen/<完整GUID>，无扩展名、无类型前缀、无版本子目录。SQLite 与资源目录索引放 cache 根，不能混入 gen。
 - 按类型扩展的功能采用统一最小接口和显式登记入口，具体类型各自独立文件；类型较多时建立 `importers/`、`codecs/` 或 `components/` 子目录。框架只负责选择和调度，具体类型拥有自己的识别、转换和校验，不把这些逻辑重新集中到大 switch；泛型登记用简单 `add<T>()`，不引入 RTTI、宏反射或通用 Manager。
-- 资源导入器负责本类型的识别、meta 默认值、依赖和工具指纹；管线负责扫描、增量、任务、数据库和原子发布。FBX、USD、字体、UI 与 JSON 的格式导入统一放在 `plugins/editor/asset_import/` 插件，每种类型独立文件，使用现有 AssetImporter 契约与宿主显式登记，不为单一格式另建插件、System 或注册门面。建模、地形、破坏、特效等仍有制作、组件编解码和命令职责的插件保持原边界。脚本保持每批一次项目级编译，各脚本转换复用该批结果。
+- 资源导入器负责本类型的识别、meta 默认值、依赖和工具指纹；管线负责扫描、增量、任务、数据库和原子发布。FBX、USD、字体、UI 与影片的格式导入统一放在 `plugins/editor/asset_import/` 插件，每种类型独立文件，使用现有 AssetImporter 契约与宿主显式登记，不为单一格式另建插件、System 或注册门面。建模、地形、破坏、特效等仍有制作、组件编解码和命令职责的插件保持原边界。JSON 等通用文本和二进制文件由基础 SourceImporter 原样导入，格式解析由调用方负责。脚本保持每批一次项目级编译，各脚本转换复用该批结果。
 - FBX 等美术源文件在编辑器按虚拟资源包组织，子资源身份及导入配置放源文件 meta；虚拟分组不成为运行时聚合容器。Model、Mesh、Skeleton、Animation、Material、Texture 等运行资源各自独立，只声明真实引用，不能因同源关系或父子分组自动互相依赖。构建从选定入口收集必要子资源，未使用项不进入运行包，保留美术源文件。
 - 字体源文件与邻接 meta 由 `plugins/editor/asset_import/` 插件内独立的 FontImporter 处理；字符集、字体面及导入参数参与增量指纹，生成独立 GUID 字体资源。运行时 `FontSystem` 属于 `runtime/font/` 核心，统一提供字体度量、字形排布与 GPU 绘制，供 UI 和 3D 文字复用；运行时不依赖离线字体解析器。同一字体的不同字号和颜色不生成重复资源。默认字体 Shader 属于引擎内置资源，项目可通过标准资源路径选用遵守字体绘制契约的自定义 Shader。
 - UI 使用普通 `Node` 挂载 `UiComponent`，组件绑定独立 UI 资源；UI 资源内部可以包含多个控件，控件不展开为场景节点，也不向 `Node` 增加 UI 专用成员。RmlUi 负责文档、布局和控件，字体通过核心 FontSystem 处理；UI 系统提供输入与控件事件，具体业务和场景跳转由调用方决定。

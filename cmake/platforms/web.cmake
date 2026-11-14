@@ -44,7 +44,7 @@ function(engine_add_web_runtime target)
     target_include_directories(${target} PRIVATE "${PROJECT_SOURCE_DIR}/src"
         "${PROJECT_SOURCE_DIR}/src/engine" "${PROJECT_SOURCE_DIR}/platforms")
     target_link_libraries(${target} PRIVATE engine::runtime engine::app engine::log
-        engine::render engine::world engine::storage SDL3::SDL3 fmt::fmt)
+        engine::render engine::world engine::storage SDL3::SDL3)
     target_compile_definitions(${target} PRIVATE ENGINE_HAS_APP_SERVICES=1
         ENGINE_START_PACKAGED_GAMEPLAY=1 ENGINE_PROJECT_APPLICATION_NAME="${ENGINE_EXPORT_PRODUCT}")
     engine_link_resource_plugin(${target})

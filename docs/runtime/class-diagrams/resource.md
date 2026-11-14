@@ -36,7 +36,7 @@ classDiagram
 - Resource 为类型擦除的只读资源抽象基类，公共虚析构为 noexcept，kind 为纯虚查询；ResourceValue 以 override 返回模板规定的 Kind。构造仅建立安全数据状态。禁止复制/移动资源对象本身，所有权通过 unique_ptr 转移。
 - ResourceValue<DataT, Kind> 是一个简单 final 模板，保存一种载荷。MeshResource 等名字只是该模板的特化别名，不另外定义一份 MeshDataT，不给 Resource 追加 mesh()/movie()/terrain()。
 - 每个 AssetKind 规定唯一规范载荷类型；登记时用编译期映射约束，不能给同一 Kind 注册另一种 DataT。插件类型也遵守该映射。新增类型只增自身载荷声明、处理器和登记，不改基类或集中 store 重载。
-- DataT 使用 schema 生成的 native DataT；source/script/json 使用 ByteBuffer。ByteBuffer、ByteView 分别为标准 vector/span 别名；即使都是字节，Kind 仍不同，不得相互强转。
+- DataT 使用 schema 生成的 native DataT；source/script 使用 ByteBuffer。ByteBuffer、ByteView 分别为标准 vector/span 别名；即使都是字节，Kind 仍不同，不得相互强转。
 - kind/info/generation/data 为 const noexcept 查询并标注 nodiscard。info 拥有独立元数据，不借用可替换的目录。generation 在核心成功读取/接纳时设置，候选发布后不可变。
 - ResourceSystem 以 friend 权限设置私有代际并校验元数据；处理器只创建规范候选，不得访问私有缓存或计数。
 - ResourceLoader::get<TResource> 先检验句柄，再按规范 Kind 映射返回只读借用，不使用 RTTI；不支持任意自定义派生类冒充同 Kind 的另一布局。
@@ -76,6 +76,6 @@ Resource 析构只释放本项 CPU 数据，不调用 GPU、音频设备或 VM�
 | FontDataT / UiDocumentDataT | 字形绘制缓存、UI 文档与控件身份 |
 | EffectAssetDataT / TerrainAssetDataT / DestructionAssetDataT | 插件运行实例和生成任务 |
 | LightProbeDataT | 场景绑定及 GPU 表示 |
-| script / json / source 的 ByteBuffer | VM 模块、业务解析结果或调用方处理流程 |
+| script / source 的 ByteBuffer | VM 模块、业务解析结果或调用方处理流程 |
 
-完整 21 种类型及处理器归属见[类型处理器](resource-codecs.md)。
+完整 20 种类型及处理器归属见[类型处理器](resource-codecs.md)。

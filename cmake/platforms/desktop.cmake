@@ -32,8 +32,7 @@ if(ENGINE_ENABLE_TEST_SUPPORT)
 else()
     set_target_properties(engine_project_app PROPERTIES OUTPUT_NAME "${ENGINE_EXPORT_PRODUCT}")
 endif()
-target_link_libraries(engine_project_app PRIVATE engine::runtime engine::app engine::log SDL3::SDL3
-                                                 fmt::fmt)
+target_link_libraries(engine_project_app PRIVATE engine::runtime engine::app engine::log SDL3::SDL3)
 target_compile_definitions(
     engine_project_app PRIVATE ENGINE_HAS_APP_SERVICES=1 ENGINE_START_PACKAGED_GAMEPLAY=1
                                ENGINE_PROJECT_APPLICATION_NAME="${ENGINE_EXPORT_PRODUCT}")
@@ -56,7 +55,7 @@ if(ENGINE_ENABLE_TEST_SUPPORT)
     set_target_properties(engine_project_mcp_test_app
                           PROPERTIES OUTPUT_NAME "${ENGINE_EXPORT_PRODUCT}-mcp-test")
     target_link_libraries(engine_project_mcp_test_app
-                          PRIVATE engine::runtime engine::app engine::log SDL3::SDL3 fmt::fmt
+                          PRIVATE engine::runtime engine::app engine::log SDL3::SDL3
                                   nlohmann_json::nlohmann_json engine::runtime_mcp_tools)
     target_compile_definitions(
         engine_project_mcp_test_app

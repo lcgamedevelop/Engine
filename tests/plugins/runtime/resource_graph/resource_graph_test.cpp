@@ -2,7 +2,7 @@
 #include "runtime/engine_config.hpp"
 #include "runtime/resource/codecs/source_resource_codec.hpp"
 #include "runtime/resource/resource_system.hpp"
-#include "runtime/resource/types/json_resource.hpp"
+#include "runtime/resource/types/script_resource.hpp"
 #include "runtime/task/task_system.hpp"
 #include "runtime/task/thread_system.hpp"
 
@@ -212,7 +212,7 @@ bool sync_lifetime()
         return false;
     }
     const SourceResource* source = nullptr;
-    const JsonResource* wrong = nullptr;
+    const ScriptResource* wrong = nullptr;
     const auto copied = a;
     if (!expect(f.graph.get(a, source) == ResourceError::none &&
                     source->data()[0] == std::byte{4} &&

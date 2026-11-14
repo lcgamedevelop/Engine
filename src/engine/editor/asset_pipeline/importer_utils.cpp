@@ -26,7 +26,7 @@ bool read_generated_payload(const Guid& guid, const ImportContext& context,
         return false;
     }
     if (bytes.size() >= 4 && bytes[0] == std::byte{'E'} && bytes[1] == std::byte{'R'} &&
-        bytes[2] == std::byte{'S'} && bytes[3] == std::byte{'1'})
+        bytes[2] == std::byte{'S'} && bytes[3] == std::byte{'2'})
     {
         const schema::AssetEntryT* entry = nullptr;
         if (context.previous_catalog)

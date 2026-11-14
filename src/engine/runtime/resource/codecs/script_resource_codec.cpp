@@ -42,8 +42,8 @@ bool ScriptResourceCodec::validate_dependencies(const Resource& resource, Resour
     error.clear();
     for (const auto* item : dependencies)
     {
-        if (!item ||
-            (item->kind() != schema::AssetKind::script && item->kind() != schema::AssetKind::json))
+        if (!item || (item->kind() != schema::AssetKind::script &&
+                      item->kind() != schema::AssetKind::source))
         {
             error = "Script dependency must be a script or JSON module";
             return false;

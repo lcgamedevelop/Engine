@@ -42,7 +42,7 @@ set_target_properties(engine_project_app PROPERTIES OUTPUT_NAME "${ENGINE_IOS_EX
 target_include_directories(engine_project_app PRIVATE "${PROJECT_SOURCE_DIR}/src"
     "${PROJECT_SOURCE_DIR}/src/engine")
 target_link_libraries(engine_project_app PRIVATE engine::runtime engine::app engine::log
-    SDL3::SDL3 fmt::fmt)
+    SDL3::SDL3)
 target_compile_definitions(engine_project_app PRIVATE ENGINE_HAS_APP_SERVICES=1
     ENGINE_START_PACKAGED_GAMEPLAY=1 ENGINE_PROJECT_APPLICATION_NAME="${ENGINE_EXPORT_PRODUCT}")
 engine_link_resource_plugin(engine_project_app)
