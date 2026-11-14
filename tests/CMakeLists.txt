@@ -997,11 +997,6 @@ if(TARGET engine_asset_import)
     engine_apply_options(engine_movie_pipeline_test)
     add_test(NAME editor.movie_pipeline COMMAND engine_movie_pipeline_test
              "${PROJECT_SOURCE_DIR}/projects/showcase/assets/movies/lcals.mp4")
-
-    add_executable(engine_json_importer_test plugins/editor/asset_import/json_importer_test.cpp)
-    target_link_libraries(engine_json_importer_test PRIVATE engine::asset_import engine::resource)
-    engine_apply_options(engine_json_importer_test)
-    add_test(NAME editor.json_importer COMMAND engine_json_importer_test)
 endif()
 
 if(TARGET engine_asset_import)
@@ -1672,8 +1667,7 @@ endforeach()
 # Shared external UTF-8 data keeps Unicode coverage out of source literals.
 foreach(_target engine_guid_map_test engine_app_log_test engine_key_value_store_test
         engine_resource_read_test engine_ui_editor_test engine_script_runtime_test
-        engine_mcp_registry_test engine_texture_pipeline_test engine_scene_data_test
-        engine_json_importer_test)
+        engine_mcp_registry_test engine_texture_pipeline_test engine_scene_data_test)
     if(TARGET ${_target})
         target_include_directories(${_target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/support")
     endif()

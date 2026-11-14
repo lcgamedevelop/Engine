@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/resource/virtual_file_system.hpp"
+
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -10,12 +12,14 @@
 namespace engine::plugins::script::vm
 {
 
-// 只承载原生调用的返回数据；不拥有虚拟机句柄。uint64_t 专用于 BigInt 身份。
+// 只承载原生调用的返回数据；不拥有虚拟机句柄。uint64_t 无损映射为 BigInt。
 struct NativeValue
 {
     using Array = std::vector<NativeValue>;
     using Object = std::vector<std::pair<std::string, NativeValue>>;
-    std::variant<std::monostate, bool, double, std::uint64_t, std::string, Array, Object> data;
+    std::variant<std::monostate, bool, double, std::uint64_t, std::string, Array, Object,
+                 ByteBuffer>
+        data;
 
     NativeValue() = default;
     NativeValue(bool value) : data(value)
@@ -46,6 +50,9 @@ struct NativeValue
     {
     }
     NativeValue(Object value) : data(std::move(value))
+    {
+    }
+    NativeValue(ByteBuffer value) : data(std::move(value))
     {
     }
 };

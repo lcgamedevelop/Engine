@@ -756,12 +756,16 @@ bool AssetPipelineSystem::build_assets(const std::filesystem::path& project_root
         }
     }
     std::map<Guid, const schema::AssetEntryT*> previous_entries;
-    if (previous_catalog.schema_version == 2)
+    if (previous_catalog.schema_version == 3)
     {
         for (const auto& entry : previous_catalog.entries)
         {
             previous_entries.emplace(entry->guid, entry.get());
         }
+    }
+    else
+    {
+        previous_catalog = {};
     }
     std::vector<const ImportAsset*> sources;
     sources.reserve(records.size());
@@ -1016,7 +1020,7 @@ bool AssetPipelineSystem::build_assets(const std::filesystem::path& project_root
         return fail();
     }
     schema::AssetCatalogDataT catalog;
-    catalog.schema_version = 2;
+    catalog.schema_version = 3;
     catalog.revision = previous_revision.empty() ? new_guid() : previous_revision;
     catalog.target_platform = platform;
     for (const auto& record : records)

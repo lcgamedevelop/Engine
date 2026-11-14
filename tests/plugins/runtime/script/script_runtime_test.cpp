@@ -122,14 +122,14 @@ std::string guid_for(std::string_view path)
 bool fixture(const fs::path& workspace, std::string_view revision,
              const std::map<std::string, std::string>& scripts, Fixture& output,
              std::string_view scene_bytes = {}, std::string_view audio_bytes = {},
-             const std::map<std::string, std::string>& json_resources = {},
+             const std::map<std::string, std::string>& data_resources = {},
              std::string_view movie_bytes = {})
 {
     output = {};
     output.root = workspace / "versions" / engine::PathUtils::from_utf8(revision);
     output.mounts = {{"content", output.root}};
     engine::schema::AssetCatalogDataT data;
-    data.schema_version = 2;
+    data.schema_version = 3;
     data.revision = revision;
     data.target_platform = target_platform();
     const auto add = [&](std::string path, std::string module, engine::schema::AssetKind kind,
@@ -189,9 +189,9 @@ bool fixture(const fs::path& workspace, std::string_view revision,
     {
         return false;
     }
-    for (const auto& [path, source] : json_resources)
+    for (const auto& [path, source] : data_resources)
     {
-        if (!add(path, "", engine::schema::AssetKind::json, source))
+        if (!add(path, "", engine::schema::AssetKind::source, source))
         {
             return false;
         }
@@ -2173,19 +2173,22 @@ export default class extends Gameplay {
     return true;
 }
 
-bool run_json_binding_cases(test_support::ResourceServices& services, const fs::path& workspace)
+bool run_resource_data_binding_cases(test_support::ResourceServices& services,
+                                     const fs::path& workspace)
 {
     // 不注入 WorldSystem：配置读取不能要求先创建场景。
     engine::plugins::script::ScriptSystem script(&services.loader);
     constexpr std::string_view source = R"js(
-import { Gameplay, Resources, Json, Debug } from 'engine';
+import { Gameplay, Resources, Debug } from 'engine';
+import * as EngineApi from 'engine';
 function readJson(path, ...extra) {
     if (extra.length) return null;
     const resource = Resources.Load(path);
     if (!resource) return null;
-    const value = Json.ParseResource(resource);
+    const text = Resources.ReadText(resource);
     Resources.Release(resource);
-    return value;
+    if (text === null) return null;
+    try { return JSON.parse(text); } catch { return null; }
 }
 const topLevelBlocked = readJson('config/maps.json') === null;
 function checkValues(revision) {
@@ -2225,6 +2228,28 @@ function checkFailures() {
     ];
     return calls.every(call => call() === null);
 }
+function checkDataReads() {
+    const invalid = Resources.Load('config/invalid.json');
+    const empty = Resources.Load('config/empty.json');
+    const binary = Resources.Load('config/invalid-utf8.json');
+    const plain = Resources.Load('config/plain.bin');
+    if (!invalid || !empty || !binary || !plain) return false;
+    const raw = Resources.ReadText(invalid);
+    const first = Resources.ReadBytes(binary), second = Resources.ReadBytes(binary);
+    if (raw !== '{"broken":' || Resources.ReadText(empty) !== '' ||
+        Resources.ReadBytes(empty)?.length !== 0 || Resources.ReadText(binary) !== null ||
+        !Resources.lastError || !(first instanceof Uint8Array) || first.length !== 4 ||
+        first[1] !== 0xc0 || second[2] !== 0xaf || first === second ||
+        Resources.ReadText(plain) !== '\ufeffa\u0000b' || Resources.lastError !== '') return false;
+    first[1] = 7;
+    if (second[1] !== 0xc0 || !Resources.Release(binary) || first[1] !== 7 ||
+        Resources.ReadBytes(binary) !== null || !Resources.lastError ||
+        Resources.ReadText({}) !== null || Resources.ReadText(invalid, 1) !== null) return false;
+    const copied = Resources.ReadBytes(plain);
+    const text = Resources.ReadText(plain);
+    return Resources.Release(invalid) && Resources.Release(empty) && Resources.Release(plain) &&
+        copied.length === 6 && copied[0] === 0xef && text.length === 4;
+}
 function checkIndependentValues() {
     const first = readJson('config/maps.json');
     const second = readJson('config/maps.json');
@@ -2256,7 +2281,8 @@ export default class extends Gameplay {
     OnInitialize() {
         this.lastRevision = expectedRevision;
         this.checkOutsideCallback();
-        return topLevelBlocked && this.constructorBlocked && Object.isFrozen(Json) &&
+        return topLevelBlocked && this.constructorBlocked && Object.isFrozen(Resources) && !("Json" in EngineApi) &&
+            checkDataReads() &&
             checkValues(expectedRevision) && checkFailures() && checkIndependentValues();
     }
     Update() {
@@ -2279,7 +2305,7 @@ export default class extends Gameplay {
     maximum.replace(0, 4, "true");
     std::string oversized(maximum_bytes + 1U, ' ');
     oversized.replace(0, 4, "true");
-    std::map<std::string, std::string> json_resources{
+    std::map<std::string, std::string> data_resources{
         {"config/maps.json", Json{{"title", test_support::utf8_fixture("json_title")},
                                   {"revision", 1},
                                   {"enabled", true},
@@ -2296,6 +2322,9 @@ export default class extends Gameplay {
         {"config/invalid.json", R"json({"broken":)json"},
         {"config/invalid-utf8.json", std::string("\x22\xc0\xaf\x22", 4)},
         {"config/empty.json", ""},
+        {"config/plain.bin", std::string("\xef\xbb\xbf"
+                                         "a\0b",
+                                         6)},
         {"config/maximum.json", std::move(maximum)},
         {"config/oversized.json", std::move(oversized)},
         {"config/unavailable.json", "true"}};
@@ -2316,11 +2345,11 @@ export default class extends Gameplay {
         !fixture(workspace, "json-first",
                  {{"scripts/game.js", make_source(1)},
                   {"scripts/looks-like-json.js", R"js("not a JSON resource")js"}},
-                 first, {}, {}, json_resources))
+                 first, {}, {}, data_resources))
     {
         return false;
     }
-    json_resources["config/maps.json"] = Json{
+    data_resources["config/maps.json"] = Json{
         {"title", test_support::utf8_fixture("json_title")},
         {"revision", 2},
         {"enabled", true},
@@ -2330,7 +2359,7 @@ export default class extends Gameplay {
     if (!fixture(workspace, "json-next",
                  {{"scripts/game.js", make_source(2)},
                   {"scripts/looks-like-json.js", R"js("not a JSON resource")js"}},
-                 next, {}, {}, json_resources))
+                 next, {}, {}, data_resources))
     {
         return false;
     }
@@ -2363,6 +2392,88 @@ export default class extends Gameplay {
     script.stop_gameplay();
     return expect(script.status().last_error.empty() && log_contains("json:shutdown:2:2"),
                   "JSON facade shuts down cleanly after the final permitted callback");
+}
+
+bool run_file_binding_cases(test_support::ResourceServices& services, const fs::path& workspace)
+{
+    engine::plugins::script::ScriptSystem script(&services.loader);
+    const auto folder = workspace / "script-files";
+    const std::string source =
+        "const folder = " + Json(engine::PathUtils::to_utf8(folder)).dump() +
+        "; const unicode = " + Json(test_support::utf8_fixture("json_text")).dump() + R"js(;
+import { Gameplay, File, Debug } from 'engine';
+const outside = File.WriteText(folder + '/blocked', 'no') === false && File.lastError === null;
+function check(value, label) { if (!value) throw new Error(label + ': ' + File.lastError); }
+export default class extends Gameplay {
+    constructor() {
+        super();
+        this.blocked = File.CreateDirectory(folder) === false;
+    }
+    OnInitialize() {
+        check(outside && this.blocked && Object.isFrozen(File), 'callback scope');
+        check(File.CreateDirectory(folder) && File.CreateDirectory(folder), 'create directory');
+        check(File.List(folder)?.length === 0, 'empty directory');
+        const a = folder + '/a', b = folder + '/b', c = folder + '/c';
+        const text = '\ufeff' + unicode + '\u0000end';
+        check(File.WriteText(a, text) && File.ReadText(a) === text, 'UTF-8 roundtrip');
+        const backing = new Uint8Array([9, 0, 255, 127, 8]);
+        check(File.WriteBytes(b, backing.subarray(1, 4)), 'byte subview write');
+        const data = File.ReadBytes(b);
+        check(data instanceof Uint8Array && data.length === 3 && data[0] === 0 &&
+            data[1] === 255 && data[2] === 127, 'binary roundtrip');
+        data[1] = 4;
+        check(File.ReadBytes(b)[1] === 255 && File.ReadText(b) === null && File.lastError,
+            'independent bytes and invalid UTF-8');
+        check(!File.WriteBytes(b, [1, 2]) && !File.WriteBytes(b, new Uint16Array([3])) &&
+            !File.WriteBytes(b, backing.buffer), 'byte type validation');
+        if (typeof SharedArrayBuffer !== 'undefined')
+            check(!File.WriteBytes(b, new Uint8Array(new SharedArrayBuffer(4))), 'shared bytes');
+        const detached = new Uint8Array(4);
+        if (typeof detached.buffer.transfer === 'function') {
+            detached.buffer.transfer();
+            check(!File.WriteBytes(b, detached), 'detached bytes');
+        }
+        check(!File.WriteText(a, '\ud800') && File.ReadText(a) === text,
+            'invalid UTF-16 preserves previous file');
+        check(File.WriteBytes(c, new Uint8Array(0)) && File.ReadText(c) === '' &&
+            File.ReadBytes(c).length === 0 && File.Stat(c).size === 0n, 'empty file');
+        check(File.Stat(b).kind === 'file' && File.Stat(b).size === 3n &&
+            File.Stat(folder).kind === 'directory', 'metadata');
+        const listed = File.List(folder);
+        check(listed.length === 3 && listed[0].path === a && listed[1].path === b &&
+            listed[2].path === c, 'sorted direct entries');
+        check(!File.Copy(b, a) && File.ReadText(a) === text && !File.Move(b, a),
+            'existing destinations are preserved');
+        check(File.Copy(b, folder + '/copy') && File.Move(folder + '/copy', folder + '/moved'),
+            'copy and move');
+        check(File.ReadBytes(folder + '/moved')[1] === 255 &&
+            File.Stat(folder + '/copy') === null && File.lastError, 'move result');
+        check(!File.Remove(folder) && !File.CreateDirectory(folder + '/missing/child') &&
+            !File.WriteText(folder + '/missing/file', 'no'), 'nonrecursive operations');
+        check(File.ReadText('relative') === null && File.ReadBytes(a + '\u0000x') === null &&
+            File.ReadText(a, 'extra') === null && File.List(a) === null, 'invalid requests');
+        check(File.Remove(c) && File.Remove(c) && File.lastError === '', 'idempotent remove');
+        check(File.Remove(a) && File.Remove(b) && File.Remove(folder + '/moved'), 'cleanup files');
+        check(File.List(folder).length === 0, 'temporary files cleaned');
+        return true;
+    }
+    OnShutdown() {
+        check(File.Remove(folder), 'shutdown file access');
+        Debug.Log('file:shutdown');
+    }
+}
+)js";
+    Fixture candidate;
+    if (!script.initialize({}) ||
+        !fixture(workspace, "file-bindings", {{"scripts/game.js", source}}, candidate) ||
+        !apply(services, script, candidate))
+    {
+        std::fprintf(stderr, "%s\n", script.status().last_error.c_str());
+        return false;
+    }
+    script.stop_gameplay();
+    return expect(script.status().last_error.empty() && log_contains("file:shutdown"),
+                  "file operations and byte bridge respect callback and storage contracts");
 }
 
 bool run_runtime_control_cases(test_support::ResourceServices& services, const fs::path& workspace)
@@ -3296,7 +3407,8 @@ int main(int argc, char** argv)
         run_render_binding_cases(services, workspace) &&
         run_scene_render_binding_cases(services, workspace) &&
         run_frame_rate_binding_cases(services, workspace) &&
-        run_json_binding_cases(services, workspace) &&
+        run_resource_data_binding_cases(services, workspace) &&
+        run_file_binding_cases(services, workspace) &&
         run_storage_binding_cases(services, workspace) &&
         run_input_binding_cases(services, workspace) &&
         run_runtime_control_cases(services, workspace) &&

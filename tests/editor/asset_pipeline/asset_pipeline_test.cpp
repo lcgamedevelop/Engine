@@ -470,6 +470,59 @@ bool scene_effects(engine::ResourceSystem& resources,
     return true;
 }
 
+bool source_data_cases()
+{
+    Fixture fixture;
+    engine::ThreadSystem threads;
+    engine::TaskSystem tasks(threads, {"SourceData", 2});
+    engine::editor::AssetPipelineSystem pipeline(tasks);
+    if (!fixture.initialize() || !threads.initialize({}) || !tasks.initialize({}) ||
+        !pipeline.initialize({}))
+    {
+        return false;
+    }
+    const std::map<std::string, std::string> inputs{
+        {"config.json", "not JSON"}, {"empty.bin", ""}, {"bytes.bin", std::string("a\0\xff", 3)}};
+    for (const auto& [name, bytes] : inputs)
+    {
+        if (!write(fixture.root / "assets" / name, bytes))
+        {
+            return false;
+        }
+    }
+    if (!build(pipeline, fixture))
+    {
+        return false;
+    }
+    for (const auto& entry : pipeline.catalog().entries)
+    {
+        const auto input = inputs.find(entry->path);
+        if (!expect(input != inputs.end() && entry->kind == engine::schema::AssetKind::source &&
+                        entry->dependencies.empty() &&
+                        read_payload(fixture, entry->guid) == input->second,
+                    "generic source import preserves empty, binary and unparsed config bytes"))
+        {
+            return false;
+        }
+    }
+    const auto before = pipeline.catalog();
+    const auto metadata = read(fixture.root / "assets/config.json.meta");
+    if (!expect(build(pipeline, fixture) && pipeline.last_build().reused == 3 &&
+                    pipeline.catalog() == before && metadata.find("source") != std::string::npos,
+                "source resources use stable identity and incremental reuse"))
+    {
+        return false;
+    }
+    // A removed importer is not silently treated as an ordinary source resource.
+    if (!write(fixture.root / "assets/config.json.meta", meta(material_guid, "json")))
+    {
+        return false;
+    }
+    const bool rejected = !pipeline.build_assets(fixture.root);
+    return expect(rejected && pipeline.catalog() == before,
+                  "removed JSON importer is rejected without changing the published catalog");
+}
+
 bool tests()
 {
     Fixture fixture;
@@ -512,7 +565,7 @@ bool tests()
     }
     engine::schema::AssetCatalogDataT catalog;
     if (!expect(load_catalog(fixture, catalog) && catalog.entries.size() == 3 &&
-                    catalog.schema_version == 2 && pipeline.catalog() == catalog,
+                    catalog.schema_version == 3 && pipeline.catalog() == catalog,
                 "read generated FlatBuffers catalog"))
     {
         return false;
@@ -744,5 +797,5 @@ bool tests()
 
 int main()
 {
-    return tests() ? 0 : 1;
+    return source_data_cases() && tests() ? 0 : 1;
 }

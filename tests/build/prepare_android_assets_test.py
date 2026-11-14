@@ -80,10 +80,10 @@ def resource_entry(payload, number=1, kind=1, path="scripts/game.ts", module="sc
     header.number(0, root)
     header.text(fields[0], guid)
     header.number(fields[1], kind, "<B")
-    header.number(fields[2], 1)
+    header.number(fields[2], 2)
     header.number(fields[3], 8 + len(header.data), "<Q")
     header.number(fields[4], len(payload), "<Q")
-    entity = b"ERS1" + struct.pack("<I", len(header.data)) + header.data + payload
+    entity = b"ERS2" + struct.pack("<I", len(header.data)) + header.data + payload
     return {
         "guid": guid,
         "logical": path,
@@ -101,7 +101,7 @@ def catalog_fixture(entries, target="android"):
     builder = BufferBuilder(b"EASC")
     fields, root = builder.table(4)
     builder.number(0, root)
-    builder.number(fields[0], 2)
+    builder.number(fields[0], 3)
     builder.text(fields[1], "fixture-guid-catalog")
     builder.text(fields[2], target)
     builder.align(4)
@@ -125,7 +125,7 @@ def catalog_fixture(entries, target="android"):
         for dep_index, dependency in enumerate(entry["dependencies"]):
             builder.text(deps + 4 + dep_index * 4, dependency)
         builder.text(asset[6], entry["module"])
-        builder.number(asset[7], 1)
+        builder.number(asset[7], 2)
         builder.number(asset[8], entry["header_size"])
         location, table = builder.table(4)
         builder.pointer(asset[9], table)
@@ -381,7 +381,7 @@ class PrepareAndroidAssetsTest(unittest.TestCase):
     def test_unknown_resource_kind_preserves_previous_output(self):
         self.prepare()
         previous = self.snapshot()
-        for kind in (21, 255):
+        for kind in (20, 255):
             with self.subTest(kind=kind):
                 self.entries = [
                     self.entries[0],
@@ -393,9 +393,39 @@ class PrepareAndroidAssetsTest(unittest.TestCase):
                 self.assertEqual(self.snapshot(), previous)
                 self.assert_clean()
 
-    def test_json_shared_package_preserves_type_bytes_and_range_validation(self):
+    def test_old_catalog_and_entity_versions_preserve_previous_output(self):
+        self.prepare()
+        previous = self.snapshot()
+        path = self.source / "catalog.bin"
+        data = bytearray(path.read_bytes())
+        view = catalog.FlatBuffer(data, b"EASC")
+        struct.pack_into("<I", data, view.field(view.root, 0), 2)
+        path.write_bytes(data)
+        with self.assertRaises(ValueError):
+            self.prepare()
+        self.assertEqual(self.snapshot(), previous)
+        self.assert_clean()
+
+        entry = self.entries[0]
+        original = entry["entity"]
+        for change_prefix in (True, False):
+            with self.subTest(change_prefix=change_prefix):
+                entity = bytearray(original)
+                if change_prefix:
+                    entity[:4] = b"ERS1"
+                else:
+                    header = catalog.FlatBuffer(entity[8:entry["header_size"]], b"ERSH")
+                    struct.pack_into("<I", entity, 8 + header.field(header.root, 2), 1)
+                entry["entity"] = bytes(entity)
+                self.write_resources()
+                with self.assertRaises(ValueError):
+                    self.prepare()
+                self.assertEqual(self.snapshot(), previous)
+                self.assert_clean()
+
+    def test_source_shared_package_preserves_type_bytes_and_range_validation(self):
         config = resource_entry(
-            b'{"weapon":"carbine","damage":24}\n', 2, 16, "config/weapons.json", ""
+            b'{"weapon":"carbine","damage":24}\n', 2, 0, "config/weapons.json", ""
         )
         script = self.entries[0]
         script["path"] = config["path"] = "packs/game"
@@ -405,7 +435,7 @@ class PrepareAndroidAssetsTest(unittest.TestCase):
         receipt = self.prepare()
         self.assertEqual(receipt, {"revision": "fixture-guid-catalog", "file_count": 2})
         parsed = catalog_entries(self.output)
-        self.assertEqual([entry["kind"] for entry in parsed], [1, 16])
+        self.assertEqual([entry["kind"] for entry in parsed], [1, 0])
         self.assertEqual(parsed[1]["offset"], len(script["entity"]))
         self.assertEqual(
             (self.output / "packs/game").read_bytes(), script["entity"] + config["entity"]

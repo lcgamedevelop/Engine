@@ -81,7 +81,7 @@ sequenceDiagram
 
 | 类型 | 使用者与操作 | 必须移出的隐式加载 |
 | --- | --- | --- |
-| source / json | 调用方借用 bytes；JSON 语法已在资源层校验 | Json.Load(path) 等直读业务旁路迁入显式资源加载；不为简单数据新建 System |
+| source | 通用原始字节；文本编码在读取边界检查，格式由调用方解析 | 脚本使用 Resources.ReadText / ReadBytes 消费已加载句柄 |
 | script | ScriptRuntime/Run 编译和执行已加载脚本闭包 | VM import 只能解析已加载声明依赖，动态新模块先显式加载 |
 | scene / prefab / model | WorldSystem/Scene 从已加载模板组装 ECS 候选并发布 | 场景实例化不自行读文件；子资源按根闭包取得 |
 | mesh / material / shader / texture | MeshRenderer/Material/RenderSystem 绑定数据及创建 GPU 表示 | set_mesh/set_shader/材质贴图设置不能因传路径而加载 |
@@ -178,4 +178,4 @@ classDiagram
 - `GameplaySession` 在提交新目录后，显式准备本轮内置资源、脚本入口和场景根，再调用对应使用模块；候选失败不替换已运行实例。内置内存候选使用 `load_memory`，当前目录已有物理实体则显式加载该实体，不回退内存副本。
 - `RuntimeParallelConfig` 的通用 `loading` 任务配置拆成 `file`、`resource_read`、`resource_graph`、`movie`、`render`；资源预算类型更新为 `ResourceReadConfig`。这些只是已有 TaskSystem 的独立配置，不另建线程池。
 
-脚本服务同步升级：`Resources.Load(path)` 返回可释放的 `ResourceHandle`；`Resources.BeginLoad(path)` 返回独占的请求外观，提供 `Status/Progress/Take/Cancel/Error`；`Resources.Retain/Release` 对获取操作。句柄为不透明值，归属和有效性由原生加载器校验，请求与未释放获取随脚本上下文清理。`Movie.Play` 改接收资源句柄；`Json.Load(path)` 删除，改为 `Json.ParseResource(handle)` 解析已加载 JSON。组件路径 setter 保留，只使用已加载资源。
+脚本服务同步升级：`Resources.Load(path)` 返回可释放的 `ResourceHandle`；`Resources.BeginLoad(path)` 返回独占的请求外观，提供 `Status/Progress/Take/Cancel/Error`；`Resources.Retain/Release` 对获取操作。句柄为不透明值，归属和有效性由原生加载器校验，请求与未释放获取随脚本上下文清理。`Movie.Play` 改接收资源句柄；通用数据使用 [Resources.ReadText / ReadBytes](../../plugins/runtime/class-diagrams/resources-script-api.md)，配置语法由项目解析。组件路径 setter 保留，只使用已加载资源。

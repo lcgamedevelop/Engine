@@ -79,6 +79,18 @@ public:
     {
         return resource_error_;
     }
+    void set_resource_error(std::string_view error)
+    {
+        resource_error_.assign(error);
+    }
+    void set_file_error(std::string_view error)
+    {
+        file_error_.assign(error);
+    }
+    [[nodiscard]] const std::string& file_error() const noexcept
+    {
+        return file_error_;
+    }
     [[nodiscard]] WorldSystem* world() const noexcept;
     [[nodiscard]] RenderSystem* renderer() const noexcept;
     [[nodiscard]] UiSystem* ui() const noexcept;
@@ -142,6 +154,7 @@ private:
     std::map<std::uint64_t, std::unique_ptr<ResourceLoad>> resource_requests_;
     std::uint64_t resource_sequence_ = 0;
     std::string resource_error_;
+    std::string file_error_;
     WorldSystem* world_ = nullptr;
     RenderSystem* renderer_ = nullptr;
     UiSystem* ui_ = nullptr;

@@ -1,6 +1,6 @@
 # 统一资源导入
 
-`editor/asset_import` 是离线源格式导入插件，统一包含 FBX、USD、字体、UI 文档与 JSON 的五种导入器。插件合并构建和装配边界，各类型继续独立文件、importer id、meta 参数、工具指纹与测试。
+`editor/asset_import` 是离线源格式导入插件，包含 FBX、USD、字体、UI 文档与影片等格式导入器。插件合并构建和装配边界，各类型继续独立文件、importer id、meta 参数、工具指纹与测试。
 
 | 项目 | 约定 |
 | --- | --- |
@@ -19,10 +19,11 @@
 | FbxImporter / UsdImporter | [模型导入](model-import.md)，各自的[FBX](class-diagrams/fbx-importer.md)与[USD](class-diagrams/usd-import.md)契约 |
 | FontImporter | [字体导入参数](font-import.md) |
 | UiImporter | [UI 文档与依赖](ui-import.md) |
-| JsonImporter | [JSON 格式约束](class-diagrams/json-importer.md)与[项目配置读取](../runtime/scripting.md#json-配置资源) |
 
 ufbx、OpenUSD、FreeType 和格式校验依赖由本插件目标组织，不进入运行包。`font-import`、`usd-import` 仍是 vcpkg 依赖 feature 名称，不是可单独选择的编辑器插件。UI 编辑插件 `editor/ui` 依赖本插件，复用 UiImporter 的源文档校验；运行时 UiSystem 和 FontSystem 仍属于核心。
 
 建模、地形、破坏与特效插件还承担制作、组件编解码及编辑命令，保持各自边界；它们的导入适配继续通过相同接口登记。运行时只消费按标准 GUID 管线生成的独立资源。
+
+通用配置与二进制文件由编辑器基础层的 [SourceImporter](../../editor/class-diagrams/source-importer.md) 原样导入，不要求启用本插件。
 
 架构见[统一导入类图](class-diagrams/asset-import.md)，构建及功能验收见[测试文档](../../testing.md)。

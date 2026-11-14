@@ -703,7 +703,7 @@ bool AssetBuildSystem::build(const std::filesystem::path& project_root,
         return false;
     }
     schema::AssetCatalogDataT data;
-    data.schema_version = 2;
+    data.schema_version = 3;
     data.target_platform = source.data().target_platform;
     ResourceBuildStats stats;
     stats.output_path = output;

@@ -111,7 +111,6 @@ if(ENGINE_ENABLE_RUNTIME_DEPS)
                 src/engine/runtime/resource/resource_codec.cpp
                 src/engine/runtime/resource/codecs/source_resource_codec.cpp
                 src/engine/runtime/resource/codecs/script_resource_codec.cpp
-                src/engine/runtime/resource/codecs/json_resource_codec.cpp
                 src/engine/runtime/resource/codecs/scene_resource_codec.cpp
                 src/engine/runtime/resource/codecs/prefab_resource_codec.cpp
                 src/engine/runtime/resource/codecs/mesh_resource_codec.cpp
@@ -128,15 +127,14 @@ if(ENGINE_ENABLE_RUNTIME_DEPS)
                 src/engine/runtime/resource/codecs/animation_retarget_resource_codec.cpp
                 src/engine/runtime/resource/codecs/animation_resource_codec.cpp
                 src/engine/runtime/resource/resource_catalog.cpp
-                src/engine/runtime/resource/virtual_file_system.cpp)
+                src/engine/runtime/resource/virtual_file_system.cpp
+                src/engine/runtime/resource/file_operations.cpp)
     target_include_directories(engine_resource PRIVATE "${PROJECT_SOURCE_DIR}/src/engine")
     engine_embed_render_shaders(engine_resource cube cube_instanced font surface water)
     target_link_libraries(
         engine_resource
         PUBLIC engine::scene_data
-        PRIVATE engine::task flatbuffers::flatbuffers basisu::basisu_encoder SDL3::SDL3
-                nlohmann_json::nlohmann_json)
-    target_compile_definitions(engine_resource PRIVATE JSON_NOEXCEPTION=1)
+        PRIVATE engine::task flatbuffers::flatbuffers basisu::basisu_encoder SDL3::SDL3)
 
     engine_add_system(runtime world)
     target_sources(engine_world PRIVATE src/engine/runtime/world/world_scene_scope.cpp)

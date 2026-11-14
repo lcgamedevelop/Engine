@@ -15,7 +15,6 @@ function(engine_configure_asset_import_plugin)
         src/engine/plugins/editor/asset_import/usd_importer.cpp
         src/engine/plugins/editor/asset_import/font_importer.cpp
         src/engine/plugins/editor/asset_import/ui_importer.cpp
-        src/engine/plugins/editor/asset_import/json_importer.cpp
         src/engine/plugins/editor/asset_import/movie_importer.cpp)
     add_library(engine::asset_import ALIAS engine_asset_import)
     target_include_directories(engine_asset_import PRIVATE "${PROJECT_SOURCE_DIR}/src/engine")

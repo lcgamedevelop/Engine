@@ -91,13 +91,13 @@ export default class Game extends Gameplay {
 
 每次玩法运行只有一个项目入口，可直接承载业务；它独立于节点。`OnInitialize` 必须返回布尔值。`Debug.Log`、`Debug.LogWarning`、`Debug.LogError` 接受字符串并映射到原生日志。`Scene.Load(path)` 从当前目录按需加载场景及必要依赖，`Scene.FindNode(name)` 查找节点；`Scene.Create` 可以动态创建所属玩法会话的场景；`Scene.CreateNode` 创建节点，节点可以添加 `Camera`、`Light`、`MeshRenderer`、`Collider`、`RigidBody`、`AudioSource`、`AudioListener` 组件。物理与音频接口见[脚本类图](class-diagrams/physics-audio-script-api.md)。全部场景对象都遵守这个结构。节点管理父子关系，Transform 提供局部位置、旋转与缩放；`Time.deltaTime` 为当前 Update 的秒数。完整用法见 [示例 Game](../../../projects/showcase/assets/scripts/game.ts) 与 [SDK 声明](../../../include/engine.d.ts)。停止或重载后旧句柄失效，失败返回 false/null。
 
-## JSON 配置资源
+## 通用配置与二进制资源
 
-项目配置可保存为独立 `.json` 资源。统一编辑器 `asset_import` 插件内的 JsonImporter 校验 1 字节至 4 MiB 的严格 UTF-8 JSON，拒绝 BOM、原始 NUL、注释和尾逗号；成功后原样进入 GUID 缓存、同步与运行包。运行时复用普通资源字节，不向核心增加 JSON 解析器。显式设置 `ENGINE_EDITOR_PLUGINS` 的已有构建需在原清单选择 `asset_import`，默认清单已包含该插件。
+配置和二进制文件通过基础 SourceImporter 原样进入 GUID 缓存、同步和运行包，不要求启用格式导入插件；空文件合法，不在原生层检查 JSON 等配置语法。项目配置内容中的字符串不会自动成为资源依赖，精简包仍需显式列出配置与所用资源入口。
 
-资源类型表参与公共导入指纹，首次升级会重新导入旧项目缓存；之后继续按资源增量构建，不需清空缓存或重编第三方依赖。
+脚本在活动 Gameplay / UI 回调中先调用 Resources.Load 或 BeginLoad 获取句柄，再通过 Resources.ReadText / ReadBytes 取得独立副本，最后 Release。文本按严格 UTF-8 读取，JSON.parse、字段校验和业务版本由项目处理；二进制返回 Uint8Array，释放句柄后仍有效。范围、编码、大小和错误契约见[资源读取类图](class-diagrams/resources-script-api.md)，导入见[通用数据](../../editor/class-diagrams/source-importer.md)。
 
-脚本在 `Gameplay.OnInitialize` 等有效回调内调用 `Json.Load("config/maps.json")`，得到 `unknown` 类型的独立 JavaScript 值，并由项目校验字段。模块顶层、构造阶段、缺失路径、非 JSON 资源和非法载荷返回 `null`，合法 JSON `null` 同样返回 `null`。JSON 内的字符串不会自动成为资源依赖；精简包须在 `settings/editor-resource-build.toml` 显式列出配置及其使用的场景、模型等入口，UI 图片继续在 `.rml.meta` 声明。接口及边界见 [JSON 导入](../editor/class-diagrams/json-importer.md)与[脚本读取](class-diagrams/json-script-api.md)。
+实际文件与目录通过 [File](class-diagrams/file-script-api.md) 操作，接受绝对路径并复用 SDL3 的跨平台 I/O。当前文件接口同步完成；批量扫描或大文件操作不能视作后台任务。Storage 继续提供固定路径的字符串 KV，保存时机由调用方决定。
 
 ## 项目结构与模块限制
 

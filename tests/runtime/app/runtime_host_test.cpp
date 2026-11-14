@@ -150,7 +150,7 @@ bool write_version(const fs::path& root, std::string_view revision, std::string_
                    const fs::path& manifest = {})
 {
     schema::AssetCatalogDataT catalog;
-    catalog.schema_version = 2;
+    catalog.schema_version = 3;
     catalog.revision = revision;
     catalog.target_platform = platform;
     auto entry = std::make_unique<schema::AssetEntryT>();

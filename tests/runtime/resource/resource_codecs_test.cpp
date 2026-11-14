@@ -165,7 +165,7 @@ bool codec_tests()
                      {renderer.mesh_guid, renderer.material_guid}) ||
         !add_payload(fixture, "data", schema::AssetKind::source, raw) ||
         !add_payload(fixture, "main.ts", schema::AssetKind::script, {}) ||
-        !add_payload(fixture, "config/weapon.json", schema::AssetKind::json,
+        !add_payload(fixture, "config/weapon.json", schema::AssetKind::source,
                      std::as_bytes(std::span(json.data(), json.size()))) ||
         !fixture.publish(resources))
     {
@@ -206,15 +206,16 @@ bool codec_tests()
                     (*resource_detail::data<ScriptResource>(script_resource.get())).empty(),
                 "raw source retains embedded zeros and empty script is a valid byte payload") ||
         !expect(fixture.read(resources, "config/weapon.json", json_resource) &&
-                    json_resource->info().kind == schema::AssetKind::json &&
+                    json_resource->info().kind == schema::AssetKind::source &&
                     json_resource->info().dependencies.empty() &&
-                    (*resource_detail::data<JsonResource>(json_resource.get())).size() ==
+                    (*resource_detail::data<SourceResource>(json_resource.get())).size() ==
                         json.size() &&
                     std::string_view(
                         reinterpret_cast<const char*>(
-                            (*resource_detail::data<JsonResource>(json_resource.get())).data()),
-                        (*resource_detail::data<JsonResource>(json_resource.get())).size()) == json,
-                "JSON is a distinct resource kind retaining its original text bytes") ||
+                            (*resource_detail::data<SourceResource>(json_resource.get())).data()),
+                        (*resource_detail::data<SourceResource>(json_resource.get())).size()) ==
+                        json,
+                "JSON configuration is a source resource retaining its original text bytes") ||
         !expect(resources.validate_dependencies(
                     *scene_resource, std::array{mesh_resource.get(), material_resource.get()},
                     dependency_error, message) &&
@@ -222,7 +223,7 @@ bool codec_tests()
                         *scene_resource, std::array{mesh_resource.get(), texture_resource.get()},
                         dependency_error, message),
                 "type codec validates only explicitly supplied scene references") ||
-        !expect(!resources.add<SourceResourceCodec>() && !resources.add<JsonResourceCodec>(),
+        !expect(!resources.add<SourceResourceCodec>() && !resources.add<ScriptResourceCodec>(),
                 "codec registration is explicit and frozen after initialization"))
     {
         return false;

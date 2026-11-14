@@ -1,4 +1,5 @@
 #include "plugins/runtime/script/vm/script_vm.hpp"
+#include "plugins/runtime/script/vm/text_encoding.hpp"
 
 #include <quickjs.h>
 
@@ -106,6 +107,15 @@ JSValue native_value(JSContext* context, const NativeValue& input)
                     }
                 }
                 return result.release();
+            }
+            else if constexpr (std::is_same_v<T, ByteBuffer>)
+            {
+                if (value.size() > maximum_byte_size)
+                {
+                    return JS_ThrowRangeError(context, "Native bytes exceed the size limit");
+                }
+                return JS_NewUint8ArrayCopy(
+                    context, reinterpret_cast<const std::uint8_t*>(value.data()), value.size());
             }
             else
             {
@@ -232,6 +242,19 @@ public:
         {
             return false;
         }
+        std::size_t unit_count = 0;
+        const auto* units = JS_ToCStringLenUTF16(context_, &unit_count, values_[index]);
+        if (!units)
+        {
+            return false;
+        }
+        const bool well_formed =
+            unit_count <= maximum_text_size && valid_utf16({units, unit_count});
+        JS_FreeCStringUTF16(context_, units);
+        if (!well_formed)
+        {
+            return false;
+        }
         std::size_t length = 0;
         const char* value = JS_ToCStringLen(context_, &length, values_[index]);
         if (value == nullptr)
@@ -245,6 +268,43 @@ public:
         }
         JS_FreeCString(context_, value);
         return valid;
+    }
+    bool bytes(int index, ByteBuffer& output) const override
+    {
+        output.clear();
+        if (!in_range(index) || JS_GetTypedArrayType(values_[index]) != JS_TYPED_ARRAY_UINT8)
+        {
+            return false;
+        }
+        std::size_t offset = 0, length = 0, element_size = 0;
+        Value buffer(context_, JS_GetTypedArrayBuffer(context_, values_[index], &offset, &length,
+                                                      &element_size));
+        if (JS_IsException(buffer.get()))
+        {
+            JS_FreeValue(context_, JS_GetException(context_));
+            return false;
+        }
+        if (!JS_IsArrayBuffer(buffer.get()) || length > maximum_byte_size)
+        {
+            return false;
+        }
+        std::size_t size = 0;
+        const auto* data = JS_GetArrayBuffer(context_, &size, buffer.get());
+        if (JS_HasException(context_))
+        {
+            JS_FreeValue(context_, JS_GetException(context_));
+            return false;
+        }
+        if (offset > size || length > size - offset || (length && !data))
+        {
+            return false;
+        }
+        if (length)
+        {
+            const auto* first = reinterpret_cast<const std::byte*>(data + offset);
+            output.assign(first, first + length);
+        }
+        return true;
     }
     void set_return(const NativeValue& value) const override
     {

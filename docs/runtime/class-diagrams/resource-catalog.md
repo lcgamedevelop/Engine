@@ -40,7 +40,7 @@ classDiagram
 
 ## 序列化模型
 
-持久字段由 asset_catalog.fbs 和 resource_header.fbs 定义并由 FlatBuffers 生成。目录格式版本为 2，实体格式版本为 1。
+持久字段由 asset_catalog.fbs 和 resource_header.fbs 定义并由 FlatBuffers 生成。目录格式版本为 3，实体格式版本为 2。
 
 | 模型 | 内容 |
 | --- | --- |
@@ -65,4 +65,4 @@ GUID 是稳定身份，内容哈希用于校验和增量判断；偏移与长度
 
 清单须完整自洽，缺失必要依赖或循环均失败。源码/include 等构建输入不进入运行依赖数组；后续才使用的软引用不自动加载，打包时通过明确入口或保留项覆盖。
 
-实体文件由 `ERS1`、32 位小端头部长度、标识为 `ERSH` 的 FlatBuffers 头和原始载荷组成。目录中的大小与 FNV-1a 64 位摘要覆盖完整实体，header_size 包含前 8 字节。合并包直接拼接完整实体，目录记录各实体偏移和长度。
+实体文件由 `ERS2`、32 位小端头部长度、标识为 `ERSH` 的 FlatBuffers 头和原始载荷组成。目录中的大小与 FNV-1a 64 位摘要覆盖完整实体，header_size 包含前 8 字节。合并包直接拼接完整实体，目录记录各实体偏移和长度。

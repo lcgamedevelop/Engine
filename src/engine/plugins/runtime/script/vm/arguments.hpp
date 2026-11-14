@@ -26,6 +26,7 @@ public:
     [[nodiscard]] virtual bool identifier(int index, std::uint64_t& output) const = 0;
     [[nodiscard]] virtual bool number(int index, double& output) const = 0;
     [[nodiscard]] virtual bool text(int index, std::string& output) const = 0;
+    [[nodiscard]] virtual bool bytes(int index, ByteBuffer& output) const = 0;
     // 转换失败由 VM 记录 JavaScript 异常，外层调用通过返回值报告失败。
     virtual void set_return(const NativeValue& value) const = 0;
     virtual void type_error(std::string_view message) const = 0;

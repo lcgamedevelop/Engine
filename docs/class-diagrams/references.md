@@ -98,7 +98,7 @@ PathUtils 只提供 UTF-8 与原生路径转换；权限、目录创建、规范
 
 资源 Codec、AssetImporter、Component 操作及脚本绑定均由所属模块显式登记。框架只选择和调度，具体类型分别拥有转换、校验和状态，不集中到跨模块大 switch。
 
-契约：[JsonImporter](../plugins/editor/class-diagrams/json-importer.md) · [JsonBinding / Json](../plugins/runtime/class-diagrams/json-script-api.md) · [ScriptRuntime](../runtime/class-diagrams/script-runtime.md) · [ScriptSystem](../plugins/runtime/class-diagrams/script-system.md) · [ScriptBindingRegistry](../plugins/runtime/class-diagrams/script-bindings.md) · [ComponentRegistry](../runtime/class-diagrams/component-registry.md) · [SceneComponentCodec](../editor/class-diagrams/scene-component-codecs.md) · [ResourceCodec](../runtime/class-diagrams/resource-codecs.md) · [AssetImporter](../editor/class-diagrams/asset-importers.md) · [ModelingMeshImporter](../plugins/editor/class-diagrams/modeling-mesh-importer.md)。
+契约：[通用数据导入](../editor/class-diagrams/source-importer.md) · [资源文本与二进制读取](../plugins/runtime/class-diagrams/resources-script-api.md) · [FileBinding](../plugins/runtime/class-diagrams/file-script-api.md) · [ScriptRuntime](../runtime/class-diagrams/script-runtime.md) · [ScriptSystem](../plugins/runtime/class-diagrams/script-system.md) · [ScriptBindingRegistry](../plugins/runtime/class-diagrams/script-bindings.md) · [ComponentRegistry](../runtime/class-diagrams/component-registry.md) · [SceneComponentCodec](../editor/class-diagrams/scene-component-codecs.md) · [ResourceCodec](../runtime/class-diagrams/resource-codecs.md) · [AssetImporter](../editor/class-diagrams/asset-importers.md) · [ModelingMeshImporter](../plugins/editor/class-diagrams/modeling-mesh-importer.md)。
 
 ## 第三方资源拥有关系
 

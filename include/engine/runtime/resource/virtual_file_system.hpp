@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -46,6 +47,22 @@ struct FileLocationT;
 } // namespace schema
 
 using ByteBuffer = std::vector<std::byte>;
+using ByteView = std::span<const std::byte>;
+
+enum class FileKind
+{
+    file,
+    directory,
+    symlink,
+    other
+};
+
+struct FileEntry
+{
+    std::filesystem::path path;
+    FileKind kind = FileKind::other;
+    std::uint64_t size = 0;
+};
 
 struct ResourceMount
 {
@@ -91,7 +108,22 @@ public:
     [[nodiscard]] bool configure(const MountList& mounts);
     [[nodiscard]] bool read(const schema::FileLocationT& location, std::uint64_t offset,
                             std::uint64_t size, ByteBuffer& output);
-    [[nodiscard]] static bool read_file(const std::filesystem::path& path, ByteBuffer& output);
+    [[nodiscard]] static bool read_file(const std::filesystem::path& path, ByteBuffer& output,
+                                        std::string* error = nullptr);
+    [[nodiscard]] static bool write_file(const std::filesystem::path& path, ByteView bytes,
+                                         std::string& error);
+    [[nodiscard]] static bool stat(const std::filesystem::path& path, FileEntry& output,
+                                   std::string& error);
+    [[nodiscard]] static bool list_directory(const std::filesystem::path& path,
+                                             std::vector<FileEntry>& output, std::string& error);
+    [[nodiscard]] static bool create_directory(const std::filesystem::path& path,
+                                               std::string& error);
+    [[nodiscard]] static bool copy_file(const std::filesystem::path& source,
+                                        const std::filesystem::path& destination,
+                                        std::string& error);
+    [[nodiscard]] static bool move(const std::filesystem::path& source,
+                                   const std::filesystem::path& destination, std::string& error);
+    [[nodiscard]] static bool remove(const std::filesystem::path& path, std::string& error);
     // 固定 64 KiB 缓冲计算完整文件 FNV-1a 64 位摘要；失败两项输出清零。
     [[nodiscard]] static bool hash_file(const std::filesystem::path& path, std::uint64_t& hash,
                                         std::uint64_t& size);

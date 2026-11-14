@@ -53,6 +53,7 @@ public:
                                        std::string& output);
 
 inline constexpr std::size_t maximum_text_size = 4 * 1024 * 1024;
+inline constexpr std::size_t maximum_byte_size = 64 * 1024 * 1024;
 inline constexpr std::size_t maximum_module_count = 256;
 #if defined(ENGINE_ENABLE_TEST_SUPPORT)
 inline constexpr std::size_t maximum_project_script_size = 256 * 1024;

@@ -138,6 +138,8 @@ RenderSubmitStatus 区分提交、暂缓和失败，GameplayStopCause 显式区�
 
 ## 编辑器基础
 
+- [通用数据资源导入](../editor/class-diagrams/source-importer.md)
+
 - [Web 运行产物导出](../editor/class-diagrams/web-export.md)
 - [资源导入异步批次（规划／待实现）](../editor/class-diagrams/asset-import-jobs.md)
 - [逐类型资源导入](../editor/class-diagrams/asset-importers.md)
@@ -182,7 +184,7 @@ RenderSubmitStatus 区分提交、暂缓和失败，GameplayStopCause 显式区�
 - [特效插件](../plugins/runtime/class-diagrams/effects.md)
 - [动态碎片退休](../plugins/runtime/class-diagrams/fragment-retirement.md)
 - [输入脚本接口](../plugins/runtime/class-diagrams/input-script-api.md)
-- [JSON 脚本接口](../plugins/runtime/class-diagrams/json-script-api.md)
+- [文件与目录脚本接口](../plugins/runtime/class-diagrams/file-script-api.md)
 - [影片脚本接口与 Run 生命周期](../plugins/runtime/class-diagrams/movie-script-api.md)
 - [多角色导航](../plugins/runtime/class-diagrams/navigation-crowd.md)
 - [导航脚本接口](../plugins/runtime/class-diagrams/navigation-script-api.md)
@@ -216,7 +218,6 @@ RenderSubmitStatus 区分提交、暂缓和失败，GameplayStopCause 显式区�
 - [特效导入与编辑器工具](../plugins/editor/class-diagrams/effect-importer.md)
 - [FBX 模型资源导入](../plugins/editor/class-diagrams/fbx-importer.md)
 - [字体资源导入](../plugins/editor/class-diagrams/font-importer.md)
-- [JSON 资源导入](../plugins/editor/class-diagrams/json-importer.md)
 - [MCP 协议与工具注册](../plugins/runtime/class-diagrams/mcp-system.md)
 - [独立运行程序的 MCP 测试接入](../plugins/editor/class-diagrams/runtime-mcp-debug.md)
 - [建模几何操作](../plugins/editor/class-diagrams/mesh-geometry.md)

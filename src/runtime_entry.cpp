@@ -34,11 +34,10 @@
 #include "runtime/utils/path_utils.hpp"
 #endif
 
-#include <fmt/base.h>
-
 #include <algorithm>
 #include <charconv>
 #include <chrono>
+#include <cinttypes>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
@@ -62,10 +61,11 @@ namespace
 void print_usage()
 {
 #if defined(ENGINE_HAS_RUNTIME_MCP_ENDPOINT)
-    fmt::print("Usage: engine_app --mcp-project <path> --mcp-runtime-dir <empty-cache-path> "
-               "[--frames <positive-count>] [--workers <0..64>]\n");
+    std::fputs("Usage: engine_app --mcp-project <path> --mcp-runtime-dir <empty-cache-path> "
+               "[--frames <positive-count>] [--workers <0..64>]\n",
+               stdout);
 #else
-    fmt::print("Usage: engine_app [--frames <positive-count>] [--workers <0..64>]\n");
+    std::fputs("Usage: engine_app [--frames <positive-count>] [--workers <0..64>]\n", stdout);
 #endif
 }
 
@@ -121,7 +121,7 @@ bool initialize_runtime_app(RuntimeAppState& state, const AppConfig& requested_a
             const auto parsed = std::from_chars(value.data(), value.data() + value.size(), count);
             if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() || count > 64)
             {
-                fmt::print(stderr, "Worker limit must be within 0..64 (0 is automatic)\n");
+                std::fputs("Worker limit must be within 0..64 (0 is automatic)\n", stderr);
                 state.exit_code = 2;
                 return fail("Invalid runtime arguments");
             }
@@ -378,8 +378,9 @@ bool initialize_runtime_app(RuntimeAppState& state, const AppConfig& requested_a
 #if defined(ENGINE_HAS_RUNTIME_MCP_ENDPOINT)
     if (!mcp_bridge.initialize(engine, {mcp_project / "cache", mcp_directory, {}}))
     {
-        fmt::print(stderr, "Cannot initialize runtime MCP test channel: {}\n",
-                   mcp_bridge.last_error());
+        const auto error = mcp_bridge.last_error();
+        std::fprintf(stderr, "Cannot initialize runtime MCP test channel: %.*s\n",
+                     static_cast<int>(error.size()), error.data());
         return fail("Runtime initialization failed");
     }
 #endif
@@ -457,7 +458,9 @@ FrameStatus step_runtime_app(RuntimeAppState& state, double delta_time)
 #if defined(ENGINE_HAS_RUNTIME_MCP_ENDPOINT)
     if (!mcp_bridge.poll())
     {
-        fmt::print(stderr, "Runtime MCP test channel failed: {}\n", mcp_bridge.last_error());
+        const auto error = mcp_bridge.last_error();
+        std::fprintf(stderr, "Runtime MCP test channel failed: %.*s\n",
+                     static_cast<int>(error.size()), error.data());
         return fail("Runtime frame failed");
     }
 #endif
@@ -631,7 +634,7 @@ void shutdown_runtime_app(RuntimeAppState& state) noexcept
         auto& log = LogSystem::instance();
         if (was_initialized)
         {
-            fmt::print("Engine stopped after {} rendered frames\n", state.frames);
+            std::printf("Engine stopped after %" PRIu64 " rendered frames\n", state.frames);
             LogSystem::write(LogLevel::info, "Engine stopped after " +
                                                  std::to_string(state.frames) + " rendered frames");
         }

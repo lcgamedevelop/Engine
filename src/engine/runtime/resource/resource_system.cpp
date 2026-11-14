@@ -41,7 +41,7 @@ bool parse_header(const schema::AssetEntryT& entry, ByteView bytes,
     output = {};
     if (entry.header_size < 16 || entry.header_size > 65536 ||
         entry.header_size > entry.content_size || bytes.size() < entry.header_size ||
-        std::memcmp(bytes.data(), "ERS1", 4) != 0)
+        std::memcmp(bytes.data(), "ERS2", 4) != 0)
     {
         return false;
     }
@@ -61,7 +61,7 @@ bool parse_header(const schema::AssetEntryT& entry, ByteView bytes,
     }
     auto header = schema::UnPackResourceHeaderData(bytes.data() + 8);
     if (header->guid != entry.guid || header->kind != entry.kind ||
-        header->format_version != entry.format_version || header->format_version != 1 ||
+        header->format_version != entry.format_version || header->format_version != 2 ||
         header->payload_offset != entry.header_size ||
         header->payload_size != entry.content_size - entry.header_size)
     {
@@ -321,7 +321,7 @@ bool ResourceSystem::validate_memory_info(const Resource& resource)
     const auto& info = resource.info();
     if (!GuidMap::valid_guid(info.guid) || !GuidMap::valid_path(info.path) ||
         info.path.starts_with("editor://") || info.kind != resource.kind() || info.location ||
-        info.format_version != 1 || info.content_size != 0 || info.header_size != 0 ||
+        info.format_version != 2 || info.content_size != 0 || info.header_size != 0 ||
         !info.content_hash.empty())
     {
         return fail(ResourceError::invalid_data, "Invalid memory resource metadata");
@@ -625,7 +625,7 @@ void ResourceSystem::shutdown_reads() noexcept
 bool ResourceSystem::on_initialize(const EngineConfig&)
 {
     schema::AssetCatalogDataT data;
-    data.schema_version = 2;
+    data.schema_version = 3;
     data.revision = "builtin-only";
     data.target_platform = target_platform();
     return update_catalog(data, {});
@@ -716,7 +716,7 @@ bool ResourceSystem::encode_resource(std::string_view guid, schema::AssetKind ki
     }
     header_size = static_cast<std::uint32_t>(header.payload_offset);
     output.resize(header_size + payload.size());
-    std::memcpy(output.data(), "ERS1", 4);
+    std::memcpy(output.data(), "ERS2", 4);
     const auto length = static_cast<std::uint32_t>(builder.GetSize());
     for (std::size_t index = 0; index < 4; ++index)
     {

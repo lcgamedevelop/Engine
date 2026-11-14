@@ -14,7 +14,7 @@ bool SourceImporter::matches(const std::filesystem::path&) const
 }
 bool SourceImporter::inspect_batch(const ImportContext&, std::string& fingerprint, std::string&)
 {
-    fingerprint = "source-copy-1";
+    fingerprint = "source-copy-2";
     return true;
 }
 bool SourceImporter::convert(const ImportAsset& asset, const ImportContext& context,

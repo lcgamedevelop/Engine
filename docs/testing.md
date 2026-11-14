@@ -62,6 +62,14 @@ CI 仍仅手动触发，默认执行基础集合；跨平台或完整功能验�
 
 登记入口为 [tests/CMakeLists.txt](../tests/CMakeLists.txt)。不为测试修改正式接口可见性，不提交运行结果或生成资源。
 
+## 文件操作与通用资源读取
+
+`engine.script_runtime` 在 QuickJS 与 V8 共用同一用例，覆盖 File 的活动回调限制、文本和字节读写、Uint8Array 子视图及独立副本、空文件、非法编码、共享／已分离缓冲区拒绝、目录枚举和文件变更；Resources 覆盖 source 资源读取、释放后的副本、类型与句柄校验及目录切换。`engine.resource_read` 补充符号链接与失败输出状态，`editor.asset_pipeline` 覆盖通用源文件原样导入及增量复用。
+
+macOS arm64 已通过受影响目标的 Debug / Release 构建；Release 的上述三个用例以及 `engine.resource_catalog`、`resource.codecs`、`plugins.runtime.resource_graph`、`engine.asset_sync` 共 7 项通过，V8 的 `engine.script_runtime` 也通过。架构边界与规则两项检查通过，Android 资源打包脚本的 29 项测试通过，其中包括拒绝旧目录／实体格式并保留已有输出。打包脚本检查不代表 Android 真机验收；文件操作尚未完成其他平台的实机验证。
+
+公开范例的资源与脚本升级结果见 [showcase 验证入口](../projects/showcase/docs/index.md#验证)；私有项目的调用方、meta、测试与构建记录留在其本地项目目录。
+
 ## 手动集成与 GPU 验证
 
 - `engine.render_submission`：剔除、实例化、材质/Probe 分组、LOD、瞬态缓冲不足和阴影像素回归。

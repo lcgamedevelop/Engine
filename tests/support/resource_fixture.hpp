@@ -144,7 +144,7 @@ public:
         {
             root.clear();
         }
-        catalog.schema_version = 2;
+        catalog.schema_version = 3;
         catalog.revision = "fixture";
 #if defined(__ANDROID__)
         catalog.target_platform = "android";

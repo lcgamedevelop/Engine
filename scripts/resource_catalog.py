@@ -136,8 +136,8 @@ def catalog_entries(source, target_platform="android"):
 
 def parse_catalog(snapshot, target_platform="android"):
     data = FlatBuffer(snapshot, b"EASC")
-    if data.value(data.root, 0, "<I", 1) != 2:
-        raise ValueError("Unsupported GUID catalog version; rebuild v2 runtime resources")
+    if data.value(data.root, 0, "<I", 1) != 3:
+        raise ValueError("Unsupported GUID catalog version; rebuild current runtime resources")
     if not data.string(data.root, 1):
         raise ValueError("GUID catalog is missing its revision")
     if data.string(data.root, 2) != target_platform:
@@ -153,7 +153,7 @@ def parse_catalog(snapshot, target_platform="android"):
         checksum = data.string(asset, 3)
         size = data.value(asset, 4, "<Q")
         module = data.string(asset, 6, False)
-        version = data.value(asset, 7, "<I", 1)
+        version = data.value(asset, 7, "<I", 2)
         header_size = data.value(asset, 8, "<I")
         location = data.pointer(data.field(asset, 9))
         mount = data.string(location, 0)
@@ -166,8 +166,8 @@ def parse_catalog(snapshot, target_platform="android"):
             or guid == "00000000-0000-0000-0000-000000000000"
             or guid in identities
             or logical in paths
-            or kind > 20  # AssetKind in asset_catalog.fbs ends with movie=20.
-            or version != 1
+            or kind > 19  # AssetKind in asset_catalog.fbs ends with movie=19.
+            or version != 2
             or not re.fullmatch(r"[0-9a-f]{16}", checksum)
             or mount != "content"
             or relative == "catalog.bin"
@@ -325,7 +325,7 @@ def validate_entity(path, entry):
         prefix = stream.read(8)
         if (
             len(prefix) != 8
-            or prefix[:4] != b"ERS1"
+            or prefix[:4] != b"ERS2"
             or struct.unpack_from("<I", prefix, 4)[0] != entry["header_size"] - 8
         ):
             raise ValueError(f"Invalid resource entity header: {entry['guid']}")
@@ -333,7 +333,7 @@ def validate_entity(path, entry):
         if (
             header.string(header.root, 0) != entry["guid"]
             or header.value(header.root, 1, "<B") != entry["kind"]
-            or header.value(header.root, 2, "<I", 1) != entry["format_version"]
+            or header.value(header.root, 2, "<I", 2) != entry["format_version"]
             or header.value(header.root, 3, "<Q") != entry["header_size"]
             or header.value(header.root, 4, "<Q") != entry["size"] - entry["header_size"]
         ):

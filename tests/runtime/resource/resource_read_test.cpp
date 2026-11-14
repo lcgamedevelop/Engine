@@ -537,6 +537,48 @@ bool asynchronous_ranges(const std::filesystem::path& root)
                   "unclaimed ready operations may outlive the file service safely");
 }
 
+bool file_operation_contracts(const std::filesystem::path& root)
+{
+    using engine::VirtualFileSystem;
+    const auto folder = root / "file-operations";
+    const auto target = folder / "target";
+    const auto link = folder / "link";
+    std::string error;
+    const std::string text = "original";
+    engine::ByteBuffer bytes;
+    engine::FileEntry entry;
+    if (!VirtualFileSystem::create_directory(folder, error) ||
+        !VirtualFileSystem::write_file(target, std::as_bytes(std::span(text.data(), text.size())),
+                                       error))
+    {
+        return false;
+    }
+    std::error_code code;
+    std::filesystem::create_symlink(target, link, code);
+    if (!code)
+    {
+        if (!expect(VirtualFileSystem::stat(link, entry, error) &&
+                        entry.kind == engine::FileKind::symlink && entry.size == 0 &&
+                        !VirtualFileSystem::write_file(link, {}, error) &&
+                        VirtualFileSystem::read_file(target, bytes, &error) &&
+                        bytes.size() == text.size(),
+                    "metadata identifies links and writes preserve their target") ||
+            !expect(VirtualFileSystem::remove(link, error) &&
+                        VirtualFileSystem::stat(target, entry, error),
+                    "removing a link preserves its target"))
+        {
+            return false;
+        }
+    }
+    entry.path = target;
+    bytes.assign(1, std::byte{1});
+    return expect(!VirtualFileSystem::stat(folder / "missing", entry, error) &&
+                      entry.path.empty() && !error.empty() &&
+                      !VirtualFileSystem::read_file(folder / "missing", bytes, &error) &&
+                      bytes.empty() && !error.empty(),
+                  "failed file operations clear outputs and report context");
+}
+
 } // namespace
 
 int main()
@@ -552,6 +594,7 @@ int main()
     failures += !empty_and_failures(directory.path);
     failures += !oversized_file(directory.path);
     failures += !apk_path_failures(directory.path);
+    failures += !file_operation_contracts(directory.path);
     failures +=
         !(asynchronous_ranges(directory.path) && single_resource_operations(directory.path));
     return failures == 0 ? 0 : 1;

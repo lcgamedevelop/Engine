@@ -83,7 +83,7 @@ if(ENGINE_BUILD_APP AND ENGINE_ENABLE_RUNTIME_DEPS AND NOT EMSCRIPTEN AND NOT IO
     else()
         add_executable(engine_app src/main.cpp src/runtime_entry.cpp)
     endif()
-    target_link_libraries(engine_app PRIVATE engine::runtime SDL3::SDL3 fmt::fmt)
+    target_link_libraries(engine_app PRIVATE engine::runtime SDL3::SDL3)
     target_include_directories(engine_app PRIVATE "${PROJECT_SOURCE_DIR}/src/engine")
     if(TARGET engine_platform)
         target_link_libraries(engine_app PRIVATE engine::app engine::log)

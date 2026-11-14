@@ -57,7 +57,7 @@ bool valid_entry(const schema::AssetEntryT& entry)
         static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
     return entry.kind >= schema::AssetKind::source && entry.kind <= schema::AssetKind::MAX &&
            GuidMap::valid_path(entry.path) && !entry.path.starts_with("editor://") &&
-           entry.format_version == 1 && entry.content_hash.size() == 16 &&
+           entry.format_version == 2 && entry.content_hash.size() == 16 &&
            std::all_of(
                entry.content_hash.begin(), entry.content_hash.end(), [](char value)
                { return (value >= '0' && value <= '9') || (value >= 'a' && value <= 'f'); }) &&
@@ -75,7 +75,7 @@ bool valid_entry(const schema::AssetEntryT& entry)
 
 bool ResourceCatalog::assign(const schema::AssetCatalogDataT& data)
 {
-    if (data.schema_version != 2 || data.revision.empty() || data.entries.size() > 65536 ||
+    if (data.schema_version != 3 || data.revision.empty() || data.entries.size() > 65536 ||
         (data.target_platform != "macos" && data.target_platform != "ios" &&
          data.target_platform != "windows" && data.target_platform != "android" &&
          data.target_platform != "linux" && data.target_platform != "web"))

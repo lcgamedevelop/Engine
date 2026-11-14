@@ -24,7 +24,7 @@
 
 系统属于 `engine::editor`，逐类型导入接口与实现属于 `engine::editor::asset_pipeline`。每种资源在独立导入器文件中实现识别、默认 meta、指纹、依赖与转换；管线只通过登记接口调度。初始化登记默认实现，宿主可在空闲时通过 `add_importer` 登记新 id，或通过 `set_importer` 替换已有 id 的实现，关闭后清空。编辑器基础不引用或链接具体插件。
 
-转换结果写入 `cache/gen/<完整GUID>`：文件名无扩展名、类型前缀或版本子目录。每个文件是 `ERS1` 资源实体，包含带 `ERSH` 标识的 FlatBuffers 实体头与载荷。`cache/catalog.bin` 使用版本 2，保存 GUID、逻辑路径、类型、必要运行依赖、完整实体大小和哈希、头长度、存储定位及目标平台；导入缓存的定位为 `content` 挂载下的 `gen/<GUID>`。
+转换结果写入 `cache/gen/<完整GUID>`：文件名无扩展名、类型前缀或版本子目录。每个文件是 `ERS2` 资源实体，包含带 `ERSH` 标识的 FlatBuffers 实体头与载荷。`cache/catalog.bin` 使用版本 3，保存 GUID、逻辑路径、类型、必要运行依赖、完整实体大小和哈希、头长度、存储定位及目标平台；导入缓存的定位为 `content` 挂载下的 `gen/<GUID>`。
 
 `cache/assets.sqlite` 使用版本 2，记录源、工具、配置和生成指纹；`dependencies` 表用于构建失效和任务排序，`runtime_dependencies` 表用于打包闭包。数据库与目录索引位于 cache 根，不进入 gen。实体哈希用于校验和增量判断，不改变 GUID 身份。
 

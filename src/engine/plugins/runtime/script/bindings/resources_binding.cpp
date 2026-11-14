@@ -1,6 +1,8 @@
 #include "plugins/runtime/script/bindings/resources_binding.hpp"
 
 #include "plugins/runtime/script/bindings/binding_context.hpp"
+#include "plugins/runtime/script/bindings/data_binding_helpers.hpp"
+#include "runtime/resource/types/source_resource.hpp"
 
 namespace engine::plugins::script::bindings
 {
@@ -48,6 +50,8 @@ export class Resources {
     constructor() { throw new TypeError('Resources is static'); }
     static Load(path) { return resourceHandle(native.ResourceLoad(path)); }
     static BeginLoad(path) { const id = native.ResourceBeginLoad(path); return id ? new ResourceRequest(key, id) : null; }
+    static ReadText(resource, ...extra) { return native.ResourceReadText(resourceToken(resource), ...extra); }
+    static ReadBytes(resource, ...extra) { return native.ResourceReadBytes(resourceToken(resource), ...extra); }
     static Retain(handle) { return resourceHandle(native.ResourceRetain(resourceToken(handle))); }
     static Release(handle) { const result = native.ResourceRelease(resourceToken(handle)); if (result) resourceHandles.delete(handle); return result; }
     static get lastError() { return native.ResourceLastError(); }
@@ -72,6 +76,45 @@ void load(const Arguments& arguments)
     if (token)
     {
         arguments.set_return(token);
+    }
+}
+
+void read_data(const Arguments& arguments)
+{
+    arguments.set_return({});
+    auto* context = BindingContext::current(arguments);
+    if (!context)
+    {
+        return;
+    }
+    context->set_resource_error({});
+    std::uint64_t token = 0;
+    const SourceResource* resource = nullptr;
+    if (arguments.count() != 1 || !BindingContext::identifier(arguments, 0, token) ||
+        !context->resources() ||
+        context->resources()->get(context->resource_handle(token), resource) != ResourceError::none)
+    {
+        context->set_resource_error("Expected a valid loaded source resource handle");
+        return;
+    }
+    const auto& bytes = resource->data();
+    if (arguments.data() == 0)
+    {
+        std::string text;
+        if (!binding_detail::decode_text(bytes, text))
+        {
+            context->set_resource_error("Resource text must be valid UTF-8 and at most 4 MiB");
+            return;
+        }
+        arguments.set_return(std::move(text));
+    }
+    else if (bytes.size() <= vm::maximum_byte_size)
+    {
+        arguments.set_return(bytes);
+    }
+    else
+    {
+        context->set_resource_error("Resource bytes exceed 64 MiB");
     }
 }
 
@@ -161,6 +204,8 @@ std::string_view ResourcesBinding::source() const noexcept
 bool ResourcesBinding::register_functions(vm::ScriptVm& vm) const
 {
     return vm.function("ResourceLoad", load, 0) && vm.function("ResourceBeginLoad", load, 1) &&
+           vm.function("ResourceReadText", read_data, 0) &&
+           vm.function("ResourceReadBytes", read_data, 1) &&
            vm.function("ResourceRetain", operation, 0) &&
            vm.function("ResourceRelease", operation, 1) &&
            vm.function("ResourceTake", operation, 2) &&

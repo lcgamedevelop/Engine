@@ -37,7 +37,7 @@ const schema::AssetCatalogDataT& builtin_resource_catalog()
     static const schema::AssetCatalogDataT catalog = []
     {
         schema::AssetCatalogDataT result;
-        result.schema_version = 2;
+        result.schema_version = 3;
         result.revision = "builtin-4";
         const auto add = [&result](const char* guid, const char* path, schema::AssetKind kind,
                                    const char* dependency)

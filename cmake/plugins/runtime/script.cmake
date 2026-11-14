@@ -20,9 +20,9 @@ function(engine_configure_script_plugin)
                 src/engine/plugins/runtime/script/bindings/completion_binding.cpp
                 src/engine/plugins/runtime/script/vm/script_vm.cpp
                 "src/engine/plugins/runtime/script/vm/${ENGINE_SCRIPT_BACKEND}_vm.cpp")
+    target_link_libraries(engine_script PUBLIC engine::gameplay)
     if(ENGINE_SCRIPT_BACKEND STREQUAL "quickjs")
-        target_link_libraries(engine_script PUBLIC engine::gameplay)
-    target_link_libraries(engine_script PRIVATE qjs)
+        target_link_libraries(engine_script PRIVATE qjs)
         target_compile_definitions(engine_script PUBLIC ENGINE_SCRIPT_BACKEND_QUICKJS=1)
     else()
         target_link_libraries(engine_script PRIVATE engine::v8)
