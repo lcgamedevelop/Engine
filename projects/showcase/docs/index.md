@@ -38,7 +38,7 @@
 
 ## 验证
 
-建模 `.mesh` 使用当前版本 2 的编辑源，仅保存 `[modeling]` 数据。568 份源文件已升级，几何、每角属性、元素 ID 与资源 GUID 保持不变；没有原始生成记录的模型不补造参数，仍可编辑，但不能参数重建。当前 Windows 资源导入和打包通过，`cache/build/windows/` 含 2 个包、1,370 项资源；此结果不代表运行画面验收。接口用法见[建模插件](../../../docs/plugins/editor/modeling.md)。
+建模 `.mesh` 使用当前版本 2 的编辑源，仅保存 `[modeling]` 数据。568 份源文件已升级，几何、每角属性、元素 ID 与资源 GUID 保持不变；没有原始生成记录的模型不补造参数，仍可编辑，但不能参数重建。接口用法见[建模插件](../../../docs/plugins/editor/modeling.md)。
 
 通用文件使用基础 SourceImporter；项目脚本已通过当前 `engine.d.ts` 的 TypeScript 检查。macOS arm64 / Release 的导入和运行资源打包通过，完整缓存包含 1,469 项，`cache/build/macos/` 包含 1,370 项资源与 2 个包；目录为版本 3、实体为 ERS2 / 版本 2。此项验证覆盖脚本类型、导入和打包，不包含场景画面验收。通用数据读取契约见 [Resources](../../../docs/plugins/runtime/class-diagrams/resources-script-api.md)。
 
