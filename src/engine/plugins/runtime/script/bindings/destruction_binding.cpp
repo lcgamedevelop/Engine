@@ -1,7 +1,8 @@
 #if defined(ENGINE_HAS_DESTRUCTION_PLUGIN) && ENGINE_HAS_DESTRUCTION_PLUGIN
 
 #include "plugins/runtime/script/bindings/destruction_binding.hpp"
-#include "plugins/runtime/script/bindings/binding_helpers.hpp"
+#include "plugins/runtime/script/bindings/control_binding_helpers.hpp"
+#include <charconv>
 
 #include "plugins/runtime/destruction/destruction_component.hpp"
 #include "plugins/runtime/destruction/destruction_system.hpp"
@@ -28,11 +29,15 @@ export class DestructionComponent extends Component {
         return submitCompletion(() => native.DestructionDamageAsync(
             h.scene, h.node, x, y, z, radius, damage, impulse), completed);
     }
-    RefreshSupport(support, maxGap, minCoverage) {
-        const h = handles.get(this), other = handles.get(support);
-        if (!other || other.kind !== native.ColliderKind) return false;
-        return native.DestructionSupport(h.scene, h.node, other.scene, other.node,
-                                         maxGap, minCoverage);
+    RefreshSupport(supports, maxGap, minCoverage) {
+        if (!Array.isArray(supports)) return false;
+        const h = handles.get(this), ids = [];
+        for (const collider of supports) {
+            const other = handles.get(collider);
+            if (!other || other.kind !== native.ColliderKind || !collider.IsValid() || other.scene !== h.scene) return false;
+            ids.push(other.node.toString());
+        }
+        return native.DestructionSupport(h.scene, h.node, JSON.stringify(ids), maxGap, minCoverage);
     }
     OwnsFragment(nodeId) {
         const h = handles.get(this); return native.DestructionOwns(h.scene, h.node, nodeId);
@@ -105,22 +110,39 @@ void damage_async(const Arguments& arguments)
 }
 void support(const Arguments& arguments)
 {
-    auto value = binding_detail::component<destruction::DestructionComponent>(arguments, 6);
+    auto value = binding_detail::component<destruction::DestructionComponent>(arguments, 5);
     auto* context = BindingContext::current(arguments);
-    std::uint64_t scene_id = 0;
-    std::uint64_t node_id = 0;
-    float max_gap = 0;
-    float min_coverage = 0;
-    if (!value || !context || !BindingContext::identifier(arguments, 2, scene_id) ||
-        !BindingContext::identifier(arguments, 3, node_id) ||
-        !BindingContext::scalar(arguments, 4, max_gap) ||
-        !BindingContext::scalar(arguments, 5, min_coverage))
+    control_detail::Json ids;
+    float max_gap = 0, min_coverage = 0;
+    if (!value || !context || !control_detail::argument(arguments, 2, ids) || !ids.is_array() ||
+        ids.size() > 4096 || !BindingContext::scalar(arguments, 3, max_gap) ||
+        !BindingContext::scalar(arguments, 4, min_coverage))
     {
         return;
     }
-    auto node = context->find_node(scene_id, node_id);
-    const auto collider = node ? node.get_component<Collider>() : Collider{};
-    arguments.set_return(collider && value.refresh_support(collider, max_gap, min_coverage));
+    std::vector<Collider> supports;
+    for (const auto& item : ids)
+    {
+        if (!item.is_string())
+        {
+            return;
+        }
+        const auto text = item.get<std::string>();
+        std::uint64_t id = 0;
+        const auto parsed = std::from_chars(text.data(), text.data() + text.size(), id);
+        if (parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size())
+        {
+            return;
+        }
+        auto collider =
+            context->find_node(value.node().scene()->id(), id).get_component<Collider>();
+        if (!collider)
+        {
+            return;
+        }
+        supports.push_back(collider);
+    }
+    arguments.set_return(value.refresh_support(supports, max_gap, min_coverage));
 }
 void owns_fragment(const Arguments& arguments)
 {

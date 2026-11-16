@@ -94,7 +94,7 @@ bool rigging()
         return false;
     }
     const auto before = test_support::read_data(prop_transform);
-    std::array<float, 16> matrix{};
+    std::array<double, 16> matrix{};
     if (!expect(animator.pause() && fixture.animation.tick(0) && attachment.following() &&
                     prop_transform.world_matrix(matrix.data()) && close(matrix[12], 12.5) &&
                     test_support::read_data(prop_transform) == before,
@@ -279,7 +279,7 @@ bool attachment_identity()
     {
         return false;
     }
-    std::array<float, 16> matrix;
+    std::array<double, 16> matrix;
     if (!expect(child_transform.world_matrix(matrix.data()) && close(matrix[12], 2) &&
                     close(matrix[13], 2),
                 "attachment descendants consume the same driven WorldTransform"))

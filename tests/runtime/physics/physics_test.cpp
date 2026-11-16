@@ -95,6 +95,27 @@ double height(engine::Node node)
     return test_support::read_settings(node.get_component<engine::Transform>()).position.y();
 }
 
+bool large_world_precision()
+{
+    Fixture fixture;
+    if (!fixture.initialize())
+    {
+        return false;
+    }
+    constexpr double x = 4000.000013, z = -4000.000019, y = 123.000017;
+    auto floor = create(*fixture.world.scene(), "Precision floor", {x, y, z},
+                        engine::schema::ColliderShape::box, false);
+    engine::PhysicsQueryHit hit;
+    if (!floor || !fixture.physics.tick(0) ||
+        !fixture.physics.query_ray({x, y + 2, z}, {0, -4, 0}, {}, hit) || !hit.hit)
+    {
+        return false;
+    }
+    return expect(std::abs(hit.point.x() - x) < 1e-9 && std::abs(hit.point.z() - z) < 1e-9 &&
+                      std::abs(hit.point.y() - (y + .5)) < 1e-6,
+                  "Jolt ray origin and hit retain double world coordinates");
+}
+
 bool collision_and_lifecycle()
 {
     Fixture fixture;
@@ -129,6 +150,16 @@ bool collision_and_lifecycle()
         return false;
     }
     auto rigid = box.get_component<engine::RigidBody>();
+    bool sleeping = false;
+    if (!expect(rigid.set_sleeping(true) && fixture.physics.tick(0) &&
+                    rigid.get_sleeping(sleeping) && sleeping,
+                "sleep request reaches the synchronized physical body") ||
+        !expect(rigid.add_impulse({0, 1, 0}) && fixture.physics.tick(0) &&
+                    rigid.get_sleeping(sleeping) && !sleeping,
+                "a subsequent impulse wakes a sleeping body"))
+    {
+        return false;
+    }
     auto body_settings = test_support::read_settings(rigid);
     body_settings.mass = 2.0F;
     body_settings.linear_velocity = {};
@@ -359,8 +390,8 @@ bool hierarchy_and_kinematic()
     motion.motion = engine::schema::BodyMotion::kinematic;
     motion.linear_velocity = {1, 0, 0};
     motion.linear_damping = 0;
-    std::array<float, 16> start{};
-    std::array<float, 16> end{};
+    std::array<double, 16> start{};
+    std::array<double, 16> end{};
     if (!mover.get_component<engine::RigidBody>().set_settings(motion) ||
         !mover.get_component<engine::Transform>().world_matrix(start.data()) ||
         !advance(fixture.physics, 60) ||
@@ -994,8 +1025,8 @@ bool rotation_and_scale()
             auto pose = test_support::read_settings(transform);
             pose.rotation = rotation;
             pose.scale = {1, 2, 0.5};
-            std::array<float, 16> before{};
-            std::array<float, 16> after{};
+            std::array<double, 16> before{};
+            std::array<double, 16> after{};
             if (!transform.set_settings(pose) || !transform.world_matrix(before.data()) ||
                 !advance(fixture.physics, 20) || !transform.world_matrix(after.data()))
             {
@@ -1523,7 +1554,7 @@ bool segmented_mesh_transforms()
     parent_pose.scale = {1.5, 1.5, 1.5};
     auto collision = test_support::read_settings(collider);
     collision.center = {1, 0.5, -0.75};
-    std::array<float, 16> matrix{};
+    std::array<double, 16> matrix{};
     if (!expect(parent_transform.set_settings(parent_pose) && floor.set_parent(parent) &&
                     transform.set_settings(pose) && collider.set_settings(collision) &&
                     fixture.physics.set_mesh_parts(collider, parts) &&
@@ -1864,7 +1895,7 @@ bool dynamic_pose_feedback()
     }
     auto world_point = [&](double x, engine::Vec3& output)
     {
-        std::array<float, 16> matrix{};
+        std::array<double, 16> matrix{};
         if (!transform.world_matrix(matrix.data()))
         {
             return false;
@@ -2365,14 +2396,15 @@ bool scoped_preparation_isolation()
 
 bool run_suite()
 {
-    return world_pause_and_resume() && collision_and_lifecycle() && fixed_step_and_validation() &&
-           velocity_updates_at_capacity() && hierarchy_and_kinematic() &&
-           trigger_and_registration() && rotation_and_scale() && transient_mesh_collision() &&
-           segmented_mesh_collision() && segmented_mesh_seams() && segmented_mesh_transforms() &&
-           segmented_mesh_character_seams() && accumulated_shape_scale() && numeric_boundaries() &&
-           compound_box_geometry() && dynamic_pose_feedback() && compound_collision() &&
-           snapshot_reuse_lifecycle() && targeted_ray() && closest_queries() && query_filters() &&
-           query_lifecycle() && impact_snapshots() && scoped_preparation_isolation();
+    return large_world_precision() && world_pause_and_resume() && collision_and_lifecycle() &&
+           fixed_step_and_validation() && velocity_updates_at_capacity() &&
+           hierarchy_and_kinematic() && trigger_and_registration() && rotation_and_scale() &&
+           transient_mesh_collision() && segmented_mesh_collision() && segmented_mesh_seams() &&
+           segmented_mesh_transforms() && segmented_mesh_character_seams() &&
+           accumulated_shape_scale() && numeric_boundaries() && compound_box_geometry() &&
+           dynamic_pose_feedback() && compound_collision() && snapshot_reuse_lifecycle() &&
+           targeted_ray() && closest_queries() && query_filters() && query_lifecycle() &&
+           impact_snapshots() && scoped_preparation_isolation();
 }
 
 bool occupied_workers(engine::ThreadSystem& threads, bool reject_submissions)

@@ -349,11 +349,13 @@ bool ShaderImporter::convert(const ImportAsset& asset, const ImportContext& cont
     {
         return false;
     }
-    for (const auto stage :
-         {std::string_view("vertex"), std::string_view("fragment"),
-          std::string_view("surface_fragment"), std::string_view("instanced_vertex")})
+    for (const auto stage : {std::string_view("vertex"), std::string_view("fragment"),
+                             std::string_view("surface_fragment"), std::string_view("rvt_fragment"),
+                             std::string_view("instanced_vertex")})
     {
-        if ((stage == "surface_fragment" || stage == "instanced_vertex") && !table.contains(stage))
+        if ((stage == "surface_fragment" || stage == "rvt_fragment" ||
+             stage == "instanced_vertex") &&
+            !table.contains(stage))
         {
             continue;
         }
@@ -395,6 +397,7 @@ bool ShaderImporter::convert(const ImportAsset& asset, const ImportContext& cont
         auto& destination = stage == "vertex"             ? shader.vertex_code
                             : stage == "fragment"         ? shader.fragment_code
                             : stage == "instanced_vertex" ? shader.instanced_vertex_code
+                            : stage == "rvt_fragment"     ? shader.rvt_fragment_code
                                                           : shader.surface_fragment_code;
         destination.resize(bytes.size());
         std::transform(bytes.begin(), bytes.end(), destination.begin(),
@@ -477,9 +480,10 @@ bool ShaderImporter::scan_dependencies(ImportAsset& asset, const ImportContext& 
     }
     asset.build_dependencies = asset.runtime_dependencies;
     for (const auto field :
-         {"vertex", "fragment", "varying", "surface_fragment", "instanced_vertex"})
+         {"vertex", "fragment", "varying", "surface_fragment", "rvt_fragment", "instanced_vertex"})
     {
         if ((std::string_view(field) == "surface_fragment" ||
+             std::string_view(field) == "rvt_fragment" ||
              std::string_view(field) == "instanced_vertex") &&
             !table.contains(field))
         {

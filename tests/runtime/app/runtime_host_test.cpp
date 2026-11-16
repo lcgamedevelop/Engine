@@ -9,10 +9,15 @@
 #include "runtime/gameplay/script_runtime.hpp"
 #include "runtime/movie/movie_frame.hpp"
 #include "runtime/movie/movie_player.hpp"
+#include "runtime/physics/physics_system.hpp"
 #include "runtime/render/render_extension.hpp"
 #include "runtime/render/render_system.hpp"
 #include "runtime/scene/camera.hpp"
+#include "runtime/scene/geometry_update.hpp"
+#include "runtime/scene/rigid_body.hpp"
 #include "runtime/scene/scene.hpp"
+#include "runtime/scene/scene_preparation.hpp"
+#include "runtime/scene/transform.hpp"
 #include "runtime/task/task_system.hpp"
 #include "runtime/world/world_system.hpp"
 
@@ -21,6 +26,7 @@
 #include <SDL3/SDL_video.h>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
@@ -39,6 +45,7 @@ namespace fs = std::filesystem;
 using Json = nlohmann::json;
 
 TaskSystem* background_tasks = nullptr;
+PhysicsSystem* observed_physics = nullptr;
 
 bool expect(bool condition, const char* message)
 {
@@ -49,10 +56,12 @@ bool expect(bool condition, const char* message)
     return condition;
 }
 
-bool observe_domains(RuntimeStage, WorldSystem&, WindowSystem&, PhysicsSystem&, NavigationSystem&,
-                     RenderSystem&, TaskSystem& tasks)
+bool observe_domains(RuntimeStage, WorldSystem&, WindowSystem&, PhysicsSystem& physics,
+                     NavigationSystem&, RenderSystem&, TaskSystem& tasks,
+                     std::vector<ScenePreparation*>&)
 {
     background_tasks = &tasks;
+    observed_physics = &physics;
     return true;
 }
 
@@ -150,7 +159,7 @@ bool write_version(const fs::path& root, std::string_view revision, std::string_
                    const fs::path& manifest = {})
 {
     schema::AssetCatalogDataT catalog;
-    catalog.schema_version = 3;
+    catalog.schema_version = 4;
     catalog.revision = revision;
     catalog.target_platform = platform;
     auto entry = std::make_unique<schema::AssetEntryT>();
@@ -473,14 +482,68 @@ bool test_prepare_results(const EngineConfig& config, const RuntimeParallelConfi
                   "restart, stop and release preserve independent terminal results");
 }
 
+class TestPreparation final : public ScenePreparation
+{
+public:
+    WorldSystem* world = nullptr;
+    std::map<SceneScopeId, ScenePreparationSnapshot> pending;
+    std::map<SceneScopeId, unsigned> releases;
+
+    SceneWorkState prepare_scope(SceneScopeId scope, const SceneWorkBudget&) override
+    {
+        const bool first = !pending.contains(scope);
+        auto& status = pending[scope];
+        status.scope = scope;
+        SceneWorkProgress progress;
+        progress.domain = "test";
+        progress.stage = "expand";
+        progress.total = 1;
+        progress.total_known = true;
+        status.state = SceneWorkState::working;
+        if (!first)
+        {
+            const bool expanded = world->with_scope_write(
+                scope,
+                [&](Scene& scene)
+                {
+                    return !world->with_scope_write(scope, [](Scene&) { return true; }) &&
+                           !world->cancel_scope(scope) && !world->seal_scope(scope) &&
+                           static_cast<bool>(scene.create_node("Generated domain content"));
+                });
+            status.state = expanded ? SceneWorkState::ready : SceneWorkState::failed;
+            progress.completed = expanded ? 1 : 0;
+        }
+        progress.state = status.state;
+        status.stages = {progress};
+        return status.state;
+    }
+    bool scope_status(SceneScopeId scope, ScenePreparationSnapshot& output) const override
+    {
+        output = {};
+        const auto found = pending.find(scope);
+        if (found == pending.end())
+        {
+            return false;
+        }
+        output = found->second;
+        return true;
+    }
+    void release_scope(SceneScopeId scope) noexcept override
+    {
+        pending.erase(scope);
+        ++releases[scope];
+    }
+};
+
 bool test_scene_publication_order(const EngineConfig& config, const RuntimeParallelConfig& parallel)
 {
     test_support::ResourceFixture fixture;
     schema::SceneDataT replacement;
-    replacement.schema_version = 4;
+    replacement.schema_version = 5;
     replacement.info = std::make_unique<schema::SceneInfoT>();
     replacement.info->name = "Replacement";
     test_support::ResourceServices services;
+    TestPreparation preparation;
     RuntimeHost host;
     if (!fixture.add("scenes/replacement.scene", replacement) || !services.initialize(config) ||
         !fixture.publish(services.core) ||
@@ -491,6 +554,12 @@ bool test_scene_publication_order(const EngineConfig& config, const RuntimeParal
     }
     auto& world = *host.world();
     auto& session = *host.gameplay();
+    preparation.world = &world;
+    if (!expect(session.add_preparation(preparation) && !session.add_preparation(preparation),
+                "domain preparation is registered once before loading"))
+    {
+        return false;
+    }
     auto* original = world.create_scene("Original");
     if (!original || !original->create_node("Old content") || host.tick(0) != FrameStatus::running)
     {
@@ -513,7 +582,10 @@ bool test_scene_publication_order(const EngineConfig& config, const RuntimeParal
             {
                 auto* candidate = session.scene_load_scene(id);
                 auto node = candidate ? candidate->create_node("Prepared content") : Node{};
-                if (!node || !session.prepare_scene_load(id))
+                if (!node || !session.prepare_scene_load(id) ||
+                    !expect(!node.set_enabled(false) && !candidate->create_node("Too late") &&
+                                !session.remove_preparation(preparation),
+                            "preparing freezes old handles and provider registration"))
                 {
                     return false;
                 }
@@ -521,7 +593,11 @@ bool test_scene_publication_order(const EngineConfig& config, const RuntimeParal
             }
             if (status.state == SceneLoadState::ready)
             {
-                return true;
+                auto* candidate = world.scope_candidate(status.scope);
+                return expect(
+                    candidate && candidate->find_node("Generated domain content") &&
+                        !world.with_scope_write(status.scope, [](Scene&) { return true; }),
+                    "domain expansion precedes sealing and native preparation");
             }
             if (status.state == SceneLoadState::failed)
             {
@@ -620,6 +696,13 @@ bool test_scene_publication_order(const EngineConfig& config, const RuntimeParal
         return false;
     }
     auto* target = world.create_scene("Replacement target");
+    if (!expect(preparation.pending.empty() &&
+                    std::all_of(preparation.releases.begin(), preparation.releases.end(),
+                                [](const auto& item) { return item.second == 1; }),
+                "cancellation, failure and release retire each provider scope exactly once"))
+    {
+        return false;
+    }
     if (!target)
     {
         return false;
@@ -648,6 +731,177 @@ bool test_scene_publication_order(const EngineConfig& config, const RuntimeParal
                       status.error_code == "target_unloaded" && !world.scene() &&
                       session.release_scene_load(orphaned),
                   "an accepted replacement cannot publish after its original target is destroyed");
+}
+
+bool test_geometry_publication(const EngineConfig& config, const RuntimeParallelConfig& parallel)
+{
+    test_support::ResourceServices services;
+    RuntimeHost host;
+    if (!services.initialize(config) || !services.prepare_builtins() ||
+        !host.initialize(config, &services.core, &services.loader, nullptr, observe_domains,
+                         &services.threads, parallel))
+    {
+        return false;
+    }
+    auto& world = *host.world();
+    auto& renderer = *host.renderer();
+    auto& physics = *observed_physics;
+    auto* scene = world.create_scene("Geometry publication");
+    auto node = scene ? scene->create_node("Editable solid") : Node{};
+    auto camera_node = scene ? scene->create_node("Camera") : Node{};
+    auto camera = camera_node.add_component<Camera>();
+    auto mesh = node.add_component<MeshRenderer>();
+    auto collider = node.add_component<Collider>();
+    TransformSettings pose;
+    pose.position = {0, 1, -4};
+    if (!mesh || !collider || !camera || !scene->set_active_camera(camera) ||
+        !camera_node.get_component<Transform>().set_settings(pose) ||
+        host.tick(0) != FrameStatus::running)
+    {
+        return false;
+    }
+    const auto mesh_instance = mesh.instance_id();
+    const auto collider_instance = collider.instance_id();
+    const auto original_revision = mesh.mesh_revision();
+    auto replacement = std::make_shared<schema::MeshDataT>(*mesh.mesh_data());
+    for (auto& vertex : replacement->vertices)
+    {
+        vertex = {vertex.x() * 2, vertex.y(), vertex.z(), vertex.nx(), vertex.ny(), vertex.nz()};
+    }
+    GeometryUpdateSpec spec;
+    spec.world_epoch = world.epoch();
+    spec.scene_id = scene->id();
+    spec.render_changes = {{mesh, mesh_instance, false, replacement}};
+    CollisionGeometryChange collision;
+    collision.target = collider;
+    collision.instance_id = collider_instance;
+    collision.settings.shape = schema::ColliderShape::mesh;
+    collision.mesh.parts = {replacement};
+    spec.collision_changes = {collision};
+    const auto advance = [&](GeometryUpdate& update)
+    {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (std::chrono::steady_clock::now() < deadline)
+        {
+            const auto state = update.prepare({16, 0.01, 8 * 1024 * 1024});
+            if (state == SceneWorkState::ready)
+            {
+                return true;
+            }
+            if (state == SceneWorkState::failed || host.tick(0) != FrameStatus::running)
+            {
+                GeometryUpdateSnapshot status;
+                if (update.status(status))
+                {
+                    std::fprintf(stderr, "geometry preparation: %s\n", status.error_code.c_str());
+                }
+                return false;
+            }
+        }
+        return false;
+    };
+    const auto ray = [&](float& fraction)
+    { return physics.cast_ray(collider, {-3, 0, 0}, {6, 0, 0}, fraction); };
+    float before = 0, staged = 0, after = 0;
+    GeometryUpdate update(world, renderer, physics, *host.tasks());
+    GeometryPublication receipt;
+    if (!ray(before) || !update.begin(spec) || !advance(update) ||
+        !expect(ray(staged) && staged == before && mesh.mesh_revision() == original_revision,
+                "preparation leaves the currently displayed and collidable geometry intact") ||
+        !update.publish(receipt) ||
+        !expect(receipt.scene_id == scene->id() && receipt.content_revision > 1 &&
+                    mesh.instance_id() == mesh_instance &&
+                    collider.instance_id() == collider_instance &&
+                    mesh.mesh_revision() == original_revision + 1 && ray(after) && after < before,
+                "one publication updates mesh and collision while preserving component identities"))
+    {
+        return false;
+    }
+    update.release();
+    if (host.tick(0) != FrameStatus::running || !ray(staged) || staged != after)
+    {
+        return false;
+    }
+    if (!update.begin(spec) || !advance(update))
+    {
+        return false;
+    }
+    pose = {};
+    pose.position = {0, 2, 0};
+    if (!node.get_component<Transform>().set_settings(pose) ||
+        !expect(!update.publish(receipt) && receipt.scene_id == 0 &&
+                    mesh.mesh_revision() == original_revision + 1,
+                "a changed target invalidates the entire candidate before publication"))
+    {
+        return false;
+    }
+    update.release();
+    pose = {};
+    if (!node.get_component<Transform>().set_settings(pose) || host.tick(0) != FrameStatus::running)
+    {
+        return false;
+    }
+    spec.render_changes.front().remove = true;
+    spec.collision_changes.front().remove = true;
+    if (!update.begin(spec) || !advance(update) || !update.publish(receipt))
+    {
+        return false;
+    }
+    update.release();
+    if (!expect(host.tick(0) == FrameStatus::running && physics.body_count() == 0,
+                "removed geometry does not resurrect its old collision on the next tick"))
+    {
+        return false;
+    }
+    spec.render_changes.front().remove = false;
+    spec.collision_changes.front().remove = false;
+    if (!update.begin(spec) || !advance(update) || !update.publish(receipt))
+    {
+        return false;
+    }
+    update.release();
+    if (!expect(host.tick(0) == FrameStatus::running && ray(staged) && staged == after,
+                "a later transaction restores removed geometry with the same component handles"))
+    {
+        return false;
+    }
+    SceneScopeId additions;
+    Node fragment;
+    if (!world.begin_scope(SceneLoadKind::append_batch, scene->id(), additions) ||
+        !world.with_scope_write(
+            additions,
+            [&](Scene& candidate)
+            {
+                fragment = candidate.create_node("Detached fragment");
+                TransformSettings position;
+                position.position = {0, 3, 0};
+                return fragment && fragment.get_component<Transform>().set_settings(position) &&
+                       fragment.add_component<MeshRenderer>() &&
+                       fragment.add_component<Collider>() && fragment.add_component<RigidBody>();
+            }))
+    {
+        return false;
+    }
+    GeometryUpdateSpec collapse;
+    collapse.world_epoch = world.epoch();
+    collapse.scene_id = scene->id();
+    collapse.new_nodes_scope = additions;
+    collapse.retired_nodes = {node};
+    if (!update.begin(collapse) || !advance(update) ||
+        !expect(node.enabled() && !world.find_node(fragment.id()) && ray(staged) && staged == after,
+                "candidate fragments stay outside simulation until the old solid retires") ||
+        !update.publish(receipt) ||
+        !expect(!node.enabled() && world.find_node(fragment.id()) == fragment &&
+                    receipt.dirty_bounds.minimum().x() <= -1 &&
+                    receipt.dirty_bounds.maximum().y() >= 3.5,
+                "retirement and new dynamic geometry publish together with complete dirty bounds"))
+    {
+        return false;
+    }
+    update.release();
+    return expect(host.tick(0) == FrameStatus::running && !node && fragment && fragment.active() &&
+                      physics.body_count() == 1 && world.scope_candidate(additions) == scene,
+                  "releasing preparation preserves published fragments and retires old nodes");
 }
 
 class FailingRenderExtension final : public RenderExtension
@@ -917,6 +1171,7 @@ int main(int, char**)
                          test_completion_fairness(settings.engine, settings.parallel) &&
                          test_prepare_results(settings.engine, settings.parallel) &&
                          test_scene_publication_order(settings.engine, settings.parallel) &&
+                         test_geometry_publication(settings.engine, settings.parallel) &&
                          test_render_failure(settings.engine, settings.parallel) &&
                          test_input_failure(settings.engine, settings.parallel) &&
                          test_deployment_selection(settings.engine, settings.parallel);

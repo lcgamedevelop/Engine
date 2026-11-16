@@ -117,6 +117,9 @@ bool round_trip(std::vector<std::uint8_t>& bytes)
     light_settings.shadow_split_lambda = 0.7F;
     light_settings.shadow_cascade_blend = 0.2F;
     engine::EnvironmentSettings environment_settings;
+    environment_settings.rvt = std::make_unique<engine::schema::RvtSettingsT>();
+    environment_settings.rvt->enabled = true;
+    environment_settings.rvt->bounds = {{-4000, -128, -4000}, {4000, 128, 4000}};
     environment_settings.atmosphere_enabled = true;
     environment_settings.atmosphere_sun_node_id = light_node.local_id();
     environment_settings.atmosphere_ground_height = 17;

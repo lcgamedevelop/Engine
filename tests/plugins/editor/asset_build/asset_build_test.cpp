@@ -127,6 +127,41 @@ struct Fixture
     }
 };
 
+class StreamImporter final : public engine::editor::asset_pipeline::AssetImporter
+{
+public:
+    std::string_view id() const noexcept override
+    {
+        return "test_stream";
+    }
+    engine::schema::AssetKind kind() const noexcept override
+    {
+        return engine::schema::AssetKind::source;
+    }
+    bool matches(const std::filesystem::path& source) const override
+    {
+        return source.extension() == ".stream";
+    }
+    bool scan_dependencies(engine::editor::asset_pipeline::ImportAsset& asset,
+                           const engine::editor::asset_pipeline::ImportContext& context,
+                           std::string&) const override
+    {
+        engine::Guid dependency;
+        if (!context.identities.path_to_guid(read(asset.source), dependency))
+        {
+            return false;
+        }
+        asset.stream_dependencies = {dependency};
+        return true;
+    }
+    bool convert(const engine::editor::asset_pipeline::ImportAsset& asset,
+                 const engine::editor::asset_pipeline::ImportContext& context,
+                 std::string&) const override
+    {
+        return write(context.output / asset.guid, read(asset.source));
+    }
+};
+
 bool build(engine::plugins::asset_build::AssetBuildSystem& builder, const Fixture& fixture,
            const std::vector<std::string>& items, std::string_view target = {})
 {
@@ -340,6 +375,44 @@ bool tests()
                 !code && builder.build(fixture.root) &&
                 builder.last_build().resource_count == builtin_count + 5,
             "an absent default manifest selects all resources without compatibility lookup"))
+    {
+        return false;
+    }
+    std::unique_ptr<engine::editor::asset_pipeline::AssetImporter> stream_importer =
+        std::make_unique<StreamImporter>();
+    engine::Guid streamed_guid;
+    engine::Guid index_guid;
+    if (!expect(pipeline.add_importer(stream_importer), "register stream fixture importer") ||
+        !write(fixture.root / "assets/world.stream", "message.txt") ||
+        !write(fixture.root / "settings/editor-resource-build.toml",
+               "[[common.items]]\nname = \"world\"\nstorage = \"package\"\n"
+               "roots = [\"world.stream\"]\n") ||
+        !build(builder, fixture, {"world"}) ||
+        !engine::ResourceSystem::read_catalog(default_output, catalog) ||
+        !catalog.identities().path_to_guid("world.stream", index_guid) ||
+        !catalog.identities().path_to_guid("message.txt", streamed_guid) ||
+        !expect(builder.last_build().resource_count == builtin_count + 2 &&
+                    catalog.find(index_guid)->dependencies.empty() &&
+                    catalog.find(index_guid)->stream_dependencies ==
+                        std::vector<std::string>{streamed_guid},
+                "export includes streamed resources without promoting them to eager dependencies"))
+    {
+        return false;
+    }
+    const auto stream_revision = builder.last_build().revision;
+    if (!build(builder, fixture, {"world"}) ||
+        !expect(
+            builder.last_build().revision == stream_revision && pipeline.last_build().imported == 0,
+            "stream references survive database reuse without invalidating unchanged exports") ||
+        !write(fixture.root / "assets/world.stream", "unused.txt") ||
+        !build(builder, fixture, {"world"}) ||
+        !engine::ResourceSystem::read_catalog(default_output, catalog) ||
+        !expect(builder.last_build().revision != stream_revision &&
+                    catalog.find(streamed_guid) == nullptr &&
+                    catalog.identities().path_to_guid("unused.txt", streamed_guid) &&
+                    catalog.find(index_guid)->stream_dependencies ==
+                        std::vector<std::string>{streamed_guid},
+                "changing a stream reference updates the exported closure and revision"))
     {
         return false;
     }

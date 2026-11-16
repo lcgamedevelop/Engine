@@ -109,9 +109,9 @@ bool PreparedTexture::describe(ResourceLoader* loader, ResourceHandle source,
     candidate.data = candidate.resource.data<TextureResource>();
     const auto* data = candidate.data;
     if (!data || data->width == 0 || data->height == 0 || mip >= data->mip_count ||
-        face >= (data->cube_map ? 6U : 1U) || data->width > caps.limits.maxTextureSize ||
-        data->height > caps.limits.maxTextureSize || data->width > UINT16_MAX ||
-        data->height > UINT16_MAX || data->data.size() > UINT32_MAX)
+        face >= (data->cube_map ? 6U : data->array_layers) ||
+        data->width > caps.limits.maxTextureSize || data->height > caps.limits.maxTextureSize ||
+        data->width > UINT16_MAX || data->height > UINT16_MAX || data->data.size() > UINT32_MAX)
     {
         return false;
     }
@@ -253,17 +253,21 @@ bool GpuTexture::create(const PreparedTexture& prepared)
 {
     release();
     const auto* data = prepared.data;
-    if (!data || !bgfx::isTextureValid(0, data->cube_map, 1, prepared.format, prepared.flags) ||
+    if (!data ||
+        !bgfx::isTextureValid(0, data->cube_map, static_cast<std::uint16_t>(data->array_layers),
+                              prepared.format, prepared.flags) ||
         !resource.retain(prepared.resource))
     {
         return false;
     }
-    handle = data->cube_map
-                 ? bgfx::createTextureCube(static_cast<std::uint16_t>(data->width),
-                                           data->mip_count > 1, 1, prepared.format, prepared.flags)
-                 : bgfx::createTexture2D(static_cast<std::uint16_t>(data->width),
-                                         static_cast<std::uint16_t>(data->height),
-                                         data->mip_count > 1, 1, prepared.format, prepared.flags);
+    handle =
+        data->cube_map
+            ? bgfx::createTextureCube(static_cast<std::uint16_t>(data->width), data->mip_count > 1,
+                                      1, prepared.format, prepared.flags)
+            : bgfx::createTexture2D(static_cast<std::uint16_t>(data->width),
+                                    static_cast<std::uint16_t>(data->height), data->mip_count > 1,
+                                    static_cast<std::uint16_t>(data->array_layers), prepared.format,
+                                    prepared.flags);
     if (!bgfx::isValid(handle))
     {
         release();
@@ -277,7 +281,7 @@ bool GpuTexture::upload(const PreparedTexture& part)
 {
     ENGINE_PROFILE_ZONE("Render.textureUpload");
     if (!bgfx::isValid(handle) || !part.data || resource.data<TextureResource>() != part.data ||
-        part.face >= (part.data->cube_map ? 6U : 1U) || part.bytes == 0 ||
+        part.face >= (part.data->cube_map ? 6U : part.data->array_layers) || part.bytes == 0 ||
         part.view.size() != part.bytes || part.bytes > UINT32_MAX ||
         texture_region_bytes(part, part.byte_offset, part.bytes) != part.bytes)
     {
@@ -305,7 +309,8 @@ bool GpuTexture::upload(const PreparedTexture& part)
     }
     else
     {
-        bgfx::updateTexture2D(handle, 0, static_cast<std::uint8_t>(part.mip), x, y, upload_width,
+        bgfx::updateTexture2D(handle, static_cast<std::uint16_t>(part.face),
+                              static_cast<std::uint8_t>(part.mip), x, y, upload_width,
                               upload_height, memory);
     }
     return true;
@@ -342,7 +347,7 @@ bool upload_texture(ResourceLoader& loader, ResourceHandle resource, bgfx::Textu
     const auto& data = source->data();
     for (std::uint32_t mip = 0; mip < data.mip_count; ++mip)
     {
-        for (std::uint32_t face = 0; face < (data.cube_map ? 6U : 1U); ++face)
+        for (std::uint32_t face = 0; face < (data.cube_map ? 6U : data.array_layers); ++face)
         {
             render_detail::PreparedTexture prepared;
             prepared.mip = mip;

@@ -1,21 +1,61 @@
 # 体积地形插件
 
-运行时与制作工具由 `runtime/terrain` 和 `editor/terrain` 两个插件实现。前者提供 `TerrainVolume`、`TerrainSystem` 及普通节点上的 `TerrainComponent`；后者负责源数据导入、组件编解码、可撤销编辑与 MCP。核心只补通用瞬时网格碰撞提交，不依赖地形插件。运行时复用现有 MeshRenderer 和 Jolt，生成的显示/碰撞组件标记为瞬态，不重复写入场景文件。
+运行时 `runtime/terrain` 管理稀疏三维密度、材质层、分区驻留、LOD、挖填和土石存档；
+`editor/terrain` 负责生成源、导入、制作作业和 MCP。两者通过标准资源目录使用独立 GUID 索引与块，
+运行时不解析 TOML、不链接噪声生成器。架构入口见[地形与 RVT](terrain-world-design.md)。
 
-默认插件清单包含两者；显式选择时将 `terrain` 加入对应 `ENGINE_RUNTIME_PLUGINS` / `ENGINE_EDITOR_PLUGINS`。Transvoxel 固定版本 `51a494f03c5b024cd153b596bcc7152eb3cc93a6` 作为子模块，只使用普通单元查找表；初始化方式为：
+## 数据与组件
 
-```sh
-git submodule update --init third_party/transvoxel
-```
+`.terrain` 使用 schema_version=2 的 TOML，保存 bounds_min/max、origin、voxel_size、block_cells、
+lod_count、固定 seed、生成 recipe 与有序 edits。运行索引 ETW2 及块 ETB2 只有当前一种格式；
+旧描述和旧存档明确拒绝，项目源应直接升级并重建缓存。每块 8³、16³ 或 32³ 样本；
+索引最多 65536 个块，空气和实体可只存一个样本，混合块通过 stream_dependencies 按需读取。
 
-`.terrain` TOML 描述尺寸、采样间距、16/32 格分块、起点、种子、平面/正弦起伏和球形洞穴，邻接 `.meta` 保存唯一 GUID，资源管线增量生成 `cache/gen/<GUID>`。运行时密度为浮点数；每轴最多 256 格且总样本最多 4M。高度图、FastNoise2、LOD 过渡仍待实现；步骤 3/4 已增加调用方显式地基联动与动态土石塌方，建筑连接损伤和应力归[独立破坏插件](destruction.md)。
+普通节点添加 TerrainComponent，显式设置 terrain_guid、streaming_enabled、collision_enabled、
+rvt_role、initial_view 和 budget。可选开关默认关闭。地形保持正等比缩放；
+分区键属于地形局部坐标，SetView、笔刷与查询 bounds 使用世界坐标。
 
-MCP 工具包括 `create_terrain_asset`、`set_terrain`、`get_terrain`、`terrain_brush`、`terrain_reset`、`terrain_save_state` 和 `terrain_load_state`。笔刷、设置、重置与加载支持现有撤销/重做事务；保存源文件或状态文件本身不使用场景撤销。球形修改采用节点局部坐标，失败保留有效版本。脚本 `TerrainComponent` 提供 `DigSphere`、`FillSphere`、`CollapseDetached`、`RetireFragments`、`Reset`、`Save`、`Load` 和只读统计。步骤 4 增加非撤销运行命令 `terrain_collapse_detached`、`terrain_reset_runtime`，`get_terrain` 返回 `fragmentCount`；动态土石不能写入旧的静态体积存档，塌方后保存/加载与可撤销体积编辑须先显式 Reset。`RetireFragments(maxCount, maxAgeSeconds)` 按数量与模拟寿命显式回收，回收不回填已抽离密度，也不解除静态存档限制，见[回收契约](class-diagrams/fragment-retirement.md)。
+TerrainVolume 持有已驻留的不可变块和修改索引；TerrainRegionPlanner 选择视域、碰撞窗口、LOD 和退出区域，
+TerrainMesher 使用 Transvoxel regular/transition 单元。宿主注入规划与网格实现，
+业务和 MCP 只调用 TerrainComponent，不向下转型。生成节点和 MeshRenderer/Collider 均为瞬态。
 
-状态文件保存完整体积与基础资源 GUID/hash，恢复时校验基础版本，不覆盖 `.terrain` 或导入缓存。编辑器保存路径限制在 `cache/terrain-states/*.terrainstate`；脚本使用 App 持久目录的 `terrain/<slot>.bin`。两种入口共用相同运行时格式，路径职责分离。
+## 操作与完成
 
-当前脚本笔刷与土石抽离复用块缓存，CPU 只重建实际变化样本影响的块及相邻梯度法线范围。渲染仍合并为单个 Mesh 并完整上传 GPU；碰撞则按稳定的 4 单元叶子分段提交，复用未变 Jolt 形状和上层分组，一个地形保持一个 Collider/BodyID。MCP 笔刷经 `TerrainStateEdit` 提交 ETRS 快照，`restore` 会重新初始化体积，因此 MCP 笔刷、撤销/重做、加载和重置仍重建全部块；脚本 `Load`/`Reset` 同样如此。同步接口保留；异步球形笔刷在共享任务域准备独占体积/网格，按请求版本在主线程有界发布。Reset、首次生成、连通塌方及 MCP 事务仍有同步路径；分块 GPU 上传和差量存档尚未实现。接口与形状复用细节见[碰撞契约](terrain-collision.md)。
+C++ request_edit/collapse/reset/retire/save/load 返回包含世界代次、节点、组件实例及序号的操作 ID。
+TS 对应 RequestEdit/RequestCollapse/RequestReset/RequestRetire/RequestSave/RequestLoad。
+GetOperation 只查询；ReleaseOperation 释放终态记录，CancelOperation 只取消尚未发布的工作。
+没有同步兼容接口或另名 Async 分支。参数、返回状态及错误见[操作类图](class-diagrams/terrain-operations.md)。
 
-架构见[运行时类图](class-diagrams/terrain.md)、[编辑器类图](../editor/class-diagrams/terrain-editor.md)和[脚本接口](class-diagrams/terrain-script-api.md)；跨插件职责见[联动契约](terrain-destruction.md)；固定来源与历史平台研究见[技术研究](terrain-destruction-feasibility.md)。
+任务由现有 TaskSystem 执行；候选使用不可变输入，在协调线程校验所有者与版本，
+经核心 GeometryUpdate 同批切换显示、碰撞和版本。失败保留旧状态，预算不足有明确状态。
+初始场景通过 ScenePreparation 扩展 GameplaySession 的候选准备，再进入原有封存/激活流程。
+SetView/RemoveView 控制临时需求，PinRegions 保留物理或业务需要的区域；查询支持分页。
 
-公开实验场与运行验证见[测试与范例](../../testing.md)。
+基础源与运行修改分离。RequestSave 保存完整修改索引、不可变载荷及动态土石的姿态、速度、睡眠和 retired 身份；
+RequestLoad 校验源 GUID/hash 后准备候选，失败不拆掉活动世界。文件采用先写载荷、最后原子替换清单，
+保存范围包含已退出视域的修改。槽内路径拒绝越界和符号链接。详见[存档与破坏](class-diagrams/terrain-world-state.md)。
+
+地形与建筑插件不互相依赖。业务等待地形 published/completed，再 CollectSupport，
+把完整静态 Collider 集合交给 DestructionComponent.RefreshSupport；未知或过期区域不能当作空地。
+导航、音效、粒子及整体游戏 checkpoint 由调用方组织。
+
+## 材质与 RVT
+
+源 material_layers 引用普通 PBR 材质。编辑器编译 BaseColor、Normal、ORM 数组和参数调色板，
+运行时只加载合成材质及其实际依赖；每个三角形保留四个主要层与插值权重，地表和洞壁使用三向投射。
+当前层输入为 opaque、metallic-roughness 的 builtin PBR；支持颜色、金属度、粗糙度、法线强度、UV 和常量自发光。
+Hex tiling、透明/裁切及自发光纹理在层编译时明确拒绝。输入纹理为 Basis 或 RGBA8，当前合成层为 128×128、完整 mip 链。
+这不是任意项目 Shader 的通用离线烘焙器。
+
+RVT 只缓存地表材质，唯一运行开关是 EnvironmentComponent 的 rvt.enabled。
+洞壁/地下按高度和法线判定回到直接 PBR；关闭 RVT 释放页资源，源体积与材质仍可正常使用。
+查看器是临时诊断开关，与生产开关独立，见[RVT 类图](../../runtime/class-diagrams/runtime-virtual-texture.md)。
+
+## 验证与范围
+
+公开 64 米实验场验证 1 米采样、洞穴与跨块编辑；8×8 公里世界用 16 米采样验证流送和四角切换，
+不把低分辨率标准世界当作高密度整图性能结果。具体操作和截图入口见[showcase](../../../projects/showcase/docs/terrain-world.md)，
+编译、测试及平台范围统一见[测试文档](../../testing.md#大世界地形与-rvt)。
+
+树木/建筑仍为独立普通节点或分区场景，由项目装配；专用生物群落散布规则与可独立编辑的二进制源块 delta 尚未提供。
+当前制作 edits 是有序持久配方；运行修改存档已经采用分块载荷。全球导航、任意无限世界和多层体积 RVT 不在当前能力内。

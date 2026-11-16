@@ -21,5 +21,6 @@ struct MeshRendererRuntime
     std::uint32_t skin_joint_count_ = 0;
     std::uint64_t mesh_revision_ = 0;
     std::uint64_t deformation_revision_ = 0;
+    bool geometry_removed_ = false;
 };
 } // namespace engine

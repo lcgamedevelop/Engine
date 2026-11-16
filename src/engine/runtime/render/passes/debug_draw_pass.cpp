@@ -1,4 +1,5 @@
 #include "runtime/render/passes/debug_draw_pass.hpp"
+#include "runtime/utils/transform_math.hpp"
 
 #include "runtime/render/render_color.hpp"
 #include "runtime/render/render_constants.hpp"
@@ -284,13 +285,15 @@ bool DebugDrawPass::draw(const WorldSystem& world, Camera camera, std::span<cons
         const auto node = world.find_node(mesh.node_id);
         const auto renderer = node.get_component<MeshRenderer>();
         const auto transform = node.get_component<Transform>();
+        std::array<double, 16> absolute{};
         std::array<float, 16> matrix{};
         if (!renderer || renderer.instance_id() != mesh.instance_id || !renderer.active() ||
             !renderer.visible_in_hierarchy() || !camera.mesh_visible(mesh.instance_id) ||
-            !transform || !transform.world_matrix(matrix.data()) || !mesh.geometry)
+            !transform || !transform.world_matrix(absolute.data()) || !mesh.geometry)
         {
             continue;
         }
+        transform_math::relative(absolute.data(), frame.world_origin, matrix.data());
         if (enabled(RenderFeature::mesh_bounds))
         {
             encoder.setColor(linear_abgr(0x50ff90ff));
@@ -345,10 +348,13 @@ bool DebugDrawPass::draw(const WorldSystem& world, Camera camera, std::span<cons
                 const auto node = world.find_node(entity.id());
                 const auto target = node.get_component<Camera>();
                 const auto transform = node.get_component<Transform>();
+                double absolute[16]{};
                 float model[16]{}, observer[16]{}, lens[16]{}, combined[16]{};
                 CameraSettings settings;
                 if (target.get_settings(settings) && target.active() &&
-                    target.visible_in_hierarchy() && transform && transform.world_matrix(model) &&
+                    target.visible_in_hierarchy() && transform &&
+                    transform.world_matrix(absolute) &&
+                    (transform_math::relative(absolute, frame.world_origin, model), true) &&
                     camera_detail::view_matrix(model, observer) &&
                     camera_detail::projection_matrix(settings, static_cast<double>(width) / height,
                                                      bgfx::getCaps()->homogeneousDepth, lens))
@@ -366,8 +372,12 @@ bool DebugDrawPass::draw(const WorldSystem& world, Camera camera, std::span<cons
         {
             encoder.setState(line.depth_test, false, false);
             encoder.setColor(linear_abgr(line.rgba));
-            encoder.moveTo(line.start.x(), line.start.y(), line.start.z());
-            encoder.lineTo(line.end.x(), line.end.y(), line.end.z());
+            encoder.moveTo(float(line.start.x() - frame.world_origin.x()),
+                           float(line.start.y() - frame.world_origin.y()),
+                           float(line.start.z() - frame.world_origin.z()));
+            encoder.lineTo(float(line.end.x() - frame.world_origin.x()),
+                           float(line.end.y() - frame.world_origin.y()),
+                           float(line.end.z() - frame.world_origin.z()));
         }
         submitted_[static_cast<std::size_t>(RenderFeature::debug_draw)] = !lines.empty();
     }
@@ -377,8 +387,12 @@ bool DebugDrawPass::draw(const WorldSystem& world, Camera camera, std::span<cons
         {
             encoder.setState(line.depth_test, false, false);
             encoder.setColor(linear_abgr(line.rgba));
-            encoder.moveTo(line.start.x(), line.start.y(), line.start.z());
-            encoder.lineTo(line.end.x(), line.end.y(), line.end.z());
+            encoder.moveTo(float(line.start.x() - frame.world_origin.x()),
+                           float(line.start.y() - frame.world_origin.y()),
+                           float(line.start.z() - frame.world_origin.z()));
+            encoder.lineTo(float(line.end.x() - frame.world_origin.x()),
+                           float(line.end.y() - frame.world_origin.y()),
+                           float(line.end.z() - frame.world_origin.z()));
         }
         submitted_[static_cast<std::size_t>(RenderFeature::meshlet_bounds)] =
             !meshlet_lines.empty();

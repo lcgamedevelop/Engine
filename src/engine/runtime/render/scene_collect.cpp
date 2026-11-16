@@ -15,6 +15,7 @@
 #include "runtime/scene/transform.hpp"
 #include "runtime/world/world_system.hpp"
 
+#include "runtime/utils/transform_math.hpp"
 #include <algorithm>
 #include <bx/math.h>
 #include <cmath>
@@ -111,7 +112,7 @@ bool sample_probe(const render_detail::RenderFrameData& frame, const std::array<
 }
 } // namespace
 
-bool RenderSystem::SceneGpuResources::collect_frame(WorldSystem& world,
+bool RenderSystem::SceneGpuResources::collect_frame(WorldSystem& world, const Vec3& origin,
                                                     render_detail::RenderFrameData& output)
 {
     ENGINE_PROFILE_ZONE("Render.collectFrame");
@@ -120,6 +121,7 @@ bool RenderSystem::SceneGpuResources::collect_frame(WorldSystem& world,
     output.lights.clear();
     output.probes.clear();
     output.world_epoch = 0;
+    output.world_origin = origin;
     const auto fail = [&]()
     {
         output.meshes.clear();
@@ -154,12 +156,13 @@ bool RenderSystem::SceneGpuResources::collect_frame(WorldSystem& world,
             probe.node_id = entity.id();
             probe.data = &resource->data();
             const auto& data = *probe.data;
-            bx::mtxInverse(probe.inverse.data(), data.baked_transform.data());
-            probe.volume =
-                std::abs(render_detail::linear_determinant(data.baked_transform.data())) *
-                (data.bounds_max.x() - data.bounds_min.x()) *
-                (data.bounds_max.y() - data.bounds_min.y()) *
-                (data.bounds_max.z() - data.bounds_min.z());
+            float model[16];
+            transform_math::relative(data.baked_transform.data(), origin, model);
+            bx::mtxInverse(probe.inverse.data(), model);
+            probe.volume = std::abs(render_detail::linear_determinant(model)) *
+                           (data.bounds_max.x() - data.bounds_min.x()) *
+                           (data.bounds_max.y() - data.bounds_min.y()) *
+                           (data.bounds_max.z() - data.bounds_min.z());
             output.probes.push_back(probe);
         });
     bool valid = true, uses_skinning = false;
@@ -175,7 +178,8 @@ bool RenderSystem::SceneGpuResources::collect_frame(WorldSystem& world,
         {
             ENGINE_PROFILE_ZONE("Render.collectMesh");
             if (!valid || stored.state.instance_id == 0 || !stored.state.flags.enabled ||
-                !stored.state.flags.visible || !node.active || !node.visible_in_hierarchy)
+                !stored.state.flags.visible || !node.active || !node.visible_in_hierarchy ||
+                entity.get<MeshRendererRuntime>().geometry_removed_)
             {
                 return;
             }
@@ -208,7 +212,8 @@ bool RenderSystem::SceneGpuResources::collect_frame(WorldSystem& world,
                 }
                 mesh.data = using_retained ? gpu.geometry->resource.data<MeshResource>()
                                            : runtime->mesh_resource_.data<MeshResource>();
-                mesh.model = transform->matrix;
+                mesh.world = transform->matrix;
+                transform_math::relative(mesh.world.data(), origin, mesh.model.data());
                 if (!mesh.data || gpu.materials.empty() ||
                     (!using_retained && (gpu.revision != runtime->mesh_revision_ ||
                                          !gpu.update_deformation(*runtime, skinning))) ||
@@ -252,6 +257,7 @@ bool RenderSystem::SceneGpuResources::collect_frame(WorldSystem& world,
                 mesh.instance_eligible =
                     runtime->mesh_resource_.handle().id != 0 && mesh.data->skin.empty() &&
                     runtime->deformed_vertices_.empty() && runtime->skinning_palette_.empty();
+                mesh.rvt_role = stored.data.rvt_role;
                 mesh.instancing = stored.data.static_instancing_enabled;
                 mesh.lod = stored.data.static_lod_enabled;
                 mesh.cast_shadows = stored.data.cast_shadows;
@@ -313,11 +319,13 @@ bool RenderSystem::SceneGpuResources::collect_frame(WorldSystem& world,
             value.node_id = entity.id();
             value.settings = stored.data;
             const auto transform = node.get_component<Transform>();
-            if (!transform || !transform.world_matrix(value.world.data()))
+            double matrix[16];
+            if (!transform || !transform.world_matrix(matrix))
             {
                 valid = false;
                 return;
             }
+            transform_math::relative(matrix, origin, value.world.data());
             output.lights.push_back(value);
         });
     if (!valid)

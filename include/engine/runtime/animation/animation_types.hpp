@@ -41,7 +41,7 @@ inline constexpr std::array<float, 16> animation_identity_matrix{1, 0, 0, 0, 0, 
 struct AnimationPoseTransform
 {
     std::array<float, 16> model = animation_identity_matrix;
-    std::array<float, 16> world = animation_identity_matrix;
+    std::array<double, 16> world{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
     std::uint64_t pose_revision = 0;
 };
 enum class AnimationIkTargetKind

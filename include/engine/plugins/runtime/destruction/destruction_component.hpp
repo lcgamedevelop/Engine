@@ -1,5 +1,7 @@
 #pragma once
 
+#include <span>
+
 #include "plugins/runtime/destruction/destruction_graph.hpp"
 #include "runtime/resource/resource.hpp"
 #include "runtime/resource/virtual_file_system.hpp"
@@ -41,7 +43,8 @@ public:
     [[nodiscard]] bool damage_sphere(const Vec3& center, float radius, float damage,
                                      float impulse = 0);
     // Explicit single-collider foundation check, after its physics geometry is committed.
-    [[nodiscard]] bool refresh_support(const Collider& support, float max_gap, float min_coverage);
+    [[nodiscard]] bool refresh_support(std::span<const Collider> supports, float max_gap,
+                                       float min_coverage);
     // One explicit gravity-stress solve; pressure limits are Pa. Failure clears broken_bonds.
     // Call at a fixed cadence: official Blast partial damage accumulates per call, not per dt.
     [[nodiscard]] bool apply_stress(const Vec3& gravity, float elastic_limit, float fatal_limit,

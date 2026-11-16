@@ -87,7 +87,8 @@ inline bool resolve_target(Animator actor, const schema::SkeletonDataT& skeleton
                            std::span<const std::string> paths,
                            std::span<const Definition> definitions, std::size_t current_definition,
                            const AnimationIkTarget& target,
-                           const ozz::math::Float4x4& world_to_model, IkOperation& output)
+                           const ozz::math::Float4x4& world_to_model, const Vec3& origin,
+                           IkOperation& output)
 {
     output.pole = target.space == AnimationIkSpace::world
                       ? ozz::math::TransformVector(world_to_model, simd_point(target.pole))
@@ -99,7 +100,10 @@ inline bool resolve_target(Animator actor, const schema::SkeletonDataT& skeleton
     if (target.kind == AnimationIkTargetKind::point)
     {
         output.target = target.space == AnimationIkSpace::world
-                            ? ozz::math::TransformPoint(world_to_model, simd_point(target.point))
+                            ? ozz::math::TransformPoint(world_to_model,
+                                                        simd_point({target.point.x() - origin.x(),
+                                                                    target.point.y() - origin.y(),
+                                                                    target.point.z() - origin.z()}))
                             : simd_point(target.point);
         return true;
     }
@@ -187,12 +191,12 @@ inline bool resolve_target(Animator actor, const schema::SkeletonDataT& skeleton
         output.target = simd_point(target.local_offset);
         return true;
     }
-    std::array<float, 16> matrix;
+    std::array<double, 16> matrix;
     if (!target.target_node.get_component<Transform>().world_matrix(matrix.data()))
     {
         return false;
     }
-    output.target = ozz::math::TransformPoint(world_to_model * load_matrix(matrix),
+    output.target = ozz::math::TransformPoint(world_to_model * relative_matrix(matrix, origin),
                                               simd_point(target.local_offset));
     return true;
 }

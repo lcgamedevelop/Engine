@@ -17,6 +17,7 @@ struct ImportAsset
     schema::AssetKind kind = schema::AssetKind::source;
     std::vector<Guid> build_dependencies;
     std::vector<Guid> runtime_dependencies;
+    std::vector<Guid> stream_dependencies;
     std::string importer_id;
     std::string subresource_key;
     Guid parent_guid;

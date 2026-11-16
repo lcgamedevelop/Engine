@@ -1,4 +1,5 @@
 #pragma once
+#include "runtime/render/rvt.hpp"
 
 #include "runtime/core/guid_map.hpp"
 #include "runtime/scene/scene_types.hpp"
@@ -43,6 +44,10 @@ namespace engine::scene_detail
             settings.atmosphere_height ||
         !vector(settings.atmosphere_ground_albedo, 1) ||
         !bounded(settings.atmosphere_multiscatter_strength, 0, 5))
+    {
+        return false;
+    }
+    if (settings.rvt && !valid_rvt_settings(*settings.rvt))
     {
         return false;
     }

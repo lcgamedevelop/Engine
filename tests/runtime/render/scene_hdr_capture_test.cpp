@@ -70,7 +70,7 @@ engine::schema::TextureDataT environment_texture(const char* path, bool cube)
         }
     }
     engine::schema::TextureDataT result;
-    result.schema_version = 2;
+    result.schema_version = 3;
     result.path = path;
     result.width = result.height = 4;
     result.mip_count = 1;
@@ -91,7 +91,7 @@ engine::schema::TextureDataT environment_texture(const char* path, bool cube)
 engine::schema::TextureDataT albedo(const char* path, const std::array<std::uint8_t, 3>& rgb)
 {
     engine::schema::TextureDataT result;
-    result.schema_version = 2;
+    result.schema_version = 3;
     result.path = path;
     result.width = result.height = 4;
     result.srgb = true;

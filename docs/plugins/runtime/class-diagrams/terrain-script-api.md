@@ -1,56 +1,84 @@
-# 地形脚本接口
+# 地形脚本与运行自动化
 
-[绑定实现](script-bindings.md) · [运行时地形](terrain.md)
+[原生组件](terrain.md) · [操作值类型](terrain-operations.md)。
+删除 DigSphere/FillSphere、独立 *Async 回调、同步 Save/Load 等旧门面，不保留转发别名。
 
 ```mermaid
 classDiagram
-    class Component
-    class TerrainComponent {
-        +DigSphere(number x, number y, number z, number radius) boolean
-        +FillSphere(number x, number y, number z, number radius) boolean
-        +DigSphereAsync(number x, number y, number z, number radius, function completed) boolean
-        +FillSphereAsync(number x, number y, number z, number radius, function completed) boolean
-        +CollapseDetached(number minSamples, number maxFragments, number fragmentCells, number density) boolean
-        +fragmentCount numberOrNull
-        +Reset() boolean
-        +Save(string slot) boolean
-        +Load(string slot) boolean
-        +ready boolean
-        +revision bigintOrNull
-        +chunkCount numberOrNull
-        +rebuiltChunks numberOrNull
-        +triangleCount numberOrNull
-        +lastError stringOrNull
+    class TerrainScript["TS TerrainComponent"] {
+        +GetSettings() TerrainDataTOrNull
+        +SetSettings(TerrainDataT settings) boolean
+        +SetView(bigint key, TerrainView view) boolean
+        +RemoveView(bigint key) boolean
+        +PinRegions(TerrainPinSpec spec) TerrainPinIdOrNull
+        +ReleasePin(TerrainPinId id) boolean
+        +RequestEdit(TerrainEditSpec spec) TerrainOperationIdOrNull
+        +RequestCollapse(TerrainCollapseSpec spec) TerrainOperationIdOrNull
+        +RequestReset(TerrainResetSpec spec) TerrainOperationIdOrNull
+        +RequestRetire(TerrainRetireSpec spec) TerrainOperationIdOrNull
+        +RequestSave(TerrainSaveSpec spec) TerrainOperationIdOrNull
+        +RequestLoad(TerrainLoadSpec spec) TerrainOperationIdOrNull
+        +GetOperation(TerrainOperationId id) TerrainOperationSnapshotOrNull
+        +CancelOperation(TerrainOperationId id) boolean
+        +ReleaseOperation(TerrainOperationId id) boolean
+        +GetRegions(TerrainRegionQuery query) TerrainRegionSnapshotOrNull
+        +CollectSupport(TerrainRegionQuery query) ColliderArrayOrNull
     }
-    class TerrainBinding {
-        <<final>>
-        +name() string_view
-        +source() string_view
-        +register_functions(ScriptVm& vm) bool
-    }
+    class TerrainBinding
     class ScriptBinding
     class ScriptVm
     class BindingContext
-    class NativeTerrain["engine::plugins::terrain::TerrainComponent"]
-    class TerrainSystem
-    class CompletionBinding
-    class App
-    Component <|-- TerrainComponent
+    class TerrainComponent
+    class TerrainOperationId
+    class TerrainOperationSnapshot
+    class TerrainRegionSnapshot
+    class TerrainRegionQuery
+    class TerrainView
+    class TerrainPinSpec
+    class TerrainPinId
+    class TerrainEditSpec
+    class TerrainCollapseSpec
+    class TerrainResetSpec
+    class TerrainRetireSpec
+    class TerrainSaveSpec
+    class TerrainLoadSpec
     ScriptBinding <|-- TerrainBinding
-    TerrainBinding ..> TerrainComponent : 提供脚本门面
-    TerrainBinding ..> NativeTerrain : 借用并调用地形工具接口
-    TerrainBinding ..> TerrainSystem : 提交后台候选请求
-    TerrainBinding ..> CompletionBinding : 主线程完成委托
-    TerrainBinding ..> BindingContext : 校验当前回调和节点身份
-    TerrainBinding ..> ScriptVm : 注册后端无关原生方法
-    TerrainBinding ..> App : 读取持久数据根目录
+    TerrainBinding ..> ScriptVm : 后端无关注册
+    TerrainBinding ..> BindingContext : Run 与组件身份
+    TerrainBinding ..> TerrainComponent : 原生请求
+    TerrainBinding ..> TerrainScript : 同一契约的脚本外观
+    TerrainScript ..> TerrainOperationId
+    TerrainScript ..> TerrainDataT
+    TerrainScript ..> TerrainOperationSnapshot
+    TerrainScript ..> TerrainRegionSnapshot
+    TerrainScript ..> TerrainRegionQuery
+    TerrainScript ..> TerrainView
+    TerrainScript ..> TerrainPinSpec
+    TerrainScript ..> TerrainPinId
+    TerrainScript ..> TerrainEditSpec
+    TerrainScript ..> TerrainCollapseSpec
+    TerrainScript ..> TerrainResetSpec
+    TerrainScript ..> TerrainRetireSpec
+    TerrainScript ..> TerrainSaveSpec
+    TerrainScript ..> TerrainLoadSpec
+    TerrainScript ..> Collider
 ```
 
-- `TerrainBinding` 属于脚本插件；只有构建期启用地形插件并定义 `ENGINE_HAS_TERRAIN_PLUGIN=1` 时编译与登记，不向脚本核心加入具体地形算法。方法均为 `const override`，`name/source` 为 `noexcept`，不持有组件所有权。
-- 脚本通过 `Node.GetComponent(TerrainComponent)` 取得已配置组件；`AddComponent` 只创建组件，未绑定资源时 `ready` 为 false。门面按场景、节点与统一组件实例身份重新解析组件，不保存原生指针。
-- 球形笔刷坐标为地形节点局部空间，半径须为正且有限；同步挖掘、填充直接调用原生 `apply_sphere`，复用块缓存局部重建。`Reset`/`Load` 从初始资源或快照重新初始化并全块重建，同步返回状态，失败返回 false。
-- `DigSphereAsync/FillSphereAsync(..., completed)` 返回是否排队成功；拒绝时不调用委托。候选生成在后台，完成委托在主线程绑定事件阶段调用一次，`true` 表示 Mesh/Jolt 已成功发布，`false` 表示失败或同场景 Reset/禁用等取消。场景更换与脚本停止丢弃旧委托；回调不得返回 Promise。调用方应在成功回调之后刷新支撑、导航或运行后续同步修改，不能以请求接收作为碰撞已更新的依据。
-- `Save/Load` 只接受长度 `1..48` 的 ASCII `[A-Za-z0-9_-]` 槽名，定位到 `App::persistent_data_path()/terrain/<slot>.bin`。固定目录、目标文件和规范路径逐项检查，拒绝符号链接、路径越界和非普通文件；不向脚本开放任意路径。保存只创建固定 terrain 目录，加载不创建目录。
-- `ready` 为布尔值；失效句柄返回 false。`revision` 保持 uint64 对应的 BigInt；块数、重建块数和三角形数为 Number，失效句柄返回 null；`lastError` 返回原生诊断，失效句柄返回 null。
+组件设置使用 GetSettings/SetSettings，直接读写生成的 TerrainDataT，与现有角色配置绑定一致；
+不新增全局地形设置，不保留旧字段的平行属性入口。
+组件继续通过 Node.AddComponent/GetComponent 取得。TerrainBinding 保留现有
+ScriptBinding 的 name/source/register_functions 方法，不把 VM 句柄暴露到核心。
 
-步骤 4：`CollapseDetached(minSamples, maxFragments, fragmentCells=4, density=1600)` 显式提取脱离下/侧边界的土石并交给动态凸形复合碰撞。预算/计算失败不删除待转化土石；`fragmentCount` 查询活动土石数量。存在动态土石时 Save/Load 目前明确失败，Reset 清理土石并恢复地形，不宣称完整世界存档。
+- 数值坐标用 Number/double；ID/revision 用 bigint；MCP JSON 转为十进制字符串。
+  无效句柄/不属当前 Run 的操作返回 null/false，不能读取另一会话。
+- Request* 只返回受理身份；Update 或临时测试脚本通过 GetOperation 观察，不阻塞 VM，
+  不自动返回 Promise，不继续保留 bool completion 机制。
+- 查询结果是独立快照。状态模型、错误与取消语义唯一来自原生契约，TS 不再实现队列或几何逻辑。
+- SetView/PinRegions 登记当前 Run 的拥有关系，停止时配对清理，不释放其他调用方的需求。
+  ReleaseOperation 只释放终态记录，不卸载已发布区域；取消发布前操作不等于回滚世界。
+- 存档 slot 仅允许安全 ASCII 名称、校验相对路径和符号链接边界；根由 App 决定，
+  不通过脚本传任意本机路径。保存全部已修改区域和土石，结果含 captured revision。
+- CollectSupport 成功的空数组与失败 null 区别明确；只有前者代表已知无地基。
+  建筑 RefreshSupport 同步更新为 Collider[] 输入，不留单 Collider 脚本重载。
+- 临时脚本在当前真实 Run 内调用这些方法；MCP 测试模块仅在显式测试构建出现，
+  不增独立 TerrainTestRuntime。标准 Release 验收用相同场景、区域、状态和截图接口。

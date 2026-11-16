@@ -1,4 +1,5 @@
 #include "runtime/render/scene_draw.hpp"
+#include "runtime/render/rvt/rvt_pass.hpp"
 
 #include "runtime/performance/profiling.hpp"
 #include "runtime/render/render_constants.hpp"
@@ -85,6 +86,7 @@ bool prepare_draw_batches(const RenderFrameData& frame_data, const ViewDrawList&
                 state |= BGFX_STATE_MSAA;
             }
             render_detail::DrawBatchKey key;
+            key.rvt_role = mesh.rvt_role;
             key.geometry = reinterpret_cast<std::uintptr_t>(item.geometry);
             key.state = state;
             key.binding = material.binding_id;
@@ -398,6 +400,16 @@ bool RenderSystem::SceneGpuResources::draw_meshes(const render_detail::RenderFra
             if (!program->bind_material(material, frame_textures, draw.max_anisotropy))
             {
                 return false;
+            }
+            if (draw.rvt && bgfx::isValid(program->rvt_program) && !material.frame_textures)
+            {
+                draw.rvt->bind(mesh.rvt_role == schema::RvtRole::reader ||
+                                   mesh.rvt_role == schema::RvtRole::writer_reader,
+                               draw.world_origin);
+            }
+            else
+            {
+                render_detail::RvtPass::bind_disabled();
             }
             bgfx::setUniform(normal_transform, mesh.normal.data());
             bgfx::setUniform(frame_valid, valid.data());

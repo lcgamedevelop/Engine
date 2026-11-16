@@ -1,6 +1,7 @@
 #include "editor/asset_pipeline/components/mesh_renderer_codec.hpp"
 
 #include "runtime/core/guid_map.hpp"
+#include "runtime/schema/control_json_generated.hpp"
 
 #include <algorithm>
 #include <array>
@@ -25,8 +26,8 @@ bool MeshRendererCodec::validate(const schema::ComponentDataT& component, std::s
 {
 
     const auto* value = component.payload.AsMeshRendererData();
-    if (value == nullptr || !GuidMap::valid_guid(value->mesh_guid) ||
-        !GuidMap::valid_guid(value->material_guid) ||
+    if (value == nullptr || value->rvt_role > schema::RvtRole::writer_reader ||
+        !GuidMap::valid_guid(value->mesh_guid) || !GuidMap::valid_guid(value->material_guid) ||
         value->additional_material_guids.size() > 15 ||
         std::any_of(value->additional_material_guids.begin(),
                     value->additional_material_guids.end(),
@@ -54,6 +55,15 @@ bool MeshRendererCodec::read(const toml::table& table, schema::ComponentDataT& c
 {
 
     schema::MeshRendererDataT value;
+    if (table.contains("rvt_role"))
+    {
+        const auto role = table["rvt_role"].value<std::string>();
+        if (!role || !schema::control_json::read(nlohmann::json(*role), value.rvt_role, error,
+                                                 false, "rvt_role"))
+        {
+            return false;
+        }
+    }
     value.mesh_guid = table["mesh"].value_or(std::string{});
     value.material_guid = table["material"].value_or(std::string{});
     if (table.contains("cast_shadows") && !table["cast_shadows"].is_boolean())
@@ -98,19 +108,14 @@ bool MeshRendererCodec::read(const toml::table& table, schema::ComponentDataT& c
         }
         else if (!numbers(table.get("lightmap_transform"), matrix))
         {
-            error = "mesh renderer lightmap_transform requires an empty array or 16 finite floats";
+            error = "mesh renderer lightmap_transform requires an empty array or 16 finite numbers";
             return false;
         }
         else
         {
             for (double element : matrix)
             {
-                if (std::abs(element) > std::numeric_limits<float>::max())
-                {
-                    error = "mesh renderer lightmap_transform exceeds float range";
-                    return false;
-                }
-                value.lightmap_transform.push_back(static_cast<float>(element));
+                value.lightmap_transform.push_back(element);
             }
         }
     }
@@ -154,12 +159,13 @@ void MeshRendererCodec::write(const schema::ComponentDataT& component, toml::tab
     value.insert("material", mesh->material_guid);
     value.insert("cast_shadows", mesh->cast_shadows);
     value.insert("bake_static", mesh->bake_static);
+    value.insert("rvt_role", std::string(schema::EnumNameRvtRole(mesh->rvt_role)));
     value.insert("static_instancing_enabled", mesh->static_instancing_enabled);
     value.insert("static_lod_enabled", mesh->static_lod_enabled);
     value.insert("lightmap", mesh->lightmap_guid);
     value.insert("lightmap_mesh_hash", mesh->lightmap_mesh_hash);
     toml::array matrix;
-    for (float element : mesh->lightmap_transform)
+    for (double element : mesh->lightmap_transform)
     {
         matrix.push_back(element);
     }

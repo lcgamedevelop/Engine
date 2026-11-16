@@ -1,0 +1,15 @@
+include "terrain.fbs";
+namespace engine.schema;
+
+table TerrainBlockData {
+    schema_version:uint = 2;
+    key:TerrainRegionKey (required, native_inline);
+    // Uniform blocks store one density and layer sample; all other blocks are dense.
+    uniform:bool = false;
+    // Each block owns block_cells cubed samples. Halo samples belong to adjacent blocks.
+    density:[float] (required);
+    layers:[TerrainLayerSample] (required);
+}
+
+root_type TerrainBlockData;
+file_identifier "ETB2";

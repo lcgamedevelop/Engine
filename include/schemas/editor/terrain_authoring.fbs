@@ -1,0 +1,44 @@
+include "terrain.fbs";
+namespace engine.schema;
+
+table TerrainHeightmapData {
+    width:uint;
+    height:uint;
+    // Row-major normalized samples. X/Z extent is the recipe bounds.
+    samples:[float] (required);
+    height_scale:double = 100;
+    height_offset:double = 0;
+}
+
+table TerrainRoadData {
+    points:[Vec3] (required);
+    width:double = 4;
+    falloff:double = 2;
+    layer:TerrainLayerSample (required, native_inline, native_default: "TerrainLayerSample(0, 0, 0, 0, Vec4(1, 0, 0, 0))");
+}
+
+table TerrainGenerationSpec {
+    origin:Vec3 (required, native_inline);
+    bounds:Bounds3 (required, native_inline, native_default: "Bounds3(Vec3(-64, -32, -64), Vec3(64, 32, 64))");
+    voxel_size:double = 1;
+    block_cells:ushort = 16;
+    lod_count:ubyte = 4;
+    seed:uint = 1;
+    height:double = 0;
+    amplitude:double = 4;
+    frequency:double = 0.02;
+    noise_graph:string;
+    heightmap:TerrainHeightmapData;
+    material_layers:[string];
+    stamps:[TerrainBrushData];
+    roads:[TerrainRoadData];
+}
+
+table TerrainSourceData {
+    schema_version:uint = 2;
+    revision:ulong = 1;
+    recipe:TerrainGenerationSpec (required);
+    edits:[TerrainBrushData];
+}
+root_type TerrainSourceData;
+file_identifier "ETAS";

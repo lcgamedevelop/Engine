@@ -28,6 +28,7 @@ class UiSystem;
 class ScriptRuntime;
 class TaskSystem;
 class ResourceCatalog;
+class ScenePreparation;
 struct ScriptStatus;
 #if defined(ENGINE_ENABLE_TEST_SUPPORT)
 struct ProjectScriptRequest;
@@ -96,6 +97,8 @@ public:
     [[nodiscard]] std::string_view last_error() const noexcept;
 
     [[nodiscard]] bool begin_scene_load(const SceneLoadSpec& spec, SceneLoadId& output);
+    [[nodiscard]] bool add_preparation(ScenePreparation& preparation);
+    [[nodiscard]] bool remove_preparation(ScenePreparation& preparation);
     [[nodiscard]] Scene* scene_load_scene(SceneLoadId id) noexcept;
     [[nodiscard]] bool prepare_scene_load(SceneLoadId id);
     [[nodiscard]] bool scene_load_status(SceneLoadId id, SceneLoadSnapshot& output) const;
@@ -106,6 +109,8 @@ public:
 
 private:
     struct SceneLoadOperation;
+    std::vector<ScenePreparation*> scene_preparations_;
+    void release_domain_preparations(SceneLoadOperation& operation) noexcept;
     std::map<std::uint64_t, std::unique_ptr<SceneLoadOperation>> scene_loads_;
     std::uint64_t scene_load_owner_ = 0;
     std::uint64_t scene_load_sequence_ = 0;

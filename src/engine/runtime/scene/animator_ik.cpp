@@ -42,7 +42,7 @@ bool set_ik_target(Animator actor, std::string_view name, const AnimationIkTarge
     IkOperation checked;
     if (!resolve_target(actor, *resource.data<SkeletonResource>(), paths, resolved,
                         static_cast<std::size_t>(found - resolved.begin()), target,
-                        ozz::math::Float4x4::identity(), checked))
+                        ozz::math::Float4x4::identity(), {}, checked))
     {
         return false;
     }

@@ -1,3 +1,163 @@
-guid = "9cf6a604-6b75-4a85-bc8d-0680389c0276"
-importer = "terrain"
+guid = '9cf6a604-6b75-4a85-bc8d-0680389c0276'
+importer = 'terrain'
 meta_version = 1
+
+[[subresources]]
+guid = '52c20a36-a439-4a76-a9ab-a976d6123c75'
+key = 'regions/0/0_0_0'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '9b4c2672-983e-4147-bdc9-9178fc38c27a'
+key = 'regions/0/0_0_1'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '18f14ee5-1711-4d9f-aa2b-73628a407d7c'
+key = 'regions/0/0_0_2'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = 'b5a9a508-a604-4551-b66e-b4ad184a08ed'
+key = 'regions/0/0_0_3'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '9220a4f4-155b-4276-999c-112acd0b3330'
+key = 'regions/0/1_0_0'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '2573bf56-21de-4233-b2e6-7933bcdeee0a'
+key = 'regions/0/1_0_1'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '898c67d0-8647-40ce-9cff-150598eb5e80'
+key = 'regions/0/1_0_2'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '8fa3bf3d-727f-4d56-9160-870e52404da1'
+key = 'regions/0/1_0_3'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '15199df8-5126-42a5-9e00-a73c33f302d6'
+key = 'regions/0/2_0_0'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = 'e58c22c9-2488-4d65-b54d-5b691ece4aeb'
+key = 'regions/0/2_0_1'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '76fcf140-d31d-43a0-a262-1a4f0ff1d8da'
+key = 'regions/0/2_0_2'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '2ce98b86-01bc-4668-a614-1d5cfd49cb35'
+key = 'regions/0/2_0_3'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '09669cc5-9465-402b-938e-c0d3e397d9b8'
+key = 'regions/0/3_0_0'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = 'a9db32bb-65b9-44ab-8e64-ae92f70a0483'
+key = 'regions/0/3_0_1'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '6760624d-6d3a-4f0c-89b1-194e6daa6cd2'
+key = 'regions/0/3_0_2'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = 'e9e429ea-d7b8-40c9-9ca7-144e43fdd4a9'
+key = 'regions/0/3_0_3'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '50969e67-df92-4641-a2dd-e240d4d110f6'
+key = 'regions/0/4_0_0'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '99b9b729-62f7-461e-8b05-11ea8c87535b'
+key = 'regions/0/4_0_1'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = 'b266c7fb-4d8d-496c-9d0d-f01c2311dd21'
+key = 'regions/0/4_0_2'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '033e12ef-6092-448a-b0a4-c3e28885004a'
+key = 'regions/0/4_0_3'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '2f6e4528-8ecc-4dcf-8ff2-e45d25401977'
+key = 'regions/0/5_0_0'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '27127a98-ac1d-4ab1-8599-e2521cc0acd7'
+key = 'regions/0/5_0_1'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '0f5d5e27-d1d5-4c0d-8d9b-e3d569a82144'
+key = 'regions/0/5_0_2'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = 'c4a37df3-cd5b-4b16-b8b1-c912ee17d07c'
+key = 'regions/0/5_0_3'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '6db2c164-a4d7-45cf-adee-51e2ad9017b6'
+key = 'regions/1/0_0_0'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '47896ac8-d062-49e4-b56b-abf015e588e7'
+key = 'regions/1/0_0_1'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '93c3412d-6e5f-4b53-b106-5b801afe8546'
+key = 'regions/1/1_0_0'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = 'c96e579e-d36a-47b3-b224-8cce3cb34051'
+key = 'regions/1/1_0_1'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '04402a1d-8ad8-412a-b36f-f544ab43a7c6'
+key = 'regions/1/2_0_0'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '4b3e9cfd-2311-4a5b-bf08-371a7ebf2774'
+key = 'regions/1/2_0_1'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = 'c1b40c62-29c9-4855-b9e5-94f98f4bdd11'
+key = 'regions/2/0_0_0'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = 'd66d0615-9f36-4611-9143-4efd1b741a7a'
+key = 'regions/2/1_0_0'
+kind = 'terrain_block'

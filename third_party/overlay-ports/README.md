@@ -6,6 +6,11 @@
 
 port 的基线来源、版本迁移和 MIT 许可全文见 [vcpkg 许可](../notices/vcpkg.md)。
 
+`joltphysics` 沿用 baseline `8450b1326545e5e933c36d698c74df072ffca6d0` 的 5.6.0#1 port，
+唯一构建选项调整为 `DOUBLE_PRECISION=ON`，使世界位置使用 Jolt 的双精度接口；形状局部数据仍为单精度。
+库和调用方必须一起重建，不能混合两种精度的静态库。上游归档版本及 SHA512 固定在 portfile，
+Jolt MIT 许可随安装包保存；这不引入私有物理实现。
+
 Android 使用仓库锁定的库版本；单项版本升级由对应 overlay 明确固定，相关修复为：
 
 - `basisu`：使用官方稳定版 2.50（`v2_50`，提交 `9bebe16726b3a61c8c213eeee3b7cffb462ef34e`），以 [vcpkg 2.50#1 port](https://github.com/microsoft/vcpkg/tree/149fdb9c7b51a03cd54faf1766774b43366b0534/ports/basisu) 为基线并保留 MIT 许可的 `export-cmake-config.diff`。原有 1.50 CMake 补丁已替换；保留完整编码器与转码器静态库，复用 vcpkg `zstd`。本地 `android-library.patch` 在 Android/iOS 关闭命令行工具，以 `Threads::Threads` 表达线程依赖，避免硬链接 Android 不提供的独立 `pthread` 库。2.50 上游已修复普通模式/完成日志的 `m_status_output` 判断；`quiet-library-output.patch` 只将余下 HDR 等警告送往 stderr，避免污染 MCP stdio。当前官方 port 仍标记 `!android`，因此继续保留此 overlay。

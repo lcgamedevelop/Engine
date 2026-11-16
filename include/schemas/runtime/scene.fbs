@@ -2,6 +2,7 @@ include "animation_pose.fbs";
 include "common.fbs";
 include "camera.fbs";
 include "character_controller.fbs";
+include "terrain.fbs";
 namespace engine.schema;
 
 table TransformData {
@@ -36,9 +37,10 @@ table MeshRendererData {
     bake_static:bool = false;
     lightmap_guid:string;
     lightmap_mesh_hash:string;
-    lightmap_transform:[float];
+    lightmap_transform:[double];
     static_instancing_enabled:bool = false;
     static_lod_enabled:bool = false;
+    rvt_role:RvtRole = none;
 }
 
 enum ColliderShape:ubyte { box, sphere, capsule, mesh, compound }
@@ -127,7 +129,18 @@ table TextData {
 
 enum FogMode:ubyte { none, linear, exponential, exponential_squared }
 
+table RvtSettings {
+    enabled:bool = false;
+    bounds:Bounds3 (required, native_inline, native_default: "Bounds3(Vec3(-4096, -256, -4096), Vec3(4096, 256, 4096))");
+    virtual_resolution:uint = 4096;
+    page_size:ushort = 128;
+    page_border:ushort = 4;
+    physical_pages:uint = 64;
+    pages_per_frame:uint = 4;
+}
+
 table EnvironmentData {
+    rvt:RvtSettings;
     ambient_color:Color (required, native_inline, native_default: "Color(1.0f, 1.0f, 1.0f, 1.0f)");
     ambient_intensity:float = 0;
     ambient_tricolor:bool = false;
@@ -204,11 +217,12 @@ table EffectData {
 
 table TerrainData {
     terrain_guid:string;
-    material_guid:string;
-    collision:bool = true;
-    surface_color:Color (required, native_inline, native_default: "Color(0.35f, 0.48f, 0.24f, 1.0f)");
-    wall_color:Color (required, native_inline, native_default: "Color(0.48f, 0.36f, 0.24f, 1.0f)");
-    uv_scale:float = 0.2;
+    surface_material_guid:string;
+    rvt_role:RvtRole = none;
+    streaming_enabled:bool = false;
+    collision_enabled:bool = false;
+    initial_view:TerrainViewData;
+    budget:TerrainBudgetData;
 }
 
 table DestructionData {

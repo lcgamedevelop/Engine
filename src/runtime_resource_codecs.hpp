@@ -22,6 +22,7 @@
 #include "plugins/runtime/effects/codecs/effect_resource_codec.hpp"
 #endif
 #if ENGINE_HAS_TERRAIN_PLUGIN
+#include "plugins/runtime/terrain/codecs/terrain_block_resource_codec.hpp"
 #include "plugins/runtime/terrain/codecs/terrain_resource_codec.hpp"
 #endif
 #if ENGINE_HAS_DESTRUCTION_PLUGIN
@@ -58,7 +59,8 @@ bool register_runtime_resource_codecs(engine::ResourceSystem& resources)
     }
 #endif
 #if ENGINE_HAS_TERRAIN_PLUGIN
-    if (!resources.add<engine::plugins::terrain::TerrainResourceCodec>())
+    if (!resources.add<engine::plugins::terrain::TerrainResourceCodec>() ||
+        !resources.add<engine::plugins::terrain::TerrainBlockResourceCodec>())
     {
         return false;
     }

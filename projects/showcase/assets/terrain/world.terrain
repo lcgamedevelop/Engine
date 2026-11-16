@@ -1,0 +1,28 @@
+amplitude = 56.0
+block_cells = 16
+bounds_max = [ 4000.0, 128.0, 4000.0 ]
+bounds_min = [ -4000.0, -128.0, -4000.0 ]
+edits = []
+frequency = 0.0025000000000000001
+height = -8.0
+lod_count = 6
+material_layers = [ 'df6a80fa-be66-4396-8a01-62aaadd61574', '64d8c791-6432-441a-ba72-12b2c09e9083' ]
+noise_graph = ''
+origin = [ 0.0, 0.0, 0.0 ]
+revision = 1
+schema_version = 2
+seed = 42
+stamps = []
+voxel_size = 16.0
+
+[[roads]]
+falloff = 24.0
+layer = 1
+points = [
+    [ -3800.0, 8.0, -3700.0 ],
+    [ -1200.0, 0.0, -600.0 ],
+    [ 0.0, 0.0, 0.0 ],
+    [ 1800.0, 12.0, 1200.0 ],
+    [ 3800.0, 4.0, 3700.0 ]
+]
+width = 32.0

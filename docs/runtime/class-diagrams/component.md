@@ -1,5 +1,7 @@
 # 节点组件
 
+Transform 的 double 世界矩阵与消费者精度边界见[大世界坐标](world-coordinates.md)。
+
 [类图索引](../../class-diagrams/index.md) · [节点](node.md) · [材质](material.md)
 
 本页定义 Component 基类及变换、相机、灯光、网格组件；[物理组件](physics-components.md)与[音频组件](audio-components.md)独立维护，同样采用非虚 Component 值句柄，真实状态存入 ECS 列。
@@ -57,7 +59,7 @@ classDiagram
 
         +get_settings(TransformSettings& output) bool
         +set_settings(const TransformSettings& settings) bool
-        +world_matrix(float#42; output) bool
+        +world_matrix(double#42; output) bool
     }
     class Camera {
         <<value handle>>
@@ -243,7 +245,7 @@ classDiagram
 - MeshRenderer 的 `cast_shadows` 默认 true，直接存储于生成的组件载荷并随场景保存；false 时仍参与主绘制，但不参与阴影边界拟合和阴影绘制，供天空等表面使用。`visible` 为单独保存的通用标志，两者不互相替代。
 - 视锥策略属于观察镜头：`CameraDataT.frustum_culling_enabled` 默认 false，通过现有 `settings()` / `set_settings()` 读取和保存。静态实例化和 LOD 是各网格实例的属性：`MeshRendererDataT.static_instancing_enabled` 与 `static_lod_enabled` 默认 false，由对应 getter 与返回 bool 的 `noexcept` setter 读写。设置仅更新生成 ECS 列，句柄失效或世界不可写时返回 false 并保持原值；换网格、保存、恢复和预制体覆盖都保留本实例选择。关闭其中一项不改变另一个字段，也不更改资源本体。RenderSystem 读取这些组件，不维护平行的持久策略开关。
 - Transform 是普通组件。Scene 创建 Node 后添加 Transform，变换逻辑全部位于 Transform。位置和欧拉角用 double，角度单位为度，矩阵为 `T * Rz * Ry * Rx * S`，Y 向上、局部前向 -Z。
-- 变换必须全部有限，缩放非零，可为负数；失败保持原值。`world_matrix()` 写 16 个列主序 float，父链缺失变换或溢出时返回 false，非空输出保持单位矩阵。
+- 变换必须全部有限，缩放非零，可为负数；失败保持原值。`world_matrix()` 写 16 个列主序 double，父链缺失变换或溢出时返回 false，非空输出保持单位矩阵。世界与局部转换规则见[大世界坐标](world-coordinates.md)，没有 float 输出重载。
 - Camera 从同节点 Transform 获得位置和朝向；视场角在 (0,180)，近裁面大于 0，远裁面大于近裁面。Camera 支持透视与正交投影；orthographic_size 为竖直半高且大于零。Light 支持方向光、点光与聚光；方向使用世界 -Z，强度非负且有限，range 大于零，聚光半角满足 0 <= inner_angle < outer_angle < 90。
 - Camera 按 `instance_id()` 保存本镜头隐藏的网格身份，仅影响该视图的主绘制和 AO 深度，不改变网格的 `visible`、`enabled` 或投影。`set_hidden_meshes()` 整批替换列表，任一 ID 为 0 则失败并保留原列表；重复 ID 合并，空列表清空。`mesh_visible()` 为 `const noexcept`，0 返回 false；`clear_hidden_meshes()` 为 `noexcept`。列表只保存 ID，不持有组件借用，不进入生成持久数据；成功恢复 Camera 数据时清空，失败保持原状态。重建网格产生新身份，不继承旧隐藏项。
 - Camera 的两种射线查询均为 `const noexcept`、`[[nodiscard]]` 的纯计算，不要求窗口、GPU、启用状态或活动镜头。`screen_point_to_ray` 的点相对视口左上角，尺寸与点使用同一单位；`viewport_point_to_ray` 使用左上 `(0,0)`、右下 `(1,1)`，aspect 是正宽高比。X 向右、Y 向下，有限的视口外坐标允许外推，不截断。

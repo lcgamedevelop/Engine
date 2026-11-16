@@ -48,6 +48,8 @@ function merge_bounds(previous: DirtyBounds | null, next: DirtyBounds): DirtyBou
     };
 }
 
+import { TerrainRequests, terrainReady } from "../terrain_requests.js";
+const terrain_bounds={minimum:{x:-24,y:-4,z:-16},maximum:{x:24,y:4,z:16}};
 const geometry_names = ["Navigation ground", "Sector divider", "Gate west", "Gate east"];
 // Match terrain/navigation.terrain. Brush sampling extends two voxels beyond the
 // sphere; neighboring cells/gradients require up to two more voxels of dirty margin.
@@ -69,6 +71,7 @@ export default class Game extends Gameplay {
     private readonly geometry: Node[] = [];
     private controller: NavigationController | null = null;
     private terrain: TerrainComponent | null = null;
+    private readonly requests = new TerrainRequests();
     private started = false;
     private startupFailed = false;
     private modifiedBounds: DirtyBounds | null = null;
@@ -99,10 +102,11 @@ export default class Game extends Gameplay {
     }
 
     private start(): boolean {
-        // Loading Terrain only schedules its first commit. Build once ready reports the
-        // generated mesh exists; subsequent brush/reset commits are synchronous.
+        // Navigation consumes only published static terrain regions.
+        const geometry=this.current_geometry();
+        if(!geometry) return false;
         if (
-            !Navigation.Build(this.geometry, {
+            !Navigation.Build(geometry, {
                 minimum: { x: -24, y: -4, z: -16 },
                 maximum: { x: 24, y: 4, z: 16 },
                 cellSize: 0.2,
@@ -133,13 +137,14 @@ export default class Game extends Gameplay {
     }
 
     private record_navigation(): void {
-        this.model.terrainStatistics = `Terrain r${this.terrain?.revision ?? "?"} | navigation r${Navigation.revision ?? "?"} | ${Navigation.rebuiltTiles ?? 0} tiles rebuilt`;
+        this.model.terrainStatistics = `Terrain r${this.terrain?.GetRegions({bounds:terrain_bounds})?.revision ?? "?"} | navigation r${Navigation.revision ?? "?"} | ${Navigation.rebuiltTiles ?? 0} tiles rebuilt`;
     }
 
     private replace_ground(): boolean {
         const bounds = this.pendingBounds;
         if (!bounds) return true;
-        if (!Navigation.Replace(this.geometry, bounds.minimum, bounds.maximum)) {
+        const geometry=this.current_geometry();
+        if (!geometry || !Navigation.Replace(geometry, bounds.minimum, bounds.maximum)) {
             if (this.model.synchronized) this.resumeAfterRepair = !this.model.stopped;
             this.stop();
             this.model.synchronized = false;
@@ -159,61 +164,30 @@ export default class Game extends Gameplay {
         return true;
     }
 
+    private current_geometry(): Node[] | null {
+        const supports=this.terrain?.CollectSupport({bounds:terrain_bounds,limit:4096});
+        return supports ? [...supports.map(collider=>collider.node), ...this.geometry.slice(1)] : null;
+    }
+
     private edit_ground(action: "pit" | "cut" | "restore" | "retryTerrain"): boolean {
-        const terrain = this.terrain;
-        if (!terrain?.ready || !terrain.IsValid()) return false;
-        if (action === "retryTerrain") {
-            if (!this.replace_ground()) return false;
-            this.model.status =
-                "Current terrain committed to navigation. Retained destinations are unchanged.";
-            return true;
-        }
-        let success = true;
-        let mutationError = "";
-        if (action === "restore") {
-            if (!terrain.Reset()) {
-                this.model.status = terrain.lastError || "Cannot restore terrain";
-                return false;
-            }
-            if (this.modifiedBounds)
-                this.pendingBounds = merge_bounds(this.pendingBounds, this.modifiedBounds);
-            this.modifiedBounds = null;
-        } else {
-            // The pit remains bypassable. Overlapping spheres cut the entire right-hand
-            // floor across z=0, down past its -4 m base; no artificial obstacle proxy.
-            const centers = action === "pit" ? [-12] : [2, 6, 10, 14, 18, 22];
-            const y = action === "pit" ? 0 : -1;
-            const radius = action === "pit" ? 3 : 4;
-            for (const x of centers) {
-                const revision = terrain.revision;
-                if (!terrain.DigSphere(x, y, 0, radius)) {
-                    success = false;
-                    mutationError = terrain.lastError || "Terrain brush failed";
-                    break;
-                }
-                if (terrain.revision === revision) continue;
-                const reach = radius + 4 * terrain_voxel_size;
-                const dirty: DirtyBounds = {
-                    minimum: { x: x - reach, y: -4, z: -reach },
-                    maximum: { x: x + reach, y: 4, z: reach },
-                };
-                this.modifiedBounds = merge_bounds(this.modifiedBounds, dirty);
-                this.pendingBounds = merge_bounds(this.pendingBounds, dirty);
-            }
-        }
-        // DigSphere and Reset atomically commit the generated mesh before returning.
-        // Submit even a partially completed multi-brush cut; never leave successful edits
-        // paired with stale navigation when a later brush fails.
-        if (!this.replace_ground()) return false;
-        this.record_navigation();
-        this.model.status = !success
-            ? `${mutationError}. Navigation reflects the completed brushes; restore to undo them.`
-            : action === "pit"
-              ? "Crossing pit excavated. Native agents retain their goals and find a route around it."
-              : action === "cut"
-                ? "Doorway floor cut through. The two sides are disconnected; native agents report no route."
-                : "Terrain restored; only the previously changed tiles were replaced. Native agents retry retained goals.";
-        return success;
+        const terrain=this.terrain;
+        if(!terrain || !terrainReady(terrain,terrain_bounds) || this.requests.busy) return false;
+        if(action==="retryTerrain") return this.replace_ground();
+        const centers=action==="pit" ? [-12] : [2,6,10,14,18,22];
+        const y=action==="pit" ? 0 : -1, radius=action==="pit" ? 3 : 4;
+        const id=action==="restore" ? terrain.RequestReset({bounds:terrain_bounds}) :
+            terrain.RequestEdit({brushes:centers.map(x=>({operation:"dig",center:{x,y,z:0},extent:{x:radius,y:radius,z:radius}}))});
+        this.model.status="Preparing terrain geometry and collision...";
+        return this.requests.Watch(terrain,id,result=>{
+            if(result?.state!=="completed") { this.model.status=this.requests.error; this.controller?.Refresh(); return; }
+            const reach=radius+4*terrain_voxel_size;
+            const dirty=action==="restore" ? this.modifiedBounds ?? terrain_bounds :
+                {minimum:{x:Math.min(...centers)-reach,y:-4,z:-reach},maximum:{x:Math.max(...centers)+reach,y:4,z:reach}};
+            this.modifiedBounds=action==="restore" ? null : merge_bounds(this.modifiedBounds,dirty);
+            this.pendingBounds=merge_bounds(this.pendingBounds,dirty);
+            if(this.replace_ground()) this.model.status="Terrain published; navigation rebuilt and retained goals updated.";
+            this.controller?.Refresh();
+        });
     }
 
     private formation(index: number): { start: Vector3; destination: Vector3; group: number } {
@@ -378,12 +352,12 @@ export default class Game extends Gameplay {
     }
 
     override Update(): void {
+        this.requests.Update();
         let refresh = false;
         if (
             !this.started &&
             !this.startupFailed &&
-            this.terrain?.ready &&
-            this.geometry[0]?.GetComponent(MeshRenderer)?.IsValid()
+            terrainReady(this.terrain,terrain_bounds)
         ) {
             this.started = this.start();
             this.startupFailed = !this.started;
@@ -444,6 +418,7 @@ export default class Game extends Gameplay {
     }
 
     override OnShutdown(): void {
+        this.requests.Shutdown();
         for (const resource of this.resources.splice(0)) {
             if (!Resources.Release(resource)) Debug.LogError("Cannot release showcase resource");
         }

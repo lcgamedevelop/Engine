@@ -65,6 +65,7 @@ protected:
     [[nodiscard]] bool restore_flags(const schema::ComponentDataT& data) noexcept;
 
 private:
+    friend class GeometryUpdate;
     friend class ComponentRegistry;
     template <class T, class Data, class Runtime>
     friend bool register_component_storage(ComponentRegistry&);

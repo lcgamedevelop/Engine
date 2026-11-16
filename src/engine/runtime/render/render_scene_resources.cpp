@@ -20,6 +20,7 @@
 #include "runtime/scene/transform.hpp"
 #include "runtime/task/task_system.hpp"
 #include "runtime/ui/ui_system.hpp"
+#include "runtime/utils/transform_math.hpp"
 #include "runtime/world/world_system.hpp"
 #include <algorithm>
 #include <bit>
@@ -486,7 +487,8 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
             }
             resources.retained_meshes.emplace(id, std::move(*mesh));
         }
-        const bool visible = renderer && renderer.active() && renderer.visible_in_hierarchy();
+        const bool visible = renderer && renderer.active() && renderer.visible_in_hierarchy() &&
+                             !ecs_detail::component_runtime(renderer)->geometry_removed_;
         if (!visible)
         {
             if (const auto retained = resources.retained_meshes.find(id);
@@ -862,7 +864,7 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
             if (render_detail::texture_region_bytes(work.part, work.byte_offset, SIZE_MAX) == 0)
             {
                 work.byte_offset = 0;
-                if (++work.face == (work.part.data->cube_map ? 6U : 1U))
+                if (++work.face == (work.part.data->cube_map ? 6U : work.part.data->array_layers))
                 {
                     work.face = 0;
                     ++work.mip;
@@ -1092,19 +1094,25 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
         std::bit_cast<std::uint32_t>(rendering.ssr_resolution_scale)};
     if (drawable)
     {
+        double absolute_camera[16]{};
         float camera_world[16]{}, camera_view[16]{}, projection[16]{};
         CameraSettings lens;
         const auto transform = selected_camera.node().get_component<Transform>();
-        if (!transform || !transform.world_matrix(camera_world) ||
-            !selected_camera.get_settings(lens) ||
-            !camera_detail::view_matrix(camera_world, camera_view) ||
+        if (!transform || !transform.world_matrix(absolute_camera) ||
+            !selected_camera.get_settings(lens))
+        {
+            return fail("Cannot read render target observer");
+        }
+        const Vec3 origin{absolute_camera[12], absolute_camera[13], absolute_camera[14]};
+        transform_math::relative(absolute_camera, origin, camera_world);
+        if (!camera_detail::view_matrix(camera_world, camera_view) ||
             !camera_detail::projection_matrix(lens, static_cast<float>(width_) / height_,
                                               bgfx::getCaps()->homogeneousDepth, projection))
         {
             return fail("Cannot read render target observer");
         }
         bx::mtxInverse(camera_world, camera_view);
-        std::vector<std::pair<float, Node>> planes;
+        std::vector<std::pair<double, Node>> planes;
         auto query = flecs::world(world_->native_world())
                          .query_builder<
                              const ecs_detail::ComponentStorage<PlanarReflectionComponent::Data>>()
@@ -1116,15 +1124,14 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
                 const auto plane = node.get_component<PlanarReflectionComponent>();
                 const auto mesh = node.get_component<MeshRenderer>();
                 const auto pose = node.get_component<Transform>();
-                float matrix[16]{};
+                double matrix[16]{};
                 if (plane && plane.active() && plane.visible_in_hierarchy() && mesh &&
                     mesh.active() && mesh.visible_in_hierarchy() &&
                     selected_camera.mesh_visible(mesh.instance_id()) && pose &&
                     pose.world_matrix(matrix))
                 {
-                    planes.emplace_back(std::hypot(matrix[12] - camera_world[12],
-                                                   matrix[13] - camera_world[13],
-                                                   matrix[14] - camera_world[14]),
+                    planes.emplace_back(std::hypot(matrix[12] - origin.x(), matrix[13] - origin.y(),
+                                                   matrix[14] - origin.z()),
                                         node);
                 }
             });
@@ -1142,11 +1149,13 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
                 {
                     return fail("Cannot read reflection target settings");
                 }
+                double absolute_plane[16]{};
                 float plane_world[16]{};
-                if (!plane_nodes[index].get_component<Transform>().world_matrix(plane_world))
+                if (!plane_nodes[index].get_component<Transform>().world_matrix(absolute_plane))
                 {
                     return fail("Cannot read reflection transform");
                 }
+                transform_math::relative(absolute_plane, origin, plane_world);
                 if (!resources.targets().planar[index].mirror(plane_world, camera_world, projection,
                                                               options.clip_bias))
                 {
@@ -1392,6 +1401,7 @@ void RenderSystem::collect_preparation(bool wait) noexcept
 
 void RenderSystem::release_scene() noexcept
 {
+    release_rvt();
     scope_frames_.clear();
     if (meshlet_culling_)
     {

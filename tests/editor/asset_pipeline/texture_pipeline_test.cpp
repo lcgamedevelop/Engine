@@ -247,7 +247,10 @@ bool shader_dependencies(engine::editor::AssetPipelineSystem& pipeline, const Fi
                                     "csm_helpers.sh",      "pbr_surface.sh",
                                     "pbr_lighting.sh",     "local_shadow_helpers.sh",
                                     "cluster/lighting.sh", "fs_surface.sc",
-                                    "dfg_approx.sh",       "hex_tiling.sh"};
+                                    "dfg_approx.sh",       "hex_tiling.sh",
+                                    "cube_fragment.sh",    "surface_fragment.sh",
+                                    "terrain_surface.sh",  "pbr_surface_types.sh",
+                                    "rvt_surface.sh",      "rvt_cache.sh"};
     constexpr std::array identities = {
         "b0000000-0000-4000-8000-000000000011", "b0000000-0000-4000-8000-000000000012",
         "b0000000-0000-4000-8000-000000000013", "b0000000-0000-4000-8000-000000000014",
@@ -255,7 +258,10 @@ bool shader_dependencies(engine::editor::AssetPipelineSystem& pipeline, const Fi
         "b0000000-0000-4000-8000-000000000017", "b0000000-0000-4000-8000-000000000018",
         "b0000000-0000-4000-8000-000000000019", "b0000000-0000-4000-8000-00000000001a",
         "b0000000-0000-4000-8000-00000000001b", "b0000000-0000-4000-8000-00000000001c",
-        "b0000000-0000-4000-8000-00000000001d", "b0000000-0000-4000-8000-00000000001e"};
+        "b0000000-0000-4000-8000-00000000001d", "b0000000-0000-4000-8000-00000000001e",
+        "b0000000-0000-4000-8000-00000000001f", "b0000000-0000-4000-8000-000000000020",
+        "b0000000-0000-4000-8000-000000000021", "b0000000-0000-4000-8000-000000000022",
+        "b0000000-0000-4000-8000-000000000023", "b0000000-0000-4000-8000-000000000024"};
     const auto upstream = std::filesystem::path(ENGINE_TEST_SOURCE_DIR).parent_path() /
                           "src/engine/runtime/render/shaders";
     for (std::size_t index = 0; index < sources.size(); ++index)
@@ -402,7 +408,7 @@ bool tests()
     const auto generated = fixture.root / "cache/gen" / guid;
     const auto original_meta = read(meta_path);
     schema::TextureDataT data;
-    data.schema_version = 2;
+    data.schema_version = 3;
     if (!expect(original_meta.find("compression = \"uastc\"") != std::string::npos &&
                     original_meta.find("format = \"auto\"") != std::string::npos &&
                     original_meta.find("srgb") == std::string::npos,
@@ -662,7 +668,7 @@ bool additional_source_tests()
     {
         const auto* asset = entry(pipeline, path);
         schema::TextureDataT data;
-        data.schema_version = 2;
+        data.schema_version = 3;
         if (!expect(asset && texture(fixture, asset->guid, data) && data.srgb &&
                         data.encoding == schema::TextureEncoding::basis && transcode(data, true),
                     "new LDR source formats retain color and use transcodable Basis data"))

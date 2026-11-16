@@ -1,11 +1,13 @@
 import { Resources, ResourceHandle,
     Animator, Camera, CharacterMotor, Debug, Gameplay, MeshRenderer,
-    Scene, TerrainComponent, Transform, UiComponent,
+    Scene, TerrainComponent, TerrainOperationId, Transform, UiComponent,
 } from "engine";
 import { TerrainController } from "../controllers/terrain_controller.js";
 import { TerrainAction, TerrainModel } from "../models/terrain_model.js";
 import { CharacterControls } from "../character_controls.js";
 
+import { TerrainRequests, terrainReady } from "../terrain_requests.js";
+const terrain_bounds = {minimum:{x:-32,y:-12,z:-32},maximum:{x:32,y:20,z:32}};
 const save_slot = "showcase-terrain";
 const camera_nodes = { overview: "Overview camera", cave: "Cave camera", walk: "Player camera" };
 
@@ -18,6 +20,7 @@ export default class Game extends Gameplay {
     private controller: TerrainController | null = null;
     private readonly model = new TerrainModel();
     private readonly input = new CharacterControls();
+    private readonly requests = new TerrainRequests();
     private player_started = false;
     private tunnel_step = 0;
     private blast_radius = 4.0;
@@ -62,12 +65,15 @@ export default class Game extends Gameplay {
         this.input.Update();
         const terrain = this.terrain;
         if (!terrain || !terrain.IsValid()) return;
+        this.requests.Update();
+        const ready = terrainReady(terrain, terrain_bounds);
+        const snapshot = terrain.GetRegions({bounds:terrain_bounds,limit:4096});
         let changed = false;
-        if (this.model.ready !== terrain.ready) {
-            this.model.ready = terrain.ready;
+        if (this.model.ready !== ready) {
+            this.model.ready = ready;
             changed = true;
         }
-        if (terrain.ready && !this.player_started) {
+        if (ready && !this.player_started) {
             if (!this.motor?.SetEnabled(true)) throw new Error("Cannot start the terrain character");
             this.player_started = true;
             this.model.status = "Ready. Dig extends the cave across z = 0 and z = -16 chunk seams.";
@@ -76,17 +82,17 @@ export default class Game extends Gameplay {
         const request = this.model.pending;
         if (request !== null) {
             this.model.pending = null;
-            if (!terrain.ready || !this.perform(request)) {
-                this.model.status = terrain.lastError || `Could not complete ${request}. Check the scene and try again.`;
+            if (!ready || !this.perform(request)) {
+                this.model.status = this.requests.error || `Could not complete ${request}. Check the scene and try again.`;
                 Debug.LogWarning(this.model.status);
             }
             changed = true;
         }
-        if (!terrain.ready && terrain.lastError && this.model.status !== terrain.lastError) {
-            this.model.status = terrain.lastError;
+        if (!ready && this.requests.error && this.model.status !== this.requests.error) {
+            this.model.status = this.requests.error;
             changed = true;
         }
-        const statistics = `Revision ${terrain.revision} / ${terrain.chunkCount} chunks / ${terrain.triangleCount} triangles / ${terrain.rebuiltChunks} rebuilt`;
+        const statistics = `Revision ${snapshot?.revision ?? 0} / ${snapshot?.regions.length ?? 0} regions / ${snapshot?.fragmentCount ?? 0} fragments`;
         if (this.model.statistics !== statistics) {
             this.model.statistics = statistics;
             changed = true;
@@ -106,38 +112,36 @@ export default class Game extends Gameplay {
         switch (action) {
             case "dig": {
                 const z = -3 * this.tunnel_step;
-                if (!terrain.DigSphere(-4, -5.5, z, 3.4)) return false;
+                if (!this.watch(terrain.RequestEdit({brushes:[{operation:"dig",center:{x:-4,y:-5.5,z},extent:{x:3.4,y:3.4,z:3.4}}]}))) return false;
                 this.tunnel_step = (this.tunnel_step + 1) % 8;
                 this.model.status = `Tunnel extended at (-4, -5.5, ${z}). Use Cave view to inspect the new walls.`;
                 return true;
             }
             case "blast": {
-                if (!terrain.DigSphere(12, 0, 0, this.blast_radius)) return false;
+                if (!this.watch(terrain.RequestEdit({brushes:[{operation:"dig",center:{x:12,y:0,z:0},extent:{x:this.blast_radius,y:this.blast_radius,z:this.blast_radius}}]}))) return false;
                 this.model.status = `Crater cut at (12, 0, 0), radius ${this.blast_radius.toFixed(1)} m. Geometry and collision rebuild together.`;
                 this.blast_radius = Math.min(9, this.blast_radius + 1);
                 return true;
             }
             case "fill":
-                if (!terrain.FillSphere(-4, -3, 10, 3.8)) return false;
+                if (!this.watch(terrain.RequestEdit({brushes:[{operation:"fill",center:{x:-4,y:-3,z:10},extent:{x:3.8,y:3.8,z:3.8}}]}))) return false;
                 this.model.status = "Entrance filled at (-4, -3, 10). Reset restores the original cave.";
                 return true;
             case "save":
-                if (!terrain.Save(save_slot)) return false;
+                if (!this.watch(terrain.RequestSave({slot:save_slot,checkpointId:`checkpoint-${Date.now()}`}))) return false;
                 this.model.status = "Terrain saved on this device. Changes survive returning to the menu or restarting.";
                 return true;
             case "load":
-                if (!terrain.Load(save_slot)) return false;
+                if (!this.watch(terrain.RequestLoad({slot:save_slot}),true)) return false;
                 this.tunnel_step = 0;
                 this.blast_radius = 4;
-                if (!this.respawn()) return false;
-                this.model.status = "Saved terrain restored. The character has returned to the safe start.";
+                this.model.status = "Loading saved terrain restored. The character has returned to the safe start.";
                 return true;
             case "reset":
-                if (!terrain.Reset()) return false;
+                if (!this.watch(terrain.RequestReset({bounds:terrain_bounds}),true)) return false;
                 this.tunnel_step = 0;
                 this.blast_radius = 4;
-                if (!this.respawn()) return false;
-                this.model.status = "Original hills and cave restored. The saved slot was not changed.";
+                this.model.status = "Restoring original hills and cave restored. The saved slot was not changed.";
                 return true;
             case "respawn":
                 if (!this.respawn()) return false;
@@ -159,6 +163,14 @@ export default class Game extends Gameplay {
         }
     }
 
+    private watch(id: TerrainOperationId | null, respawn = false): boolean {
+        return !!this.terrain && this.requests.Watch(this.terrain,id,result=>{
+            this.model.status = result?.state === "completed" ? "Terrain operation completed." : this.requests.error;
+            if(result?.state === "completed" && respawn && !this.respawn()) this.model.status="Cannot respawn character";
+            this.controller?.Refresh();
+        });
+    }
+
     private respawn(): boolean {
         const transform = this.scene?.FindNode("Player")?.GetComponent(Transform);
         return !!transform && !!this.motor && this.motor.ClearInput() &&
@@ -166,6 +178,7 @@ export default class Game extends Gameplay {
     }
 
     override OnShutdown(): void {
+        this.requests.Shutdown();
         for (const resource of this.resources.splice(0)) {
             if (!Resources.Release(resource)) Debug.LogError("Cannot release showcase resource");
         }

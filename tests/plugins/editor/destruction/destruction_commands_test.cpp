@@ -184,7 +184,7 @@ bool run(Fixture& fixture)
         return false;
     }
     auto refresh = identity;
-    refresh["supportNodeId"] = std::to_string(support_node.id());
+    refresh["supportNodeIds"] = Json::array({std::to_string(support_node.id())});
     refresh["maxGap"] = 0.2;
     refresh["minCoverage"] = 0.7;
     const auto before_support = component.revision();

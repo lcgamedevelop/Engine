@@ -746,7 +746,7 @@ engine::schema::MeshDataT textured_quad()
 engine::schema::TextureDataT test_texture(const char* path, bool srgb, bool blocks)
 {
     engine::schema::TextureDataT data;
-    data.schema_version = 2;
+    data.schema_version = 3;
     data.path = path;
     data.width = 8;
     data.height = 8;
@@ -790,7 +790,7 @@ engine::schema::TextureDataT ibl_test_texture(const char* path, bool cube)
         }
     }
     engine::schema::TextureDataT result;
-    result.schema_version = 2;
+    result.schema_version = 3;
     result.path = path;
     result.width = result.height = 4;
     result.mip_count = 1;
@@ -914,7 +914,7 @@ bool test_scene_sampling(const engine::EngineConfig& config)
         return false;
     }
     engine::schema::TextureDataT checker;
-    checker.schema_version = 2;
+    checker.schema_version = 3;
     checker.path = "textures/sampling-checker";
     checker.width = checker.height = 256;
     checker.mip_count = 9;
@@ -2811,8 +2811,8 @@ bool test_shadow_edge_filtering(const engine::EngineConfig& config)
     engine::WorldSystem world{&services.loader};
     engine::WindowSystem windows;
     engine::RenderSystem renderer(windows, &world);
-    if (!services.initialize(config) || !services.prepare_builtins() ||
-        !world.initialize(config) || !windows.initialize(config) || !renderer.initialize(config))
+    if (!services.initialize(config) || !services.prepare_builtins() || !world.initialize(config) ||
+        !windows.initialize(config) || !renderer.initialize(config))
     {
         return false;
     }
@@ -4648,9 +4648,8 @@ int main(int, char**)
     const bool skinning_passed = sampling_passed && test_orthographic_pbr_view(config) &&
                                  test_pbr_occlusion_lighting(config) &&
                                  test_ibl_white_furnace(config) && test_gpu_skinning(config);
-    const bool settings_passed =
-        skinning_passed && test_render_settings_and_capture(config) &&
-        test_shadow_edge_filtering(config) && test_async_capture(config);
+    const bool settings_passed = skinning_passed && test_render_settings_and_capture(config) &&
+                                 test_shadow_edge_filtering(config) && test_async_capture(config);
     const bool reflection_passed =
         settings_passed && test_reflections_water_and_diffuse_capture(config);
     const bool hdr_passed = reflection_passed && test_hdr_and_bloom(config);

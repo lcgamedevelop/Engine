@@ -52,6 +52,8 @@ public:
     [[nodiscard]] bool set_static_lod_enabled(bool enabled) noexcept;
     [[nodiscard]] bool bake_static() const noexcept;
     [[nodiscard]] bool set_bake_static(bool enabled) noexcept;
+    [[nodiscard]] schema::RvtRole rvt_role() const noexcept;
+    [[nodiscard]] bool set_rvt_role(schema::RvtRole role) noexcept;
     [[nodiscard]] std::string_view lightmap_path() const noexcept;
     [[nodiscard]] bool set_lightmap(std::string_view path);
     // 借用已校验姿态和网格版本的线性照明资源；绑定失效或不存在时为空。

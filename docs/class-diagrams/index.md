@@ -8,6 +8,19 @@
 
 核心命名空间为 `engine`，编辑器为 `engine::editor`，插件为 `engine::plugins::<插件名>`。`*--` 表示独占拥有，`o--` 表示共享资源引用，`-->` 表示借用，`..>` 表示参数、返回值或使用依赖。
 
+## 大世界地形与 RVT
+
+[目标设计总入口](../plugins/runtime/terrain-world-design.md)。覆盖地上/地下统一体积、8×8 公里区域流送、
+物理破坏、RVT 和 MCP 全流程；本组维护当前运行时契约，制作端未完成范围单列，不保留旧接口或旧格式兼容。
+
+| 评审面 | 类图 |
+| --- | --- |
+| 地形职责与可替换算法 | [组件与系统](../plugins/runtime/class-diagrams/terrain.md)、[区域与算法](../plugins/runtime/class-diagrams/terrain-regions.md) |
+| 请求、取消与发布 | [操作状态](../plugins/runtime/class-diagrams/terrain-operations.md)、[几何事务](../runtime/class-diagrams/geometry-update.md) |
+| 复用运行时 | [领域准备](../runtime/class-diagrams/scene-domain-preparation.md)、[流送引用](../runtime/class-diagrams/streamed-resources.md)、[世界坐标](../runtime/class-diagrams/world-coordinates.md) |
+| 材质、物理与保存 | [RVT](../runtime/class-diagrams/runtime-virtual-texture.md)、[破坏与存档](../plugins/runtime/class-diagrams/terrain-world-state.md) |
+| 无人参与制作与验收 | [编辑器及 MCP](../plugins/editor/class-diagrams/terrain-editor.md)、[脚本](../plugins/runtime/class-diagrams/terrain-script-api.md) |
+
 ## WebGPU 运行产物
 
 范围仅为 Web 游戏导出，编辑器保留原生后端。不新增核心公开类、System 或项目脚本接口；复用运行宿主、资源管线与渲染链。必要共享改动包括目标互斥、私有文件发布及设备暂缓传播，影片呈现使用已有三态返回值。

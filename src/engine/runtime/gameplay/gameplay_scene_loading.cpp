@@ -6,6 +6,7 @@
 #include "runtime/render/render_system.hpp"
 #include "runtime/resource/resource_loader.hpp"
 #include "runtime/scene/scene.hpp"
+#include "runtime/scene/scene_preparation.hpp"
 #include "runtime/ui/ui_system.hpp"
 #include "runtime/world/world_system.hpp"
 
@@ -30,6 +31,41 @@ bool terminal(SceneLoadState state)
            state == SceneLoadState::cancelled;
 }
 } // namespace
+
+bool GameplaySession::add_preparation(ScenePreparation& preparation)
+{
+    if (std::any_of(scene_loads_.begin(), scene_loads_.end(),
+                    [](const auto& entry) { return !entry.second->domains_released; }) ||
+        std::find(scene_preparations_.begin(), scene_preparations_.end(), &preparation) !=
+            scene_preparations_.end())
+    {
+        return false;
+    }
+    scene_preparations_.push_back(&preparation);
+    return true;
+}
+
+bool GameplaySession::remove_preparation(ScenePreparation& preparation)
+{
+    if (std::any_of(scene_loads_.begin(), scene_loads_.end(),
+                    [](const auto& entry) { return !entry.second->domains_released; }))
+    {
+        return false;
+    }
+    return std::erase(scene_preparations_, &preparation) != 0;
+}
+
+void GameplaySession::release_domain_preparations(SceneLoadOperation& operation) noexcept
+{
+    if (!operation.domains_released)
+    {
+        for (auto* preparation : scene_preparations_)
+        {
+            preparation->release_scope(operation.snapshot.scope);
+        }
+        operation.domains_released = true;
+    }
+}
 
 bool GameplaySession::begin_scene_load(const SceneLoadSpec& spec, SceneLoadId& output)
 {
@@ -135,7 +171,7 @@ bool GameplaySession::prepare_scene_load(SceneLoadId id)
     {
         return true;
     }
-    if (snapshot.state != SceneLoadState::staged || !world_.seal_scope(snapshot.scope))
+    if (snapshot.state != SceneLoadState::staged || !world_.freeze_scope(snapshot.scope))
     {
         return false;
     }
@@ -226,6 +262,7 @@ bool GameplaySession::cancel_scene_load(SceneLoadId id)
     {
         physics_->release_scope(operation.snapshot.scope);
     }
+    release_domain_preparations(operation);
     if (animation_)
     {
         animation_->release_scope(operation.snapshot.scope);
@@ -257,6 +294,7 @@ bool GameplaySession::release_scene_load(SceneLoadId id)
     {
         return false;
     }
+    release_domain_preparations(*found->second);
     world_.release_scope(found->second->snapshot.scope);
     scene_loads_.erase(found);
     return true;
@@ -280,6 +318,7 @@ void GameplaySession::finish_scene_loads(GameplayStopCause cause, std::string_vi
         (void)key;
         if (terminal(operation->snapshot.state))
         {
+            release_domain_preparations(*operation);
             continue;
         }
         auto& snapshot = operation->snapshot;
@@ -292,6 +331,7 @@ void GameplaySession::finish_scene_loads(GameplayStopCause cause, std::string_vi
         snapshot.last_progress_ns = load_time();
         operation->resources.clear();
         operation->retained.clear();
+        release_domain_preparations(*operation);
         if (physics_)
         {
             physics_->release_scope(snapshot.scope);
@@ -329,6 +369,7 @@ void GameplaySession::step_scene_loads(const SceneWorkBudget& budget)
         const auto old_stages = snapshot.stages;
         const auto fail = [&](std::string code, std::string error)
         {
+            release_domain_preparations(op);
             snapshot.state = SceneLoadState::failed;
             snapshot.error_code = std::move(code);
             snapshot.error = std::move(error);
@@ -483,16 +524,84 @@ void GameplaySession::step_scene_loads(const SceneWorkBudget& budget)
                                        value.stages.end());
                 ready = ready &&
                         (state == SceneWorkState::ready || state == SceneWorkState::not_required);
-                if (state == SceneWorkState::failed)
+                if (state == SceneWorkState::failed || state == SceneWorkState::cancelled)
                 {
                     fail("preparation_failed",
                          value.stages.empty() ? "Cannot prepare scene" : value.stages.back().error);
                 }
             };
+            if (!op.domains_sealed)
+            {
+                op.domain_status.resize(scene_preparations_.size());
+                while (op.next_preparation < scene_preparations_.size())
+                {
+                    step.seconds = budget.seconds - (load_time() - started) * 1e-9;
+                    if (step.seconds <= 0)
+                    {
+                        break;
+                    }
+                    auto* preparation = scene_preparations_[op.next_preparation];
+                    const auto domain_state = preparation->prepare_scope(snapshot.scope, step);
+                    auto& status = op.domain_status[op.next_preparation];
+                    if (!preparation->scope_status(snapshot.scope, status) ||
+                        status.scope != snapshot.scope || status.state != domain_state)
+                    {
+                        fail("preparation_status_invalid", "Scene preparation status is invalid");
+                        break;
+                    }
+                    if (domain_state != SceneWorkState::ready &&
+                        domain_state != SceneWorkState::not_required)
+                    {
+                        break;
+                    }
+                    ++op.next_preparation;
+                }
+                for (const auto& status : op.domain_status)
+                {
+                    if (status.scope == snapshot.scope)
+                    {
+                        collect(status.state, status);
+                    }
+                }
+                ready = ready && op.next_preparation == scene_preparations_.size() &&
+                        snapshot.state != SceneLoadState::failed;
+                if (ready)
+                {
+                    if (!world_.seal_scope(snapshot.scope))
+                    {
+                        fail("seal_failed", "Cannot seal the expanded scene candidate");
+                        ready = false;
+                    }
+                    else
+                    {
+                        op.domains_sealed = true;
+                    }
+                }
+                else if (snapshot.state != SceneLoadState::failed)
+                {
+                    ready = false;
+                }
+            }
+            else
+            {
+                for (const auto& status : op.domain_status)
+                {
+                    collect(status.state, status);
+                }
+            }
             ScenePreparationSnapshot value;
-            auto state = world_.step_scope(snapshot.scope, step);
-            (void)world_.scope_status(snapshot.scope, value);
-            collect(state, value);
+            auto state = SceneWorkState::queued;
+            step.seconds = budget.seconds - (load_time() - started) * 1e-9;
+            if (ready && step.seconds > 0)
+            {
+                state = world_.step_scope(snapshot.scope, step);
+                (void)world_.scope_status(snapshot.scope, value);
+                collect(state, value);
+            }
+            else
+            {
+                ready = false;
+            }
             const auto prepare_domain = [&](auto* system)
             {
                 if (!ready || !system || snapshot.state == SceneLoadState::failed)

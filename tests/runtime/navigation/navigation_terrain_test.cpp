@@ -1,8 +1,8 @@
-#include "plugins/runtime/terrain/terrain_volume.hpp"
 #include "runtime/engine_config.hpp"
 #include "runtime/navigation/navigation_system.hpp"
 #include "runtime/task/task_system.hpp"
 #include "runtime/task/thread_system.hpp"
+#include "terrain_fixture.hpp"
 
 #include <algorithm>
 #include <array>
@@ -41,16 +41,9 @@ bool terrain_destruction_and_recovery()
     using engine::NavigationAgentStatus;
     using engine::plugins::terrain::TerrainVolume;
 
-    engine::schema::TerrainGeneratorDataT generator;
-    generator.cells_x = 48;
-    generator.cells_y = generator.cells_z = 16;
-    generator.voxel_size = 0.5F;
-    generator.chunk_cells = 16;
-    generator.origin = {-12, -4, -4};
-    generator.height = generator.amplitude = 0;
-
+    const engine::Bounds3 terrain_bounds{{-12, -4, -4}, {12, 4, 4}};
+    test_support::TerrainFixture baseline(terrain_bounds);
     TerrainVolume terrain;
-    engine::schema::TerrainAssetDataT baseline;
     engine::schema::MeshDataT mesh;
     std::string terrain_error;
     engine::NavigationSystem navigation(navigation_tasks);
@@ -58,11 +51,11 @@ bool terrain_destruction_and_recovery()
     const engine::NavigationBounds bounds{{-12, -4, -4}, {12, 4, 4}};
     engine::NavigationSettings settings;
     settings.tile_size = 16;
-    if (!expect(TerrainVolume::generate(generator, baseline, terrain_error) &&
-                    terrain.initialize(baseline, terrain_error) &&
-                    terrain.build_mesh(mesh, terrain_error) && !mesh.indices.empty() &&
-                    navigation.initialize({}) && navigation.build(geometry, bounds, settings) &&
-                    navigation.configure_crowd(5),
+    if (!expect(baseline.restore(terrain, terrain_error) &&
+                    test_support::terrain_navigation_mesh(terrain, terrain_bounds, mesh,
+                                                          terrain_error) &&
+                    !mesh.indices.empty() && navigation.initialize({}) &&
+                    navigation.build(geometry, bounds, settings) && navigation.configure_crowd(5),
                 "generated sampled terrain feeds its actual mesh into navigation", navigation,
                 terrain_error))
     {
@@ -135,20 +128,33 @@ bool terrain_destruction_and_recovery()
     const engine::NavigationBounds dirty{{-4.5, -4, -4}, {4.5, 4, 4}};
     for (const double z : std::array{-4.0, 0.0, 4.0})
     {
-        if (!expect(terrain.apply_sphere({0, -1.5, z}, 3.5F, false, terrain_error),
+        engine::plugins::terrain::TerrainReadSnapshot samples;
+        engine::plugins::terrain::TerrainDelta delta;
+        engine::plugins::terrain::TerrainEditSpec edit;
+        engine::schema::TerrainBrushDataT brush;
+        brush.center = {0, -1.5, z};
+        brush.extent = {3.5, 3.5, 3.5};
+        edit.brushes.push_back(brush);
+        engine::plugins::terrain::TerrainRegionQuery query;
+        query.bounds = terrain_bounds;
+        if (!expect(terrain.read(query, samples) &&
+                        TerrainVolume::stage_edit(samples, edit, delta, terrain_error) &&
+                        terrain.validate_delta(delta),
                     "real density brushes carve a continuous trench", navigation, terrain_error))
         {
             return false;
         }
+        terrain.publish(std::move(delta));
     }
     const auto before_cut = navigation.revision();
-    if (!expect(terrain.build_mesh(mesh, terrain_error) && navigation.replace(geometry, dirty) &&
-                    navigation.revision() > before_cut && navigation.rebuilt_tiles() > 0 &&
-                    navigation.rebuilt_tiles() < full_tiles &&
-                    !navigation.find_path({-9, 0, 0}, {9, 0, 0}, path) && path.empty() &&
-                    navigation.find_path({-9, 0, 0}, {-6, 0, 0}, path),
-                "local replacement cuts the route while preserving unaffected terrain tiles",
-                navigation, terrain_error))
+    if (!expect(
+            test_support::terrain_navigation_mesh(terrain, terrain_bounds, mesh, terrain_error) &&
+                navigation.replace(geometry, dirty) && navigation.revision() > before_cut &&
+                navigation.rebuilt_tiles() > 0 && navigation.rebuilt_tiles() < full_tiles &&
+                !navigation.find_path({-9, 0, 0}, {9, 0, 0}, path) && path.empty() &&
+                navigation.find_path({-9, 0, 0}, {-6, 0, 0}, path),
+            "local replacement cuts the route while preserving unaffected terrain tiles",
+            navigation, terrain_error))
     {
         return false;
     }
@@ -221,8 +227,9 @@ bool terrain_destruction_and_recovery()
 
     const auto blocked = states;
     const auto before_fill = navigation.revision();
-    if (!expect(terrain.initialize(baseline, terrain_error) &&
-                    terrain.build_mesh(mesh, terrain_error) &&
+    if (!expect(baseline.restore(terrain, terrain_error) &&
+                    test_support::terrain_navigation_mesh(terrain, terrain_bounds, mesh,
+                                                          terrain_error) &&
                     navigation.replace(geometry, dirty) && navigation.revision() > before_fill &&
                     navigation.rebuilt_tiles() > 0 && navigation.rebuilt_tiles() < full_tiles &&
                     navigation.find_path({-9, 0, 0}, {9, 0, 0}, path),

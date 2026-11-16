@@ -5,7 +5,7 @@
 namespace engine::editor::asset_pipeline::control_toml
 {
 using Json = nlohmann::json;
-inline bool read(const toml::table& table, Json& output, std::string& error)
+inline bool read_table(const toml::table& table, Json& output, std::string& error)
 {
     std::ostringstream stream;
     stream << toml::json_formatter(table);
@@ -13,6 +13,15 @@ inline bool read(const toml::table& table, Json& output, std::string& error)
     if (output.is_discarded())
     {
         error = "Invalid control TOML";
+        return false;
+    }
+    return true;
+}
+// Component flags belong to the outer record, never to nested settings.
+inline bool read_component(const toml::table& table, Json& output, std::string& error)
+{
+    if (!read_table(table, output, error))
+    {
         return false;
     }
     output.erase("type");

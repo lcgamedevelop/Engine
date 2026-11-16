@@ -1,5 +1,8 @@
 # 按范围准备、首帧与截图
 
+[RVT 图](runtime-virtual-texture.md)定义页面需求/缓存版本及查看器帧证据；
+继续使用本页同一截图请求和回读链路。
+
 [类图索引](../../class-diagrams/index.md) · [场景加载与状态](scene-loading.md) · [当前渲染系统](render-system.md) · [运行时 MCP 测试](../../plugins/runtime/class-diagrams/mcp-runtime-test.md)
 
 场景切入、失败收尾及截图共用普通运行时的范围准备和实际帧身份；平台验证与限制集中见[测试文档](../../testing.md)。

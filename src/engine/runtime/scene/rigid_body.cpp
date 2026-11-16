@@ -84,6 +84,8 @@ bool RigidBody::set_settings(const schema::RigidBodyDataT& value) noexcept
     if (value.motion != schema::BodyMotion::dynamic)
     {
         runtime()->pending_impulse_ = {};
+        runtime()->synchronized_collider_ = 0;
+        runtime()->sleep_requested_ = false;
     }
     return true;
 }
@@ -104,6 +106,8 @@ bool RigidBody::restore_data(const schema::ComponentDataT& value)
         return false;
     }
     runtime()->pending_impulse_ = {};
+    runtime()->synchronized_collider_ = 0;
+    runtime()->sleep_requested_ = false;
     if (!restore_flags(value))
     {
         return false;
@@ -157,6 +161,32 @@ Vec3 RigidBody::linear_velocity() const noexcept
     }
     const auto* data = read_data<Data>();
     return data ? data->linear_velocity : Vec3{};
+}
+
+bool RigidBody::get_sleeping(bool& output) const noexcept
+{
+    output = false;
+    Data data;
+    const auto collider = node().get_component<Collider>();
+    if (!active() || !get_settings(data) || data.motion != schema::BodyMotion::dynamic ||
+        !collider.active() || runtime()->synchronized_collider_ != collider.instance_id())
+    {
+        return false;
+    }
+    output = runtime()->sleeping_;
+    return true;
+}
+
+bool RigidBody::set_sleeping(bool sleeping) noexcept
+{
+    Data data;
+    if (!writable() || !get_settings(data) || data.motion != schema::BodyMotion::dynamic)
+    {
+        return false;
+    }
+    runtime()->requested_sleeping_ = sleeping;
+    runtime()->sleep_requested_ = true;
+    return true;
 }
 
 } // namespace engine

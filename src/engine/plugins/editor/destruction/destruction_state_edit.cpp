@@ -27,12 +27,13 @@ DestructionStateEdit::DestructionStateEdit(WorldSystem& world, std::uint64_t sce
                                            std::shared_ptr<std::uint64_t> node,
                                            std::shared_ptr<std::uint64_t> revision,
                                            schema::ComponentDataT settings, ByteBuffer before,
-                                           std::shared_ptr<std::uint64_t> support, float max_gap,
-                                           float min_coverage)
+                                           std::vector<std::shared_ptr<std::uint64_t>> supports,
+                                           float max_gap, float min_coverage)
     : DestructionStateEdit(world, scene, std::move(node), std::move(revision), std::move(settings),
                            std::move(before), false, {}, 0, 0, 0)
 {
-    support_ = std::move(support);
+    supports_ = std::move(supports);
+    support_refresh_ = true;
     max_gap_ = max_gap;
     min_coverage_ = min_coverage;
 }
@@ -100,18 +101,22 @@ bool DestructionStateEdit::apply(std::string& error)
                 return true;
             }
         }
-        else if (support_)
+        else if (support_refresh_)
         {
-            const auto support_node = component.node().scene()->find_node(*support_);
-            const auto collider =
-                support_node ? support_node.get_component<Collider>() : Collider{};
-            if (!collider)
+            std::vector<Collider> supports;
+            for (const auto& identity : supports_)
             {
-                error = "Foundation support collider no longer exists";
-                return false;
+                const auto collider =
+                    component.node().scene()->find_node(*identity).get_component<Collider>();
+                if (!collider)
+                {
+                    error = "Foundation support collider no longer exists";
+                    return false;
+                }
+                supports.push_back(collider);
             }
             const auto before_revision = component.revision();
-            applied = component.refresh_support(collider, max_gap_, min_coverage_);
+            applied = component.refresh_support(supports, max_gap_, min_coverage_);
             no_change_ = applied && component.revision() == before_revision;
             if (no_change_)
             {

@@ -42,7 +42,7 @@ bool SceneResourceCodec::decode(const schema::AssetEntryT& entry, ByteView paylo
 bool SceneResourceCodec::validate_data(const Resource& resource, std::string& error) const
 {
     const auto* data = resource_detail::data<ResourceType>(&resource);
-    if (!data || !(!resource.info().path.starts_with("builtin://") && data->schema_version == 4 &&
+    if (!data || !(!resource.info().path.starts_with("builtin://") && data->schema_version == 5 &&
                    data->info && validate_nodes(resource, data->nodes)))
     {
         error = "Invalid Scene data or declared dependencies";
@@ -112,8 +112,8 @@ bool SceneResourceCodec::validate_nodes(
             {
                 if ((!terrain->terrain_guid.empty() &&
                      !declares(resource, terrain->terrain_guid)) ||
-                    (!terrain->material_guid.empty() &&
-                     !declares(resource, terrain->material_guid)))
+                    (!terrain->surface_material_guid.empty() &&
+                     !declares(resource, terrain->surface_material_guid)))
                 {
                     return false;
                 }
@@ -267,10 +267,10 @@ bool SceneResourceCodec::validate_node_dependencies(
             if (const auto* terrain = component->payload.AsTerrainData())
             {
                 const auto* value = dependency(dependencies, terrain->terrain_guid);
-                const auto* material = dependency(dependencies, terrain->material_guid);
+                const auto* material = dependency(dependencies, terrain->surface_material_guid);
                 if ((!terrain->terrain_guid.empty() &&
                      (!value || value->kind() != schema::AssetKind::terrain)) ||
-                    (!terrain->material_guid.empty() &&
+                    (!terrain->surface_material_guid.empty() &&
                      !resource_detail::data<MaterialResource>(material)))
                 {
                     return false;

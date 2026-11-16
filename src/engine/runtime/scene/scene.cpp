@@ -86,8 +86,11 @@ Node Scene::create_node(std::string_view name, std::uint64_t local_id)
 {
     flecs::world current(world_.native_world());
     const auto* scope = current.entity(metadata_entity_).try_get<ecs_detail::ScopeState>();
-    if ((scope && scope->sealed && !scope->simulating) || !world_.can_modify() || !mutable_info() ||
-        local_id == 0 || local_node_index_.contains(local_id) ||
+    const bool leased = scope && !scope->sealed && ecs_detail::preparing_epoch == world_.epoch() &&
+                        ecs_detail::preparing_scope == scope->scope;
+    if ((scope && (scope->sealed || scope->frozen) && !scope->simulating && !leased) ||
+        !world_.can_modify() || !mutable_info() || local_id == 0 ||
+        local_node_index_.contains(local_id) ||
         order_sequence_ == std::numeric_limits<std::uint64_t>::max())
     {
         return {};
@@ -207,6 +210,13 @@ bool Scene::collect_nodes(std::vector<Node>& output) const
     for (const auto& [local_id, id] : local_node_index_)
     {
         (void)local_id;
+        // Append preparation reserves identities in the destination before publication.
+        // Such nodes are valid candidates, but do not belong to its visible snapshot yet.
+        if (published_ && ecs_is_alive(world_.native_world(), id) &&
+            !current.entity(id).has<ecs_detail::Published>())
+        {
+            continue;
+        }
         const auto node = find_node(id);
         if (!node)
         {
@@ -309,7 +319,10 @@ bool Scene::set_active_camera(Camera camera) noexcept
     auto* info = mutable_info();
     flecs::world current(world_.native_world());
     const auto* scope = current.entity(metadata_entity_).try_get<ecs_detail::ScopeState>();
-    if ((scope && scope->sealed && !scope->simulating) || !world_.can_modify() || !info ||
+    const bool leased = scope && !scope->sealed && ecs_detail::preparing_epoch == world_.epoch() &&
+                        ecs_detail::preparing_scope == scope->scope;
+    if ((scope && (scope->sealed || scope->frozen) && !scope->simulating && !leased) ||
+        !world_.can_modify() || !info ||
         (camera.instance_id() != 0 && (!camera || camera.node().scene() != this)))
     {
         return false;
@@ -337,7 +350,7 @@ bool Scene::build_data(schema::SceneDataT& output) const
         return false;
     }
     schema::SceneDataT snapshot;
-    snapshot.schema_version = 4;
+    snapshot.schema_version = 5;
     snapshot.info = std::make_unique<schema::SceneInfoT>(*info);
     for (const auto node : nodes)
     {
@@ -403,7 +416,7 @@ bool Scene::build_data(schema::SceneDataT& output) const
 }
 bool Scene::restore_data(const schema::SceneDataT& data)
 {
-    if (!empty() || data.schema_version != 4 || !data.info)
+    if (!empty() || data.schema_version != 5 || !data.info)
     {
         return false;
     }

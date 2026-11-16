@@ -489,7 +489,7 @@ void pose(const Arguments& arguments)
     {
         model.emplace_back(element);
     }
-    for (const float element : output.world)
+    for (const double element : output.world)
     {
         world.emplace_back(element);
     }

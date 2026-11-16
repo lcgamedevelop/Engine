@@ -1,56 +1,42 @@
 #pragma once
 
+#include "plugins/runtime/terrain/terrain_component.hpp"
+#include "plugins/runtime/terrain/terrain_mesher.hpp"
+#include "runtime/scene/scene_preparation.hpp"
 #include "runtime/system/system.hpp"
 
-#include <cstddef>
-#include <cstdint>
-#include <functional>
 #include <map>
 #include <memory>
-#include <set>
-#include <vector>
+#include <variant>
 
 namespace engine
 {
 class WorldSystem;
-class PhysicsSystem;
+class ResourceLoader;
 class TaskSystem;
-namespace schema
-{
-struct Vec3;
-struct MeshDataT;
-} // namespace schema
+class RenderSystem;
+class PhysicsSystem;
 } // namespace engine
 
 namespace engine::plugins::terrain
 {
-class TerrainComponent;
-class TerrainVolume;
+using TerrainRequest = std::variant<TerrainEditSpec, TerrainCollapseSpec, TerrainResetSpec,
+                                    TerrainRetireSpec, TerrainSaveSpec, TerrainLoadSpec>;
 
-class TerrainSystem final : public System
+class TerrainSystem final : public System, public ScenePreparation
 {
 public:
-    // Borrowed world/physics must outlive this system. Called synchronously at frame boundaries.
-    TerrainSystem(WorldSystem& world, PhysicsSystem& physics, TaskSystem* tasks = nullptr,
-                  std::size_t max_pending_requests = 64,
-                  std::size_t max_commits_per_tick = 1) noexcept;
+    TerrainSystem(WorldSystem& world, ResourceLoader& resources, TaskSystem& tasks,
+                  RenderSystem& renderer, PhysicsSystem& physics,
+                  std::unique_ptr<TerrainRegionPlanner> planner,
+                  std::unique_ptr<TerrainMesher> mesher) noexcept;
     ~TerrainSystem() noexcept override;
-    [[nodiscard]] static TerrainSystem* instance() noexcept;
-    [[nodiscard]] bool commit(TerrainComponent component, TerrainVolume candidate);
-    // true 仅表示排队；完成委托由 synchronize/tick 在主线程调用，取消结果为 false。
-    // 不接受无任务域或空委托；关闭丢弃委托，后台候选不借用场景/组件。
-    [[nodiscard]] bool request_apply_sphere(TerrainComponent component, const schema::Vec3& center,
-                                            float radius, bool fill,
-                                            std::function<void(bool)> completed);
-    [[nodiscard]] bool collapse_detached(TerrainComponent component, std::uint32_t min_samples,
-                                         std::uint32_t max_fragments, std::uint32_t fragment_cells,
-                                         float density);
-    // 主线程物理安全点；失败输出清零，保留全部碎块和源密度。
-    [[nodiscard]] bool retire_fragments(TerrainComponent component, std::uint32_t max_count,
-                                        double max_age_seconds, std::uint32_t& retired_count);
-    void clear_fragments(TerrainComponent component) noexcept;
-    [[nodiscard]] std::size_t fragment_count(TerrainComponent component) const noexcept;
     [[nodiscard]] bool synchronize();
+    [[nodiscard]] SceneWorkState prepare_scope(SceneScopeId scope,
+                                               const SceneWorkBudget& budget) override;
+    [[nodiscard]] bool scope_status(SceneScopeId scope,
+                                    ScenePreparationSnapshot& output) const override;
+    void release_scope(SceneScopeId scope) noexcept override;
 
 protected:
     [[nodiscard]] bool on_initialize(const EngineConfig& config) override;
@@ -58,30 +44,19 @@ protected:
     void on_shutdown() noexcept override;
 
 private:
-    [[nodiscard]] bool commit_prepared(TerrainComponent component, TerrainVolume candidate,
-                                       schema::MeshDataT mesh);
-    void process_requests();
-    struct AsyncState;
-    struct Fragment
-    {
-        std::uint64_t node = 0;
-        std::uint64_t collider_instance = 0;
-        double published_at = 0;
-    };
-    struct Fragments
-    {
-        std::weak_ptr<const std::uint8_t> owner;
-        std::vector<Fragment> items;
-    };
+    friend class TerrainComponent;
+    [[nodiscard]] bool request(TerrainComponent component, TerrainRequest request,
+                               TerrainOperationId& output);
+    [[nodiscard]] bool update(TerrainComponent component, SceneScopeId scope,
+                              const SceneWorkBudget& budget);
     WorldSystem& world_;
+    ResourceLoader& resources_;
+    TaskSystem& tasks_;
+    RenderSystem& renderer_;
     PhysicsSystem& physics_;
-    TaskSystem* tasks_ = nullptr;
-    std::size_t max_pending_requests_ = 64;
-    std::size_t max_commits_per_tick_ = 1;
-    std::unique_ptr<AsyncState> async_;
-    std::set<std::uint64_t> generated_;
-    std::map<std::uint64_t, Fragments> fragments_;
+    std::unique_ptr<TerrainRegionPlanner> planner_;
+    std::shared_ptr<TerrainMesher> mesher_;
+    std::map<SceneScopeId, ScenePreparationSnapshot> scopes_;
     double simulation_time_ = 0;
 };
-
 } // namespace engine::plugins::terrain

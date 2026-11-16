@@ -31,6 +31,18 @@ public:
     {
         return capture_height_;
     }
+    [[nodiscard]] bgfx::FrameBufferHandle target() const noexcept
+    {
+        return target_;
+    }
+    [[nodiscard]] std::uint16_t width() const noexcept
+    {
+        return width_;
+    }
+    [[nodiscard]] std::uint16_t height() const noexcept
+    {
+        return height_;
+    }
     void release() noexcept;
 
 private:

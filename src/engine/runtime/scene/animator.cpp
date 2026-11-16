@@ -529,7 +529,7 @@ bool Animator::get_bone_pose(std::string_view path, AnimationPoseTransform& outp
         return false;
     }
     const auto found = std::find(paths.begin(), paths.end(), path);
-    std::array<float, 16> mesh_world;
+    std::array<double, 16> mesh_world;
     ozz::math::Float4x4 inverse;
     if (found == paths.end() || !node().get_component<Transform>().world_matrix(mesh_world.data()))
     {
@@ -543,9 +543,9 @@ bool Animator::get_bone_pose(std::string_view path, AnimationPoseTransform& outp
         return false;
     }
     output.model = runtime()->committed_models_[static_cast<std::size_t>(found - paths.begin())];
-    animation_detail::store_matrix(animation_detail::load_matrix(mesh_world) * inverse *
-                                       animation_detail::load_matrix(output.model),
-                                   output.world);
+    const auto local =
+        animation_detail::double_matrix(inverse * animation_detail::load_matrix(output.model));
+    transform_math::multiply(mesh_world.data(), local.data(), output.world.data());
     output.pose_revision = runtime()->pose_revision_;
     return true;
 }
@@ -570,8 +570,8 @@ bool Animator::get_socket_pose(std::string_view name, AnimationPoseTransform& ou
             const auto offset = animation_detail::pose_matrix(socket->offset);
             animation_detail::store_matrix(animation_detail::load_matrix(bone.model) * offset,
                                            output.model);
-            animation_detail::store_matrix(animation_detail::load_matrix(bone.world) * offset,
-                                           output.world);
+            const auto local = animation_detail::double_matrix(offset);
+            transform_math::multiply(bone.world.data(), local.data(), output.world.data());
             output.pose_revision = bone.pose_revision;
             return true;
         }

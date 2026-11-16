@@ -1,513 +1,391 @@
 #include "plugins/runtime/terrain/terrain_volume.hpp"
 
+#include "plugins/runtime/terrain/terrain_samples.hpp"
+#include "runtime/core/guid_map.hpp"
 #include "runtime/performance/profiling.hpp"
-
-// Eric Lengyel's official regular-cell tables, pinned by the transvoxel submodule.
-// The upstream file contains its table types as well as the data; keep it unmodified.
-#include <Transvoxel.cpp>
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cmath>
 #include <limits>
-#include <span>
+#include <set>
 #include <utility>
 
 namespace engine::plugins::terrain
 {
 namespace
 {
-using Data = schema::TerrainAssetDataT;
-constexpr std::size_t max_samples = 4U * 1024U * 1024U;
-constexpr unsigned collision_cells = 4;
+using namespace terrain_detail;
+constexpr std::size_t maximum_edit_regions = 256;
+constexpr std::size_t maximum_brushes = 64;
 
-struct CollisionCellRange
+bool block_valid(const schema::TerrainAssetDataT& source, const schema::TerrainBlockDataT& block)
 {
-    std::uint32_t part = 0;
-    std::uint32_t vertex_begin = 0;
-    std::uint32_t vertex_count = 0;
-    std::uint32_t index_begin = 0;
-    std::uint32_t index_count = 0;
-};
-
-std::size_t collision_parts_per_chunk(const Data& data)
-{
-    const std::size_t axis = data.chunk_cells / collision_cells;
-    return axis * axis * axis;
+    const auto count =
+        static_cast<std::size_t>(source.block_cells) * source.block_cells * source.block_cells;
+    const auto* region = entry(source, block.key);
+    const auto samples = block.uniform ? std::size_t{1} : count;
+    return block.schema_version == 2 && region &&
+           region->uniform != schema::TerrainUniformState::unknown &&
+           block.density.size() == samples && block.layers.size() == samples &&
+           std::all_of(block.density.begin(), block.density.end(),
+                       [](float v) { return std::isfinite(v); }) &&
+           std::all_of(block.layers.begin(), block.layers.end(), [&](const auto& layer)
+                       { return layer_valid(layer, source.material_layers.size()); });
 }
 
-bool finite(const schema::Vec3& v)
+Bounds3 brush_bounds(const schema::TerrainBrushDataT& brush)
 {
-    return std::isfinite(v.x()) && std::isfinite(v.y()) && std::isfinite(v.z());
+    return {{brush.center.x() - brush.extent.x(), brush.center.y() - brush.extent.y(),
+             brush.center.z() - brush.extent.z()},
+            {brush.center.x() + brush.extent.x(), brush.center.y() + brush.extent.y(),
+             brush.center.z() + brush.extent.z()}};
 }
 
-std::size_t offset(const Data& d, unsigned x, unsigned y, unsigned z)
+bool brush_valid(const schema::TerrainBrushDataT& brush, const schema::TerrainAssetDataT& source)
 {
-    return (static_cast<std::size_t>(z) * (d.cells_y + 1) + y) * (d.cells_x + 1) + x;
+    return finite(brush.center) && finite(brush.extent) && brush.extent.x() > 0 &&
+           brush.extent.y() > 0 && brush.extent.z() > 0 && std::isfinite(brush.strength) &&
+           brush.strength > 0 && brush.strength <= 1 &&
+           brush.shape >= schema::TerrainBrushShape::MIN &&
+           brush.shape <= schema::TerrainBrushShape::MAX &&
+           brush.operation >= schema::TerrainBrushOperation::MIN &&
+           brush.operation <= schema::TerrainBrushOperation::MAX &&
+           (brush.shape != schema::TerrainBrushShape::sphere ||
+            (brush.extent.x() == brush.extent.y() && brush.extent.x() == brush.extent.z())) &&
+           layer_valid(brush.layer, source.material_layers.size());
 }
 
-float sample(const Data& d, int x, int y, int z)
+float signed_distance(const schema::TerrainBrushDataT& brush, Vec3 point)
 {
-    return d.density[offset(d, std::clamp(x, 0, static_cast<int>(d.cells_x)),
-                            std::clamp(y, 0, static_cast<int>(d.cells_y)),
-                            std::clamp(z, 0, static_cast<int>(d.cells_z)))];
-}
-
-schema::Vec3 gradient(const Data& d, int x, int y, int z)
-{
-    return {sample(d, x + 1, y, z) - sample(d, x - 1, y, z),
-            sample(d, x, y + 1, z) - sample(d, x, y - 1, z),
-            sample(d, x, y, z + 1) - sample(d, x, y, z - 1)};
-}
-
-bool dimensions(const Data& d)
-{
-    if ((d.chunk_cells != 16 && d.chunk_cells != 32) || d.cells_x == 0 || d.cells_y == 0 ||
-        d.cells_z == 0 || d.cells_x > 256 || d.cells_y > 256 || d.cells_z > 256 ||
-        d.cells_x % d.chunk_cells || d.cells_y % d.chunk_cells || d.cells_z % d.chunk_cells ||
-        !std::isfinite(d.voxel_size) || d.voxel_size < 0.05F || d.voxel_size > 100.0F ||
-        !finite(d.origin))
+    const double x = std::abs(point.x() - brush.center.x());
+    const double y = std::abs(point.y() - brush.center.y());
+    const double z = std::abs(point.z() - brush.center.z());
+    if (brush.shape == schema::TerrainBrushShape::sphere)
     {
-        return false;
+        return static_cast<float>(std::hypot(x, y, z) - brush.extent.x());
     }
-    return static_cast<std::size_t>(d.cells_x + 1) * (d.cells_y + 1) * (d.cells_z + 1) <=
-           max_samples;
+    const double dx = x - brush.extent.x(), dy = y - brush.extent.y(), dz = z - brush.extent.z();
+    return static_cast<float>(std::hypot(std::max(dx, 0.0), std::max(dy, 0.0), std::max(dz, 0.0)) +
+                              std::min(std::max({dx, dy, dz}), 0.0));
 }
 
-bool boundary(const Data& d, unsigned x, unsigned y, unsigned z)
+using BrushFunction = float (*)(float value, float distance, double height, float smooth);
+float dig(float value, float distance, double, float)
 {
-    return x == 0 || y == 0 || z == 0 || x == d.cells_x || y == d.cells_y || z == d.cells_z;
+    return std::max(value, -distance);
 }
+float fill(float value, float distance, double, float)
+{
+    return std::min(value, distance);
+}
+float flatten(float value, float distance, double height, float)
+{
+    return distance <= 0 ? static_cast<float>(height) : value;
+}
+float smooth(float value, float distance, double, float average)
+{
+    return distance <= 0 ? average : value;
+}
+float paint(float value, float, double, float)
+{
+    return value;
+}
+constexpr std::array<BrushFunction, 5> brush_functions{dig, fill, flatten, smooth, paint};
 
-float nonzero(float v)
-{
-    return std::abs(v) < 0.00001F ? 0.00001F : v;
-}
-
-bool same_geometry(const schema::MeshDataT& a, const schema::MeshDataT& b)
-{
-    ENGINE_PROFILE_ZONE("Terrain.collision_compare");
-    if (a.vertices.size() != b.vertices.size() || a.indices != b.indices)
-    {
-        return false;
-    }
-    for (std::size_t i = 0; i < a.vertices.size(); ++i)
-    {
-        const auto& x = a.vertices[i];
-        const auto& y = b.vertices[i];
-        if (x.x() != y.x() || x.y() != y.y() || x.z() != y.z())
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
-void mesh_chunk(const Data& d, unsigned cx, unsigned cy, unsigned cz, schema::MeshDataT& mesh,
-                std::vector<CollisionCellRange>& ranges)
-{
-    ENGINE_PROFILE_ZONE("Terrain.mesh_chunk");
-    mesh = {};
-    mesh.path = "builtin://terrain/transient.mesh";
-    ranges.clear();
-    const unsigned part_axis = d.chunk_cells / collision_cells;
-    for (unsigned z = cz; z < cz + d.chunk_cells; ++z)
-    {
-        for (unsigned y = cy; y < cy + d.chunk_cells; ++y)
-        {
-            for (unsigned x = cx; x < cx + d.chunk_cells; ++x)
-            {
-                std::array<float, 8> values{};
-                std::array<schema::Vec3, 8> normals{};
-                unsigned mask = 0;
-                for (unsigned c = 0; c < 8; ++c)
-                {
-                    const unsigned px = x + (c & 1U);
-                    const unsigned py = y + ((c >> 1U) & 1U);
-                    const unsigned pz = z + ((c >> 2U) & 1U);
-                    values[c] = d.density[offset(d, px, py, pz)];
-                    normals[c] = gradient(d, px, py, pz);
-                    if (values[c] < 0)
-                    {
-                        mask |= 1U << c;
-                    }
-                }
-                const auto& cell = regularCellData[regularCellClass[mask]];
-                const auto base = static_cast<std::uint32_t>(mesh.vertices.size());
-                const auto index_begin = static_cast<std::uint32_t>(mesh.indices.size());
-                for (long v = 0; v < cell.GetVertexCount(); ++v)
-                {
-                    const unsigned edge = regularVertexData[mask][v];
-                    const unsigned a = (edge >> 4U) & 15U;
-                    const unsigned b = edge & 15U;
-                    const double t = values[a] / static_cast<double>(values[a] - values[b]);
-                    const auto interpolate = [t](double first, double second)
-                    { return first + t * (second - first); };
-                    double nx = interpolate(normals[a].x(), normals[b].x());
-                    double ny = interpolate(normals[a].y(), normals[b].y());
-                    double nz = interpolate(normals[a].z(), normals[b].z());
-                    const double length = std::sqrt(nx * nx + ny * ny + nz * nz);
-                    if (length > 1.0e-12)
-                    {
-                        nx /= length;
-                        ny /= length;
-                        nz /= length;
-                    }
-                    else
-                    {
-                        nx = 0;
-                        ny = 1;
-                        nz = 0;
-                    }
-                    mesh.vertices.emplace_back(
-                        static_cast<float>(d.origin.x() +
-                                           d.voxel_size * (x + interpolate(a & 1U, b & 1U))),
-                        static_cast<float>(d.origin.y() +
-                                           d.voxel_size *
-                                               (y + interpolate((a >> 1U) & 1U, (b >> 1U) & 1U))),
-                        static_cast<float>(d.origin.z() +
-                                           d.voxel_size *
-                                               (z + interpolate((a >> 2U) & 1U, (b >> 2U) & 1U))),
-                        static_cast<float>(nx), static_cast<float>(ny), static_cast<float>(nz));
-                }
-                for (long i = 0; i < cell.GetTriangleCount() * 3; i += 3)
-                {
-                    auto ia = base + cell.vertexIndex[i];
-                    auto ib = base + cell.vertexIndex[i + 1];
-                    auto ic = base + cell.vertexIndex[i + 2];
-                    const auto& a = mesh.vertices[ia];
-                    const auto& b = mesh.vertices[ib];
-                    const auto& c = mesh.vertices[ic];
-                    const double abx = b.x() - a.x(), aby = b.y() - a.y(), abz = b.z() - a.z();
-                    const double acx = c.x() - a.x(), acy = c.y() - a.y(), acz = c.z() - a.z();
-                    const double nx = aby * acz - abz * acy;
-                    const double ny = abz * acx - abx * acz;
-                    const double nz = abx * acy - aby * acx;
-                    if (nx * nx + ny * ny + nz * nz < 1.0e-18)
-                    {
-                        continue;
-                    }
-                    if (nx * (a.nx() + b.nx() + c.nx()) + ny * (a.ny() + b.ny() + c.ny()) +
-                            nz * (a.nz() + b.nz() + c.nz()) <
-                        0)
-                    {
-                        std::swap(ib, ic);
-                    }
-                    mesh.indices.insert(mesh.indices.end(), {ia, ib, ic});
-                }
-                if (cell.GetVertexCount() != 0)
-                {
-                    const unsigned px = (x - cx) / collision_cells;
-                    const unsigned py = (y - cy) / collision_cells;
-                    const unsigned pz = (z - cz) / collision_cells;
-                    const auto vertex_count = static_cast<std::uint32_t>(cell.GetVertexCount());
-                    const auto index_end = static_cast<std::uint32_t>(mesh.indices.size());
-                    ranges.push_back({(pz * part_axis + py) * part_axis + px, base, vertex_count,
-                                      index_begin, index_end - index_begin});
-                }
-            }
-        }
-    }
-}
-
-void prepare_collision(const schema::MeshDataT& mesh, const std::vector<CollisionCellRange>& ranges,
-                       std::span<std::shared_ptr<const schema::MeshDataT>> collision)
-{
-    ENGINE_PROFILE_ZONE("Terrain.prepare_collision");
-    std::vector<schema::MeshDataT> parts(collision.size());
-    for (const auto& range : ranges)
-    {
-        auto& part = parts[range.part];
-        const auto base = static_cast<std::uint32_t>(part.vertices.size());
-        const auto begin = mesh.vertices.begin() + range.vertex_begin;
-        part.vertices.insert(part.vertices.end(), begin, begin + range.vertex_count);
-        for (std::uint32_t i = 0; i < range.index_count; ++i)
-        {
-            part.indices.push_back(base + mesh.indices[range.index_begin + i] - range.vertex_begin);
-        }
-    }
-    for (std::size_t i = 0; i < parts.size(); ++i)
-    {
-        auto& previous = collision[i];
-        auto& part = parts[i];
-        if (part.indices.empty())
-        {
-            previous.reset();
-        }
-        else if (!previous || !same_geometry(*previous, part))
-        {
-            part.path = "builtin://terrain/transient.mesh";
-            previous = std::make_shared<const schema::MeshDataT>(std::move(part));
-        }
-    }
-}
 } // namespace
 
-bool TerrainVolume::validate(const Data& data, std::string& error)
+bool TerrainVolume::validate(const schema::TerrainAssetDataT& source, std::string& error)
 {
     error.clear();
-    if (data.schema_version != 1 || !dimensions(data) ||
-        data.density.size() !=
-            static_cast<std::size_t>(data.cells_x + 1) * (data.cells_y + 1) * (data.cells_z + 1))
+    if (source.schema_version != 2 || !finite(source.origin) || !valid_bounds(source.bounds) ||
+        !std::isfinite(source.voxel_size) || source.voxel_size < 0.01 || source.voxel_size > 1024 ||
+        (source.block_cells != 8 && source.block_cells != 16 && source.block_cells != 32) ||
+        source.regions.empty() || source.regions.size() > 4U * 1024U * 1024U ||
+        source.material_layers.size() > 256 ||
+        (!source.surface_material.empty() && !GuidMap::valid_guid(source.surface_material)))
     {
-        error = "Terrain requires bounded dimensions, 16/32-cell chunks and complete samples";
+        error = "Invalid terrain index version, bounds, scale or capacity";
         return false;
     }
-    for (float v : data.density)
+    const schema::TerrainRegionEntryT* previous = nullptr;
+    for (const auto& region : source.regions)
     {
-        if (!std::isfinite(v) || std::abs(v) > 1000000.0F)
+        if (!region || region->key.lod() > 15 ||
+            (previous && !TerrainRegionLess{}(previous->key, region->key)) ||
+            !intersects(source.bounds, region_bounds(source, region->key)) ||
+            region->uniform < schema::TerrainUniformState::MIN ||
+            region->uniform > schema::TerrainUniformState::MAX)
         {
-            error = "Terrain density is not finite or exceeds supported range";
+            error = "Terrain regions must have unique sorted keys inside the declared bounds";
+            return false;
+        }
+        if (region->uniform == schema::TerrainUniformState::mixed)
+        {
+            if (!GuidMap::valid_guid(region->payload) || region->content_hash.size() != 16 ||
+                !std::all_of(region->content_hash.begin(), region->content_hash.end(), [](char c)
+                             { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }))
+            {
+                error = "Mixed terrain regions require a payload GUID and catalog content hash";
+                return false;
+            }
+        }
+        else if (!region->payload.empty() || !region->content_hash.empty())
+        {
+            error = "Uniform or unknown terrain regions cannot reference a payload";
+            return false;
+        }
+        previous = region.get();
+    }
+    for (const auto& material : source.material_layers)
+    {
+        if (!GuidMap::valid_guid(material))
+        {
+            error = "Invalid terrain material layer GUID";
             return false;
         }
     }
     return true;
 }
 
-bool TerrainVolume::generate(const schema::TerrainGeneratorDataT& settings, Data& output,
-                             std::string& error)
+bool TerrainVolume::initialize(const schema::TerrainAssetDataT& source, std::string& error)
 {
-    ENGINE_PROFILE_ZONE("Terrain.generate");
-    output = {};
-    error.clear();
-    Data data;
-    data.cells_x = settings.cells_x;
-    data.cells_y = settings.cells_y;
-    data.cells_z = settings.cells_z;
-    data.voxel_size = settings.voxel_size;
-    data.chunk_cells = settings.chunk_cells;
-    data.origin = settings.origin;
-    if (!dimensions(data) || !std::isfinite(settings.height) ||
-        !std::isfinite(settings.amplitude) || settings.amplitude < 0 ||
-        settings.amplitude > 10000 || !std::isfinite(settings.frequency) ||
-        settings.frequency <= 0 || settings.frequency > 10 || settings.cavities.size() > 1024)
+    if (!validate(source, error))
     {
-        error = "Invalid terrain generation settings";
         return false;
     }
-    for (const auto& sphere : settings.cavities)
+    auto candidate = std::make_shared<const schema::TerrainAssetDataT>(source);
+    source_ = std::move(candidate);
+    blocks_.clear();
+    revision_ = 1;
+    return true;
+}
+
+bool TerrainVolume::stage_regions(std::span<const schema::TerrainBlockDataT> blocks,
+                                  std::span<const TerrainRegionKey> retire, TerrainDelta& output,
+                                  std::string& error) const
+{
+    output = {};
+    error.clear();
+    if (!source_ || blocks.size() + retire.size() > maximum_edit_regions || revision_ == UINT64_MAX)
     {
-        if (!sphere || !finite(sphere->center) || !std::isfinite(sphere->radius) ||
-            sphere->radius <= 0 || sphere->radius > 10000)
+        error = "Invalid terrain region batch or volume state";
+        return false;
+    }
+    TerrainDelta candidate;
+    candidate.source = source_;
+    candidate.base_revision = revision_;
+    candidate.blocks = blocks_;
+    std::set<TerrainRegionKey, TerrainRegionLess> keys;
+    for (auto key : retire)
+    {
+        if (!keys.insert(key).second || candidate.blocks.erase(key) == 0)
         {
-            error = "Invalid terrain cavity";
+            error = "Duplicate or nonresident terrain retirement";
             return false;
         }
+        candidate.changed.push_back(key);
     }
-    data.density.resize(static_cast<std::size_t>(data.cells_x + 1) * (data.cells_y + 1) *
-                        (data.cells_z + 1));
-    const double phase = (settings.seed % 4096) * 0.013;
-    for (unsigned z = 0; z <= data.cells_z; ++z)
+    for (const auto& block : blocks)
     {
-        for (unsigned y = 0; y <= data.cells_y; ++y)
+        if (!keys.insert(block.key).second || !block_valid(*source_, block))
         {
-            for (unsigned x = 0; x <= data.cells_x; ++x)
+            error = "Invalid or duplicate terrain block payload";
+            return false;
+        }
+        candidate.blocks[block.key] = std::make_shared<const schema::TerrainBlockDataT>(block);
+        candidate.changed.push_back(block.key);
+    }
+    output = std::move(candidate);
+    return true;
+}
+
+bool TerrainVolume::read(const TerrainRegionQuery& query, TerrainReadSnapshot& output) const
+{
+    output = {};
+    TerrainReadSnapshot candidate;
+    if (!source_ || !query.cursor.empty() || query.limit > 4096 ||
+        !enumerate(*source_, query.bounds, query.lod, query.limit, candidate.regions))
+    {
+        return false;
+    }
+    candidate.source = source_;
+    candidate.blocks = blocks_;
+    candidate.source_revision = revision_;
+    // The immutable snapshot includes the complete resident map; halo ownership is unchanged.
+    for (auto key : candidate.regions)
+    {
+        for (int z = -1; z <= 1; ++z)
+        {
+            for (int y = -1; y <= 1; ++y)
             {
-                const double px = data.origin.x() + x * data.voxel_size;
-                const double py = data.origin.y() + y * data.voxel_size;
-                const double pz = data.origin.z() + z * data.voxel_size;
-                const double height =
-                    settings.height +
-                    settings.amplitude *
-                        (0.65 * std::sin(px * settings.frequency + phase) *
-                             std::cos(pz * settings.frequency) +
-                         0.35 * std::sin((px + pz) * settings.frequency * 0.47 + phase));
-                double value = py - height;
-                for (const auto& sphere : settings.cavities)
+                for (int x = -1; x <= 1; ++x)
                 {
-                    const double dx = px - sphere->center.x(), dy = py - sphere->center.y(),
-                                 dz = pz - sphere->center.z();
-                    value =
-                        std::max(value, sphere->radius - std::sqrt(dx * dx + dy * dy + dz * dz));
+                    if (key.x() <= INT32_MIN || key.x() >= INT32_MAX || key.y() <= INT32_MIN ||
+                        key.y() >= INT32_MAX || key.z() <= INT32_MIN || key.z() >= INT32_MAX ||
+                        !resident(candidate, {key.x() + x, key.y() + y, key.z() + z, key.lod()}))
+                    {
+                        return false;
+                    }
                 }
-                // Finite volume boundary is air, producing a closed surface instead of open outer
-                // walls.
-                data.density[offset(data, x, y, z)] =
-                    boundary(data, x, y, z) ? data.voxel_size : nonzero(static_cast<float>(value));
             }
         }
     }
-    if (!validate(data, error))
-    {
-        return false;
-    }
-    output = std::move(data);
+    output = std::move(candidate);
     return true;
 }
 
-bool TerrainVolume::initialize(const Data& data, std::string& error)
+bool TerrainVolume::stage_edit(const TerrainReadSnapshot& input, const TerrainEditSpec& edit,
+                               TerrainDelta& output, std::string& error)
 {
-    if (!validate(data, error))
-    {
-        return false;
-    }
-    data_ = data;
-    chunks_.clear();
-    chunks_.resize(static_cast<std::size_t>(data.cells_x / data.chunk_cells) *
-                   (data.cells_y / data.chunk_cells) * (data.cells_z / data.chunk_cells));
-    collision_.parts.clear();
-    collision_.parts.resize(chunks_.size() * collision_parts_per_chunk(data));
-    rebuilt_chunks_ = 0;
-    return true;
-}
-
-bool TerrainVolume::apply_sphere(const schema::Vec3& center, float radius, bool fill,
-                                 std::string& error)
-{
-    ENGINE_PROFILE_ZONE("Terrain.brush_samples");
-    error.clear();
-    if (chunks_.empty() || !finite(center) || !std::isfinite(radius) || radius <= 0 ||
-        radius > 10000)
-    {
-        error = "Invalid terrain sphere";
-        return false;
-    }
-    const auto& d = data_;
-    const double reach = radius + 2.0 * d.voxel_size;
-    const auto low = [&](double position, double origin, unsigned cells)
-    {
-        return static_cast<unsigned>(
-            std::clamp(std::floor((position - reach - origin) / d.voxel_size), 1.0,
-                       static_cast<double>(cells)));
-    };
-    const auto high = [&](double position, double origin, unsigned cells)
-    {
-        return static_cast<unsigned>(
-            std::clamp(std::ceil((position + reach - origin) / d.voxel_size), 0.0,
-                       static_cast<double>(cells - 1)));
-    };
-    const unsigned lx = low(center.x(), d.origin.x(), d.cells_x),
-                   hx = high(center.x(), d.origin.x(), d.cells_x);
-    const unsigned ly = low(center.y(), d.origin.y(), d.cells_y),
-                   hy = high(center.y(), d.origin.y(), d.cells_y);
-    const unsigned lz = low(center.z(), d.origin.z(), d.cells_z),
-                   hz = high(center.z(), d.origin.z(), d.cells_z);
-    for (unsigned z = lz; z <= hz; ++z)
-    {
-        for (unsigned y = ly; y <= hy; ++y)
-        {
-            for (unsigned x = lx; x <= hx; ++x)
-            {
-                const double dx = d.origin.x() + x * d.voxel_size - center.x();
-                const double dy = d.origin.y() + y * d.voxel_size - center.y();
-                const double dz = d.origin.z() + z * d.voxel_size - center.z();
-                const float sphere =
-                    static_cast<float>(std::sqrt(dx * dx + dy * dy + dz * dz) - radius);
-                const auto index = offset(d, x, y, z);
-                const float previous = data_.density[index];
-                const float changed =
-                    nonzero(fill ? std::min(previous, sphere) : std::max(previous, -sphere));
-                if (changed == previous)
-                {
-                    continue;
-                }
-                data_.density[index] = changed;
-                mark_sample_dirty(x, y, z);
-            }
-        }
-    }
-    return true;
-}
-
-void TerrainVolume::mark_sample_dirty(unsigned x, unsigned y, unsigned z)
-{
-    // One sample affects adjacent cells and their central-difference normals.
-    const auto& d = data_;
-    const unsigned nx = d.cells_x / d.chunk_cells, ny = d.cells_y / d.chunk_cells;
-    const unsigned min_x = (x > 1 ? x - 2 : 0) / d.chunk_cells;
-    const unsigned min_y = (y > 1 ? y - 2 : 0) / d.chunk_cells;
-    const unsigned min_z = (z > 1 ? z - 2 : 0) / d.chunk_cells;
-    const unsigned max_x = std::min(x + 1, d.cells_x - 1) / d.chunk_cells;
-    const unsigned max_y = std::min(y + 1, d.cells_y - 1) / d.chunk_cells;
-    const unsigned max_z = std::min(z + 1, d.cells_z - 1) / d.chunk_cells;
-    for (unsigned cz = min_z; cz <= max_z; ++cz)
-    {
-        for (unsigned cy = min_y; cy <= max_y; ++cy)
-        {
-            for (unsigned cx = min_x; cx <= max_x; ++cx)
-            {
-                chunks_[(cz * ny + cy) * nx + cx].dirty = true;
-            }
-        }
-    }
-}
-
-bool TerrainVolume::build_mesh(schema::MeshDataT& output, std::string& error)
-{
-    ENGINE_PROFILE_ZONE("Terrain.build_mesh");
+    ENGINE_PROFILE_ZONE("Terrain.stage_edit");
     output = {};
     error.clear();
-    if (chunks_.empty())
+    if (!input.source || input.source_revision == 0 || input.source_revision == UINT64_MAX ||
+        (edit.expected_revision && edit.expected_revision != input.source_revision) ||
+        edit.brushes.empty() || edit.brushes.size() > maximum_brushes)
     {
-        error = "Terrain volume is not initialized";
+        error = "Invalid terrain edit or revision conflict";
         return false;
     }
-    schema::MeshDataT mesh;
-    mesh.path = "builtin://terrain/transient.mesh";
-    std::size_t index = 0;
-    const auto parts_per_chunk = collision_parts_per_chunk(data_);
-    std::vector<CollisionCellRange> cell_ranges;
-    rebuilt_chunks_ = 0;
-    for (unsigned z = 0; z < data_.cells_z; z += data_.chunk_cells)
+    TerrainDelta candidate;
+    candidate.base_revision = input.source_revision;
+    candidate.source = input.source;
+    candidate.blocks = input.blocks;
+    std::set<TerrainRegionKey, TerrainRegionLess> changed;
+    std::array<double, 3> minimum{INFINITY, INFINITY, INFINITY};
+    std::array<double, 3> maximum{-INFINITY, -INFINITY, -INFINITY};
+    const auto cells = input.source->block_cells;
+    for (const auto& brush : edit.brushes)
     {
-        for (unsigned y = 0; y < data_.cells_y; y += data_.chunk_cells)
+        std::vector<TerrainRegionKey> keys;
+        const auto bounds = brush_bounds(brush);
+        if (!brush_valid(brush, *input.source) ||
+            !enumerate(*input.source, bounds, 0, maximum_edit_regions, keys))
         {
-            for (unsigned x = 0; x < data_.cells_x; x += data_.chunk_cells)
+            error = "Terrain brush is invalid or exceeds the bounded region batch";
+            return false;
+        }
+        const std::array<double, 3> low{bounds.minimum().x(), bounds.minimum().y(),
+                                        bounds.minimum().z()};
+        const std::array<double, 3> high{bounds.maximum().x(), bounds.maximum().y(),
+                                         bounds.maximum().z()};
+        for (std::size_t axis = 0; axis < 3; ++axis)
+        {
+            minimum[axis] = std::min(minimum[axis], low[axis]);
+            maximum[axis] = std::max(maximum[axis], high[axis]);
+        }
+        TerrainReadSnapshot current = input;
+        current.blocks = candidate.blocks;
+        for (auto key : keys)
+        {
+            if (std::find(input.regions.begin(), input.regions.end(), key) == input.regions.end())
             {
-                const auto first_part = index * parts_per_chunk;
-                auto& chunk = chunks_[index++];
-                if (chunk.dirty)
+                error = "Terrain edit snapshot does not cover the complete brush";
+                return false;
+            }
+            schema::TerrainBlockDataT block;
+            if (!materialize_block(current, key, block))
+            {
+                error = "Terrain edit requires an unloaded or unknown region";
+                return false;
+            }
+            bool modified = false;
+            for (std::uint32_t z = 0; z < cells; ++z)
+            {
+                for (std::uint32_t y = 0; y < cells; ++y)
                 {
-                    schema::MeshDataT rebuilt;
-                    mesh_chunk(data_, x, y, z, rebuilt, cell_ranges);
-                    chunk.mesh = std::make_shared<const schema::MeshDataT>(std::move(rebuilt));
-                    prepare_collision(
-                        *chunk.mesh, cell_ranges,
-                        std::span(collision_.parts).subspan(first_part, parts_per_chunk));
-                    chunk.dirty = false;
-                    ++rebuilt_chunks_;
+                    for (std::uint32_t x = 0; x < cells; ++x)
+                    {
+                        const std::int64_t sx = static_cast<std::int64_t>(key.x()) * cells + x;
+                        const std::int64_t sy = static_cast<std::int64_t>(key.y()) * cells + y;
+                        const std::int64_t sz = static_cast<std::int64_t>(key.z()) * cells + z;
+                        const auto index = (static_cast<std::size_t>(z) * cells + y) * cells + x;
+                        const auto& source = *input.source;
+                        const Vec3 position{source.origin.x() + sx * source.voxel_size,
+                                            source.origin.y() + sy * source.voxel_size,
+                                            source.origin.z() + sz * source.voxel_size};
+                        const float distance = signed_distance(brush, position);
+                        const float before = block.density[index];
+                        float average = before;
+                        if (brush.operation == schema::TerrainBrushOperation::smooth &&
+                            distance <= 0)
+                        {
+                            std::array<float, 6> neighbors{};
+                            if (!sample(current, sx - 1, sy, sz, 0, neighbors[0]) ||
+                                !sample(current, sx + 1, sy, sz, 0, neighbors[1]) ||
+                                !sample(current, sx, sy - 1, sz, 0, neighbors[2]) ||
+                                !sample(current, sx, sy + 1, sz, 0, neighbors[3]) ||
+                                !sample(current, sx, sy, sz - 1, 0, neighbors[4]) ||
+                                !sample(current, sx, sy, sz + 1, 0, neighbors[5]))
+                            {
+                                error = "Terrain smoothing requires the complete sample halo";
+                                return false;
+                            }
+                            average = 0;
+                            for (float value : neighbors)
+                            {
+                                average += value / 6;
+                            }
+                        }
+                        const float target =
+                            brush_functions[static_cast<std::size_t>(brush.operation)](
+                                before, distance, position.y() - brush.center.y(), average);
+                        const float after =
+                            std::clamp(before + (target - before) * brush.strength,
+                                       -float(source.voxel_size), float(source.voxel_size));
+                        if (after != before)
+                        {
+                            block.density[index] = after;
+                            modified = true;
+                        }
+                        if (distance <= 0 &&
+                            (brush.operation == schema::TerrainBrushOperation::paint ||
+                             brush.operation == schema::TerrainBrushOperation::fill) &&
+                            block.layers[index] != brush.layer)
+                        {
+                            block.layers[index] =
+                                blend_layers(block.layers[index], brush.layer, brush.strength);
+                            modified = true;
+                        }
+                    }
                 }
-                if (mesh.vertices.size() + chunk.mesh->vertices.size() > 4000000U)
+            }
+            if (modified)
+            {
+                candidate.blocks[key] =
+                    std::make_shared<const schema::TerrainBlockDataT>(std::move(block));
+                changed.insert(key);
+                if (changed.size() > maximum_edit_regions)
                 {
-                    error = "Terrain mesh exceeds the synchronous mesh budget";
+                    error = "Terrain brush batch exceeds the region limit";
                     return false;
                 }
-                const auto base = static_cast<std::uint32_t>(mesh.vertices.size());
-                mesh.vertices.insert(mesh.vertices.end(), chunk.mesh->vertices.begin(),
-                                     chunk.mesh->vertices.end());
-                for (auto i : chunk.mesh->indices)
-                {
-                    mesh.indices.push_back(base + i);
-                }
             }
         }
     }
-    if (mesh.indices.empty())
+    candidate.changed.assign(changed.begin(), changed.end());
+    if (!propagate_lods(input, candidate, error))
     {
-        mesh.vertices.clear();
+        return false;
     }
-    ENGINE_PROFILE_PLOT("Terrain.rebuilt_chunks", static_cast<double>(rebuilt_chunks_));
-    ENGINE_PROFILE_PLOT("Terrain.mesh_triangles", static_cast<double>(mesh.indices.size() / 3));
-    output = std::move(mesh);
+    candidate.dirty_bounds = {{minimum[0], minimum[1], minimum[2]},
+                              {maximum[0], maximum[1], maximum[2]}};
+    output = std::move(candidate);
     return true;
 }
 
-const Data& TerrainVolume::data() const noexcept
+bool TerrainVolume::validate_delta(const TerrainDelta& delta) const noexcept
 {
-    return data_;
+    return source_ && delta.source == source_ && delta.base_revision == revision_ &&
+           revision_ != UINT64_MAX;
 }
 
-const MeshCollisionData& TerrainVolume::collision_data() const noexcept
+void TerrainVolume::publish(TerrainDelta&& delta) noexcept
 {
-    return collision_;
+    assert(validate_delta(delta));
+    blocks_.swap(delta.blocks);
+    ++revision_;
 }
-std::size_t TerrainVolume::chunk_count() const noexcept
-{
-    return chunks_.size();
-}
-std::size_t TerrainVolume::rebuilt_chunks() const noexcept
-{
-    return rebuilt_chunks_;
-}
-
 } // namespace engine::plugins::terrain

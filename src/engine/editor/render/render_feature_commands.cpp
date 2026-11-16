@@ -8,6 +8,7 @@
 #include "runtime/render/scene_render_settings.hpp"
 #include "runtime/scene/environment_component.hpp"
 #include "runtime/scene/mesh_renderer.hpp"
+#include "runtime/schema/control_json_generated.hpp"
 
 #include <array>
 #include <limits>
@@ -59,18 +60,21 @@ Json mesh_settings(const MeshRenderer& mesh)
             {"nodeId", std::to_string(mesh.node().id())},
             {"scope", "component"},
             {"staticInstancingEnabled", mesh.static_instancing_enabled()},
-            {"staticLodEnabled", mesh.static_lod_enabled()}};
+            {"staticLodEnabled", mesh.static_lod_enabled()},
+            {"rvtRole", schema::EnumNameRvtRole(mesh.rvt_role())}};
 }
 
 class MeshRenderEdit final : public EditorEdit
 {
 public:
     MeshRenderEdit(WorldSystem& world, std::shared_ptr<std::uint64_t> identity,
-                   const MeshRenderer& mesh, std::array<bool, 2> after, std::array<bool, 2> changed)
+                   const MeshRenderer& mesh, std::array<std::uint8_t, 3> after,
+                   std::array<bool, 3> changed)
         : world_(world), identity_(std::move(identity)), scene_id_(mesh.node().scene()->id()),
           node_id_(mesh.node().id()), instance_(mesh.instance_id()),
-          before_{mesh.static_instancing_enabled(), mesh.static_lod_enabled()}, after_(after),
-          changed_(changed)
+          before_{std::uint8_t(mesh.static_instancing_enabled()),
+                  std::uint8_t(mesh.static_lod_enabled()), std::uint8_t(mesh.rvt_role())},
+          after_(after), changed_(changed)
     {
     }
     bool apply(std::string& error) override
@@ -83,8 +87,8 @@ public:
     }
 
 private:
-    bool change(const std::array<bool, 2>& expected, const std::array<bool, 2>& replacement,
-                std::string& error)
+    bool change(const std::array<std::uint8_t, 3>& expected,
+                const std::array<std::uint8_t, 3>& replacement, std::string& error)
     {
         auto* scene = world_.scene();
         const auto node =
@@ -92,7 +96,8 @@ private:
         auto mesh = node ? node.get_component<MeshRenderer>() : MeshRenderer{};
         if (!mesh || (node.id() == node_id_ && mesh.instance_id() != instance_) ||
             (changed_[0] && mesh.static_instancing_enabled() != expected[0]) ||
-            (changed_[1] && mesh.static_lod_enabled() != expected[1]))
+            (changed_[1] && mesh.static_lod_enabled() != bool(expected[1])) ||
+            (changed_[2] && std::uint8_t(mesh.rvt_role()) != expected[2]))
         {
             error = "Mesh render properties or their component identity changed outside this edit";
             return false;
@@ -109,6 +114,15 @@ private:
                              : "Cannot restore mesh render properties";
             return false;
         }
+        if (changed_[2] && !mesh.set_rvt_role(schema::RvtRole(replacement[2])))
+        {
+            const bool restored_lod = !changed_[1] || mesh.set_static_lod_enabled(expected[1]);
+            const bool restored_instancing =
+                !changed_[0] || mesh.set_static_instancing_enabled(expected[0]);
+            error = restored_lod && restored_instancing ? "Cannot set RVT role"
+                                                        : "Cannot restore mesh properties";
+            return false;
+        }
         node_id_ = node.id();
         instance_ = mesh.instance_id();
         return true;
@@ -118,9 +132,9 @@ private:
     std::uint64_t scene_id_;
     std::uint64_t node_id_;
     std::uint64_t instance_;
-    std::array<bool, 2> before_;
-    std::array<bool, 2> after_;
-    std::array<bool, 2> changed_;
+    std::array<std::uint8_t, 3> before_;
+    std::array<std::uint8_t, 3> after_;
+    std::array<bool, 3> changed_;
 };
 } // namespace
 
@@ -128,6 +142,105 @@ bool register_render_feature_commands(RenderSystem& renderer, WorldSystem& world
                                       EditorCommands& commands, SceneCommands& scenes)
 {
     return commands.register_command(
+               "get_rvt_status", false,
+               [&renderer](const Json& args, Json& result, std::unique_ptr<EditorEdit>&,
+                           std::string&)
+               {
+                   RvtStatus status;
+                   if (!args.empty() || !renderer.rvt_status(status))
+                   {
+                       return false;
+                   }
+                   result = {{"requested", status.requested},
+                             {"supported", status.supported},
+                             {"effective", status.effective},
+                             {"reason", status.reason},
+                             {"deviceGeneration", std::to_string(status.device_generation)},
+                             {"demandRevision", std::to_string(status.demand_revision)},
+                             {"cacheRevision", std::to_string(status.cache_revision)},
+                             {"readyPages", status.ready_pages},
+                             {"requiredPages", status.required_pages},
+                             {"residentBytes", std::to_string(status.resident_bytes)}};
+                   return true;
+               }) &&
+           commands.register_command(
+               "get_rvt_debug_options", false,
+               [&renderer](const Json& args, Json& result, std::unique_ptr<EditorEdit>&,
+                           std::string&)
+               {
+                   RvtDebugOptions value;
+                   std::uint64_t revision = 0;
+                   if (!args.empty() || !renderer.rvt_debug_options(value, revision))
+                   {
+                       return false;
+                   }
+                   constexpr const char* modes[]{"overview", "virtual_texture", "physical_atlas",
+                                                 "page_table"};
+                   constexpr const char* channels[]{"base_color", "normal", "roughness", "metallic",
+                                                    "ao"};
+                   result = {{"mode", modes[unsigned(value.mode)]},
+                             {"channel", channels[unsigned(value.channel)]},
+                             {"mip", value.mip},
+                             {"revision", std::to_string(revision)}};
+                   return true;
+               }) &&
+           commands.register_command(
+               "set_rvt_debug_options", false,
+               [&renderer](const Json& args, Json& result, std::unique_ptr<EditorEdit>&,
+                           std::string& error)
+               {
+                   RvtDebugOptions value;
+                   std::uint64_t revision = 0;
+                   if (!args.is_object() || args.empty() ||
+                       !renderer.rvt_debug_options(value, revision))
+                   {
+                       return false;
+                   }
+                   constexpr std::array modes{"overview", "virtual_texture", "physical_atlas",
+                                              "page_table"};
+                   constexpr std::array channels{"base_color", "normal", "roughness", "metallic",
+                                                 "ao"};
+                   for (const auto& [key, entry] : args.items())
+                   {
+                       if (key == "mode" && entry.is_string())
+                       {
+                           auto i = std::find(modes.begin(), modes.end(), entry.get<std::string>());
+                           if (i == modes.end())
+                           {
+                               return false;
+                           }
+                           value.mode = RvtDebugMode(i - modes.begin());
+                       }
+                       else if (key == "channel" && entry.is_string())
+                       {
+                           auto i = std::find(channels.begin(), channels.end(),
+                                              entry.get<std::string>());
+                           if (i == channels.end())
+                           {
+                               return false;
+                           }
+                           value.channel = RvtDebugChannel(i - channels.begin());
+                       }
+                       else if (key == "mip" && entry.is_number_integer() && entry >= -1 &&
+                                entry <= 8)
+                       {
+                           value.mip = entry.get<std::int32_t>();
+                       }
+                       else
+                       {
+                           error = "Invalid RVT debug option";
+                           return false;
+                       }
+                   }
+                   if (!renderer.set_rvt_debug_options(value) ||
+                       !renderer.rvt_debug_options(value, revision))
+                   {
+                       return false;
+                   }
+                   result = {{"revision", std::to_string(revision)}};
+                   return true;
+               }) &&
+           commands.register_command(
                "get_mesh_render_settings", false,
                [&world](const Json& arguments, Json& result, std::unique_ptr<EditorEdit>&,
                         std::string& error)
@@ -152,7 +265,8 @@ bool register_render_feature_commands(RenderSystem& renderer, WorldSystem& world
                                  std::unique_ptr<EditorEdit>& edit, std::string& error)
                {
                    if (!components::fields(
-                           arguments, {"staticInstancingEnabled", "staticLodEnabled"}, error) ||
+                           arguments, {"staticInstancingEnabled", "staticLodEnabled", "rvtRole"},
+                           error) ||
                        arguments.size() <= 2)
                    {
                        return false;
@@ -164,9 +278,10 @@ bool register_render_feature_commands(RenderSystem& renderer, WorldSystem& world
                        error = "Selected node has no MeshRenderer";
                        return false;
                    }
-                   std::array<bool, 2> after{mesh.static_instancing_enabled(),
-                                             mesh.static_lod_enabled()};
-                   std::array<bool, 2> changed{};
+                   std::array<std::uint8_t, 3> after{std::uint8_t(mesh.static_instancing_enabled()),
+                                                     std::uint8_t(mesh.static_lod_enabled()),
+                                                     std::uint8_t(mesh.rvt_role())};
+                   std::array<bool, 3> changed{};
                    constexpr std::array keys{"staticInstancingEnabled", "staticLodEnabled"};
                    for (std::size_t index = 0; index < keys.size(); ++index)
                    {
@@ -182,6 +297,17 @@ bool register_render_feature_commands(RenderSystem& renderer, WorldSystem& world
                        after[index] = arguments[keys[index]].get<bool>();
                        changed[index] = true;
                    }
+                   if (arguments.contains("rvtRole"))
+                   {
+                       schema::RvtRole role;
+                       if (!schema::control_json::read(arguments["rvtRole"], role, error, false,
+                                                       "rvtRole"))
+                       {
+                           return false;
+                       }
+                       after[2] = std::uint8_t(role);
+                       changed[2] = true;
+                   }
                    auto identity = scenes.node_identity(node.id());
                    if (!identity)
                    {
@@ -190,8 +316,9 @@ bool register_render_feature_commands(RenderSystem& renderer, WorldSystem& world
                    edit = std::make_unique<MeshRenderEdit>(world, std::move(identity), mesh, after,
                                                            changed);
                    result = mesh_settings(mesh);
-                   result["staticInstancingEnabled"] = after[0];
-                   result["staticLodEnabled"] = after[1];
+                   result["staticInstancingEnabled"] = bool(after[0]);
+                   result["staticLodEnabled"] = bool(after[1]);
+                   result["rvtRole"] = schema::EnumNameRvtRole(schema::RvtRole(after[2]));
                    return true;
                }) &&
            commands.register_command(
@@ -368,51 +495,45 @@ bool register_render_feature_commands(RenderSystem& renderer, WorldSystem& world
                    result["frameNumber"] = renderer.frame_number();
                    return true;
                }) &&
-           commands.register_command("get_render_submission_stats", false,
-                                     [&renderer](const Json& arguments, Json& result,
-                                                 std::unique_ptr<EditorEdit>&, std::string& error)
-                                     {
-                                         if (!arguments.is_object() || !arguments.empty())
-                                         {
-                                             error = "Submission statistics has no arguments";
-                                             return false;
-                                         }
-                                         Json rows = Json::array();
-                                         for (const auto& row : renderer.submission_stats())
-                                         {
-                                             rows.push_back(
-                                                 {{"frameNumber", row.frame_number},
-                                                  {"viewId", row.view_id},
-                                                  {"candidateMeshes", row.candidate_meshes},
-                                                  {"culledMeshes", row.culled_meshes},
-                                                  {"visibleMeshes", row.visible_meshes},
-                                                  {"drawCalls", row.draw_calls},
-                                                  {"directInstanceBatches",
-                                                   row.direct_instance_batches},
-                                                  {"directInstances", row.direct_instances},
-                                                  {"directTriangles", row.direct_triangles},
-                                                  {"indirectBatches", row.indirect_batches},
-                                                  {"indirectCommands", row.indirect_commands},
-                                                  {"meshletInstancedBatches",
-                                                   row.meshlet_instanced_batches},
-                                                  {"meshletCandidatePairs",
-                                                   row.meshlet_candidate_pairs},
-                                                  {"meshletCandidateTriangles",
-                                                   row.meshlet_candidate_triangles},
-                                                  {"meshletMissingData", row.meshlet_missing_data},
-                                                  {"meshletIncompatibleDraws",
-                                                   row.meshlet_incompatible_draws},
-                                                  {"meshletBudgetFallbacks",
-                                                   row.meshlet_budget_fallbacks},
-                                                  {"meshletGpu",
-                                                   meshlet_sample_json(row.meshlet_gpu)}});
-                                         }
-                                         result = {{"frameNumber", renderer.frame_number()},
-                                                   {"views", rows},
-                                                   {"source", "scene_mesh_submission"},
-                                                   {"gpuCompletion", "not_measured"}};
-                                         return true;
-                                     }) &&
+           commands.register_command(
+               "get_render_submission_stats", false,
+               [&renderer](const Json& arguments, Json& result, std::unique_ptr<EditorEdit>&,
+                           std::string& error)
+               {
+                   if (!arguments.is_object() || !arguments.empty())
+                   {
+                       error = "Submission statistics has no arguments";
+                       return false;
+                   }
+                   Json rows = Json::array();
+                   for (const auto& row : renderer.submission_stats())
+                   {
+                       rows.push_back(
+                           {{"frameNumber", row.frame_number},
+                            {"viewId", row.view_id},
+                            {"candidateMeshes", row.candidate_meshes},
+                            {"culledMeshes", row.culled_meshes},
+                            {"visibleMeshes", row.visible_meshes},
+                            {"drawCalls", row.draw_calls},
+                            {"directInstanceBatches", row.direct_instance_batches},
+                            {"directInstances", row.direct_instances},
+                            {"directTriangles", row.direct_triangles},
+                            {"indirectBatches", row.indirect_batches},
+                            {"indirectCommands", row.indirect_commands},
+                            {"meshletInstancedBatches", row.meshlet_instanced_batches},
+                            {"meshletCandidatePairs", row.meshlet_candidate_pairs},
+                            {"meshletCandidateTriangles", row.meshlet_candidate_triangles},
+                            {"meshletMissingData", row.meshlet_missing_data},
+                            {"meshletIncompatibleDraws", row.meshlet_incompatible_draws},
+                            {"meshletBudgetFallbacks", row.meshlet_budget_fallbacks},
+                            {"meshletGpu", meshlet_sample_json(row.meshlet_gpu)}});
+                   }
+                   result = {{"frameNumber", renderer.frame_number()},
+                             {"views", rows},
+                             {"source", "scene_mesh_submission"},
+                             {"gpuCompletion", "not_measured"}};
+                   return true;
+               }) &&
            commands.register_command(
                "draw_debug_lines", false,
                [&renderer](const Json& arguments, Json& result, std::unique_ptr<EditorEdit>&,

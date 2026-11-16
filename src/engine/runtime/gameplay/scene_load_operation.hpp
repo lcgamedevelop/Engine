@@ -21,5 +21,9 @@ struct GameplaySession::SceneLoadOperation
     std::uint64_t replaced_scene_id = 0;
     bool restored = false;
     bool activate = false;
+    bool domains_sealed = false;
+    bool domains_released = false;
+    std::size_t next_preparation = 0;
+    std::vector<ScenePreparationSnapshot> domain_status;
 };
 } // namespace engine

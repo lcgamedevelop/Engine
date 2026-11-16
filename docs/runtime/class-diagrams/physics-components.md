@@ -36,6 +36,8 @@ classDiagram
         +add_impulse(const Vec3& impulse) bool
         +set_linear_velocity(const Vec3& velocity) bool
         +linear_velocity() Vec3
+        +get_sleeping(bool& output) bool
+        +set_sleeping(bool sleeping) bool
     }
     class Component
     class Node
@@ -84,6 +86,11 @@ classDiagram
 ```
 
 设置失败保持已有数据。冲量只接受启用的动态刚体；静态刚体拒绝非零速度。`valid_settings` 可由编辑器导入器复用。所有尺寸、质量和速度必须有限并处于校验范围；瞬态冲量不进入持久数据。
+
+`get_sleeping` 返回最近物理同步的动态刚体睡眠状态；尚未同步、禁用或碰撞身份失效时失败并清空输出。
+`set_sleeping` 提交下一物理安全点消费的一次性请求，候选碎块可在发布前设置；成功仅表示受理。
+睡眠/唤醒由 PhysicsSystem 调用物理后端，组件不依赖 Jolt。后续冲量会唤醒刚体；
+运行状态存 ECS Runtime 列，由领域存档采样，不新增场景持久属性。
 
 `Collider::instance_id()` 是组件只读且不复用的进程内身份，不进入 FlatBuffers 持久数据。物理快照保留此身份；同节点移除并重新添加 Collider 后，未清理的旧物理体不能被查询当成新组件。最近命中结果结合场景、节点与此身份检查有效性，位置或设置变化不创建新实例身份。
 

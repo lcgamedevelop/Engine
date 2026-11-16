@@ -1,4 +1,5 @@
 #pragma once
+#include "runtime/render/rvt.hpp"
 #include "runtime/scene/camera.hpp"
 
 #include "runtime/render/render_features.hpp"
@@ -21,6 +22,7 @@ namespace engine
 {
 
 class Camera;
+class MeshRenderer;
 class WindowSystem;
 class WorldSystem;
 class FontSystem;
@@ -35,6 +37,11 @@ class FrameOutput;
 class RenderSurface;
 class MoviePass;
 class MeshletCullPass;
+class VirtualTextureCache;
+class RvtPass;
+class RvtDebugView;
+struct RenderFrameData;
+struct SceneDrawView;
 enum class FramePrepareStatus;
 } // namespace render_detail
 
@@ -125,6 +132,10 @@ public:
     [[nodiscard]] bool set_debug_feature(RenderFeature feature, bool enabled);
     [[nodiscard]] RenderFeatureState feature_state(RenderFeature feature) const noexcept;
     [[nodiscard]] std::vector<RenderViewStats> submission_stats() const;
+    [[nodiscard]] bool rvt_status(RvtStatus& output) const;
+    [[nodiscard]] bool set_rvt_debug_options(const RvtDebugOptions& options);
+    [[nodiscard]] bool rvt_debug_options(RvtDebugOptions& output, std::uint64_t& revision) const;
+
     // 仅复制本次调用的数据，随成功场景帧递减；停止或切场景清空。
     [[nodiscard]] bool draw_debug_lines(std::span<const DebugLine> lines,
                                         std::uint16_t lifetime_frames = 1);
@@ -144,6 +155,9 @@ protected:
     void on_shutdown() noexcept override;
 
 private:
+    friend class GeometryUpdate;
+    [[nodiscard]] bool can_publish_geometry(MeshRenderer prepared, MeshRenderer target) const;
+    void publish_geometry(MeshRenderer prepared, MeshRenderer target) noexcept;
     [[nodiscard]] RenderPrepareStatus prepare_resources(RenderPrepareProgress& output,
                                                         double max_seconds, Camera camera);
     [[nodiscard]] render_detail::FramePrepareStatus prepare_frame();
@@ -196,6 +210,18 @@ private:
     void advance_screenshots();
     void submit_screenshot(RenderFrameKind kind);
     std::unique_ptr<render_detail::FrameOutput> frame_output_;
+    void prepare_rvt(const RenderSettings& settings, const render_detail::RenderFrameData& frame,
+                     const render_detail::SceneDrawView& draw);
+    void draw_rvt_viewer();
+    void release_rvt() noexcept;
+    std::unique_ptr<render_detail::VirtualTextureCache> rvt_cache_;
+    std::unique_ptr<render_detail::RvtPass> rvt_pass_;
+    std::unique_ptr<render_detail::RvtDebugView> rvt_viewer_;
+    RvtStatus rvt_status_;
+    RvtDebugOptions rvt_options_;
+    std::uint64_t rvt_debug_revision_ = 1, rvt_scene_id_ = 0;
+    bool rvt_debug_visible_ = false;
+
     struct SceneGpuResources;
     struct RenderPreparation;
     struct RendererCallbacks;

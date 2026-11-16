@@ -253,6 +253,7 @@ classDiagram
     }
     class SceneCaptureRequest {
         <<struct>>
+        +Vec3 world_origin
         +float[16] view
         +float[16] projection
         +uint16_t width

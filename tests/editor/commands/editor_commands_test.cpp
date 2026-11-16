@@ -361,7 +361,7 @@ bool render_component_tests()
     geometry.indices = {0, 2, 1};
     geometry.lightmap_texcoords = {{.1, .1}, {.9, .1}, {.1, .9}};
     schema::TextureDataT lightmap;
-    lightmap.schema_version = 2;
+    lightmap.schema_version = 3;
     lightmap.path = "lighting/test.texture";
     lightmap.width = lightmap.height = 1;
     lightmap.encoding = schema::TextureEncoding::native;

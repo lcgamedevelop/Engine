@@ -833,7 +833,7 @@ bool check_textures(test_support::ResourceServices& services, engine::Scene& sce
     auto& loader = services.loader;
     test_support::ResourceFixture fixture;
     engine::schema::TextureDataT texture;
-    texture.schema_version = 2;
+    texture.schema_version = 3;
     texture.path = "textures/gray";
     texture.width = 1;
     texture.height = 1;

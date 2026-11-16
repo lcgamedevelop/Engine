@@ -57,6 +57,46 @@ engine::schema::MeshDataT grid(int width, int depth, int hole_x0 = 0, int hole_x
     return mesh;
 }
 
+bool large_world_precision()
+{
+    engine::NavigationSystem navigation(navigation_tasks);
+    auto mesh = grid(24, 16);
+    std::array sources{engine::NavigationGeometry{&mesh}};
+    const engine::Vec3 origin{4000.000013, 123.000017, -4000.000019};
+    sources[0].transform[12] = origin.x();
+    sources[0].transform[13] = origin.y();
+    sources[0].transform[14] = origin.z();
+    const engine::NavigationBounds bounds{{origin.x(), origin.y() - 2, origin.z()},
+                                          {origin.x() + 24, origin.y() + 4, origin.z() + 16}};
+    engine::NavigationSettings settings;
+    settings.tile_size = 16;
+    std::vector<engine::Vec3> path;
+    const engine::Vec3 start{origin.x() + 2, origin.y(), origin.z() + 8},
+        end{origin.x() + 22, origin.y(), origin.z() + 8};
+    if (!expect(navigation.initialize({}) && navigation.build(sources, bounds, settings) &&
+                    navigation.find_path(start, end, path) && path.size() >= 2 &&
+                    std::abs(path.front().x() - start.x()) < 1e-8 &&
+                    std::abs(path.back().x() - end.x()) < 1e-8 &&
+                    std::abs(path.front().z() - start.z()) < 1e-8,
+                "Detour returns double world positions from a local navigation domain", navigation))
+    {
+        return false;
+    }
+    if (!navigation.configure_crowd(2))
+    {
+        return false;
+    }
+    engine::NavigationAgentHandle agent;
+    engine::NavigationAgentSettings agent_settings;
+    engine::NavigationAgentState state;
+    return expect(navigation.create_agent(start, agent_settings, agent) &&
+                      navigation.agent_state(agent, state) &&
+                      std::abs(state.position.x() - start.x()) < 1e-8 &&
+                      navigation.set_agent_target(agent, end) && navigation.step_crowd(1. / 60) &&
+                      navigation.agent_state(agent, state) && state.position.x() > origin.x(),
+                  "Crowd positions and targets share the stable domain origin", navigation);
+}
+
 bool local_rebuild()
 {
     engine::NavigationSystem navigation(navigation_tasks);
@@ -616,8 +656,8 @@ bool crowd_rebuild()
 
 bool run_suite()
 {
-    return local_rebuild() && geometry_and_boundaries() && crowd_lifecycle() && crowd_crossing() &&
-           crowd_moving_target() && crowd_rebuild();
+    return large_world_precision() && local_rebuild() && geometry_and_boundaries() &&
+           crowd_lifecycle() && crowd_crossing() && crowd_moving_target() && crowd_rebuild();
 }
 
 } // namespace

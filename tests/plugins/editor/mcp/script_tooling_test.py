@@ -310,10 +310,15 @@ def test(
         "set_mesh_render_settings",
         "get_render_features",
         "set_render_feature",
+        "get_rvt_status",
+        "get_rvt_debug_options",
+        "set_rvt_debug_options",
         "get_render_submission_stats",
         "draw_debug_lines",
         "get_mesh_lod_import",
         "set_mesh_lod_import",
+        "get_meshlet_import",
+        "set_meshlet_import",
         "get_planar_reflection",
         "set_planar_reflection",
         "get_light_probe_volume",
@@ -364,16 +369,15 @@ def test(
         "stop_effect",
     }
     terrain_tools = {
-        "create_terrain_asset",
-        "set_terrain",
-        "get_terrain",
-        "terrain_brush",
-        "terrain_reset",
-        "terrain_save_state",
-        "terrain_load_state",
-        "terrain_collapse_detached",
-        "terrain_reset_runtime",
-    }
+        "create_terrain_asset", "get_terrain_capabilities", "get_terrain_source",
+        "start_terrain_authoring", "get_terrain_authoring", "cancel_terrain_authoring",
+        "publish_terrain_authoring", "release_terrain_authoring", "set_terrain", "get_terrain",
+    } | {"terrain_" + method for method in (
+        "set_view", "remove_view", "pin_regions", "release_pin", "request_edit",
+        "request_collapse", "request_reset", "request_retire", "request_save", "request_load",
+        "operation_status", "cancel_operation", "release_operation", "query_regions",
+        "collect_support",
+    )}
     destruction_tools = {
         "create_destruction_asset",
         "set_destruction",

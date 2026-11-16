@@ -76,7 +76,7 @@ void world_vector(const Arguments& arguments)
     arguments.set_return({});
     const auto node = BindingContext::node(arguments);
     const auto transform = node ? node.get_component<Transform>() : Transform{};
-    float matrix[16]{};
+    double matrix[16]{};
     if (!transform || arguments.count() != 2 || !transform.world_matrix(matrix))
     {
         return;

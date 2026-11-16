@@ -1,5 +1,6 @@
 #pragma once
 
+#include "runtime/scene/scene_types.hpp"
 #include <array>
 #include <cstdint>
 #include <memory>
@@ -33,6 +34,7 @@ struct SceneCaptureLightmap
 // 接受请求时复制描述；中间光照纹理只读共享，不依赖编辑器或临时资源目录。
 struct SceneCaptureRequest
 {
+    Vec3 world_origin{};
     std::array<float, 16> view{};
     std::array<float, 16> projection{};
     std::uint16_t width = 0;

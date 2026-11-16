@@ -2,6 +2,7 @@
 #include "runtime/render/frame_counters.hpp"
 #include "runtime/scene/ecs_scene.hpp"
 #include "runtime/scene/ecs_storage.hpp"
+#include "runtime/utils/transform_math.hpp"
 
 #include "runtime/core/guid_map.hpp"
 #include "runtime/resource/resource_loader.hpp"
@@ -656,7 +657,8 @@ bool FontSystem::draw(const ResourceHandle& handle, const FontGeometry& geometry
     return true;
 }
 
-bool FontSystem::render_scene(const Scene& scene, std::uint16_t view_id, bool linear_output)
+bool FontSystem::render_scene(const Scene& scene, const Vec3& origin, std::uint16_t view_id,
+                              bool linear_output)
 {
     auto& world = scene.world();
     if (!world.refresh_scene_state())
@@ -677,11 +679,13 @@ bool FontSystem::render_scene(const Scene& scene, std::uint16_t view_id, bool li
         draw_settings.depth_test = true;
         draw_settings.linear_output = linear_output;
         draw_settings.shader = text.shader();
-        if (!transform || !transform.world_matrix(draw_settings.transform.data()))
+        double absolute[16];
+        if (!transform || !transform.world_matrix(absolute))
         {
             last_error_ = "Invalid text node transform";
             return false;
         }
+        transform_math::relative(absolute, origin, draw_settings.transform.data());
         const auto& color = stored.data.color;
         const auto channel = [](float value)
         { return static_cast<std::uint32_t>(std::clamp(value, 0.0F, 1.0F) * 255.0F + 0.5F); };

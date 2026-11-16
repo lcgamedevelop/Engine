@@ -35,7 +35,7 @@ engine::schema::TextureDataT constant_normal(const char* path,
                                              const std::array<std::uint16_t, 3>& encoded)
 {
     engine::schema::TextureDataT result;
-    result.schema_version = 2;
+    result.schema_version = 3;
     result.path = path;
     result.width = result.height = 4;
     result.srgb = false;
@@ -160,7 +160,7 @@ bool test()
     const auto rotated_normal =
         constant_normal("textures/hex-test-rotated-normal", {0x3800, 0x3a00, 0x3c00});
     engine::schema::TextureDataT checker;
-    checker.schema_version = 2;
+    checker.schema_version = 3;
     checker.path = "textures/hex-test-checker";
     checker.width = checker.height = 8;
     checker.srgb = true;

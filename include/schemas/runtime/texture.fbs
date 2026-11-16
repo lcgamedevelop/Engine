@@ -21,6 +21,8 @@ table TextureData {
     format:TextureFormat = auto_format;
     data:[ubyte] (required);
     cube_map:bool = false;
+    // Native 2D arrays use face as the layer index; cubes remain exactly six faces.
+    array_layers:uint = 1;
     subresources:[TextureSubresourceData];
 }
 

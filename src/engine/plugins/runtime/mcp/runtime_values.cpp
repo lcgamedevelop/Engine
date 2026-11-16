@@ -62,7 +62,12 @@ Json frame_value(const RenderFrameSnapshot& value)
             {"submittedAtNs", std::to_string(value.submitted_at_ns)},
             {"kind", kinds[static_cast<unsigned>(value.kind)]},
             {"meshDraws", value.mesh_draws},
-            {"uiDraws", value.ui_draws}};
+            {"uiDraws", value.ui_draws},
+            {"rvtDemandRevision", std::to_string(value.rvt_demand_revision)},
+            {"rvtCacheRevision", std::to_string(value.rvt_cache_revision)},
+            {"rvtDebugRevision", std::to_string(value.rvt_debug_revision)},
+            {"rvtReady", value.rvt_ready},
+            {"rvtDebugVisible", value.rvt_debug_visible}};
 }
 Json screenshot_value(const ScreenshotSnapshot& value)
 {

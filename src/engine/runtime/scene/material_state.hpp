@@ -53,6 +53,7 @@ public:
     [[nodiscard]] bool get_v4(std::string_view name, Vec4& output) const noexcept;
 
 private:
+    friend class GeometryUpdate;
     friend class MeshRenderer;
     Node owner_;
 

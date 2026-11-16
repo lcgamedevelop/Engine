@@ -152,7 +152,7 @@ bool camera_arguments(const Json& arguments, TransformSettings& pose, double& sp
 bool copy_camera(const Camera& source, TransformSettings& pose)
 {
     const auto transform = source.node().get_component<Transform>();
-    float matrix[16]{};
+    double matrix[16]{};
     if (!transform || !transform.world_matrix(matrix))
     {
         return false;
@@ -167,7 +167,7 @@ bool copy_camera(const Camera& source, TransformSettings& pose)
         }
         for (std::size_t row = 0; row < 3; ++row)
         {
-            matrix[offset + row] = static_cast<float>(matrix[offset + row] / length);
+            matrix[offset + row] = matrix[offset + row] / length;
         }
     }
     constexpr double degrees = 180.0 / std::numbers::pi;
@@ -570,7 +570,7 @@ struct ScenePreview::State
         right *= distance;
         forward *= distance;
         up *= distance;
-        float matrix[16]{};
+        double matrix[16]{};
         if (!transform.world_matrix(matrix))
         {
             return fail("Cannot read preview camera basis");

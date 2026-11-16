@@ -175,21 +175,34 @@ public:
     }
 };
 
+static_assert(sizeof(JPH::Real) == sizeof(double), "Jolt requires double precision positions");
+
+JPH::RVec3 position_value(const Vec3& value)
+{
+    return {value.x(), value.y(), value.z()};
+}
+
 JPH::Vec3 vector(const Vec3& value)
 {
     return {static_cast<float>(value.x()), static_cast<float>(value.y()),
             static_cast<float>(value.z())};
 }
 
-Vec3 vector(JPH::Vec3Arg value)
+template <typename T> Vec3 vector(const T& value)
 {
     return {value.GetX(), value.GetY(), value.GetZ()};
 }
 
-bool finite(JPH::Vec3Arg value)
+template <typename T> bool finite(const T& value)
 {
     return std::isfinite(value.GetX()) && std::isfinite(value.GetY()) &&
            std::isfinite(value.GetZ());
+}
+
+template <typename T> double maximum_abs(const T& value)
+{
+    return std::max({std::abs(double(value.GetX())), std::abs(double(value.GetY())),
+                     std::abs(double(value.GetZ()))});
 }
 
 bool close(float left, float right)
@@ -226,7 +239,8 @@ Vec3 euler_angles(JPH::QuatArg rotation)
     return {roll * degrees, pitch * degrees, yaw * degrees};
 }
 
-bool decompose(const JPH::Mat44& matrix, JPH::Vec3& position, JPH::Quat& rotation, JPH::Vec3& scale)
+bool decompose(const JPH::RMat44& matrix, JPH::RVec3& position, JPH::Quat& rotation,
+               JPH::Vec3& scale)
 {
     const auto x = matrix.GetAxisX();
     const auto y = matrix.GetAxisY();
@@ -234,7 +248,7 @@ bool decompose(const JPH::Mat44& matrix, JPH::Vec3& position, JPH::Quat& rotatio
     scale = {x.Length(), y.Length(), z.Length()};
     position = matrix.GetTranslation();
     if (!finite(scale) || !finite(position) || scale.ReduceMin() < 0.00001F ||
-        scale.ReduceMax() > 100000.0F || position.Abs().ReduceMax() > 10000000.0F)
+        scale.ReduceMax() > 100000.0F || maximum_abs(position) > 10000000.0F)
     {
         return false;
     }
@@ -254,17 +268,18 @@ bool decompose(const JPH::Mat44& matrix, JPH::Vec3& position, JPH::Quat& rotatio
     return true;
 }
 
-bool world_matrix(const Transform& transform, JPH::Mat44& output)
+bool world_matrix(const Transform& transform, JPH::RMat44& output)
 {
-    std::array<float, 16> values{};
+    std::array<double, 16> values{};
     if (!transform.world_matrix(values.data()))
     {
         return false;
     }
-    output = JPH::Mat44(JPH::Vec4(values[0], values[1], values[2], values[3]),
-                        JPH::Vec4(values[4], values[5], values[6], values[7]),
-                        JPH::Vec4(values[8], values[9], values[10], values[11]),
-                        JPH::Vec4(values[12], values[13], values[14], values[15]));
+    output = JPH::RMat44(
+        JPH::Vec4(float(values[0]), float(values[1]), float(values[2]), float(values[3])),
+        JPH::Vec4(float(values[4]), float(values[5]), float(values[6]), float(values[7])),
+        JPH::Vec4(float(values[8]), float(values[9]), float(values[10]), float(values[11])),
+        JPH::RVec3(values[12], values[13], values[14]));
     return true;
 }
 
@@ -340,7 +355,7 @@ bool make_shape(const schema::ColliderDataT& collider, const schema::MeshDataT* 
     ENGINE_PROFILE_ZONE("Physics.create_shape");
     output = nullptr;
     const auto center = vector(collider.center) * scale;
-    if (!finite(center) || center.Abs().ReduceMax() > 100000.0F)
+    if (!finite(center) || maximum_abs(center) > 100000.0F)
     {
         return false;
     }
@@ -428,7 +443,7 @@ bool make_shape(const schema::ColliderDataT& collider, const schema::MeshDataT* 
         for (const auto& vertex : mesh->vertices)
         {
             const JPH::Vec3 position = JPH::Vec3(vertex.x(), vertex.y(), vertex.z()) * scale;
-            if (!finite(position) || position.Abs().ReduceMax() > 100000.0F)
+            if (!finite(position) || maximum_abs(position) > 100000.0F)
             {
                 return false;
             }
@@ -535,7 +550,7 @@ struct CharacterSnapshot
     std::uint64_t node_id = 0;
     std::uint64_t instance_id = 0;
     schema::CharacterMotorDataT settings;
-    JPH::Vec3 position = JPH::Vec3::sZero();
+    JPH::RVec3 position = JPH::RVec3::sZero();
     bool reset_velocity = false;
     float yaw_degrees = 0;
 };
@@ -553,13 +568,14 @@ bool read_character(Node node, CharacterMotor motor, CharacterSnapshot& output)
         return false;
     }
     if (pose.scale != Vec3(1, 1, 1) || pose.rotation.x() != 0.0 || pose.rotation.z() != 0.0 ||
-        !finite(vector(pose.position)) || vector(pose.position).Abs().ReduceMax() > 10000000.0F)
+        !finite(position_value(pose.position)) ||
+        maximum_abs(position_value(pose.position)) > 10000000.0F)
     {
         return false;
     }
     output.scene_id = node.scene()->id();
     output.node_id = node.id();
-    output.position = vector(pose.position);
+    output.position = position_value(pose.position);
     output.yaw_degrees = static_cast<float>(pose.rotation.y());
     return true;
 }
@@ -573,7 +589,7 @@ struct BodySnapshot
     std::uint64_t collider_id = 0;
     std::shared_ptr<const schema::ColliderDataT> collider;
     schema::RigidBodyDataT rigid_body;
-    JPH::Vec3 position = JPH::Vec3::sZero();
+    JPH::RVec3 position = JPH::RVec3::sZero();
     JPH::Quat rotation = JPH::Quat::sIdentity();
     JPH::Vec3 scale = JPH::Vec3::sReplicate(1.0F);
     // scale 是本帧请求；shape_scale 是实际烘入形状的值，复用不能推进此基准。
@@ -634,7 +650,7 @@ bool read_snapshot(Node node, const schema::ColliderDataT& collider, const schem
     }
     else
     {
-        JPH::Mat44 matrix;
+        JPH::RMat44 matrix;
         if (!world_matrix(transform, matrix) ||
             !decompose(matrix, output.position, output.rotation, output.scale))
         {
@@ -773,7 +789,7 @@ bool prepare_mesh_parts(BodySnapshot& snapshot, const BodySnapshot* previous)
 JPH::AABox part_bounds(const BodySnapshot& snapshot, const JPH::Shape& shape)
 {
     // Shape 的包围盒以质心为原点；顶点缩放及 Collider.center 已烘入子形状。
-    const auto transform = JPH::Mat44::sRotationTranslation(snapshot.rotation, snapshot.position)
+    const auto transform = JPH::RMat44::sRotationTranslation(snapshot.rotation, snapshot.position)
                                .PreTranslated(shape.GetCenterOfMass());
     return shape.GetWorldSpaceBounds(transform, JPH::Vec3::sOne());
 }
@@ -896,23 +912,23 @@ ContactSample contact_sample(const PhysicsObject& a, const PhysicsObject& b, JPH
 {
     const bool reverse = object_less(b, a);
     return {{reverse ? b : a, reverse ? a : b},
-            vector(JPH::Vec3(point)),
+            vector(point),
             vector(reverse ? -normal : normal),
             is_trigger};
 }
 
-bool valid_overlap(const WorldSystem* world, JPH::Vec3Arg center, const PhysicsQueryFilter& filter)
+bool valid_overlap(const WorldSystem* world, JPH::RVec3Arg center, const PhysicsQueryFilter& filter)
 {
     return world != nullptr && world->is_initialized() && finite(center) &&
-           center.Abs().ReduceMax() <= 10000000.0F &&
+           maximum_abs(center) <= 10000000.0F &&
            (filter.ignore_node_id == 0 || world->find_node(filter.ignore_node_id).valid());
 }
 
-bool valid_query(const WorldSystem* world, JPH::Vec3Arg position, JPH::Vec3Arg direction,
+bool valid_query(const WorldSystem* world, JPH::RVec3Arg position, JPH::Vec3Arg direction,
                  const PhysicsQueryFilter& filter)
 {
     return world != nullptr && world->is_initialized() && finite(position) && finite(direction) &&
-           position.Abs().ReduceMax() <= 10000000.0F && direction.Abs().ReduceMax() <= 100000.0F &&
+           maximum_abs(position) <= 10000000.0F && direction.Abs().ReduceMax() <= 100000.0F &&
            direction.LengthSq() > 0.0F &&
            (filter.ignore_node_id == 0 || world->find_node(filter.ignore_node_id).valid());
 }
@@ -923,7 +939,7 @@ JPH::Vec3 query_normal(JPH::Vec3Arg normal, JPH::Vec3Arg direction)
                                                       : -direction.Normalized();
 }
 
-bool write_transform(Node node, JPH::Vec3Arg position, JPH::QuatArg rotation,
+bool write_transform(Node node, JPH::RVec3Arg position, JPH::QuatArg rotation,
                      JPH::Vec3Arg world_scale)
 {
     auto transform = node.get_component<Transform>();
@@ -932,18 +948,18 @@ bool write_transform(Node node, JPH::Vec3Arg position, JPH::QuatArg rotation,
         return false;
     }
     auto matrix =
-        JPH::Mat44::sRotationTranslation(rotation, position) * JPH::Mat44::sScale(world_scale);
+        JPH::RMat44::sRotationTranslation(rotation, position) * JPH::Mat44::sScale(world_scale);
     if (auto parent = node.parent())
     {
         auto parent_transform = parent.get_component<Transform>();
-        JPH::Mat44 parent_matrix;
+        JPH::RMat44 parent_matrix;
         if (!parent_transform.valid() || !world_matrix(parent_transform, parent_matrix))
         {
             return false;
         }
         matrix = parent_matrix.Inversed() * matrix;
     }
-    JPH::Vec3 local_position;
+    JPH::RVec3 local_position;
     JPH::Quat local_rotation;
     JPH::Vec3 local_scale;
     if (!decompose(matrix, local_position, local_rotation, local_scale))
@@ -1090,7 +1106,7 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
         out.step = step;
         out.simulation_time = step * fixed_step;
         out.has_simulated = simulated;
-        out.feet_position = vector(JPH::Vec3(c.GetPosition()));
+        out.feet_position = vector(c.GetPosition());
         out.yaw_degrees = entry.yaw_degrees;
         out.velocity = vector(c.GetLinearVelocity());
         out.active_half_height = entry.active_half_height;
@@ -1245,7 +1261,7 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
     {
         const auto found = body_objects.find(body.GetID());
         if (found == body_objects.end() || !active_physics_object(world, found->second) ||
-            !std::isfinite(fraction) || !finite(JPH::Vec3(point)))
+            !std::isfinite(fraction) || !finite(point))
         {
             return false;
         }
@@ -1313,7 +1329,7 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
                 point = (a + b) * 0.5F;
             }
         }
-        if (closing_speed <= 0 || !finite(JPH::Vec3(point)))
+        if (closing_speed <= 0 || !finite(point))
         {
             return;
         }
@@ -1747,11 +1763,13 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
         auto collider = node.get_component<Collider>();
         auto rigid_body = node.get_component<RigidBody>();
         if (!collider.valid() || !collider.active() ||
+            engine::ecs_detail::component_runtime(collider)->geometry_removed_ ||
             (rigid_body.valid() && !rigid_body.active()) || !active_transform(node))
         {
             if (rigid_body.valid())
             {
                 engine::ecs_detail::component_runtime(rigid_body)->pending_impulse_ = {};
+                engine::ecs_detail::component_runtime(rigid_body)->synchronized_collider_ = 0;
             }
             return true;
         }
@@ -2228,6 +2246,14 @@ void PhysicsSystem::clear() noexcept
     }
     if (state_ && world_ && world_->is_initialized())
     {
+        for (const auto& [id, entry] : state_->bodies)
+        {
+            auto body = world_->find_node(id).get_component<RigidBody>();
+            if (body)
+            {
+                ecs_detail::component_runtime(body)->synchronized_collider_ = 0;
+            }
+        }
         state_->bind_queries(*world_);
     }
     if (state_ && state_->motors && world_ && world_->is_initialized())
@@ -2266,10 +2292,10 @@ bool PhysicsSystem::cast_sphere(const Vec3& origin, const Vec3& displacement, fl
                                 float& fraction) const
 {
     fraction = 0.0F;
-    const auto position = vector(origin);
+    const auto position = position_value(origin);
     const auto direction = vector(displacement);
     if (!state_ || !world_ || !world_->is_initialized() || !finite(position) ||
-        !finite(direction) || position.Abs().ReduceMax() > 10000000.0F ||
+        !finite(direction) || maximum_abs(position) > 10000000.0F ||
         direction.Abs().ReduceMax() > 100000.0F || !std::isfinite(radius) || radius < 0.0001F ||
         radius > 1000.0F)
     {
@@ -2307,11 +2333,11 @@ bool PhysicsSystem::cast_ray(Collider collider, const Vec3& origin, const Vec3& 
     }
     fraction = 0;
     const auto node = collider.node();
-    const auto position = vector(origin);
+    const auto position = position_value(origin);
     const auto direction = vector(displacement);
     if (!state_ || !world_ || world_->find_node(node.id()) != node ||
         node.get_component<Collider>() != collider || !finite(position) || !finite(direction) ||
-        position.Abs().ReduceMax() > 10000000.0F || direction.Abs().ReduceMax() > 100000.0F)
+        maximum_abs(position) > 10000000.0F || direction.Abs().ReduceMax() > 100000.0F)
     {
         return false;
     }
@@ -2338,7 +2364,7 @@ bool PhysicsSystem::query_ray(const Vec3& origin, const Vec3& displacement,
                               const PhysicsQueryFilter& filter, PhysicsQueryHit& hit) const
 {
     hit = {};
-    const auto position = vector(origin);
+    const auto position = position_value(origin);
     const auto direction = vector(displacement);
     if (!state_ || !state_->can_query(world_) || !valid_query(world_, position, direction, filter))
     {
@@ -2370,7 +2396,7 @@ bool PhysicsSystem::query_sphere(const Vec3& origin, const Vec3& displacement, f
                                  const PhysicsQueryFilter& filter, PhysicsQueryHit& hit) const
 {
     hit = {};
-    const auto position = vector(origin);
+    const auto position = position_value(origin);
     const auto direction = vector(displacement);
     if (!state_ || !state_->can_query(world_) ||
         !valid_query(world_, position, direction, filter) || !std::isfinite(radius) ||
@@ -2414,7 +2440,7 @@ bool PhysicsSystem::overlap_sphere(const Vec3& center, float radius,
                                    std::vector<PhysicsObject>& objects) const
 {
     objects.clear();
-    const auto position = vector(center);
+    const auto position = position_value(center);
     if (!state_ || !state_->can_query(world_) || !valid_overlap(world_, position, filter) ||
         !std::isfinite(radius) || radius < 0.0001F || radius > 1000.0F)
     {
@@ -2430,7 +2456,7 @@ bool PhysicsSystem::overlap_box(const Vec3& center, const Vec3& half_extents,
                                 std::vector<PhysicsObject>& objects) const
 {
     objects.clear();
-    const auto position = vector(center);
+    const auto position = position_value(center);
     const auto extents = vector(half_extents);
     if (!state_ || !state_->can_query(world_) || !valid_overlap(world_, position, filter) ||
         !finite(extents) || extents.ReduceMin() < 0.0001F || extents.ReduceMax() > 1000.0F)
@@ -2537,6 +2563,7 @@ bool PhysicsSystem::set_collider_data(Collider collider, const schema::ColliderD
     engine::ecs_detail::component_runtime(collider)->mesh_ = std::move(source);
     engine::ecs_detail::component_runtime(collider)->transient_mesh_.reset();
     engine::ecs_detail::component_runtime(collider)->mesh_parts_.reset();
+    engine::ecs_detail::component_runtime(collider)->geometry_removed_ = false;
     return true;
 }
 
@@ -2602,6 +2629,7 @@ bool PhysicsSystem::set_mesh_data(Collider collider, const schema::MeshDataT& me
     engine::ecs_detail::component_runtime(collider)->transient_mesh_ =
         std::move(snapshot.transient_mesh);
     engine::ecs_detail::component_runtime(collider)->mesh_parts_.reset();
+    engine::ecs_detail::component_runtime(collider)->geometry_removed_ = false;
     return true;
 }
 
@@ -2666,7 +2694,67 @@ bool PhysicsSystem::set_mesh_parts(Collider collider, const MeshCollisionData& p
     engine::ecs_detail::component_runtime(collider)->mesh_.reset();
     engine::ecs_detail::component_runtime(collider)->transient_mesh_.reset();
     engine::ecs_detail::component_runtime(collider)->mesh_parts_ = std::move(snapshot.mesh_parts);
+    engine::ecs_detail::component_runtime(collider)->geometry_removed_ = false;
     return true;
+}
+
+bool PhysicsSystem::can_publish_geometry(Collider prepared, Collider target) const
+{
+    if (!state_ || state_->in_callback || !world_ || !world_->can_modify() || !prepared ||
+        !target || prepared.node().world() != world_ || target.node().world() != world_ ||
+        target.node().get_component<CharacterMotor>())
+    {
+        return false;
+    }
+    const auto body = state_->bodies.find(prepared.node().id());
+    return body == state_->bodies.end() ||
+           (!body->second.added && body->second.snapshot.collider_id == prepared.instance_id());
+}
+
+void PhysicsSystem::publish_geometry(Collider prepared, Collider target) noexcept
+{
+    auto& interface = state_->physics.GetBodyInterface();
+    if (prepared == target)
+    {
+        const auto found = state_->bodies.find(target.node().id());
+        if (found != state_->bodies.end() && !found->second.added)
+        {
+            interface.AddBody(found->second.body, JPH::EActivation::Activate);
+            found->second.added = true;
+        }
+        return;
+    }
+    auto next = state_->bodies.extract(prepared.node().id());
+    auto old = state_->bodies.extract(target.node().id());
+    if (!old.empty())
+    {
+        auto& entry = old.mapped();
+        if (entry.added)
+        {
+            interface.RemoveBody(entry.body);
+        }
+        entry.added = false;
+        entry.snapshot.node_id = prepared.node().id();
+        entry.snapshot.collider_id = prepared.instance_id();
+        old.key() = prepared.node().id();
+        state_->bodies.insert(std::move(old));
+    }
+    if (!next.empty())
+    {
+        auto& entry = next.mapped();
+        entry.snapshot.scene_id = target.node().scene()->id();
+        entry.snapshot.node_id = target.node().id();
+        entry.snapshot.collider_id = target.instance_id();
+        interface.SetUserData(entry.body, target.node().id());
+        state_->body_objects.at(entry.body) =
+            PhysicsObject{entry.snapshot.scene_id, entry.snapshot.node_id,
+                          PhysicsObjectKind::collider, entry.snapshot.collider_id};
+        interface.AddBody(entry.body, JPH::EActivation::Activate);
+        entry.added = true;
+        next.key() = target.node().id();
+        state_->bodies.insert(std::move(next));
+    }
+    state_->mark_synchronized(target.node().scene()->id());
 }
 
 SceneWorkState PhysicsSystem::prepare_scope(SceneScopeId scope, const SceneWorkBudget& budget)
@@ -2839,6 +2927,19 @@ bool PhysicsSystem::on_tick(double delta_time)
             if (body.get_settings(body_settings) &&
                 body_settings.motion == schema::BodyMotion::dynamic)
             {
+                auto* runtime = engine::ecs_detail::component_runtime(body);
+                if (runtime->sleep_requested_)
+                {
+                    if (runtime->requested_sleeping_)
+                    {
+                        interface.DeactivateBody(entry.body);
+                    }
+                    else
+                    {
+                        interface.ActivateBody(entry.body);
+                    }
+                    runtime->sleep_requested_ = false;
+                }
                 if (engine::ecs_detail::component_runtime(body)->pending_impulse_ != Vec3{})
                 {
                     interface.AddImpulse(
@@ -3134,7 +3235,7 @@ bool PhysicsSystem::on_tick(double delta_time)
                 clear();
                 return false;
             }
-            pose.position = vector(JPH::Vec3(entry.character->GetPosition()));
+            pose.position = vector(entry.character->GetPosition());
             pose.rotation = Vec3(0, entry.yaw_degrees, 0);
             if (!transform.set_settings(pose))
             {
@@ -3170,7 +3271,7 @@ bool PhysicsSystem::on_tick(double delta_time)
                                 entry.snapshot.rigid_body.linear_velocity != Vec3{} ||
                                 entry.snapshot.rigid_body.angular_velocity != Vec3{};
             if (advanced && driven &&
-                !write_transform(node, JPH::Vec3(position), rotation, entry.snapshot.scale))
+                !write_transform(node, position, rotation, entry.snapshot.scale))
             {
                 std::fputs("Cannot write physics pose through the node hierarchy\n", stderr);
                 clear();
@@ -3178,7 +3279,7 @@ bool PhysicsSystem::on_tick(double delta_time)
             }
             if (advanced && entry.snapshot.rigid_body.motion == schema::BodyMotion::dynamic)
             {
-                entry.snapshot.position = JPH::Vec3(position);
+                entry.snapshot.position = position;
                 entry.snapshot.rotation = rotation;
                 TransformSettings pose;
                 if (!node.get_component<Transform>().get_settings(pose))
@@ -3205,6 +3306,9 @@ bool PhysicsSystem::on_tick(double delta_time)
                 return false;
             }
             entry.snapshot.rigid_body = settings;
+            auto* runtime = engine::ecs_detail::component_runtime(body);
+            runtime->sleeping_ = !interface.IsActive(entry.body);
+            runtime->synchronized_collider_ = node.get_component<Collider>().instance_id();
         }
         state_->impacts.reserve(state_->pending_impacts.size());
         for (const auto& [pair, impact] : state_->pending_impacts)

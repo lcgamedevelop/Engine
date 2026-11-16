@@ -94,6 +94,7 @@ std::string scene()
            "ssr_enabled = true\nssr_resolution_scale = 0.5\nssr_max_steps = 48\n"
            "ssr_max_distance = 60\nssr_thickness = 0.2\nssr_roughness_cutoff = 0.65\n"
            "[[nodes.components]]\ntype = \"environment\"\n"
+           "rvt = { enabled = true }\n"
            "ambient_color = [0.25, 0.5, 0.75]\nambient_intensity = 0.75\n"
            "ambient_tricolor = true\nambient_sky_color = [0.4, 0.6, 0.8, 1.0]\n"
            "ambient_equator_color = [0.3, 0.2, 0.1]\n"
@@ -320,6 +321,7 @@ bool scene_effects(engine::ResourceSystem& resources,
                             ->payload.AsLightData();
     if (!expect(
             environment != nullptr && post_process != nullptr && light != nullptr &&
+                environment->rvt && environment->rvt->enabled &&
                 environment->ambient_color.a() == 1.0F && environment->ambient_intensity == 0.75F &&
                 environment->ambient_tricolor && environment->ambient_sky_color.g() == 0.6F &&
                 environment->ambient_equator_color.r() == 0.3F &&
@@ -565,7 +567,7 @@ bool tests()
     }
     engine::schema::AssetCatalogDataT catalog;
     if (!expect(load_catalog(fixture, catalog) && catalog.entries.size() == 3 &&
-                    catalog.schema_version == 3 && pipeline.catalog() == catalog,
+                    catalog.schema_version == 4 && pipeline.catalog() == catalog,
                 "read generated FlatBuffers catalog"))
     {
         return false;
@@ -714,7 +716,7 @@ bool tests()
     }
 
     engine::schema::SceneDataT data;
-    data.schema_version = 4;
+    data.schema_version = 5;
     std::string import_error;
     const auto saved_scene = fixture.root / "settings/roundtrip.scene";
     if (!expect(engine::editor::SceneImporter::read(assets / "main.scene", data, import_error) &&

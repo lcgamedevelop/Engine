@@ -4,6 +4,7 @@
 
 #include <sqlite3.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -16,6 +17,25 @@ namespace engine::editor::asset_pipeline
 {
 namespace
 {
+struct DependencyTable
+{
+    const char* select;
+    const char* insert;
+    std::vector<Guid> ImportAsset::* member;
+};
+
+constexpr std::array dependency_tables{
+    DependencyTable{"SELECT asset_guid,dependency_guid FROM dependencies ORDER BY dependency_guid;",
+                    "INSERT INTO dependencies(asset_guid,dependency_guid) VALUES(?,?);",
+                    &ImportAsset::build_dependencies},
+    DependencyTable{
+        "SELECT asset_guid,dependency_guid FROM runtime_dependencies ORDER BY dependency_guid;",
+        "INSERT INTO runtime_dependencies(asset_guid,dependency_guid) VALUES(?,?);",
+        &ImportAsset::runtime_dependencies},
+    DependencyTable{
+        "SELECT asset_guid,dependency_guid FROM stream_dependencies ORDER BY dependency_guid;",
+        "INSERT INTO stream_dependencies(asset_guid,dependency_guid) VALUES(?,?);",
+        &ImportAsset::stream_dependencies}};
 
 class Statement final
 {
@@ -105,7 +125,7 @@ bool AssetDatabase::open(const std::filesystem::path& path, std::string& error)
         return false;
     }
     const int number = sqlite3_column_int(version.get(), 0);
-    if (number != 0 && number != 1 && number != 2)
+    if (number != 0 && number != 3)
     {
         error = "unsupported asset database version; rebuild cache/assets.sqlite";
         return false;
@@ -122,8 +142,11 @@ bool AssetDatabase::open(const std::filesystem::path& path, std::string& error)
         "CREATE TABLE IF NOT EXISTS runtime_dependencies("
         "asset_guid TEXT NOT NULL REFERENCES assets(guid) ON DELETE CASCADE,"
         "dependency_guid TEXT NOT NULL, PRIMARY KEY(asset_guid,dependency_guid));"
+        "CREATE TABLE IF NOT EXISTS stream_dependencies("
+        "asset_guid TEXT NOT NULL REFERENCES assets(guid) ON DELETE CASCADE,"
+        "dependency_guid TEXT NOT NULL, PRIMARY KEY(asset_guid,dependency_guid));"
         "CREATE TABLE IF NOT EXISTS state(key TEXT PRIMARY KEY, value TEXT NOT NULL);"
-        "PRAGMA user_version=2;",
+        "PRAGMA user_version=3;",
         error);
 }
 
@@ -159,15 +182,10 @@ bool AssetDatabase::load(std::map<Guid, AssetRecord>& records, std::string& erro
         error = "cannot finish reading asset database rows";
         return false;
     }
-    for (const bool runtime : {false, true})
+    for (const auto& table : dependency_tables)
     {
         Statement dependencies;
-        const char* sql =
-            runtime
-                ? "SELECT asset_guid,dependency_guid FROM runtime_dependencies ORDER BY "
-                  "dependency_guid;"
-                : "SELECT asset_guid,dependency_guid FROM dependencies ORDER BY dependency_guid;";
-        if (!dependencies.prepare(database_, sql))
+        if (!dependencies.prepare(database_, table.select))
         {
             error = "cannot read asset dependencies";
             return false;
@@ -180,8 +198,7 @@ bool AssetDatabase::load(std::map<Guid, AssetRecord>& records, std::string& erro
                 error = "asset database contains an orphan dependency";
                 return false;
             }
-            auto& list = runtime ? iterator->second.asset.runtime_dependencies
-                                 : iterator->second.asset.build_dependencies;
+            auto& list = iterator->second.asset.*(table.member);
             list.push_back(dependencies.text(1));
         }
         if (result != SQLITE_DONE)
@@ -225,25 +242,30 @@ bool AssetDatabase::begin_update(const std::vector<AssetRecord>& records,
         return false;
     }
     transaction_ = true;
-    if (!execute("DELETE FROM runtime_dependencies; DELETE FROM dependencies; DELETE FROM assets;",
+    if (!execute("DELETE FROM stream_dependencies; DELETE FROM runtime_dependencies; "
+                 "DELETE FROM dependencies; DELETE FROM assets;",
                  error))
     {
         return false;
     }
     Statement insert;
-    Statement dependency;
-    Statement runtime_dependency;
+    std::array<Statement, dependency_tables.size()> dependencies;
     if (!insert.prepare(database_,
                         "INSERT INTO "
                         "assets(guid,path,kind,source_hash,meta_hash,build_key,output_hash,"
-                        "output_size,module_path) VALUES(?,?,?,?,?,?,?,?,?);") ||
-        !dependency.prepare(database_,
-                            "INSERT INTO dependencies(asset_guid,dependency_guid) VALUES(?,?);") ||
-        !runtime_dependency.prepare(
-            database_, "INSERT INTO runtime_dependencies(asset_guid,dependency_guid) VALUES(?,?);"))
+                        "output_size,module_path) VALUES(?,?,?,?,?,?,?,?,?);"))
     {
         error = "cannot prepare asset database update: " + std::string(sqlite3_errmsg(database_));
         return false;
+    }
+    for (std::size_t index = 0; index < dependency_tables.size(); ++index)
+    {
+        if (!dependencies[index].prepare(database_, dependency_tables[index].insert))
+        {
+            error =
+                "cannot prepare asset dependency update: " + std::string(sqlite3_errmsg(database_));
+            return false;
+        }
     }
     for (const auto& record : records)
     {
@@ -259,12 +281,10 @@ bool AssetDatabase::begin_update(const std::vector<AssetRecord>& records,
         }
         sqlite3_reset(insert.get());
         sqlite3_clear_bindings(insert.get());
-        for (const bool runtime : {false, true})
+        for (std::size_t index = 0; index < dependency_tables.size(); ++index)
         {
-            auto& statement = runtime ? runtime_dependency : dependency;
-            const auto& dependencies =
-                runtime ? record.asset.runtime_dependencies : record.asset.build_dependencies;
-            for (const auto& guid : dependencies)
+            auto& statement = dependencies[index];
+            for (const auto& guid : record.asset.*(dependency_tables[index].member))
             {
                 if (!statement.bind(1, record.asset.guid) || !statement.bind(2, guid) ||
                     sqlite3_step(statement.get()) != SQLITE_DONE)

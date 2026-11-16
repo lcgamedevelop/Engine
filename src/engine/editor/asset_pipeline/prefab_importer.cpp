@@ -151,7 +151,7 @@ bool PrefabImporter::read(const std::filesystem::path& source, schema::PrefabDat
         return false;
     }
     schema::PrefabDataT data;
-    data.schema_version = 4;
+    data.schema_version = 5;
     if (!asset_pipeline::identifier(table.get("root"), data.root_id) || data.root_id == 0)
     {
         error = "Prefab requires a nonzero root ID";
@@ -277,7 +277,7 @@ bool PrefabImporter::validate(const schema::PrefabDataT& data, std::string& erro
         return false;
     }
     schema::SceneDataT scene;
-    scene.schema_version = 4;
+    scene.schema_version = 5;
     scene.info = std::make_unique<schema::SceneInfoT>();
     scene.info->name = "Prefab";
     for (const auto& node : data.nodes)
@@ -306,8 +306,7 @@ bool PrefabImporter::apply_component_override(schema::ComponentDataT& in_out,
     std::set<std::string> fields;
     for (const auto& field : override_data.fields)
     {
-        if (field == "type" || !fields.insert(field).second || !values.contains(field) ||
-            !base.contains(field))
+        if (field == "type" || !fields.insert(field).second || !values.contains(field))
         {
             error = "Unknown or duplicate component override field: " + field;
             return false;
@@ -339,7 +338,7 @@ bool PrefabImporter::from_model(const schema::ModelDataT& model,
         return false;
     }
     schema::PrefabDataT result(in_out);
-    result.schema_version = 4;
+    result.schema_version = 5;
     result.nodes.clear();
     if (result.root_id == 0)
     {

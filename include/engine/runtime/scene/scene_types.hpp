@@ -8,6 +8,7 @@ namespace engine
 using Vec2 = schema::Vec2;
 using Vec3 = schema::Vec3;
 using Vec4 = schema::Vec4;
+using Bounds3 = schema::Bounds3;
 using Color = schema::Color;
 using TransformSettings = schema::TransformDataT;
 using CameraSettings = schema::CameraDataT;

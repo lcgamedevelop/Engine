@@ -42,18 +42,7 @@ vec3 pbr_view_direction(vec3 camera_position, vec3 world_position)
     return direction / max(length(direction), 0.0001);
 }
 
-struct PbrSurface
-{
-    vec4 base_color;
-    vec3 normal;
-    vec3 specular_color;
-    vec3 emission;
-    float metallic;
-    float roughness;
-    float diffuse_weight;
-    float smoothness;
-    float occlusion;
-};
+#include "pbr_surface_types.sh"
 
 PbrSurface sample_pbr_surface(vec2 texcoord, vec4 vertex_color, vec3 world_normal,
                               vec4 world_tangent, vec3 view_direction)

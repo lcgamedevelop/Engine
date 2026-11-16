@@ -756,7 +756,7 @@ bool AssetPipelineSystem::build_assets(const std::filesystem::path& project_root
         }
     }
     std::map<Guid, const schema::AssetEntryT*> previous_entries;
-    if (previous_catalog.schema_version == 3)
+    if (previous_catalog.schema_version == 4)
     {
         for (const auto& entry : previous_catalog.entries)
         {
@@ -1020,7 +1020,7 @@ bool AssetPipelineSystem::build_assets(const std::filesystem::path& project_root
         return fail();
     }
     schema::AssetCatalogDataT catalog;
-    catalog.schema_version = 3;
+    catalog.schema_version = 4;
     catalog.revision = previous_revision.empty() ? new_guid() : previous_revision;
     catalog.target_platform = platform;
     for (const auto& record : records)
@@ -1032,6 +1032,7 @@ bool AssetPipelineSystem::build_assets(const std::filesystem::path& project_root
         entry->content_hash = record.output_hash;
         entry->content_size = record.output_size;
         entry->dependencies = record.asset.runtime_dependencies;
+        entry->stream_dependencies = record.asset.stream_dependencies;
         entry->module_path = record.module_path;
         entry->header_size = record.header_size;
         entry->location = std::make_unique<schema::FileLocationT>();

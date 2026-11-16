@@ -28,7 +28,7 @@ classDiagram
         +append_glyph(const FontDataT& data, const FontGlyphT& glyph, float x, float y, float size, uint32_t color, bool y_down, FontGeometry& output) bool$
         +prepare_font(const ResourceHandle& font, const ResourceHandle& shader, const SceneWorkBudget& budget, SceneWorkProgress& output) SceneWorkState
         +draw(const ResourceHandle& font, const FontGeometry& geometry, const FontDraw& settings) bool
-        +render_scene(const Scene& scene, uint16_t view_id, bool linear_output = false) bool
+        +render_scene(const Scene& scene, const Vec3& origin, uint16_t view_id, bool linear_output = false) bool
         +release_scene() void
         +gpu_resource_count() uint32
         +last_error() const string&

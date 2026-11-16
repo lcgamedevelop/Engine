@@ -27,6 +27,8 @@
 #include "plugins/editor/destruction/destruction_importer.hpp"
 #endif
 #if ENGINE_HAS_TERRAIN_EDITOR
+#include "plugins/editor/terrain/terrain_authoring_commands.hpp"
+#include "plugins/editor/terrain/terrain_authoring_system.hpp"
 #include "plugins/editor/terrain/terrain_commands.hpp"
 #endif
 #if ENGINE_HAS_DESTRUCTION_EDITOR
@@ -185,22 +187,29 @@ int run_editor(const fs::path& project_root, engine::editor::EditorEnvironment& 
         return 1;
     }
 #endif
+    static std::vector<engine::ScenePreparation*> preview_preparations;
+    preview_preparations.clear();
     const engine::RuntimeSetup configure_runtime_plugins =
         [](engine::RuntimeStage stage, engine::WorldSystem& world, engine::WindowSystem& window,
            engine::PhysicsSystem& physics, engine::NavigationSystem& navigation,
-           engine::RenderSystem& renderer, engine::TaskSystem& tasks)
+           engine::RenderSystem& renderer, engine::TaskSystem& tasks,
+           std::vector<engine::ScenePreparation*>& preparations)
     {
-        return assemble_runtime_plugins(stage, world, window, physics, navigation, renderer, tasks,
+        const bool assembled = assemble_runtime_plugins(stage, world, window, physics, navigation,
+                                                        renderer, tasks, preparations,
 #if ENGINE_HAS_CAMERA
-                                        &camera_types,
+                                                        &camera_types,
 #else
-                                        nullptr,
+                                                        nullptr,
 #endif
 #if ENGINE_HAS_CHARACTER_CONTROLLER
-                                        &character_abilities);
+                                                        &character_abilities);
 #else
-                                        nullptr);
+                                                        nullptr);
 #endif
+        if (assembled && stage == engine::RuntimeStage::initialized)
+            preview_preparations = preparations;
+        return assembled;
     };
     engine::RuntimeHost runtime;
     engine::AnimationRetargeterFactory retargeter_factory = nullptr;
@@ -222,6 +231,9 @@ int run_editor(const fs::path& project_root, engine::editor::EditorEnvironment& 
 #endif
 #if ENGINE_HAS_MODELING_PLUGIN
     std::unique_ptr<engine::plugins::modeling::ModelingCommands> modeling;
+#endif
+#if ENGINE_HAS_TERRAIN_EDITOR
+    std::unique_ptr<engine::plugins::terrain::TerrainAuthoringSystem> terrain_authoring;
 #endif
     std::unique_ptr<engine::editor::RenderCommands> render_commands;
     std::unique_ptr<engine::editor::ScenePreview> preview;
@@ -493,6 +505,17 @@ int run_editor(const fs::path& project_root, engine::editor::EditorEnvironment& 
         }
 #endif
 #if ENGINE_HAS_TERRAIN_EDITOR
+        std::string terrain_error;
+        terrain_authoring = std::make_unique<engine::plugins::terrain::TerrainAuthoringSystem>(
+            environment, tasks, engine::plugins::terrain::create_terrain_generator(terrain_error),
+            engine::plugins::terrain::create_terrain_mesher(terrain_error));
+        if (!terrain_authoring->initialize(config) ||
+            !engine::plugins::terrain::register_terrain_authoring_commands(
+                *terrain_authoring, *editor->commands(), project_root))
+        {
+            LogSystem::write(LogLevel::error, "Cannot initialize terrain authoring");
+            return 1;
+        }
         if (!editor->scene_commands() || !editor->commands() ||
             !engine::plugins::terrain::register_terrain_commands(
                 *runtime.world(), *editor->scene_commands(), *editor->commands(), project_root))
@@ -642,6 +665,13 @@ int run_editor(const fs::path& project_root, engine::editor::EditorEnvironment& 
             }
             ui_editor->tick(delta_time);
 #endif
+#if ENGINE_HAS_TERRAIN_EDITOR
+            if (!terrain_authoring->tick(delta_time))
+            {
+                LogSystem::write(LogLevel::error, "Terrain authoring frame failed");
+                return 1;
+            }
+#endif
 #if ENGINE_HAS_SCENE_BAKE
             if (!scene_bake->tick(delta_time))
             {
@@ -688,6 +718,29 @@ int run_editor(const fs::path& project_root, engine::editor::EditorEnvironment& 
                 {
                     status = engine::FrameStatus::exit_requested;
                 }
+                else if (
+                    [&]()
+                    {
+                        for (auto* preparation : preview_preparations)
+                        {
+                            if (preparation->prepare_scope({}, {}) ==
+                                engine::SceneWorkState::failed)
+                            {
+                                engine::ScenePreparationSnapshot snapshot;
+                                (void)preparation->scope_status({}, snapshot);
+                                for (const auto& stage : snapshot.stages)
+                                    if (!stage.error.empty())
+                                        LogSystem::write(LogLevel::error, stage.error);
+                                return true;
+                            }
+                        }
+                        return false;
+                    }())
+                {
+                    LogSystem::write(LogLevel::error, "Scene preview domain preparation failed");
+                    preview->close();
+                    status = render_preview();
+                }
                 else if (!preview->tick(delta_time))
                 {
                     LogSystem::write(LogLevel::error, preview->last_error());
@@ -697,32 +750,6 @@ int run_editor(const fs::path& project_root, engine::editor::EditorEnvironment& 
                 {
                     status = engine::FrameStatus::paused;
                 }
-#if ENGINE_HAS_TERRAIN_PLUGIN
-                else if (engine::plugins::terrain::TerrainSystem::instance() &&
-                         !engine::plugins::terrain::TerrainSystem::instance()->synchronize())
-                {
-                    LogSystem::write(LogLevel::error,
-                                     "Scene preview terrain synchronization failed");
-                    if (const auto* scene = runtime.world()->scene())
-                    {
-                        std::vector<engine::Node> nodes;
-                        if (!scene->collect_nodes(nodes))
-                            return 1;
-                        for (const auto node : nodes)
-                        {
-                            const auto terrain =
-                                node.get_component<engine::plugins::terrain::TerrainComponent>();
-                            if (terrain && !terrain.last_error().empty())
-                            {
-                                LogSystem::write(LogLevel::error,
-                                                 node.name() + ": " + terrain.last_error());
-                            }
-                        }
-                    }
-                    preview->close();
-                    status = render_preview();
-                }
-#endif
 #if ENGINE_HAS_DESTRUCTION_PLUGIN
                 else if (engine::plugins::destruction::DestructionSystem::instance() &&
                          !engine::plugins::destruction::DestructionSystem::instance()
@@ -847,6 +874,9 @@ int run_editor(const fs::path& project_root, engine::editor::EditorEnvironment& 
     }
 #if ENGINE_HAS_ASSET_PIPELINE
     persistence.reset();
+#endif
+#if ENGINE_HAS_TERRAIN_EDITOR
+    terrain_authoring.reset();
 #endif
     render_commands.reset();
 #if ENGINE_HAS_UI_EDITOR

@@ -2,6 +2,7 @@
 #include "editor/resource_access.hpp"
 #include "runtime/resource/types/material_resource.hpp"
 #include "runtime/resource/types/mesh_resource.hpp"
+#include "runtime/utils/transform_math.hpp"
 #include "runtime/world/world_system.hpp"
 
 #include "runtime/render/render_system.hpp"
@@ -35,7 +36,7 @@ namespace engine::plugins::scene_bake
 {
 namespace
 {
-using Matrix = std::array<float, 16>;
+using Matrix = std::array<double, 16>;
 bool fixed_node(const schema::SceneDataT& scene, std::uint64_t id)
 {
     std::set<std::uint64_t> visited;
@@ -104,7 +105,7 @@ bool texture(std::span<const float> rgba, std::uint16_t size, schema::TextureDat
     const auto* bytes = reinterpret_cast<const std::uint8_t*>(half.data());
     const auto byte_count = half.size() * sizeof(half.front());
     output = {};
-    output.schema_version = 2;
+    output.schema_version = 3;
     output.path = "bake/lightmap.ktx";
     output.width = output.height = size;
     output.srgb = false;
@@ -622,7 +623,11 @@ BakeProgress LightingBakeJob::tick(std::string& error)
                 s.lm_uv.push_back(static_cast<float>(uv.x()));
                 s.lm_uv.push_back(static_cast<float>(uv.y()));
             }
-            lmSetGeometry(s.lm.get(), mesh.transform.data(), LM_FLOAT, mesh.mesh->vertices.data(),
+            s.request.world_origin = {mesh.transform[12], mesh.transform[13], mesh.transform[14]};
+            float local_transform[16];
+            transform_math::relative(mesh.transform.data(), s.request.world_origin,
+                                     local_transform);
+            lmSetGeometry(s.lm.get(), local_transform, LM_FLOAT, mesh.mesh->vertices.data(),
                           sizeof(schema::MeshVertex), LM_FLOAT,
                           reinterpret_cast<const std::byte*>(mesh.mesh->vertices.data()) +
                               3 * sizeof(float),
@@ -691,9 +696,8 @@ BakeProgress LightingBakeJob::tick(std::string& error)
             local[a] = lo[a] + (hi[a] - lo[a]) * cell[a] / (grid[a] - 1);
         }
         const auto& m = p.baked_transform;
-        const bx::Vec3 position{m[0] * local[0] + m[4] * local[1] + m[8] * local[2] + m[12],
-                                m[1] * local[0] + m[5] * local[1] + m[9] * local[2] + m[13],
-                                m[2] * local[0] + m[6] * local[1] + m[10] * local[2] + m[14]};
+        s.request.world_origin = transform_math::point(m.data(), {local[0], local[1], local[2]});
+        const bx::Vec3 position{0, 0, 0};
         bx::mtxLookAt(s.request.view.data(), position,
                       bx::add(position, face_forward[s.probe_face]), face_up[s.probe_face],
                       bx::Handedness::Right);

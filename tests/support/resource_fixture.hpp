@@ -4,6 +4,7 @@
 #include "resource_codecs.hpp"
 #include "runtime/resource/builtin_resources.hpp"
 #include "runtime/resource/resource_loader.hpp"
+#include "runtime/schema/terrain_block_generated.h"
 
 #include <algorithm>
 #include <chrono>
@@ -79,7 +80,7 @@ scene_dependencies(const std::vector<std::unique_ptr<engine::schema::NodeDataT>>
             if (const auto* value = component->payload.AsTerrainData())
             {
                 add(value->terrain_guid);
-                add(value->material_guid);
+                add(value->surface_material_guid);
             }
             if (const auto* value = component->payload.AsDestructionData())
             {
@@ -144,7 +145,7 @@ public:
         {
             root.clear();
         }
-        catalog.schema_version = 3;
+        catalog.schema_version = 4;
         catalog.revision = "fixture";
 #if defined(__ANDROID__)
         catalog.target_platform = "android";
@@ -279,6 +280,34 @@ public:
             builder, engine::schema::MaterialData::Pack(builder, &material));
         return add_entity(material.type_path, engine::schema::AssetKind::material, builder,
                           dependencies);
+    }
+
+    bool add(std::string_view path, const engine::schema::TerrainBlockDataT& data)
+    {
+        flatbuffers::FlatBufferBuilder builder;
+        engine::schema::FinishTerrainBlockDataBuffer(
+            builder, engine::schema::TerrainBlockData::Pack(builder, &data));
+        return add_entity(path, engine::schema::AssetKind::terrain_block, builder, {});
+    }
+    bool add(std::string_view path, const engine::schema::TerrainAssetDataT& data)
+    {
+        flatbuffers::FlatBufferBuilder builder;
+        engine::schema::FinishTerrainAssetDataBuffer(
+            builder, engine::schema::TerrainAssetData::Pack(builder, &data));
+        if (!add_entity(path, engine::schema::AssetKind::terrain, builder, data.material_layers))
+        {
+            return false;
+        }
+        for (const auto& region : data.regions)
+        {
+            if (!region->payload.empty())
+            {
+                catalog.entries.back()->stream_dependencies.push_back(region->payload);
+            }
+        }
+        auto& dependencies = catalog.entries.back()->stream_dependencies;
+        std::sort(dependencies.begin(), dependencies.end());
+        return true;
     }
 
     bool publish(engine::ResourceSystem& resources)

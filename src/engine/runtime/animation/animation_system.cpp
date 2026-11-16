@@ -414,13 +414,13 @@ struct AttachmentCommit
 {
     BoneAttachment attachment;
     bool following = false;
-    std::array<float, 16> local;
+    std::array<double, 16> local;
     std::uint64_t revision = 0, generation = 0;
 };
-bool candidate_world(Node node, const std::map<std::uint64_t, ozz::math::Float4x4>& overrides,
-                     ozz::math::Float4x4& output)
+bool candidate_world(Node node, const std::map<std::uint64_t, std::array<double, 16>>& overrides,
+                     std::array<double, 16>& output)
 {
-    output = ozz::math::Float4x4::identity();
+    output = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
     std::vector<Node> chain;
     for (auto current = node; current; current = current.parent())
     {
@@ -440,7 +440,11 @@ bool candidate_world(Node node, const std::map<std::uint64_t, ozz::math::Float4x
         {
             return false;
         }
-        output = output * animation_detail::authored_matrix(pose);
+        auto local = animation_detail::double_matrix(animation_detail::authored_matrix(pose));
+        local[12] = pose.position.x();
+        local[13] = pose.position.y();
+        local[14] = pose.position.z();
+        transform_math::multiply(output.data(), local.data(), output.data());
     }
     return true;
 }
@@ -471,7 +475,7 @@ bool publish_attachments(WorldSystem& world, Scene* scope = nullptr)
     std::stable_sort(attachments.begin(), attachments.end(), [&](const auto& a, const auto& b)
                      { return depth(a.node()) < depth(b.node()); });
     std::vector<AttachmentCommit> commits;
-    std::map<std::uint64_t, ozz::math::Float4x4> overrides;
+    std::map<std::uint64_t, std::array<double, 16>> overrides;
     for (auto attachment : attachments)
     {
         AttachmentCommit commit;
@@ -487,21 +491,24 @@ bool publish_attachments(WorldSystem& world, Scene* scope = nullptr)
             animation_detail::attachment_can_drive(attachment.node()) &&
             source.get_socket_pose(data.socket_name, socket))
         {
-            const auto desired = animation_detail::load_matrix(socket.world) *
-                                 animation_detail::pose_matrix(data.offset);
-            ozz::math::Float4x4 parent_world, parent_inverse;
+            std::array<double, 16> desired, parent_world, parent_inverse;
+            const auto offset =
+                animation_detail::double_matrix(animation_detail::pose_matrix(data.offset));
+            transform_math::multiply(socket.world.data(), offset.data(), desired.data());
             if (!candidate_world(attachment.node().parent(), overrides, parent_world) ||
-                !animation_detail::invert_matrix(parent_world, parent_inverse))
+                !transform_math::inverse(parent_world.data(), parent_inverse.data()))
             {
                 return false;
             }
-            const auto local = parent_inverse * desired;
+            transform_math::multiply(parent_inverse.data(), desired.data(), commit.local.data());
             TransformSettings exact;
-            if (!animation_detail::decompose_authored(local, exact))
+            const Vec3 local_origin{commit.local[12], commit.local[13], commit.local[14]};
+            if (!animation_detail::decompose_authored(
+                    animation_detail::relative_matrix(commit.local, local_origin), exact))
             {
                 return false;
             }
-            animation_detail::store_matrix(local, commit.local);
+
             commit.following = true;
             commit.revision = socket.pose_revision;
             commit.generation =
@@ -952,12 +959,14 @@ SceneWorkState AnimationSystem::prepare_scope(SceneScopeId scope, const SceneWor
             {
                 sample.rest = false;
             }
-            std::array<float, 16> matrix;
-            if (!sample.rest &&
-                (!node.get_component<Transform>().world_matrix(matrix.data()) ||
-                 !animation_detail::collect_ik_operations(
-                     animator, *entry->current.clip->target,
-                     animation_detail::load_matrix(matrix) * entry->skeleton_to_mesh, sample.ik)))
+            std::array<double, 16> matrix;
+            if (!sample.rest && (!node.get_component<Transform>().world_matrix(matrix.data()) ||
+                                 !animation_detail::collect_ik_operations(
+                                     animator, *entry->current.clip->target,
+                                     animation_detail::relative_matrix(
+                                         matrix, {matrix[12], matrix[13], matrix[14]}) *
+                                         entry->skeleton_to_mesh,
+                                     {matrix[12], matrix[13], matrix[14]}, sample.ik)))
             {
                 return false;
             }
@@ -1105,13 +1114,15 @@ bool AnimationSystem::on_tick(double delta_time)
                     return;
                 }
                 sample.frozen_final = !running && !runtime->pose_dirty_ && entry.sampled;
-                std::array<float, 16> mesh_world;
+                std::array<double, 16> mesh_world;
                 if (!sample.rest && !sample.frozen_final &&
                     (!node.get_component<Transform>().world_matrix(mesh_world.data()) ||
                      !animation_detail::collect_ik_operations(
                          animator, *entry.current.clip->target,
-                         animation_detail::load_matrix(mesh_world) * entry.skeleton_to_mesh,
-                         sample.ik)))
+                         animation_detail::relative_matrix(
+                             mesh_world, {mesh_world[12], mesh_world[13], mesh_world[14]}) *
+                             entry.skeleton_to_mesh,
+                         {mesh_world[12], mesh_world[13], mesh_world[14]}, sample.ik)))
                 {
                     success = false;
                     return;

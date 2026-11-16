@@ -11,6 +11,9 @@ public:
     [[nodiscard]] std::string_view id() const noexcept override;
     [[nodiscard]] schema::AssetKind kind() const noexcept override;
     [[nodiscard]] bool matches(const std::filesystem::path& source) const override;
+    [[nodiscard]] bool discover(const editor::asset_pipeline::ImportAsset& source,
+                                std::vector<editor::asset_pipeline::ImportSubresource>& output,
+                                std::string& error) const override;
     [[nodiscard]] bool inspect_batch(const editor::asset_pipeline::ImportContext& context,
                                      std::string& fingerprint, std::string& error) override;
     [[nodiscard]] bool scan_dependencies(editor::asset_pipeline::ImportAsset& asset,
@@ -19,6 +22,9 @@ public:
     [[nodiscard]] bool convert(const editor::asset_pipeline::ImportAsset& asset,
                                const editor::asset_pipeline::ImportContext& context,
                                std::string& error) const override;
+    [[nodiscard]] bool finalize_dependencies(editor::asset_pipeline::ImportAsset& asset,
+                                             const editor::asset_pipeline::ImportContext& context,
+                                             std::string& error) const override;
 };
 
 } // namespace engine::plugins::terrain

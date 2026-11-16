@@ -1,49 +1,59 @@
 #include "plugins/runtime/terrain/terrain_component.hpp"
 
 #include "plugins/runtime/terrain/terrain_component_runtime.hpp"
-
-#include "runtime/scene/ecs_storage.hpp"
-
 #include "plugins/runtime/terrain/terrain_resource.hpp"
-#include "plugins/runtime/terrain/terrain_system.hpp"
+#include "plugins/runtime/terrain/terrain_samples.hpp"
 #include "runtime/core/guid_map.hpp"
-#include "runtime/performance/profiling.hpp"
-#include "runtime/resource/types/material_resource.hpp"
-#include "runtime/resource/virtual_file_system.hpp"
-#include "runtime/scene/resource_binding.hpp"
-#include "runtime/schema/terrain_state_generated.h"
-#include "runtime/utils/path_utils.hpp"
+#include "runtime/scene/ecs_storage.hpp"
+#include "runtime/scene/rigid_body.hpp"
+#include "runtime/scene/transform.hpp"
+#include "runtime/world/world_system.hpp"
 
-#include <SDL3/SDL_filesystem.h>
-#include <SDL3/SDL_iostream.h>
-#include <flatbuffers/flatbuffers.h>
-#include <flatbuffers/verifier.h>
-
+#include <algorithm>
+#include <charconv>
 #include <cmath>
-#include <utility>
+#include <limits>
 
 namespace engine::plugins::terrain
 {
 namespace
 {
-bool color_valid(const schema::Color& color)
+bool valid_view(const TerrainView& view)
 {
-    for (float value : {color.r(), color.g(), color.b(), color.a()})
-    {
-        if (!std::isfinite(value) || value < 0 || value > 1)
-        {
-            return false;
-        }
-    }
-    return true;
+    return terrain_detail::finite(view.center) && std::isfinite(view.visual_radius) &&
+           std::isfinite(view.collision_radius) && view.visual_radius > 0 &&
+           view.visual_radius <= 100000 && view.collision_radius >= 0 &&
+           view.collision_radius <= view.visual_radius && view.lod_bias >= -15 &&
+           view.lod_bias <= 15;
 }
 
-bool same_dimensions(const schema::TerrainAssetDataT& a, const schema::TerrainAssetDataT& b)
+template <class Id> bool owner(TerrainComponent component, const Id& id)
 {
-    return a.cells_x == b.cells_x && a.cells_y == b.cells_y && a.cells_z == b.cells_z &&
-           a.voxel_size == b.voxel_size && a.chunk_cells == b.chunk_cells &&
-           a.origin.x() == b.origin.x() && a.origin.y() == b.origin.y() &&
-           a.origin.z() == b.origin.z();
+    return component && component.node().world()->epoch() == id.world_epoch &&
+           component.node().id() == id.node_id &&
+           component.instance_id() == id.component_instance && id.sequence != 0;
+}
+
+bool local_query(TerrainComponent component, const TerrainRegionQuery& query,
+                 TerrainRegionQuery& result)
+{
+    TransformSettings pose;
+    if (!terrain_detail::valid_bounds(query.bounds) || component.node().parent() ||
+        !component.node().get_component<Transform>().get_settings(pose) ||
+        pose.rotation != Vec3{} || pose.scale.x() <= 0 || pose.scale.x() != pose.scale.y() ||
+        pose.scale.x() != pose.scale.z())
+    {
+        return false;
+    }
+    const auto local = [&](Vec3 value)
+    {
+        return Vec3{(value.x() - pose.position.x()) / pose.scale.x(),
+                    (value.y() - pose.position.y()) / pose.scale.x(),
+                    (value.z() - pose.position.z()) / pose.scale.x()};
+    };
+    result = query;
+    result.bounds = {local(query.bounds.minimum()), local(query.bounds.maximum())};
+    return true;
 }
 } // namespace
 
@@ -51,394 +61,330 @@ bool TerrainComponent::register_type(ComponentRegistry& registry)
 {
     return register_component_storage<TerrainComponent, Data, Runtime>(registry);
 }
-
 TerrainComponent::Runtime* TerrainComponent::runtime() const noexcept
 {
     return runtime_state<Runtime>();
 }
-
-bool TerrainComponent::valid_settings(const schema::TerrainDataT& settings) noexcept
+bool TerrainComponent::valid_settings(const Data& value) noexcept
 {
-    return (settings.terrain_guid.empty() || GuidMap::valid_guid(settings.terrain_guid)) &&
-           (settings.material_guid.empty() || GuidMap::valid_guid(settings.material_guid)) &&
-           color_valid(settings.surface_color) && color_valid(settings.wall_color) &&
-           std::isfinite(settings.uv_scale) && settings.uv_scale > 0 && settings.uv_scale <= 100;
+    if ((!value.terrain_guid.empty() && !GuidMap::valid_guid(value.terrain_guid)) ||
+        (!value.surface_material_guid.empty() &&
+         !GuidMap::valid_guid(value.surface_material_guid)) ||
+        value.rvt_role < schema::RvtRole::MIN || value.rvt_role > schema::RvtRole::MAX ||
+        (value.initial_view && !valid_view(*value.initial_view)))
+    {
+        return false;
+    }
+    const auto budget = value.budget ? *value.budget : schema::TerrainBudgetDataT{};
+    return budget.max_requests > 0 && budget.max_requests <= 1024 && budget.max_tasks > 0 &&
+           budget.max_tasks <= 64 && budget.max_regions > 0 && budget.max_regions <= 4096 &&
+           budget.cpu_bytes >= 1024 * 1024 && budget.gpu_bytes >= 1024 * 1024 &&
+           budget.collision_bytes >= 1024 * 1024 && budget.upload_bytes_per_frame > 0 &&
+           budget.publications_per_frame > 0 && budget.publications_per_frame <= 16;
 }
-
-bool TerrainComponent::get_settings(Data& output) const noexcept
+bool TerrainComponent::get_settings(Data& output) const
 {
-    const auto* value = read_data<Data>();
-    output = value ? *value : Data{};
-    return value != nullptr;
+    const auto* data = read_data<Data>();
+    output = data ? *data : Data{};
+    return data != nullptr;
 }
-
-bool TerrainComponent::set_settings(const schema::TerrainDataT& value)
+bool TerrainComponent::set_settings(const Data& value)
 {
-    if (!writable())
+    if (!writable() || !valid_settings(value) || runtime()->settings_revision_ == UINT64_MAX)
     {
         return false;
     }
-    if (!valid_settings(value))
+    if (*read_data<Data>() == value)
     {
-        runtime()->last_error_ = "Invalid terrain component settings";
-        return false;
+        return true;
     }
-    auto* resources = node().world()->resource_loader();
-    ResourceReference replacement;
-    ResourceReference material;
-    TerrainVolume candidate;
-    if (!value.terrain_guid.empty())
-    {
-        if (!resources || !ecs_detail::acquire_resource(node(), value.terrain_guid, replacement) ||
-            !replacement || replacement->info().kind != schema::AssetKind::terrain ||
-            !replacement.data<TerrainResource>() ||
-            !candidate.initialize(*replacement.data<TerrainResource>(), runtime()->last_error_))
-        {
-            runtime()->last_error_ = "Cannot load terrain resource";
-            return false;
-        }
-        const auto material_path = value.material_guid.empty()
-                                       ? std::string_view("builtin://materials/default-pbr")
-                                       : std::string_view(value.material_guid);
-        if (!ecs_detail::acquire_resource(node(), material_path, material) ||
-            !material.data<MaterialResource>())
-        {
-            runtime()->last_error_ = "Material must be loaded before binding";
-            return false;
-        }
-    }
-    const bool retain =
-        runtime()->resource_ && replacement &&
-        runtime()->resource_->info().guid == replacement->info().guid &&
-        runtime()->resource_->info().content_hash == replacement->info().content_hash;
-    Data previous_settings;
-    if (!get_settings(previous_settings))
-    {
-        return false;
-    }
-    if (retain)
-    {
-        if (runtime()->detached_ && value != previous_settings)
-        {
-            runtime()->last_error_ =
-                "Reset terrain fragments before changing their material or settings";
-            return false;
-        }
-        candidate = runtime()->volume_;
-    }
-    auto previous_resource = std::move(runtime()->resource_);
-    auto previous_material = std::move(runtime()->material_);
     *write_data<Data>() = value;
+    auto* state = runtime();
+    ++state->settings_revision_;
+    state->plan_dirty_ = true;
+    state->views_[0] = value.initial_view ? *value.initial_view : TerrainView{};
     modified();
-    runtime()->resource_ = std::move(replacement);
-    runtime()->material_ = std::move(material);
-    if (runtime()->ready_ && runtime()->resource_)
-    {
-        auto* system = TerrainSystem::instance();
-        if (!system || !system->commit(*this, std::move(candidate)))
-        {
-            *write_data<Data>() = previous_settings;
-            modified();
-            runtime()->resource_ = std::move(previous_resource);
-            runtime()->material_ = std::move(previous_material);
-            return false;
-        }
-    }
-    else
-    {
-        runtime()->volume_ = std::move(candidate);
-        runtime()->triangles_ = 0;
-        runtime()->ready_ = false;
-        runtime()->pending_ = static_cast<bool>(runtime()->resource_);
-    }
-    if (!retain)
-    {
-        if (auto* system = TerrainSystem::instance())
-        {
-            system->clear_fragments(*this);
-        }
-        runtime()->detached_ = false;
-    }
-    runtime()->last_error_.clear();
     return true;
 }
-
 bool TerrainComponent::restore_data(const schema::ComponentDataT& data)
 {
-    if (!data.flags)
+    const auto* settings = data.payload.AsTerrainData();
+    return settings && data.flags && set_settings(*settings) && restore_flags(data);
+}
+bool TerrainComponent::set_view(std::uint64_t key, const TerrainView& view)
+{
+    if (!writable() || key == 0 || !valid_view(view))
     {
         return false;
     }
-    if (!writable())
+    auto* state = runtime();
+    if (!state->views_.contains(key) && state->views_.size() >= 16)
     {
         return false;
     }
-    const auto* value = data.payload.AsTerrainData();
-    if (!value || !set_settings(*value))
+    if (const auto found = state->views_.find(key);
+        found != state->views_.end() && found->second == view)
+    {
+        return true;
+    }
+    state->views_.erase(0);
+    ++state->demand_revision_;
+    state->views_[key] = view;
+    state->plan_dirty_ = true;
+    return true;
+}
+bool TerrainComponent::remove_view(std::uint64_t key)
+{
+    if (!writable() || key == 0 || runtime()->views_.erase(key) == 0)
     {
         return false;
     }
-    if (!restore_flags(data))
+    ++runtime()->demand_revision_;
+    runtime()->plan_dirty_ = true;
+    return true;
+}
+bool TerrainComponent::pin_regions(const TerrainPinSpec& spec, TerrainPinId& output)
+{
+    output = {};
+    if (!writable() || spec.owner_key == 0 || spec.regions.empty() || spec.regions.size() > 256 ||
+        spec.reason.empty() || spec.reason.size() > 256)
+    {
+        return false;
+    }
+    auto* state = runtime();
+    const auto* source = state->source_.data<TerrainResource>();
+    if (!source || state->pins_.size() >= 64 || state->next_pin_ == UINT64_MAX)
+    {
+        return false;
+    }
+    for (auto key : spec.regions)
+    {
+        if (!terrain_detail::entry(*source, key) || (spec.collision_required && key.lod() != 0))
+        {
+            return false;
+        }
+    }
+    const auto sequence = state->next_pin_++;
+    state->pins_.emplace(sequence, spec);
+    ++state->demand_revision_;
+    state->plan_dirty_ = true;
+    output = {node().world()->epoch(), node().id(), instance_id(), sequence};
+    return true;
+}
+bool TerrainComponent::release_pin(TerrainPinId id)
+{
+    if (!writable() || !owner(*this, id) || runtime()->pins_.erase(id.sequence) == 0)
+    {
+        return false;
+    }
+    ++runtime()->demand_revision_;
+    runtime()->plan_dirty_ = true;
+    return true;
+}
+bool TerrainComponent::request_edit(const TerrainEditSpec& spec, TerrainOperationId& output)
+{
+    output = {};
+    return writable() && runtime()->system_ && runtime()->system_->request(*this, spec, output);
+}
+bool TerrainComponent::request_collapse(const TerrainCollapseSpec& spec, TerrainOperationId& output)
+{
+    output = {};
+    return writable() && runtime()->system_ && runtime()->system_->request(*this, spec, output);
+}
+bool TerrainComponent::request_reset(const TerrainResetSpec& spec, TerrainOperationId& output)
+{
+    output = {};
+    return writable() && runtime()->system_ && runtime()->system_->request(*this, spec, output);
+}
+bool TerrainComponent::request_retire(const TerrainRetireSpec& spec, TerrainOperationId& output)
+{
+    output = {};
+    return writable() && runtime()->system_ && runtime()->system_->request(*this, spec, output);
+}
+bool TerrainComponent::request_save(const TerrainSaveSpec& spec, TerrainOperationId& output)
+{
+    output = {};
+    return writable() && runtime()->system_ && runtime()->system_->request(*this, spec, output);
+}
+bool TerrainComponent::request_load(const TerrainLoadSpec& spec, TerrainOperationId& output)
+{
+    output = {};
+    return writable() && runtime()->system_ && runtime()->system_->request(*this, spec, output);
+}
+bool TerrainComponent::operation_status(TerrainOperationId id,
+                                        TerrainOperationSnapshot& output) const
+{
+    output = {};
+    if (!owner(*this, id))
+    {
+        return false;
+    }
+    const auto found = runtime()->operations_.find(id.sequence);
+    if (found == runtime()->operations_.end())
+    {
+        return false;
+    }
+    output = found->second->snapshot;
+    return true;
+}
+bool TerrainComponent::cancel_operation(TerrainOperationId id)
+{
+    if (!writable() || !owner(*this, id))
+    {
+        return false;
+    }
+    const auto found = runtime()->operations_.find(id.sequence);
+    if (found == runtime()->operations_.end() || terminal(found->second->snapshot.state) ||
+        found->second->snapshot.state == TerrainOperationState::published)
+    {
+        return false;
+    }
+    auto& operation = *found->second;
+    if (operation.persistence_commit)
+    {
+        return false;
+    }
+    operation.cancelled = true;
+    if (operation.work)
+    {
+        operation.work->cancelled->store(true, std::memory_order_relaxed);
+    }
+    if (operation.geometry && !operation.geometry->cancel())
     {
         return false;
     }
     return true;
 }
-
-bool TerrainComponent::apply_sphere(const Vec3& center, float radius, bool fill)
+bool TerrainComponent::release_operation(TerrainOperationId id)
 {
-    if (!writable())
+    if (!writable() || !owner(*this, id))
     {
         return false;
     }
-    ENGINE_PROFILE_ZONE("Terrain.brush");
-    auto* system = TerrainSystem::instance();
-    if (!runtime()->ready_ || !system || !active())
-    {
-        runtime()->last_error_ = "Terrain is not ready";
-        return false;
-    }
-    auto candidate = runtime()->volume_;
-    return candidate.apply_sphere(center, radius, fill, runtime()->last_error_) &&
-           system->commit(*this, std::move(candidate));
-}
-
-bool TerrainComponent::retire_fragments(std::uint32_t max_count, double max_age_seconds,
-                                        std::uint32_t& retired_count)
-{
-    retired_count = 0;
-    if (!writable())
+    auto& operations = runtime()->operations_;
+    const auto found = operations.find(id.sequence);
+    if (found == operations.end() || !terminal(found->second->snapshot.state) ||
+        found->second->future.valid())
     {
         return false;
     }
-    auto* system = TerrainSystem::instance();
-    if (!system)
-    {
-        runtime()->last_error_ = "Terrain system is not ready";
-        return false;
-    }
-    return system->retire_fragments(*this, max_count, max_age_seconds, retired_count);
-}
-
-bool TerrainComponent::reset()
-{
-    if (!writable())
-    {
-        return false;
-    }
-    auto* system = TerrainSystem::instance();
-    schema::TerrainAssetDataT data;
-    TerrainVolume candidate;
-    if (!runtime()->resource_ || !system || !runtime()->resource_.data<TerrainResource>() ||
-        !candidate.initialize(*runtime()->resource_.data<TerrainResource>(),
-                              runtime()->last_error_))
-    {
-        return false;
-    }
-    if (!system->commit(*this, std::move(candidate)))
-    {
-        return false;
-    }
-    system->clear_fragments(*this);
-    runtime()->detached_ = false;
+    operations.erase(found);
     return true;
 }
-
-bool TerrainComponent::collapse_detached(std::uint32_t min_samples, std::uint32_t max_fragments,
-                                         std::uint32_t fragment_cells, float density)
+bool TerrainComponent::query_regions(const TerrainRegionQuery& query,
+                                     TerrainRegionSnapshot& output) const
 {
-    if (!writable())
+    output = {};
+    TerrainRegionQuery local;
+    if (!valid() || query.limit == 0 || query.limit > 4096 || !local_query(*this, query, local))
     {
         return false;
     }
-    auto* system = TerrainSystem::instance();
-    if (!system)
+    const auto* state = runtime();
+    const auto* source = state->source_.data<TerrainResource>();
+    if (!source)
     {
-        runtime()->last_error_ = "Terrain system is not available";
         return false;
     }
-    return system->collapse_detached(*this, min_samples, max_fragments, fragment_cells, density);
-}
-
-std::size_t TerrainComponent::fragment_count() const noexcept
-{
-    if (!valid())
+    std::vector<TerrainRegionKey> keys;
+    if (!terrain_detail::enumerate(*source, local.bounds, local.lod, 65536, keys))
     {
-        return {};
+        return false;
     }
-    const auto* system = TerrainSystem::instance();
-    return system ? system->fragment_count(*this) : 0;
+    std::size_t start = 0;
+    if (!query.cursor.empty())
+    {
+        const auto split = query.cursor.find(':');
+        if (split == std::string::npos)
+        {
+            return false;
+        }
+        std::uint64_t revision = 0;
+        const auto* begin = query.cursor.data();
+        const auto first = std::from_chars(begin, begin + split, revision);
+        const auto second = std::from_chars(begin + split + 1, begin + query.cursor.size(), start);
+        if (first.ec != std::errc{} || first.ptr != begin + split || second.ec != std::errc{} ||
+            second.ptr != begin + query.cursor.size() || revision != state->revision_ ||
+            start >= keys.size())
+        {
+            return false;
+        }
+    }
+    output.revision = state->revision_;
+    output.settings_revision = state->settings_revision_;
+    output.fragment_count = state->fragments_.size();
+    const auto end = std::min(keys.size(), start + query.limit);
+    for (auto index = start; index < end; ++index)
+    {
+        TerrainRegionStatus status;
+        status.key = keys[index];
+        if (const auto found = state->regions_.find(status.key); found != state->regions_.end())
+        {
+            status = found->second.status;
+        }
+        else
+        {
+            const auto* entry = terrain_detail::entry(*source, status.key);
+            status.known = entry && entry->uniform != schema::TerrainUniformState::unknown;
+            status.blocked_reason = status.known ? "not_resident" : "unknown_region";
+        }
+        status.dirty = state->dirty_.contains(status.key);
+        for (const auto& [id, pin] : state->pins_)
+        {
+            (void)id;
+            if (std::find(pin.regions.begin(), pin.regions.end(), status.key) != pin.regions.end())
+            {
+                ++status.pin_count;
+            }
+        }
+        output.regions.push_back(std::move(status));
+    }
+    if (end < keys.size())
+    {
+        output.next_cursor = std::to_string(state->revision_) + ":" + std::to_string(end);
+    }
+    return true;
 }
-
-bool TerrainComponent::snapshot(ByteBuffer& output) const
+bool TerrainComponent::collect_support(const TerrainRegionQuery& query,
+                                       std::vector<Collider>& output) const
 {
     output.clear();
-    if (!valid())
+    TerrainRegionSnapshot status;
+    TerrainRegionQuery local;
+    TerrainReadSnapshot samples;
+    if (query.lod != 0 || !query.cursor.empty() || !query_regions(query, status) ||
+        !status.next_cursor.empty() || !local_query(*this, query, local) ||
+        !runtime()->volume_.read(local, samples))
     {
         return false;
     }
-    if (!runtime()->ready_ || !runtime()->resource_ || runtime()->detached_)
+    std::vector<Collider> candidate;
+    for (const auto& region : status.regions)
     {
-        return false;
+        if (!region.known || region.state != SceneWorkState::ready || !region.collision_required ||
+            region.mesh_revision != region.density_revision ||
+            region.collision_revision != region.density_revision)
+        {
+            return false;
+        }
+        const auto found = runtime()->regions_.find(region.key);
+        if (found == runtime()->regions_.end())
+        {
+            return false;
+        }
+        if (found->second.node)
+        {
+            auto collider = found->second.node.get_component<Collider>();
+            schema::ColliderDataT settings;
+            if (!collider || !collider.active() || !collider.get_settings(settings) ||
+                settings.is_trigger || collider.node().get_component<RigidBody>())
+            {
+                return false;
+            }
+            candidate.push_back(collider);
+        }
     }
-    schema::TerrainStateDataT state;
-    state.base_guid = runtime()->resource_->info().guid;
-    state.base_hash = runtime()->resource_->info().content_hash;
-    state.volume = std::make_unique<schema::TerrainAssetDataT>(runtime()->volume_.data());
-    flatbuffers::FlatBufferBuilder builder;
-    schema::FinishTerrainStateDataBuffer(builder, schema::TerrainStateData::Pack(builder, &state));
-    const auto* begin = reinterpret_cast<const std::byte*>(builder.GetBufferPointer());
-    output.assign(begin, begin + builder.GetSize());
+    output = std::move(candidate);
     return true;
 }
-
-bool TerrainComponent::restore(ByteView bytes)
-{
-    if (!writable())
-    {
-        return false;
-    }
-    if (runtime()->detached_)
-    {
-        runtime()->last_error_ =
-            "Terrain state cannot restore dynamic fragments; reset them explicitly first";
-        return false;
-    }
-    auto* system = TerrainSystem::instance();
-    const auto* source = reinterpret_cast<const std::uint8_t*>(bytes.data());
-    flatbuffers::Verifier verifier(source, bytes.size());
-    if (!runtime()->resource_ || !system || bytes.size() > 32U * 1024U * 1024U ||
-        !schema::VerifyTerrainStateDataBuffer(verifier))
-    {
-        runtime()->last_error_ = "Invalid terrain state";
-        return false;
-    }
-    const auto state = schema::UnPackTerrainStateData(source);
-    TerrainVolume candidate;
-    if (state->schema_version != 1 || state->base_guid != runtime()->resource_->info().guid ||
-        state->base_hash != runtime()->resource_->info().content_hash || !state->volume ||
-        !same_dimensions(*state->volume, runtime()->volume_.data()))
-    {
-        runtime()->last_error_ = "Terrain state does not match its base resource";
-        return false;
-    }
-    return candidate.initialize(*state->volume, runtime()->last_error_) &&
-           system->commit(*this, std::move(candidate));
-}
-
-bool TerrainComponent::save_state(const std::filesystem::path& path) const
-{
-    if (!valid())
-    {
-        return false;
-    }
-    ByteBuffer bytes;
-    if (path.empty() || !snapshot(bytes))
-    {
-        return false;
-    }
-    std::error_code ec;
-    std::filesystem::create_directories(path.parent_path(), ec);
-    if (ec)
-    {
-        return false;
-    }
-    auto temporary = path;
-    temporary += ".pending";
-    const auto status = std::filesystem::symlink_status(temporary, ec);
-    if ((ec && ec != std::errc::no_such_file_or_directory) ||
-        status.type() != std::filesystem::file_type::not_found)
-    {
-        return false;
-    }
-    const auto temporary_text = PathUtils::to_utf8(temporary);
-    const auto target_text = PathUtils::to_utf8(path);
-    // Exclusive creation never follows an existing temporary file/symlink.
-    auto* file = SDL_IOFromFile(temporary_text.c_str(), "wbx");
-    if (!file)
-    {
-        return false;
-    }
-    const bool written = SDL_WriteIO(file, bytes.data(), bytes.size()) == bytes.size();
-    const bool closed = SDL_CloseIO(file);
-    if (!written || !closed)
-    {
-        (void)SDL_RemovePath(temporary_text.c_str());
-        return false;
-    }
-    // SDL supplies replace-existing rename semantics on every supported platform.
-    if (!SDL_RenamePath(temporary_text.c_str(), target_text.c_str()))
-    {
-        (void)SDL_RemovePath(temporary_text.c_str());
-        return false;
-    }
-    return true;
-}
-
-bool TerrainComponent::load_state(const std::filesystem::path& path)
-{
-    if (!writable())
-    {
-        return false;
-    }
-    ByteBuffer bytes;
-    std::error_code ec;
-    const auto size = std::filesystem::file_size(path, ec);
-    if (ec || size > 32U * 1024U * 1024U || !VirtualFileSystem::read_file(path, bytes))
-    {
-        runtime()->last_error_ = "Cannot read terrain state";
-        return false;
-    }
-    return restore(bytes);
-}
-
-bool TerrainComponent::ready() const noexcept
-{
-    if (!valid())
-    {
-        return false;
-    }
-    return runtime()->ready_;
-}
-std::uint64_t TerrainComponent::revision() const noexcept
-{
-    if (!valid())
-    {
-        return {};
-    }
-    return runtime()->revision_;
-}
-std::size_t TerrainComponent::chunk_count() const noexcept
-{
-    if (!valid())
-    {
-        return {};
-    }
-    return runtime()->volume_.chunk_count();
-}
-std::size_t TerrainComponent::rebuilt_chunks() const noexcept
-{
-    if (!valid())
-    {
-        return {};
-    }
-    return runtime()->volume_.rebuilt_chunks();
-}
-std::size_t TerrainComponent::triangle_count() const noexcept
-{
-    if (!valid())
-    {
-        return {};
-    }
-    return runtime()->triangles_;
-}
-std::string TerrainComponent::last_error() const noexcept
-{
-    if (!valid())
-    {
-        return {};
-    }
-    return runtime()->last_error_;
-}
-
 } // namespace engine::plugins::terrain

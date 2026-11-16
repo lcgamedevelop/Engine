@@ -1,5 +1,6 @@
 #include "plugins/runtime/script/bindings/environment_component_binding.hpp"
 #include "plugins/runtime/script/bindings/binding_helpers.hpp"
+#include "plugins/runtime/script/bindings/control_binding_helpers.hpp"
 
 #include "plugins/runtime/script/bindings/binding_context.hpp"
 #include "runtime/scene/environment_component.hpp"
@@ -17,6 +18,8 @@ namespace
 constexpr std::string_view javascript = R"js(
 export class EnvironmentComponent extends Component {
     constructor(token, scene, node) { super(token, scene, node, native.EnvironmentKind); }
+    GetRvtSettings() {const h=handles.get(this);return native.EnvironmentGetRvt(h.scene,h.node);}
+    SetRvtSettings(settings) {const h=handles.get(this);return native.EnvironmentSetRvt(h.scene,h.node,JSON.stringify(settings));}
     SetAmbient(r, g, b, intensity) {
         const h = handles.get(this);
         return native.EnvironmentAmbient(h.scene, h.node, r, g, b, intensity);
@@ -210,6 +213,39 @@ void meshlet_enabled(const Arguments& arguments)
     arguments.set_return(target && target.get_settings(value) && value.meshlet_culling_enabled);
 }
 
+void get_rvt(const Arguments& arguments)
+{
+    const auto component = binding_detail::component<EnvironmentComponent>(arguments, 2);
+    EnvironmentSettings settings;
+    arguments.set_return({});
+    if (!component || !component.get_settings(settings))
+    {
+        return;
+    }
+    const schema::RvtSettingsT defaults;
+    arguments.set_return(control_detail::native(
+        schema::control_json::write(settings.rvt ? *settings.rvt : defaults, true)));
+}
+void set_rvt(const Arguments& arguments)
+{
+    auto component = binding_detail::component<EnvironmentComponent>(arguments, 3);
+    EnvironmentSettings settings;
+    control_detail::Json json;
+    std::string error;
+    arguments.set_return(false);
+    if (!component || !component.get_settings(settings) ||
+        !control_detail::argument(arguments, 2, json))
+    {
+        return;
+    }
+    auto value = std::make_unique<schema::RvtSettingsT>();
+    if (!schema::control_json::read(json, *value, error, true))
+    {
+        return;
+    }
+    settings.rvt = std::move(value);
+    arguments.set_return(component.set_settings(settings));
+}
 void meshlet_culling(const Arguments& arguments)
 {
     auto target = binding_detail::component<EnvironmentComponent>(arguments, 3);
@@ -350,6 +386,7 @@ bool EnvironmentComponentBinding::register_functions(vm::ScriptVm& vm) const
 {
     return vm.integer("EnvironmentKind", static_cast<int>(EnvironmentComponent::component_type)) &&
            vm.function("EnvironmentAdd", binding_detail::add_component<EnvironmentComponent>) &&
+           vm.function("EnvironmentGetRvt", get_rvt) && vm.function("EnvironmentSetRvt", set_rvt) &&
            vm.function("EnvironmentAmbient", ambient) &&
            vm.function("EnvironmentTricolor", tricolor) &&
            vm.function("EnvironmentLinearFog", linear_fog) &&

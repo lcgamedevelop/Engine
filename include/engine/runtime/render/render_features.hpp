@@ -21,6 +21,10 @@ enum class RenderFeature : std::uint8_t
     meshlet_bounds,
     meshlet_colors,
     meshlet_statistics,
+    rvt_viewer,
+    rvt_pages,
+    rvt_residency,
+    rvt_invalidated,
     stats,
     count
 };

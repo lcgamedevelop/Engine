@@ -95,8 +95,8 @@ def scene():
     component(player, "character_controller")["camera_node_id"] = 3
     terrain = cloned("terrain.scene", "Terrain", 5)
     component(terrain, "terrain").update(
-        terrain=guid("terrain/foundation.terrain"), surface_color=[0.31, 0.38, 0.24, 1],
-        wall_color=[0.51, 0.37, 0.23, 1])
+        terrain_guid=guid("terrain/foundation.terrain"), streaming_enabled=True, collision_enabled=True,
+        initial_view={"center":[0,0,0],"visual_radius":100.0,"collision_radius":100.0})
     for identity, name in ((6, "Tower"), (7, "Wall"), (8, "Column"),
                            (9, "Environment"), (10, "Afternoon sun"), (11, "Cool fill")):
         cloned("destruction.scene", name, identity)
@@ -209,11 +209,13 @@ def generated():
     result[path + ".meta"] = meta(path, "mesh")
     path = "terrain/foundation.terrain"
     result[path] = """# Flat ground fully supports the original structural specimens.
-cells_x = 64
-cells_y = 32
-cells_z = 64
+schema_version = 2
+revision = 1
+bounds_min = [-32, -16, -32]
+bounds_max = [32, 16, 32]
 voxel_size = 1.0
-chunk_cells = 16
+block_cells = 16
+lod_count = 3
 origin = [-32, -16, -32]
 height = 0.0
 amplitude = 0.0

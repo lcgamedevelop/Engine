@@ -1,3 +1,213 @@
-guid = "ddc3e00c-0e5a-4141-876f-858a2f54d2b6"
-importer = "terrain"
+guid = 'ddc3e00c-0e5a-4141-876f-858a2f54d2b6'
+importer = 'terrain'
 meta_version = 1
+
+[[subresources]]
+guid = '268e1f13-c979-428b-88db-17e586190303'
+key = 'regions/0/0_0_0'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '7ee62b82-ae73-4fdc-9ea2-b50649977ae1'
+key = 'regions/0/0_0_1'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '5783ea22-b08e-4fd5-bc91-89a81e357805'
+key = 'regions/0/0_0_2'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '023055be-754a-475d-88ea-af24e49e2a5b'
+key = 'regions/0/0_0_3'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = 'd7d0aaf1-bf62-4ed3-aab0-e0734be30119'
+key = 'regions/0/0_1_0'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = 'a7a455fb-2c4d-45a6-abc2-7a80873a99c2'
+key = 'regions/0/0_1_1'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '1468e10f-d32b-4f0f-834e-49087e28b031'
+key = 'regions/0/0_1_2'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '2a7adc2f-c828-40e5-9cb0-973f1c8195e5'
+key = 'regions/0/0_1_3'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '6ab03a79-ca2f-4ff0-8c6a-9d7f56b5af17'
+key = 'regions/0/1_0_0'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '157b760d-90e4-4ddd-94b0-73e9552bbc70'
+key = 'regions/0/1_0_1'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '6fb0a4bf-afde-49b9-b46b-7a1ce5ddf3b4'
+key = 'regions/0/1_0_2'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = 'd5c5f210-ca79-4062-a486-aa636ec2c4e7'
+key = 'regions/0/1_0_3'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '49c5300e-fee4-4fea-acf5-6c2ff0b813b5'
+key = 'regions/0/1_1_0'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '5fc8c68c-8cb5-4e32-ba8b-f548fb8a3b21'
+key = 'regions/0/1_1_1'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '59c0d3c1-07a9-4338-92f5-485dd4bc0948'
+key = 'regions/0/1_1_2'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = 'ca7c9f9b-469d-4c2c-846d-7b260786d998'
+key = 'regions/0/1_1_3'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '58ebdbfe-1a42-4fed-9418-57a75bd4d29d'
+key = 'regions/0/2_0_0'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '44c16d9f-cf66-4030-89f6-24070e662fd4'
+key = 'regions/0/2_0_1'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '94a81e34-4997-4ddd-a958-bcec06610f45'
+key = 'regions/0/2_0_2'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '6bfd89b9-8776-46e2-ad99-21539fc2fca3'
+key = 'regions/0/2_0_3'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '9f38de19-8f49-4661-b913-557ba7c8969f'
+key = 'regions/0/2_1_0'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '3166b72d-24bd-4d28-98a6-6fabe7a6afb5'
+key = 'regions/0/2_1_1'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '84c7456e-3783-4097-a9d9-a076eae6f124'
+key = 'regions/0/2_1_2'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = 'e470b0f1-900a-4d75-84ae-8e1e322e531d'
+key = 'regions/0/2_1_3'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '6c510ce8-7fb5-450e-a2e8-39ffd9551461'
+key = 'regions/0/3_0_0'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '03a7a40a-678e-4bec-81a7-8b56650fd9e1'
+key = 'regions/0/3_0_1'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = 'd608f870-3044-405f-8a3e-cb8ff41078e1'
+key = 'regions/0/3_0_2'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = 'd7cc44e2-6357-4983-9fc7-984c96061908'
+key = 'regions/0/3_0_3'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '7da77cd0-aa8a-4f36-8bd7-563899db9e0c'
+key = 'regions/0/3_1_0'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = 'fcdc7dfb-dab6-456e-8654-430fbe09ae5c'
+key = 'regions/0/3_1_1'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '9e87ea3d-dfd2-41b3-8c42-a98a5874862a'
+key = 'regions/0/3_1_2'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = 'be631220-9347-4950-854d-65b8b0d278d6'
+key = 'regions/0/3_1_3'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '1e5b0ddf-c99e-4472-b985-0f5d72921f23'
+key = 'regions/1/0_0_0'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '1e621f32-edf0-4111-83d2-5557a2200263'
+key = 'regions/1/0_0_1'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '8fc107a8-de8f-468a-af8f-14b5d8aa971f'
+key = 'regions/1/1_0_0'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = 'ffe7065a-a6be-47e6-b2c0-4da7797eb9cf'
+key = 'regions/1/1_0_1'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = 'dd665e48-8d90-4b42-bcc4-4ff8a337a08d'
+key = 'regions/2/0_0_0'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = 'ae09590f-6fab-42d6-a175-3e0693d07ddc'
+key = 'layer-base'
+kind = 'texture'
+
+[[subresources]]
+guid = '6cf6d981-32a3-4441-a7c6-cfb48c68a343'
+key = 'layer-normal'
+kind = 'texture'
+
+[[subresources]]
+guid = '8eef4e41-98bb-471e-b75d-ead398ecdd61'
+key = 'layer-orm'
+kind = 'texture'
+
+[[subresources]]
+guid = '763a32d1-bd73-4979-805f-eb57e5d452ce'
+key = 'layer-palette'
+kind = 'texture'
+
+[[subresources]]
+guid = 'be2626e2-c338-417b-bd61-35ae030b6db8'
+key = 'surface'
+kind = 'material'

@@ -1,11 +1,22 @@
-# Flat ground fully supports the original structural specimens.
-cells_x = 64
-cells_y = 32
-cells_z = 64
-voxel_size = 1.0
-chunk_cells = 16
+schema_version = 2
+revision = 1
 origin = [-32, -16, -32]
+bounds_min = [-32, -16, -32]
+bounds_max = [32.0, 16.0, 32.0]
+voxel_size = 1.0
+block_cells = 16
+lod_count = 3
 height = 0.0
 amplitude = 0.0
 frequency = 0.08
 seed = 1
+
+[[stamps]]
+operation = "fill"
+center = [-18, 1.3, 7]
+extent = [1.8, 1.8, 1.8]
+
+[[stamps]]
+operation = "fill"
+center = [-18, 6.9, 7]
+extent = [4.4, 4.4, 4.4]

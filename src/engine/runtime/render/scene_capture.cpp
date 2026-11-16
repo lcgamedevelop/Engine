@@ -205,7 +205,7 @@ bool capture_snapshot(const WorldSystem& world, const SceneCaptureRequest& reque
     {
         const auto node = world.find_node(id);
         const auto transform = node ? node.get_component<Transform>() : Transform{};
-        std::array<float, 16> matrix{};
+        std::array<double, 16> matrix{};
         if (!node || !transform || !transform.world_matrix(matrix.data()))
         {
             return false;
@@ -399,8 +399,7 @@ bool RenderSystem::draw_diffuse_capture(const RenderSettings& rendering)
         return fail();
     }
     auto& resources = *scene_resources_;
-    if (resources.frame_data.world_epoch == 0 &&
-        !resources.collect_frame(*world_, resources.frame_data))
+    if (!resources.collect_frame(*world_, capture_request_.world_origin, resources.frame_data))
     {
         return fail();
     }
@@ -411,6 +410,7 @@ bool RenderSystem::draw_diffuse_capture(const RenderSettings& rendering)
         bx::mtxInverse(capture_world, request.view.data());
         render_detail::SceneDrawView draw;
         draw.renderer = this;
+        draw.world_origin = request.world_origin;
         draw.id = render_detail::capture_view;
         draw.width = request.width;
         draw.height = request.height;

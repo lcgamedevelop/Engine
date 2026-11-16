@@ -1,129 +1,58 @@
 #include "plugins/editor/terrain/terrain_codec.hpp"
-
-#include "runtime/resource/builtin_resources.hpp"
-
+#include "editor/asset_pipeline/control_toml.hpp"
 #include "editor/asset_pipeline/importer_utils.hpp"
-#include "editor/asset_pipeline/toml_helpers.hpp"
 #include "plugins/runtime/terrain/terrain_component.hpp"
-
-#include <algorithm>
-#include <array>
-#include <memory>
-#include <utility>
+#include "runtime/resource/builtin_resources.hpp"
 
 namespace engine::plugins::terrain
 {
-
 schema::ComponentPayload TerrainCodec::type() const noexcept
 {
     return schema::ComponentPayload::TerrainData;
 }
-
 std::string_view TerrainCodec::name() const noexcept
 {
     return "terrain";
 }
-
 bool TerrainCodec::validate(const schema::ComponentDataT& component, std::string& error) const
 {
-    const auto* value = component.payload.AsTerrainData();
-    if (value == nullptr || !TerrainComponent::valid_settings(*value))
+    const auto* data = component.payload.AsTerrainData();
+    if (!data || !TerrainComponent::valid_settings(*data))
     {
-        error = "invalid terrain component resource GUIDs, colors or UV scale";
+        error = "Invalid terrain component settings";
         return false;
     }
     return true;
 }
-
 bool TerrainCodec::read(const toml::table& table, schema::ComponentDataT& component,
                         std::string& error) const
 {
-    constexpr std::array<std::string_view, 8> fields = {"type",       "enabled",   "terrain",
-                                                        "material",   "collision", "surface_color",
-                                                        "wall_color", "uv_scale"};
-    for (const auto& [name, field] : table)
+    nlohmann::json json;
+    schema::TerrainDataT data;
+    if (!editor::asset_pipeline::control_toml::read_component(table, json, error) ||
+        !schema::control_json::read(json, data, error))
     {
-        static_cast<void>(field);
-        if (std::find(fields.begin(), fields.end(), name.str()) == fields.end())
-        {
-            error = "unknown terrain component field: " + std::string(name.str());
-            return false;
-        }
-    }
-    schema::TerrainDataT value;
-    for (const auto& [name, destination] :
-         {std::pair{"terrain", &value.terrain_guid}, std::pair{"material", &value.material_guid}})
-    {
-        if (table.contains(name))
-        {
-            const auto guid = table[name].value<std::string>();
-            if (!guid)
-            {
-                error = std::string(name) + " must be a resource GUID string";
-                return false;
-            }
-            *destination = *guid;
-        }
-    }
-    if (table.contains("collision"))
-    {
-        const auto collision = table["collision"].value_exact<bool>();
-        if (!collision)
-        {
-            error = "terrain collision must be boolean";
-            return false;
-        }
-        value.collision = *collision;
-    }
-    if (table.contains("uv_scale") &&
-        !editor::asset_pipeline::float_number(table.get("uv_scale"), value.uv_scale))
-    {
-        error = "terrain uv_scale must be a finite float";
         return false;
     }
-    for (const auto& [name, destination] : {std::pair{"surface_color", &value.surface_color},
-                                            std::pair{"wall_color", &value.wall_color}})
-    {
-        if (table.contains(name))
-        {
-            std::array<double, 4> values{};
-            if (!editor::asset_pipeline::numbers(table.get(name), values) ||
-                !std::all_of(values.begin(), values.end(),
-                             [](double number) { return number >= 0 && number <= 1; }))
-            {
-                error = std::string("terrain ") + name + " requires four values in [0,1]";
-                return false;
-            }
-            *destination =
-                schema::Color(static_cast<float>(values[0]), static_cast<float>(values[1]),
-                              static_cast<float>(values[2]), static_cast<float>(values[3]));
-        }
-    }
-    if (!TerrainComponent::valid_settings(value))
-    {
-        error = "invalid terrain GUIDs, colors or UV scale";
-        return false;
-    }
-    if (!value.terrain_guid.empty() && value.material_guid.empty())
+    if (!data.terrain_guid.empty() && data.surface_material_guid.empty())
     {
         for (const auto& entry : builtin_resource_catalog().entries)
         {
             if (entry->path == "builtin://materials/default-pbr")
             {
-                value.material_guid = entry->guid;
+                data.surface_material_guid = entry->guid;
                 break;
             }
         }
-        if (value.material_guid.empty())
-        {
-            error = "Default material is unavailable";
-            return false;
-        }
     }
-    component.payload.Set(std::move(value));
+    if (!TerrainComponent::valid_settings(data))
+    {
+        error = "Invalid terrain settings";
+        return false;
+    }
+    component.payload.Set(std::move(data));
     return true;
 }
-
 bool TerrainCodec::scan_dependencies(const schema::ComponentDataT& component,
                                      const editor::asset_pipeline::ImportContext& context,
                                      std::vector<Guid>& dependencies, std::string& error) const
@@ -132,35 +61,26 @@ bool TerrainCodec::scan_dependencies(const schema::ComponentDataT& component,
     {
         return false;
     }
-    const auto& value = *component.payload.AsTerrainData();
-    return (value.terrain_guid.empty() ||
-            editor::asset_pipeline::reference(value.terrain_guid, schema::AssetKind::terrain,
+    const auto& data = *component.payload.AsTerrainData();
+    return (data.terrain_guid.empty() ||
+            editor::asset_pipeline::reference(data.terrain_guid, schema::AssetKind::terrain,
                                               context, dependencies, error)) &&
-           (value.material_guid.empty() ||
-            editor::asset_pipeline::reference(value.material_guid, schema::AssetKind::material,
-                                              context, dependencies, error));
+           (data.surface_material_guid.empty() ||
+            editor::asset_pipeline::reference(data.surface_material_guid,
+                                              schema::AssetKind::material, context, dependencies,
+                                              error));
 }
-
 std::span<const std::string_view> TerrainCodec::resource_fields() const noexcept
 {
-    static constexpr std::string_view fields[]{"terrain", "material"};
+    static constexpr std::string_view fields[]{"terrain_guid", "surface_material_guid"};
     return fields;
 }
-
 void TerrainCodec::write(const schema::ComponentDataT& component, toml::table& table) const
 {
-    const auto& value = *component.payload.AsTerrainData();
-    table.insert("type", "terrain");
-    table.insert("terrain", value.terrain_guid);
-    table.insert("material", value.material_guid);
-    table.insert("collision", value.collision);
-    table.insert("surface_color", toml::array{value.surface_color.r(), value.surface_color.g(),
-                                              value.surface_color.b(), value.surface_color.a()});
-    table.insert("wall_color", toml::array{value.wall_color.r(), value.wall_color.g(),
-                                           value.wall_color.b(), value.wall_color.a()});
-    table.insert("uv_scale", value.uv_scale);
+    table.insert_or_assign("type", "terrain");
+    editor::asset_pipeline::control_toml::write_table(
+        schema::control_json::write(*component.payload.AsTerrainData()), table);
 }
-
 bool register_terrain_codec()
 {
     if (editor::asset_pipeline::find_scene_component_codec(schema::ComponentPayload::TerrainData))
@@ -171,5 +91,4 @@ bool register_terrain_codec()
         std::make_unique<TerrainCodec>();
     return editor::asset_pipeline::register_scene_component_codec(codec);
 }
-
 } // namespace engine::plugins::terrain

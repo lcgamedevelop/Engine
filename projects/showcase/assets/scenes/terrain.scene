@@ -149,6 +149,7 @@ scale = [1, 1, 1]
 
 [[nodes.components]]
 type = "environment"
+rvt = { enabled = true, bounds = { minimum = {x = -40, y = -16, z = -40}, maximum = {x = 40, y = 24, z = 40} }, virtual_resolution = 2048, page_size = 128, page_border = 4, physical_pages = 64, pages_per_frame = 4 }
 ambient_tricolor = true
 ambient_sky_color = [0.58, 0.72, 0.9]
 ambient_equator_color = [0.58, 0.63, 0.58]

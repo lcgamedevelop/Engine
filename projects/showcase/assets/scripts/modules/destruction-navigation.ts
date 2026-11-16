@@ -1,7 +1,7 @@
-import { MeshRenderer, Navigation, Node, Scene, Transform, Vector3 } from "engine";
+import { MeshRenderer, Navigation, Node, Scene, TerrainComponent, Transform, Vector3 } from "engine";
 
 export class DestructionNavigation {
-    private terrain: Node | null = null;
+    private terrain: TerrainComponent | null = null;
     private readonly markers: {renderer: MeshRenderer; transform: Transform}[] = [];
     private dirtyMin: Vector3 | null = null;
     private dirtyMax: Vector3 | null = null;
@@ -10,7 +10,7 @@ export class DestructionNavigation {
     private readonly goal = {x: 18, y: 0.2, z: 5};
 
     Bind(scene: Scene): boolean {
-        this.terrain = scene.FindNode("Terrain");
+        this.terrain = scene.FindNode("Terrain")?.GetComponent(TerrainComponent) ?? null;
         for (let index = 1; index <= 48; ++index) {
             const node = scene.FindNode(`Route marker ${index}`);
             const renderer = node?.GetComponent(MeshRenderer);
@@ -21,9 +21,14 @@ export class DestructionNavigation {
         return this.terrain !== null;
     }
 
+    private geometry(): Node[] | null {
+        return this.terrain?.CollectSupport({bounds:{minimum:{x:-32,y:-16,z:-32},maximum:{x:32,y:16,z:32}},limit:4096})?.map(collider=>collider.node) ?? null;
+    }
+
     Build(): boolean {
         this.dirtyMin = this.dirtyMax = null;
-        if (!this.terrain || !Navigation.Build([this.terrain], {
+        const geometry=this.geometry();
+        if (!geometry || !Navigation.Build(geometry, {
             minimum: {x:-32,y:-16,z:-32}, maximum: {x:32,y:20,z:32},
             cellSize: 0.5, cellHeight: 0.2, tileSize: 16,
             agentHeight: 1.8, agentRadius: 0.4, agentMaxClimb: 0.35,
@@ -50,7 +55,8 @@ export class DestructionNavigation {
         if (!this.dirtyMin || !this.dirtyMax || !this.terrain) return true;
         const minimum = this.dirtyMin, maximum = this.dirtyMax;
         this.dirtyMin = this.dirtyMax = null;
-        if (!Navigation.Replace([this.terrain], minimum, maximum)) {
+        const geometry=this.geometry();
+        if (!geometry || !Navigation.Replace(geometry, minimum, maximum)) {
             this.status = Navigation.lastError ?? "Affected navigation tiles invalidated";
             return false;
         }

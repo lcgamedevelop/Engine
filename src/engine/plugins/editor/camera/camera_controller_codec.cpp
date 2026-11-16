@@ -26,7 +26,7 @@ bool CameraControllerCodec::read(const toml::table& t, schema::ComponentDataT& c
 {
     nlohmann::json j;
     schema::CameraControllerDataT d;
-    if (!editor::asset_pipeline::control_toml::read(t, j, e) ||
+    if (!editor::asset_pipeline::control_toml::read_component(t, j, e) ||
         !schema::control_json::read(j, d, e))
     {
         return false;

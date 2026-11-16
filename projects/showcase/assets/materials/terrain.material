@@ -3,7 +3,7 @@ shader = "00000000-0000-4000-8000-000000000001"
 [[parameters]]
 name = "baseColor"
 type = "v4"
-value = [1, 1, 1, 1]
+value = [0.19, 0.31, 0.095, 1]
 
 [[parameters]]
 name = "metallic"
@@ -14,3 +14,20 @@ value = 0.0
 name = "roughness"
 type = "float"
 value = 0.92
+
+[[parameters]]
+name = "uvTransform"
+type = "v4"
+value = [0.25, 0.25, 0, 0]
+
+[[textures]]
+name = "baseColorTexture"
+texture = "1ba210db-e1d6-5b35-a2f2-5fcee0e6d58c"
+
+[[textures]]
+name = "normalTexture"
+texture = "c2068f6e-5492-5279-abd4-d3d298b7d026"
+
+[[textures]]
+name = "ormTexture"
+texture = "6ff7005d-4b01-54c1-96e2-13a9c16eb41a"

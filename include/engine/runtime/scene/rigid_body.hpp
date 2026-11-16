@@ -28,6 +28,8 @@ public:
     [[nodiscard]] bool add_impulse(const Vec3& impulse) noexcept;
     [[nodiscard]] bool set_linear_velocity(const Vec3& velocity) noexcept;
     [[nodiscard]] Vec3 linear_velocity() const noexcept;
+    [[nodiscard]] bool get_sleeping(bool& output) const noexcept;
+    [[nodiscard]] bool set_sleeping(bool sleeping) noexcept;
 
 private:
     template <class T> friend auto engine::ecs_detail::component_runtime(T component) noexcept;

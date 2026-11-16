@@ -44,6 +44,30 @@ struct GeneratedGroup
     std::uint64_t collider_instance = 0;
 };
 
+Node find_owned_node(WorldSystem& world, std::uint64_t id)
+{
+    if (auto published = world.find_node(id))
+    {
+        return published;
+    }
+    if (!world.native_world() || !ecs_is_alive(world.native_world(), id))
+    {
+        return {};
+    }
+    flecs::world ecs(world.native_world());
+    const auto* runtime = ecs.entity(id).try_get<ecs_detail::NodeRuntime>();
+    return runtime && runtime->scope_scene ? runtime->scope_scene->find_node(id) : Node{};
+}
+
+bool set_group_collision(WorldSystem& world, PhysicsSystem& physics, Collider collider,
+                         const Collider::Data& settings)
+{
+    // 候选只写碰撞描述，由共同 Physics 准备阶段创建未激活的刚体。
+    return world.find_node(collider.node().id()) == collider.node()
+               ? physics.set_collider_data(collider, settings)
+               : collider.set_settings(settings);
+}
+
 bool build_group_geometry(const schema::DestructionAssetDataT& asset,
                           const DestructionGroup& description,
                           const schema::DestructionDataT& settings, schema::MeshDataT& mesh,
@@ -140,14 +164,14 @@ Vec3 center_of(const schema::DestructionAssetDataT& asset, const std::vector<std
     return volume > 0 ? Vec3{x / volume, y / volume, z / volume} : Vec3{};
 }
 
-Vec3 world_point(const float* matrix, const Vec3& value)
+Vec3 world_point(const double* matrix, const Vec3& value)
 {
     return {matrix[0] * value.x() + matrix[4] * value.y() + matrix[8] * value.z() + matrix[12],
             matrix[1] * value.x() + matrix[5] * value.y() + matrix[9] * value.z() + matrix[13],
             matrix[2] * value.x() + matrix[6] * value.y() + matrix[10] * value.z() + matrix[14]};
 }
 
-Vec3 local_point(const float* matrix, const Vec3& value, double scale)
+Vec3 local_point(const double* matrix, const Vec3& value, double scale)
 {
     const double x = value.x() - matrix[12];
     const double y = value.y() - matrix[13];
@@ -159,9 +183,9 @@ Vec3 local_point(const float* matrix, const Vec3& value, double scale)
             (matrix[8] * x + matrix[9] * y + matrix[10] * z) / squared};
 }
 
-bool support_coverage(const schema::DestructionChunkDataT& chunk, const float* matrix,
-                      Collider support, const PhysicsSystem& physics, float max_gap,
-                      double& coverage, std::string& error)
+bool support_coverage(const schema::DestructionChunkDataT& chunk, const double* matrix,
+                      std::span<const Collider> supports, const PhysicsSystem& physics,
+                      float max_gap, double& coverage, std::string& error)
 {
     coverage = 0;
     const auto& mesh = *chunk.mesh;
@@ -211,14 +235,19 @@ bool support_coverage(const schema::DestructionChunkDataT& chunk, const float* m
                 (points[0].x() + points[1].x() + points[2].x()) / 6 + points[sample].x() / 2,
                 (points[0].y() + points[1].y() + points[2].y()) / 6 + points[sample].y() / 2,
                 (points[0].z() + points[1].z() + points[2].z()) / 6 + points[sample].z() / 2};
-            float fraction = 0;
-            if (!physics.cast_ray(support, {point.x(), point.y() + lift, point.z()},
-                                  {0, -length, 0}, fraction))
+            bool covered = false;
+            for (auto support : supports)
             {
-                error = "Cannot query the committed foundation collider";
-                return false;
+                float fraction = 0;
+                if (!physics.cast_ray(support, {point.x(), point.y() + lift, point.z()},
+                                      {0, -length, 0}, fraction))
+                {
+                    error = "Cannot query the committed foundation collider";
+                    return false;
+                }
+                covered = covered || (fraction < 1 && fraction * length <= max_gap + lift);
             }
-            if (fraction < 1 && fraction * length <= max_gap + lift)
+            if (covered)
             {
                 covered_area += area / 3;
             }
@@ -240,7 +269,7 @@ bool release_groups(WorldSystem& world, PhysicsSystem& physics,
     // Keep every node alive until the whole batch has released its collision successfully.
     for (const auto& group : groups)
     {
-        auto node = world.find_node(group.node);
+        auto node = find_owned_node(world, group.node);
         if (!node)
         {
             continue;
@@ -253,7 +282,8 @@ bool release_groups(WorldSystem& world, PhysicsSystem& physics,
                 return false;
             }
             Collider::Data settings;
-            if (!collider.get_settings(settings) || !physics.set_collider_data(collider, settings))
+            if (!collider.get_settings(settings) ||
+                !set_group_collision(world, physics, collider, settings))
             {
                 bool restored = collider.set_enabled(enabled);
                 for (auto& [previous, previous_enabled] : disabled)
@@ -261,7 +291,7 @@ bool release_groups(WorldSystem& world, PhysicsSystem& physics,
                     Collider::Data previous_settings;
                     if (!previous.get_settings(previous_settings) ||
                         !previous.set_enabled(previous_enabled) ||
-                        !physics.set_collider_data(previous, previous_settings))
+                        !set_group_collision(world, physics, previous, previous_settings))
                     {
                         restored = false;
                     }
@@ -279,7 +309,7 @@ bool release_groups(WorldSystem& world, PhysicsSystem& physics,
     bool result = true;
     for (const auto& group : groups)
     {
-        if (auto node = world.find_node(group.node))
+        if (auto node = find_owned_node(world, group.node))
         {
             result = node.scene()->destroy_node(group.node) && result;
         }
@@ -332,7 +362,7 @@ struct DestructionSystem::State
     struct SourceGroup
     {
         DestructionGroup group;
-        std::array<float, 16> matrix{};
+        std::array<double, 16> matrix{};
         double scale = 1;
     };
     struct Prepared
@@ -367,6 +397,13 @@ struct DestructionSystem::State
         bool success = false;
         std::uint64_t owner = 0;
     };
+    struct Scope
+    {
+        ScenePreparationSnapshot snapshot;
+        std::vector<Node> owners;
+        std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
+    };
+    std::map<SceneScopeId, Scope> scopes;
     std::map<std::uint64_t, std::vector<GeneratedGroup>> generated;
     std::map<std::uint64_t, Owner> owners;
     std::vector<Completion> ready;
@@ -515,14 +552,14 @@ bool DestructionSystem::publish(DestructionComponent component, DestructionGraph
     }
     ENGINE_PROFILE_ZONE("Destruction.publish_fragments");
     auto* scene = component.node().scene();
-    if (!state_ || world_.find_node(component.node().id()) != component.node() ||
+    if (!state_ || !scene || !ecs_detail::scope_writable(component.node()) ||
         component.node().parent() || groups.size() != candidate.groups().size() ||
         (prepared != nullptr && prepared->size() != groups.size()) ||
         engine::ecs_detail::component_runtime(component)->revision_ ==
             std::numeric_limits<std::uint64_t>::max())
     {
         engine::ecs_detail::component_runtime(component)->last_error_ =
-            "Destruction requires a root node in the active world";
+            "Destruction requires a root node in a writable scene";
         return false;
     }
     const auto& material_resource = engine::ecs_detail::component_runtime(component)->material_;
@@ -671,7 +708,7 @@ bool DestructionSystem::publish(DestructionComponent component, DestructionGraph
         {
             return fail("Cannot set destruction fragment state");
         }
-        if (!physics_.set_collider_data(collider, geometry.collision))
+        if (!set_group_collision(world_, physics_, collider, geometry.collision))
         {
             return fail("Cannot prepare destruction convex compound collision");
         }
@@ -772,7 +809,7 @@ bool DestructionSystem::prepare_groups(DestructionComponent component,
             auto source_node = generated != record->second.end()
                                    ? component.node().scene()->find_node(generated->node)
                                    : Node{};
-            float matrix[16];
+            double matrix[16];
             if (!source_node || !source_node.get_component<Transform>().world_matrix(matrix))
             {
                 engine::ecs_detail::component_runtime(component)->last_error_ =
@@ -847,7 +884,7 @@ bool DestructionSystem::damage(DestructionComponent component, const Vec3& cente
                         ? component.node().scene()->find_node(generated->node)
                         : Node{};
         auto transform = node ? node.get_component<Transform>() : Transform{};
-        float matrix[16];
+        double matrix[16];
         TransformSettings pose;
         if (!transform.get_settings(pose) || !valid_transform(pose) ||
             !transform.world_matrix(matrix))
@@ -887,7 +924,7 @@ bool DestructionSystem::damage(DestructionComponent component, const Vec3& cente
         auto node = source == found->second.end()
                         ? Node{}
                         : component.node().scene()->find_node(source->node);
-        float matrix[16];
+        double matrix[16];
         double volume = 0;
         if (!node || !node.get_component<Transform>().world_matrix(matrix))
         {
@@ -979,7 +1016,7 @@ bool DestructionSystem::apply_stress(DestructionComponent component, const Vec3&
                         ? component.node().scene()->find_node(generated->node)
                         : Node{};
         auto transform = node ? node.get_component<Transform>() : Transform{};
-        float matrix[16];
+        double matrix[16];
         TransformSettings pose;
         if (!transform.get_settings(pose) || !valid_transform(pose) ||
             !transform.world_matrix(matrix))
@@ -1391,38 +1428,47 @@ bool DestructionSystem::retire_fragments(DestructionComponent component, std::ui
     return true;
 }
 
-bool DestructionSystem::refresh_support(DestructionComponent component, Collider support,
-                                        float max_gap, float min_coverage)
+bool DestructionSystem::refresh_support(DestructionComponent component,
+                                        std::span<const Collider> supports, float max_gap,
+                                        float min_coverage)
 {
     if (!component || component.node().world() != &world_ || !world_.can_modify())
     {
         return false;
     }
     ENGINE_PROFILE_ZONE("Destruction.refresh_support");
-    if (!support || !state_ || !engine::ecs_detail::component_runtime(component)->ready_ ||
-        !active_component(component) ||
+    if (supports.size() > 4096 || !state_ ||
+        !engine::ecs_detail::component_runtime(component)->ready_ || !active_component(component) ||
         world_.find_node(component.node().id()) != component.node() ||
-        world_.find_node(support.node().id()) != support.node() ||
         component.node().get_component<DestructionComponent>() != component ||
-        support.node().get_component<Collider>() != support || !std::isfinite(max_gap) ||
-        max_gap <= 0 || max_gap > 1000 || !std::isfinite(min_coverage) || min_coverage <= 0 ||
-        min_coverage > 1)
+        !std::isfinite(max_gap) || max_gap <= 0 || max_gap > 1000 || !std::isfinite(min_coverage) ||
+        min_coverage <= 0 || min_coverage > 1)
     {
         engine::ecs_detail::component_runtime(component)->last_error_ =
             "Invalid destruction foundation query, component or scene";
         return false;
     }
-    auto support_body = support.node().get_component<RigidBody>();
-    Collider::Data support_settings;
-    RigidBody::Data support_body_settings;
-    if (!support.get_settings(support_settings) || support_settings.is_trigger ||
-        support.node() == component.node() || owns_fragment(component, support.node().id()) ||
-        (support_body && (!support_body.get_settings(support_body_settings) ||
-                          support_body_settings.motion != schema::BodyMotion::static_body)))
+    std::vector<std::uint64_t> support_ids;
+    for (auto support : supports)
     {
-        engine::ecs_detail::component_runtime(component)->last_error_ =
-            "Destruction support must be an external static solid collider";
-        return false;
+        auto support_body = support.node().get_component<RigidBody>();
+        Collider::Data support_settings;
+        RigidBody::Data support_body_settings;
+        if (!support || support.node().scene() != component.node().scene() ||
+            world_.find_node(support.node().id()) != support.node() ||
+            support.node().get_component<Collider>() != support ||
+            !support.get_settings(support_settings) || support_settings.is_trigger ||
+            support.node() == component.node() || owns_fragment(component, support.node().id()) ||
+            std::find(support_ids.begin(), support_ids.end(), support.node().id()) !=
+                support_ids.end() ||
+            (support_body && (!support_body.get_settings(support_body_settings) ||
+                              support_body_settings.motion != schema::BodyMotion::static_body)))
+        {
+            engine::ecs_detail::component_runtime(component)->last_error_ =
+                "Destruction supports must be distinct external static solid colliders";
+            return false;
+        }
+        support_ids.push_back(support.node().id());
     }
     const auto found = state_->generated.find(component.node().id());
     if (found == state_->generated.end())
@@ -1451,7 +1497,7 @@ bool DestructionSystem::refresh_support(DestructionComponent component, Collider
             { return std::binary_search(value.chunks.begin(), value.chunks.end(), chunk_id); });
         auto node = group != found->second.end() ? world_.find_node(group->node) : Node{};
         auto transform = node ? node.get_component<Transform>() : Transform{};
-        float matrix[16];
+        double matrix[16];
         TransformSettings pose;
         if (!transform.get_settings(pose) || !valid_transform(pose) ||
             !transform.world_matrix(matrix))
@@ -1461,7 +1507,7 @@ bool DestructionSystem::refresh_support(DestructionComponent component, Collider
             return false;
         }
         double coverage = 0;
-        if (!support_coverage(chunk, matrix, support, physics_, max_gap, coverage,
+        if (!support_coverage(chunk, matrix, supports, physics_, max_gap, coverage,
                               engine::ecs_detail::component_runtime(component)->last_error_))
         {
             return false;
@@ -1625,6 +1671,152 @@ bool DestructionSystem::restore(DestructionComponent component,
     return publish(component, std::move(candidate), groups, false);
 }
 
+SceneWorkState DestructionSystem::prepare_scope(SceneScopeId scope, const SceneWorkBudget& budget)
+{
+    if (!state_ || !is_initialized() || !world_.is_initialized())
+    {
+        return SceneWorkState::failed;
+    }
+    auto [found, inserted] = state_->scopes.try_emplace(scope);
+    auto& work = found->second;
+    auto& snapshot = work.snapshot;
+    auto* scene = scope == SceneScopeId{} ? world_.scene() : world_.scope_candidate(scope);
+    if (inserted)
+    {
+        snapshot.scope = scope;
+        snapshot.state = SceneWorkState::working;
+        SceneWorkProgress progress;
+        progress.domain = "destruction";
+        progress.stage = "initial_groups";
+        progress.state = SceneWorkState::working;
+        progress.total_known = true;
+        snapshot.stages.push_back(std::move(progress));
+        std::vector<Node> nodes;
+        if (scene && scene->collect_nodes(nodes))
+        {
+            for (auto node : nodes)
+            {
+                if (node.get_component<DestructionComponent>())
+                {
+                    work.owners.push_back(node);
+                }
+            }
+        }
+        else
+        {
+            snapshot.stages.front().error = "Cannot enumerate the destruction candidate";
+        }
+        snapshot.stages.front().total = work.owners.size();
+    }
+    auto& progress = snapshot.stages.front();
+    if (snapshot.state != SceneWorkState::working)
+    {
+        return snapshot.state;
+    }
+    if (!scene || budget.items == 0 || !std::isfinite(budget.seconds) || budget.seconds <= 0)
+    {
+        progress.error = "Invalid destruction preparation scope or budget";
+    }
+    if (progress.error.empty())
+    {
+        const auto prepare = [&](Scene&)
+        {
+            const auto started = std::chrono::steady_clock::now();
+            for (std::uint32_t count = 0;
+                 progress.completed < work.owners.size() && count < budget.items; ++count)
+            {
+                auto component =
+                    work.owners[progress.completed].get_component<DestructionComponent>();
+                auto* runtime = component ? ecs_detail::component_runtime(component) : nullptr;
+                if (!runtime)
+                {
+                    progress.error = "Destruction preparation owner is no longer available";
+                    return false;
+                }
+                if (runtime->resource_ && runtime->pending_)
+                {
+                    DestructionGraph candidate;
+                    if (!runtime->graph_.clone(candidate, progress.error) ||
+                        !rebuild(component, std::move(candidate), false))
+                    {
+                        if (progress.error.empty())
+                        {
+                            progress.error = component.last_error();
+                        }
+                        return false;
+                    }
+                }
+                ++progress.completed;
+                ++progress.progress_revision;
+                progress.last_progress_ns = static_cast<std::uint64_t>(
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now().time_since_epoch())
+                        .count());
+                if (std::chrono::duration<double>(std::chrono::steady_clock::now() - started)
+                        .count() >= budget.seconds)
+                {
+                    break;
+                }
+            }
+            return true;
+        };
+        const bool success =
+            scope == SceneScopeId{} ? prepare(*scene) : world_.with_scope_write(scope, prepare);
+        if (!success && progress.error.empty())
+        {
+            progress.error = "Cannot prepare destruction groups in the candidate scene";
+        }
+    }
+    snapshot.state = !progress.error.empty()                ? SceneWorkState::failed
+                     : progress.completed == progress.total ? SceneWorkState::ready
+                                                            : SceneWorkState::working;
+    progress.state = snapshot.state;
+    progress.error_code = progress.error.empty() ? "" : "destruction_preparation_failed";
+    progress.elapsed_ns =
+        static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                       std::chrono::steady_clock::now() - work.started)
+                                       .count());
+    return snapshot.state;
+}
+
+bool DestructionSystem::scope_status(SceneScopeId scope, ScenePreparationSnapshot& output) const
+{
+    output = {};
+    if (!state_)
+    {
+        return false;
+    }
+    const auto found = state_->scopes.find(scope);
+    if (found == state_->scopes.end())
+    {
+        return false;
+    }
+    output = found->second.snapshot;
+    return true;
+}
+
+void DestructionSystem::release_scope(SceneScopeId scope) noexcept
+{
+    if (!state_)
+    {
+        return;
+    }
+    const auto found = state_->scopes.find(scope);
+    if (found == state_->scopes.end())
+    {
+        return;
+    }
+    // 已发布组属于场景。取消候选时，节点由 WorldSystem 的 scope 生命周期统一回收。
+    for (auto owner : found->second.owners)
+    {
+        if (!world_.find_node(owner.id()))
+        {
+            state_->generated.erase(owner.id());
+        }
+    }
+    state_->scopes.erase(found);
+}
+
 bool DestructionSystem::on_tick(double delta_time)
 {
     if (world_.paused())
@@ -1639,7 +1831,7 @@ bool DestructionSystem::on_tick(double delta_time)
     {
         auto node = world_.find_node(id);
         auto component = node ? node.get_component<DestructionComponent>() : DestructionComponent{};
-        if (!component || !active_component(component))
+        if (!component || !ecs_detail::scope_writable(node) || !active_component(component))
         {
             continue;
         }
@@ -1667,7 +1859,7 @@ bool DestructionSystem::synchronize()
     }
     for (auto found = state_->generated.begin(); found != state_->generated.end();)
     {
-        auto node = world_.find_node(found->first);
+        auto node = find_owned_node(world_, found->first);
         auto component = node ? node.get_component<DestructionComponent>() : DestructionComponent{};
         if (!component || !engine::ecs_detail::component_runtime(component)->resource_)
         {
@@ -1685,9 +1877,15 @@ bool DestructionSystem::synchronize()
     std::vector<std::uint64_t> owners;
     flecs::query<const ecs_detail::ComponentStorage<DestructionComponent::Data>>(
         state_->owners_query)
-        .each([&](flecs::entity entity,
-                  const ecs_detail::ComponentStorage<DestructionComponent::Data>&)
-              { owners.push_back(entity.id()); });
+        .each(
+            [&](flecs::entity entity,
+                const ecs_detail::ComponentStorage<DestructionComponent::Data>&)
+            {
+                if (entity.has<ecs_detail::Simulating>())
+                {
+                    owners.push_back(entity.id());
+                }
+            });
     for (auto id : owners)
     {
         auto node = world_.find_node(id);

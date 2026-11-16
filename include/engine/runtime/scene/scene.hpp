@@ -42,6 +42,7 @@ public:
     [[nodiscard]] bool build_data(schema::SceneDataT& output) const;
 
 private:
+    friend class GeometryUpdate;
     friend class WorldSystem;
     friend class Node;
     Scene(WorldSystem& world, std::uint64_t id) noexcept;

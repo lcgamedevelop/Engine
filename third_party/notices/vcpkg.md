@@ -10,6 +10,9 @@ Web 导出新增的 `spirv-tools`、`quill`、`libvpx` overlay 基于 baseline `
 
 以下保留上游 MIT 许可全文：
 
+`joltphysics` overlay 同样来自 baseline `8450b1326545e5e933c36d698c74df072ffca6d0` 的
+`ports/joltphysics`（5.6.0#1），仅启用上游已有的 `DOUBLE_PRECISION` 构建选项。
+
 ```text
 MIT License
 

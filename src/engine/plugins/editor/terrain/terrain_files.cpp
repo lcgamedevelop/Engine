@@ -28,12 +28,10 @@ bool create_asset(const fs::path& project, const Json& arguments, Json& result, 
     }
     const auto& relative = arguments["path"].get_ref<const std::string&>();
     const auto& source = arguments["source"].get_ref<const std::string&>();
-    schema::TerrainGeneratorDataT generator;
-    schema::TerrainAssetDataT volume;
+    schema::TerrainSourceDataT generator;
     fs::path destination;
     if (!terrain_file_path(project, "assets", relative, ".terrain", destination, error) ||
-        !read_terrain_source(source, generator, error) ||
-        !TerrainVolume::generate(generator, volume, error))
+        !read_terrain_source(source, generator, error))
     {
         return false;
     }
@@ -50,7 +48,7 @@ bool create_asset(const fs::path& project, const Json& arguments, Json& result, 
     }
     result = {{"path", relative},
               {"guid", guid},
-              {"densitySamples", volume.density.size()},
+              {"sourceRevision", std::to_string(generator.revision)},
               {"importRequired", true}};
     return true;
 }

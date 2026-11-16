@@ -1256,23 +1256,22 @@ endif()
 if(TARGET engine_terrain)
     if(TARGET engine_resource_graph)
         add_executable(engine_terrain_runtime_test plugins/runtime/terrain/terrain_runtime_test.cpp)
-        target_link_libraries(engine_terrain_runtime_test PRIVATE engine::resource_graph)
         target_include_directories(engine_terrain_runtime_test PRIVATE "${PROJECT_SOURCE_DIR}/src/engine")
-        target_link_libraries(engine_terrain_runtime_test PRIVATE engine::terrain)
+        target_link_libraries(engine_terrain_runtime_test PRIVATE engine::terrain engine::resource_graph engine::runtime)
+        target_include_directories(engine_terrain_runtime_test PRIVATE "${PROJECT_SOURCE_DIR}/tests/support")
+        target_compile_definitions(engine_terrain_runtime_test PRIVATE ENGINE_TEST_RUNTIME_SETTINGS="${PROJECT_SOURCE_DIR}/tests/fixtures/runtime-settings.json" JSON_NOEXCEPTION=1)
         engine_apply_options(engine_terrain_runtime_test)
         add_test(NAME engine.terrain_runtime COMMAND engine_terrain_runtime_test)
         set_tests_properties(engine.terrain_runtime PROPERTIES TIMEOUT 60)
     endif()
 
-    add_executable(engine_terrain_collision_benchmark
-                   plugins/runtime/terrain/terrain_collision_benchmark.cpp)
-    target_link_libraries(engine_terrain_collision_benchmark PRIVATE engine::terrain)
-    engine_apply_options(engine_terrain_collision_benchmark)
+
 endif()
 
 if(TARGET engine_terrain_editor)
     add_executable(engine_terrain_pipeline_test plugins/editor/terrain/terrain_pipeline_test.cpp)
     target_link_libraries(engine_terrain_pipeline_test PRIVATE engine::terrain_editor)
+    target_include_directories(engine_terrain_pipeline_test PRIVATE "${PROJECT_SOURCE_DIR}/src/engine")
     engine_apply_options(engine_terrain_pipeline_test)
     add_test(NAME editor.terrain_pipeline COMMAND engine_terrain_pipeline_test)
     set_tests_properties(editor.terrain_pipeline PROPERTIES TIMEOUT 60)
@@ -1382,6 +1381,7 @@ if(TARGET engine_runtime)
         target_link_libraries(engine_runtime_host_test PRIVATE engine::resource_graph)
         target_include_directories(engine_runtime_host_test PRIVATE "${PROJECT_SOURCE_DIR}/src/engine")
         target_link_libraries(engine_runtime_host_test PRIVATE engine::runtime engine::app
+                                                              engine::geometry
                                                               engine::resource engine::task
                                                               nlohmann_json::nlohmann_json SDL3::SDL3)
         target_compile_definitions(engine_runtime_host_test PRIVATE
@@ -1429,8 +1429,9 @@ if(TARGET engine_script AND TARGET engine_terrain AND TARGET engine_destruction)
         target_link_libraries(engine_terrain_destruction_script_test PRIVATE engine::resource_graph)
         target_include_directories(engine_terrain_destruction_script_test PRIVATE "${PROJECT_SOURCE_DIR}/src/engine")
         target_link_libraries(engine_terrain_destruction_script_test PRIVATE
-            engine::script engine::terrain engine::destruction engine::task
+            engine::runtime engine::script engine::terrain engine::destruction engine::task
             engine::physics engine::world engine::resource engine::app engine::log)
+        target_compile_definitions(engine_terrain_destruction_script_test PRIVATE ENGINE_TEST_RUNTIME_SETTINGS="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/runtime-settings.json")
         engine_apply_options(engine_terrain_destruction_script_test)
         engine_copy_script_data(engine_terrain_destruction_script_test)
         add_test(NAME engine.terrain_destruction_script COMMAND engine_terrain_destruction_script_test)

@@ -112,7 +112,7 @@ bool decode_ktx(ByteView bytes, schema::TextureDataT& output)
     output.mip_count = mips;
     output.cube_map = faces == 6;
     output.format = rgba ? schema::TextureFormat::rgba16f : schema::TextureFormat::rg16f;
-    output.schema_version = 2;
+    output.schema_version = 3;
     output.encoding = schema::TextureEncoding::native;
     output.srgb = false;
     offset = 64 + metadata_size;

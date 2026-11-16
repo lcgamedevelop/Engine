@@ -120,7 +120,7 @@ bool prepare_effect(test_support::ResourceFixture& fixture, ByteView source,
             continue;
         }
         schema::TextureDataT texture;
-        texture.schema_version = 2;
+        texture.schema_version = 3;
         texture.path = std::string(folder) + "/texture-" + std::to_string(paths.size());
         texture.width = 1;
         texture.height = 1;

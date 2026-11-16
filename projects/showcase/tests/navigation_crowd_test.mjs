@@ -62,12 +62,28 @@ export class TerrainComponent {
         renderer.meshRevision=this.revision;
         fixture.events.push('mesh:'+this.revision);
     }
-    DigSphere(x,y,z,radius) {
-        ++fixture.brushes; fixture.events.push('brush');
-        if (fixture.failBrush===fixture.brushes) { this.lastError='brush rejected'; return false; }
-        this.commit(); return true;
+    GetRegions() { return {revision:this.revision,nextCursor:'',regions:this.ready ? [{known:true,state:'ready',collisionRequired:true,densityRevision:this.revision,collisionRevision:this.revision}] : []}; }
+    CollectSupport() { return this.ready ? [{node:this.node}] : null; }
+    RequestEdit(spec) { return this.request('brush',spec.brushes); }
+    RequestReset() { return this.request('reset',[]); }
+    request(kind,brushes) {
+        this.operations ??= new Map(); this.sequence=(this.sequence??0)+1;
+        const id={sequence:BigInt(this.sequence)};
+        this.operations.set(id.sequence,{id,kind,brushes,state:'queued'}); return id;
     }
-    Reset() { fixture.events.push('reset'); this.commit(); return true; }
+    GetOperation(id) {
+        const op=this.operations?.get(id.sequence); if(!op) return null;
+        if(op.state==='queued') {
+            fixture.events.push(op.kind);
+            const failed=op.brushes.some(()=>++fixture.brushes===fixture.failBrush);
+            op.state=failed?'failed':'completed'; op.error=failed?'brush rejected':'';
+            if(!failed) this.commit();
+        }
+        return op;
+    }
+    ReleaseOperation(id) { return this.operations?.delete(id.sequence)??false; }
+    CancelOperation(id) { const op=this.operations?.get(id.sequence);if(!op)return false;op.state='cancelled';return true; }
+
 }
 export class Animator {
     constructor(node) { this.node=node; this.speed=0; this.animations=[]; this.speeds=[]; this.plays=0; fixture.animators.push(this); }
@@ -175,6 +191,10 @@ try {
     const alive = () => fixture.agents.filter((agent) => agent.IsValid());
     const click = (action) => {
         fixture.click(`navigation-${action}`);
+        const before=fixture.replacements.length;
+        game.Update();
+        if([...fixture.terrain.operations?.values()??[]].some(op=>op.state==='queued'))
+            assert.equal(fixture.replacements.length,before,'navigation waits for terrain publication');
         game.Update();
     };
     const text = (id) => fixture.scene.view.FindElement(`navigation-${id}`).text;
@@ -255,7 +275,7 @@ try {
         assert.deepEqual(
             fixture.events.slice(-3),
             ["brush", "mesh:2", "replace:2"],
-            "synchronous brush commits fresh mesh before the same-frame local Replace",
+            "navigation consumes only the completed terrain batch",
         );
         assert.equal(fixture.stops, pitStops, "ordinary edits do not cancel native goals");
         assert.deepEqual(
@@ -330,7 +350,7 @@ try {
             doorRequests,
             "restore leaves native retained destinations intact",
         );
-        assert.deepEqual(fixture.events.slice(-3), ["reset", "mesh:9", "replace:9"]);
+        assert.deepEqual(fixture.events.slice(-3), ["reset", "mesh:4", "replace:4"]);
         fixture.reject = 1;
         click("resume");
         assert.match(text("statistics"), /1 rejected/);
@@ -378,10 +398,10 @@ try {
         click("cut");
         assert.equal(
             fixture.replacements.length,
-            beforePartial + 1,
-            "partial multi-brush failure still publishes successful geometry to navigation",
+            beforePartial,
+            "failed multi-brush transaction preserves all published navigation geometry",
         );
-        assert.match(text("status"), /brush rejected.*completed brushes/);
+        assert.match(text("status"), /brush rejected/);
         const partial = fixture.replacements.at(-1);
         assert.equal(partial.revision, fixture.terrain.revision);
         assert.equal(fixture.builds.length, 1, "terrain edits never rebuild the entire navmesh");
@@ -394,7 +414,7 @@ try {
             0,
         );
         console.log(
-            "PASS crowd sample: native agents, terrain startup, synchronous local rebuild, retained goals, failure recovery and cleanup",
+            "PASS crowd sample: native agents, terrain startup, asynchronous publication and local rebuild, retained goals, failure recovery and cleanup",
         );
     } finally {
         game.OnShutdown();

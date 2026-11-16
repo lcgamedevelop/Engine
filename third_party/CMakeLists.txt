@@ -29,6 +29,10 @@ if("editor/modeling" IN_LIST ENGINE_SELECTED_PLUGINS)
     include("${PROJECT_SOURCE_DIR}/cmake/dependencies/modeling.cmake")
 endif()
 
+if("editor/terrain" IN_LIST ENGINE_SELECTED_PLUGINS)
+    include("${PROJECT_SOURCE_DIR}/cmake/dependencies/terrain.cmake")
+endif()
+
 if("editor/scene_bake" IN_LIST ENGINE_SELECTED_PLUGINS)
     include("${PROJECT_SOURCE_DIR}/cmake/dependencies/xatlas.cmake")
     include("${PROJECT_SOURCE_DIR}/cmake/dependencies/lightmapper.cmake")

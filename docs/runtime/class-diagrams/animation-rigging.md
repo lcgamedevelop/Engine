@@ -36,7 +36,7 @@ classDiagram
     class AnimationPoseTransform {
         <<value snapshot>>
         +array_float_16 model = identity
-        +array_float_16 world = identity
+        +array_double_16 world = identity
         +uint64_t pose_revision = 0
     }
     class AnimationPlayback

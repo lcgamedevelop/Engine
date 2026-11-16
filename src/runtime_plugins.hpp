@@ -51,6 +51,7 @@ bool assemble_runtime_plugins(
     engine::RuntimeStage stage, engine::WorldSystem& world, engine::WindowSystem& window,
     engine::PhysicsSystem& physics, engine::NavigationSystem& navigation,
     engine::RenderSystem& renderer, engine::TaskSystem& background_tasks,
+    std::vector<engine::ScenePreparation*>& preparations,
     const engine::plugins::camera::CameraTypeRegistry* camera_types,
     const engine::plugins::character_controller::CharacterAbilityRegistry* abilities)
 {
@@ -63,6 +64,7 @@ bool assemble_runtime_plugins(
     (void)background_tasks;
     (void)camera_types;
     (void)abilities;
+    (void)preparations;
     if (stage == engine::RuntimeStage::initialized)
     {
 #if ENGINE_HAS_CAMERA
@@ -85,23 +87,37 @@ bool assemble_runtime_plugins(
 #if ENGINE_HAS_TERRAIN_PLUGIN
     if (stage == engine::RuntimeStage::before_physics)
     {
-        std::unique_ptr<engine::System> terrain =
-            std::make_unique<engine::plugins::terrain::TerrainSystem>(world, physics, &background_tasks);
+        std::string error;
+        auto planner = engine::plugins::terrain::create_terrain_region_planner(error);
+        auto mesher = engine::plugins::terrain::create_terrain_mesher(error);
+        if (!world.resource_loader() || !planner || !mesher)
+        {
+            return false;
+        }
+        auto implementation = std::make_unique<engine::plugins::terrain::TerrainSystem>(
+            world, *world.resource_loader(), background_tasks, renderer, physics,
+            std::move(planner), std::move(mesher));
+        auto* preparation = implementation.get();
+        std::unique_ptr<engine::System> terrain = std::move(implementation);
         if (!world.add_subsystem(terrain))
         {
             return false;
         }
+        preparations.push_back(preparation);
     }
 #endif
 #if ENGINE_HAS_DESTRUCTION_PLUGIN
     if (stage == engine::RuntimeStage::before_physics)
     {
-        std::unique_ptr<engine::System> destruction =
-            std::make_unique<engine::plugins::destruction::DestructionSystem>(world, physics, &background_tasks);
+        auto implementation = std::make_unique<engine::plugins::destruction::DestructionSystem>(
+            world, physics, &background_tasks);
+        auto* preparation = implementation.get();
+        std::unique_ptr<engine::System> destruction = std::move(implementation);
         if (!world.add_subsystem(destruction))
         {
             return false;
         }
+        preparations.push_back(preparation);
     }
 #endif
 #if ENGINE_HAS_CHARACTER_CONTROLLER

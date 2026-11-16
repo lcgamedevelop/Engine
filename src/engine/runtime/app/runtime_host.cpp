@@ -229,11 +229,13 @@ bool RuntimeHost::initialize_gameplay(const EngineConfig& config,
             return false;
         }
     }
-    if ((setup != nullptr && !setup(RuntimeStage::before_physics, *world, *window_, *physics_,
-                                    *navigation_ptr, *renderer_, *background_tasks_)) ||
+    std::vector<ScenePreparation*> preparations;
+    if ((setup != nullptr &&
+         !setup(RuntimeStage::before_physics, *world, *window_, *physics_, *navigation_ptr,
+                *renderer_, *background_tasks_, preparations)) ||
         !world->add_subsystem(physics) || !world->add_subsystem(animation) ||
         (setup != nullptr && !setup(RuntimeStage::after_physics, *world, *window_, *physics_,
-                                    *navigation_ptr, *renderer_, *background_tasks_)))
+                                    *navigation_ptr, *renderer_, *background_tasks_, preparations)))
     {
         reset_gameplay();
         return false;
@@ -247,7 +249,7 @@ bool RuntimeHost::initialize_gameplay(const EngineConfig& config,
     }
     if (!engine_.initialize(config) ||
         (setup && !setup(RuntimeStage::initialized, *world_, *window_, *physics_, *navigation_ptr,
-                         *renderer_, *background_tasks_)) ||
+                         *renderer_, *background_tasks_, preparations)) ||
         !renderer_->bind_world(world_, fonts_, ui_))
     {
         reset_gameplay();
@@ -256,6 +258,14 @@ bool RuntimeHost::initialize_gameplay(const EngineConfig& config,
     gameplay_ =
         std::make_unique<GameplaySession>(*resources_, *world_, *renderer_, script, physics_,
                                           audio_, animation_, fonts_, ui_, background_tasks_.get());
+    for (auto* preparation : preparations)
+    {
+        if (!preparation || !gameplay_->add_preparation(*preparation))
+        {
+            reset_gameplay();
+            return false;
+        }
+    }
     return true;
 }
 

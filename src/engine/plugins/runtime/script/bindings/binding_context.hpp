@@ -58,6 +58,8 @@ public:
     void begin_call(double delta_time) noexcept;
     void end_call() noexcept;
     void shutdown() noexcept;
+    void remember_release(std::string key, std::function<void()> release);
+    void forget_release(std::string_view key);
     void cancel_movies() noexcept;
     [[nodiscard]] MoviePlayer* movies() const noexcept;
     [[nodiscard]] bool remember_movie(MoviePlaybackHandle handle) noexcept;
@@ -140,6 +142,7 @@ public:
     [[nodiscard]] static bool text(const Arguments& arguments, int index, std::string& output);
 
 private:
+    std::map<std::string, std::function<void()>, std::less<>> lifetime_releases_;
     struct AsyncResult
     {
         bool ready = false;

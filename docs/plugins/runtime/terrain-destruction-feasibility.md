@@ -4,19 +4,19 @@
 
 ## 结论与采用范围
 
-- 地形使用 CPU 密度数据、Transvoxel regular-cell 表和现有 bgfx；只参考 Voxel Tools 的连通域/浮岛处理，不引入 Godot。LOD transition 未接入。
+- 地形使用稀疏 CPU 密度块、Transvoxel regular-cell/transition-cell 表和现有 bgfx；参考 Voxel Tools 的连通域/浮岛处理，不引入 Godot。
 - Jolt 提供静态网格、凸形/compound、查询和角色能力；地形碰撞使用分段叶子及组树，渲染仍需处理 Mesh 上传成本。
 - Blast 采用 low-level、官方损伤 Shader、编辑器 Authoring 和 ExtStress 标量路径，不引入 PhysX 或 Toolkit。
-- 制作输入仍是有界参数试件，不等同任意空心建筑力学；综合世界存档和动态残骸导航未完成。
-- FastNoise2、sse2neon 和 SIMDe 是历史研究候选，未接入，不在日常文档维护其平台与版本状态。
+- 建筑制作输入仍是有界参数试件，不等同任意空心建筑力学；地形已有分块 checkpoint，跨模块综合存档和动态残骸导航未完成。
+- FastNoise2 作为编辑器生成依赖；sse2neon 和 SIMDe 未接入。
 
 ## 核对基线
 
 | 开源上游 | 固定研究/接入版本 | 当前用途 |
 | --- | --- | --- |
 | [Voxel Tools](https://github.com/Zylann/godot_voxel/tree/045ff9326a32fd10ac6fdac6357b5a098aaf2093) | `045ff9326a32fd10ac6fdac6357b5a098aaf2093` | 连通域/浮岛算法参考，未引入 Godot 框架 |
-| [Transvoxel](https://github.com/EricLengyel/Transvoxel/tree/51a494f03c5b024cd153b596bcc7152eb3cc93a6) | `51a494f03c5b024cd153b596bcc7152eb3cc93a6` | 正式子模块，regular-cell 查找表，MIT |
-| [FastNoise2](https://github.com/Auburn/FastNoise2/tree/721400f9560831be2fc9790be9b72c44bee7d33f) | `721400f9560831be2fc9790be9b72c44bee7d33f`；候选发布 `v1.1.1` | 尚未接入 |
+| [Transvoxel](https://github.com/EricLengyel/Transvoxel/tree/51a494f03c5b024cd153b596bcc7152eb3cc93a6) | `51a494f03c5b024cd153b596bcc7152eb3cc93a6` | 正式子模块，regular-cell 与 transition-cell 查找表，MIT |
+| [FastNoise2](https://github.com/Auburn/FastNoise2/tree/903c1f2d2f9d53ddce94cd223f32727d9ab3aeaa) | `903c1f2d2f9d53ddce94cd223f32727d9ab3aeaa`，`v1.1.1` | 编辑器地形噪声生成，MIT；源码及许可在子模块保留 |
 | [Blast](https://github.com/NVIDIAGameWorks/Blast/tree/636e7eb43b8d41e44c40eb1b4799bfd027f17ba7) | `636e7eb43b8d41e44c40eb1b4799bfd027f17ba7`，5.1.0 | 正式子模块，NVIDIA BSD-3-Clause；附属依赖保留各自许可 |
 
 正式复用保留固定版本、源文件许可和必要来源说明；Voxel Tools 的完整 MIT 声明见[许可记录](../../../third_party/notices/voxel-tools-terrain.md)，Blast 兼容补丁及其依据位于 [third_party/patches/blast](../../../third_party/patches/blast/README.md)。商业/私有参考源码、实现和资源不得进入仓库。

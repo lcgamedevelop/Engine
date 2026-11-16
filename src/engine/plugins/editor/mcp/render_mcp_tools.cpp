@@ -3,6 +3,7 @@
 
 #include "plugins/editor/mcp/editor_mcp_tools.hpp"
 #include "plugins/runtime/mcp/mcp_system.hpp"
+#include "runtime/schema/control_json_generated.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -50,7 +51,8 @@ bool register_render_tools(McpSystem& system, EditorMcpTools& editor)
         {"enum",
          {"frustum_culling", "static_instancing", "static_lod", "wireframe", "debug_draw",
           "mesh_bounds", "camera_frusta", "stats", "atmosphere", "hex_tiling", "meshlet_culling",
-          "meshlet_bounds", "meshlet_colors", "meshlet_statistics"}}};
+          "meshlet_bounds", "meshlet_colors", "meshlet_statistics", "rvt_viewer", "rvt_pages",
+          "rvt_residency", "rvt_invalidated"}}};
     feature["enabled"] = {{"type", "boolean"}};
     const auto vector =
         Json{{"type", "array"}, {"items", {{"type", "number"}}}, {"minItems", 3}, {"maxItems", 3}};
@@ -145,6 +147,22 @@ bool register_render_tools(McpSystem& system, EditorMcpTools& editor)
     lod_set["screenHeights"] = lod_set["triangleRatios"];
     lod_set["maxRelativeError"] = {{"type", "number"}, {"minimum", 0}, {"maximum", 1}};
     return feature_set &&
+           add("get_rvt_status", "Read actual RVT residency, versions and fallback reason.",
+               object_schema(Json::object(), Json::array())) &&
+           add("get_rvt_debug_options", "Read temporary live texture viewer options and revision.",
+               object_schema(Json::object(), Json::array())) &&
+           add("set_rvt_debug_options",
+               "Select the live GPU texture view. Enable rvt_viewer separately; no scene data is "
+               "changed.",
+               object_schema(
+                   {{"mode",
+                     {{"type", "string"},
+                      {"enum", {"overview", "virtual_texture", "physical_atlas", "page_table"}}}},
+                    {"channel",
+                     {{"type", "string"},
+                      {"enum", {"base_color", "normal", "roughness", "metallic", "ao"}}}},
+                    {"mip", {{"type", "integer"}, {"minimum", -1}, {"maximum", 8}}}},
+                   Json::array())) &&
            add("get_render_features",
                "Query actual feature status and support details for the device, current scene and "
                "selected material.",
@@ -158,7 +176,10 @@ bool register_render_tools(McpSystem& system, EditorMcpTools& editor)
                object_schema({{"sceneId", identity["sceneId"]},
                               {"nodeId", identity["nodeId"]},
                               {"staticInstancingEnabled", {{"type", "boolean"}}},
-                              {"staticLodEnabled", {{"type", "boolean"}}}},
+                              {"staticLodEnabled", {{"type", "boolean"}}},
+                              {"rvtRole",
+                               {{"type", "string"},
+                                {"enum", {"none", "writer", "reader", "writer_reader"}}}}},
                              required_node)) &&
            add("get_render_submission_stats",
                "Return mesh submission counts for each actual view in this module; these do not "
@@ -197,6 +218,8 @@ bool register_render_tools(McpSystem& system, EditorMcpTools& editor)
                     {"nodeId", identity["nodeId"]},
                     {"atmosphereEnabled", {{"type", "boolean"}}},
                     {"meshletCullingEnabled", {{"type", "boolean"}}},
+                    {"rvt", schema::control_json::describe(
+                                static_cast<const schema::RvtSettingsT*>(nullptr))},
                     {"atmosphereSunNodeId",
                      {{"type", "string"}, {"minLength", 1}, {"maxLength", 20}}},
                     {"atmosphereGroundHeight", {{"type", "number"}}},

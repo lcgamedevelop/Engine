@@ -625,7 +625,7 @@ void ResourceSystem::shutdown_reads() noexcept
 bool ResourceSystem::on_initialize(const EngineConfig&)
 {
     schema::AssetCatalogDataT data;
-    data.schema_version = 3;
+    data.schema_version = 4;
     data.revision = "builtin-only";
     data.target_platform = target_platform();
     return update_catalog(data, {});

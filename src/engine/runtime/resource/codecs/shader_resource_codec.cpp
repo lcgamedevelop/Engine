@@ -92,6 +92,12 @@ bool reserved_uniform(std::string_view name)
                                   std::string_view("u_model"),
                                   std::string_view("u_modelView"),
                                   std::string_view("u_modelViewProj"),
+                                  std::string_view("u_rvt_bounds"),
+                                  std::string_view("u_rvt_layout"),
+                                  std::string_view("u_rvt_parameters"),
+                                  std::string_view("u_rvt_height"),
+                                  std::string_view("s_rvt_atlas"),
+                                  std::string_view("s_rvt_table"),
                                   std::string_view("u_alphaRef")};
     return std::find(names.begin(), names.end(), name) != names.end();
 }
@@ -100,7 +106,7 @@ bool reserved_uniform(std::string_view name)
 
 bool ShaderResourceCodec::validate(const schema::ShaderDataT& data)
 {
-    if (!valid_path(data.path) || data.schema_version != 2 || data.vertex_code.empty() ||
+    if (!valid_path(data.path) || data.schema_version != 3 || data.vertex_code.empty() ||
         data.fragment_code.empty())
     {
         return false;

@@ -47,20 +47,23 @@ bool has_effect_resources(const WorldSystem& world)
     return found;
 }
 
-bool effect_transform(const Node& node, Effekseer::Matrix43& output)
+bool effect_transform(const Node& node, const Vec3& origin, Effekseer::Matrix43& output)
 {
     const auto transform = node.get_component<Transform>();
-    float matrix[16]{};
+    double matrix[16]{};
     if (!transform || !transform.world_matrix(matrix))
     {
         return false;
     }
+    matrix[12] -= origin.x();
+    matrix[13] -= origin.y();
+    matrix[14] -= origin.z();
     // 引擎列向量矩阵与 Effekseer 行向量矩阵的转置表示具有相同内存顺序。
     for (std::size_t row = 0; row < 4; ++row)
     {
         for (std::size_t column = 0; column < 3; ++column)
         {
-            output.Value[row][column] = matrix[row * 4 + column];
+            output.Value[row][column] = static_cast<float>(matrix[row * 4 + column]);
         }
     }
     return true;
@@ -99,7 +102,8 @@ void set_effect_light(const Scene& scene, EffekseerRenderer::Renderer& renderer)
                 return static_cast<std::uint8_t>(
                     std::clamp(value * settings.intensity, 0.0F, 1.0F) * 255.0F);
             };
-            renderer.SetLightDirection({pose.matrix[8], pose.matrix[9], pose.matrix[10]});
+            renderer.SetLightDirection(
+                {float(pose.matrix[8]), float(pose.matrix[9]), float(pose.matrix[10])});
             renderer.SetLightColor({channel(settings.color.r()), channel(settings.color.g()),
                                     channel(settings.color.b()), 255});
         });
@@ -121,6 +125,7 @@ struct EffectSystem::State
         std::uint64_t revision = 0;
         std::shared_ptr<CompiledEffect> compiled;
         Effekseer::Handle handle = -1;
+        Vec3 origin;
     };
 
     struct PreparedEffect
@@ -335,6 +340,13 @@ struct EffectSystem::State
                 return false;
             }
         }
+        double matrix[16];
+        if (!component.node().get_component<Transform>().world_matrix(matrix))
+        {
+            resources.error = "Invalid effect spawn transform";
+            return false;
+        }
+        instance.origin = {matrix[12], matrix[13], matrix[14]};
         instance.handle = manager->Play(instance.compiled->effect, 0, 0, 0);
         if (instance.handle < 0)
         {
@@ -412,7 +424,7 @@ struct EffectSystem::State
                     return false;
                 }
                 Effekseer::Matrix43 transform;
-                if (!effect_transform(node, transform))
+                if (!effect_transform(node, instance.origin, transform))
                 {
                     resources.error = "Invalid effect emitter world transform";
                     return false;
@@ -486,7 +498,7 @@ struct EffectSystem::State
                 {
                     Effekseer::Matrix43 transform;
                     if (!start(instance, component) ||
-                        !effect_transform(component.node(), transform))
+                        !effect_transform(component.node(), instance.origin, transform))
                     {
                         return false;
                     }
@@ -598,40 +610,38 @@ SceneWorkState EffectSystem::prepare_scope(SceneScopeId scope, const SceneWorkBu
         }
         found = state_->preparing.emplace(scope, std::move(work)).first;
     }
-    return scene_detail::step_work(found->second, budget,
-                                   [&](Node node)
-                                   {
-                                       auto component = node.get_component<EffectComponent>();
-                                       if (!component || !component.active())
-                                       {
-                                           return true;
-                                       }
-                                       auto* runtime =
-                                           engine::ecs_detail::component_runtime(component);
-                                       if (!runtime->effect_)
-                                       {
-                                           return true;
-                                       }
-                                       if (!state_->initialize(render_detail::extension_view))
-                                       {
-                                           return false;
-                                       }
-                                       auto compiled = state_->compile(runtime->effect_);
-                                       if (!compiled)
-                                       {
-                                           last_error_ = state_->resources.error;
-                                           return false;
-                                       }
-                                       const auto running =
-                                           state_->instances.find(component.instance_id());
-                                       if (running == state_->instances.end() ||
-                                           running->second.compiled != compiled)
-                                       {
-                                           state_->prepared_effects[component.instance_id()] =
-                                               {component, std::move(compiled)};
-                                       }
-                                       return true;
-                                   });
+    return scene_detail::step_work(
+        found->second, budget,
+        [&](Node node)
+        {
+            auto component = node.get_component<EffectComponent>();
+            if (!component || !component.active())
+            {
+                return true;
+            }
+            auto* runtime = engine::ecs_detail::component_runtime(component);
+            if (!runtime->effect_)
+            {
+                return true;
+            }
+            if (!state_->initialize(render_detail::extension_view))
+            {
+                return false;
+            }
+            auto compiled = state_->compile(runtime->effect_);
+            if (!compiled)
+            {
+                last_error_ = state_->resources.error;
+                return false;
+            }
+            const auto running = state_->instances.find(component.instance_id());
+            if (running == state_->instances.end() || running->second.compiled != compiled)
+            {
+                state_->prepared_effects[component.instance_id()] = {component,
+                                                                     std::move(compiled)};
+            }
+            return true;
+        });
 }
 bool EffectSystem::scope_status(SceneScopeId scope, ScenePreparationSnapshot& output) const
 {
@@ -720,28 +730,60 @@ bool EffectSystem::draw(const RenderContext& context)
             projection.Values[row][column] = context.projection[row * 4 + column];
         }
     }
-    renderer.SetCameraMatrix(camera);
     renderer.SetProjectionMatrix(projection);
     renderer.SetTime(state_->time);
     set_effect_light(context.scene, renderer);
     EffekseerRendererBGFX::SetOutputGamma(state_->renderer, !context.hdr);
-    if (!renderer.BeginRendering())
+    std::vector<const State::Instance*> visible;
+    for (const auto& [id, instance] : state_->instances)
     {
-        last_error_ = "Cannot begin Effekseer rendering";
-        return false;
+        (void)id;
+        if (instance.handle >= 0 && state_->manager->Exists(instance.handle))
+        {
+            visible.push_back(&instance);
+        }
     }
-    Effekseer::Manager::DrawParameter draw;
-    draw.ViewProjectionMatrix = renderer.GetCameraProjectionMatrix();
-    draw.ZNear = bgfx::getCaps()->homogeneousDepth ? -1.0F : 0.0F;
-    draw.ZFar = 1.0F;
-    draw.CameraPosition = renderer.GetCameraPosition();
-    draw.CameraFrontDirection = renderer.GetCameraFrontDirection();
-    draw.IsSortingEffectsEnabled = true;
-    state_->manager->Draw(draw);
-    if (!renderer.EndRendering())
+    const auto distance = [&](const auto* instance)
     {
-        last_error_ = "Cannot finish Effekseer rendering";
-        return false;
+        return std::hypot(instance->origin.x() - context.world_origin.x(),
+                          instance->origin.y() - context.world_origin.y(),
+                          instance->origin.z() - context.world_origin.z());
+    };
+    std::stable_sort(visible.begin(), visible.end(),
+                     [&](auto a, auto b) { return distance(a) > distance(b); });
+    for (const auto* instance : visible)
+    {
+        auto local_camera = camera;
+        const double delta[]{instance->origin.x() - context.world_origin.x(),
+                             instance->origin.y() - context.world_origin.y(),
+                             instance->origin.z() - context.world_origin.z()};
+        for (unsigned column = 0; column < 4; ++column)
+        {
+            double translation = context.view[12 + column];
+            for (unsigned axis = 0; axis < 3; ++axis)
+            {
+                translation += double(context.view[axis * 4 + column]) * delta[axis];
+            }
+            local_camera.Values[3][column] = float(translation);
+        }
+        renderer.SetCameraMatrix(local_camera);
+        if (!renderer.BeginRendering())
+        {
+            last_error_ = "Cannot begin Effekseer rendering";
+            return false;
+        }
+        Effekseer::Manager::DrawParameter draw;
+        draw.ViewProjectionMatrix = renderer.GetCameraProjectionMatrix();
+        draw.ZNear = bgfx::getCaps()->homogeneousDepth ? -1.F : 0.F;
+        draw.ZFar = 1;
+        draw.CameraPosition = renderer.GetCameraPosition();
+        draw.CameraFrontDirection = renderer.GetCameraFrontDirection();
+        state_->manager->DrawHandle(instance->handle, draw);
+        if (!renderer.EndRendering())
+        {
+            last_error_ = "Cannot finish Effekseer rendering";
+            return false;
+        }
     }
     last_error_.clear();
     return true;

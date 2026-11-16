@@ -17,8 +17,10 @@ struct RenderFrameData
 {
     struct Mesh
     {
+        schema::RvtRole rvt_role = schema::RvtRole::none;
         const GpuMesh* gpu = nullptr;
         const schema::MeshDataT* data = nullptr;
+        std::array<double, 16> world{};
         std::array<float, 16> model{}, normal{};
         std::array<float, 3> center{};
         std::array<std::array<float, 4>, 9> coefficients{};
@@ -35,6 +37,7 @@ struct RenderFrameData
         std::array<float, 16> inverse{};
         double volume = 0;
     };
+    Vec3 world_origin;
     std::uint64_t world_epoch = 0;
     std::vector<Mesh> meshes;
     std::vector<LocalShadowLight> lights;
@@ -44,6 +47,7 @@ struct RenderFrameData
 // 逐字段比较完整有效状态；不以哈希相等替代状态相等，不读取 struct 填充。
 struct DrawBatchKey
 {
+    schema::RvtRole rvt_role = schema::RvtRole::none;
     std::uintptr_t geometry = 0;
     std::uint64_t state = 0;
     std::size_t binding = 0, lod = 0;

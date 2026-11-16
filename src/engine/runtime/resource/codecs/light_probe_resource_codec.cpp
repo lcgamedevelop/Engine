@@ -12,7 +12,7 @@ namespace engine
 bool LightProbeResourceCodec::validate(const schema::LightProbeDataT& data) noexcept
 {
     constexpr std::size_t maximum_probes = 262144;
-    if (data.schema_version != 1 || !valid_path(data.path) || data.source_fingerprint.empty() ||
+    if (data.schema_version != 2 || !valid_path(data.path) || data.source_fingerprint.empty() ||
         data.source_fingerprint.size() > 256 || data.grid_x < 2 || data.grid_y < 2 ||
         data.grid_z < 2 || data.grid_x > 128 || data.grid_y > 128 || data.grid_z > 128 ||
         data.baked_transform.size() != 16)
@@ -35,7 +35,7 @@ bool LightProbeResourceCodec::validate(const schema::LightProbeDataT& data) noex
         }
     }
     if (!std::all_of(data.baked_transform.begin(), data.baked_transform.end(),
-                     [](float value) { return std::isfinite(value); }) ||
+                     [](double value) { return std::isfinite(value); }) ||
         !std::all_of(data.valid.begin(), data.valid.end(),
                      [](std::uint8_t value) { return value <= 1; }) ||
         data.baked_transform[3] != 0 || data.baked_transform[7] != 0 ||

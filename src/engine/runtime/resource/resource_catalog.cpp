@@ -75,7 +75,7 @@ bool valid_entry(const schema::AssetEntryT& entry)
 
 bool ResourceCatalog::assign(const schema::AssetCatalogDataT& data)
 {
-    if (data.schema_version != 3 || data.revision.empty() || data.entries.size() > 65536 ||
+    if (data.schema_version != 4 || data.revision.empty() || data.entries.size() > 65536 ||
         (data.target_platform != "macos" && data.target_platform != "ios" &&
          data.target_platform != "windows" && data.target_platform != "android" &&
          data.target_platform != "linux" && data.target_platform != "web"))
@@ -102,7 +102,8 @@ bool ResourceCatalog::assign(const schema::AssetCatalogDataT& data)
         if (builtin != nullptr)
         {
             if (entry->path != builtin->path || entry->kind != builtin->kind ||
-                entry->dependencies != builtin->dependencies)
+                entry->dependencies != builtin->dependencies ||
+                entry->stream_dependencies != builtin->stream_dependencies)
             {
                 return false;
             }
@@ -144,6 +145,17 @@ bool ResourceCatalog::assign(const schema::AssetCatalogDataT& data)
                 users[found->second].push_back(index);
             }
             else if (builtin_resource_info(dependency) == nullptr)
+            {
+                return false;
+            }
+        }
+        // 流送引用只影响导出闭包，不参与运行期驻留拓扑。
+        for (const auto& dependency : data.entries[index]->stream_dependencies)
+        {
+            if (dependency == data.entries[index]->guid ||
+                !dependencies.insert(dependency).second ||
+                (!candidate->entries.contains(dependency) &&
+                 builtin_resource_info(dependency) == nullptr))
             {
                 return false;
             }

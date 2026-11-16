@@ -16,6 +16,41 @@
 
 一次修改开始时选定最小验证集合；通过后不因整理文档、准备提交而重复执行。新增用例必须能捕获现有测试缺少的真实契约或回归；优先补入所属模块现有测试，不为每个修改点再建测试程序。不重复验证第三方库本身，不维护临时场景的全排列矩阵。
 
+## 大世界地形与 RVT
+
+当前实现与边界见[地形架构](plugins/runtime/terrain-world-design.md)，
+公开场景和复现命令见 [showcase 地形文档](../projects/showcase/docs/terrain-world.md)。
+macOS arm64 / Metal 已完成受影响 Debug、Release 编译，功能测试只使用 Release。
+本轮验证属于地形及直接依赖链，不代表全引擎或所有平台通过。
+
+| 已覆盖内容 | 证据入口 |
+| --- | --- |
+| 稀疏块、LOD 过渡、区域预算、未知邻区拒绝、取消、显示与碰撞同版本发布 | `engine.terrain_runtime` |
+| 源格式、噪声/高度图/道路/画层、局部块缓存、层纹理编译、可撤销源事务与重启恢复 | `editor.terrain_pipeline` |
+| 流送依赖随包导出而不自动常驻、目录版本与失败原子性 | `engine.resource_catalog`、`plugins.runtime.resource_graph`、`editor.asset_pipeline`、`editor.asset_build` |
+| 场景准备、几何事务、ECS 生命周期 | `engine.scene`、`engine.runtime_host` |
+| 双精度位置、睡眠状态、局部导航与骨骼世界姿态 | `engine.physics`、`engine.navigation`、`engine.navigation_terrain`、`engine.animation_rigging_events` |
+| 破坏支撑集合、建筑候选分批准备与取消、封存后到激活前的隔离、异步地形脚本、存档与碎块 | `engine.destruction_runtime`、`engine.terrain_destruction_script`、`engine.terrain_runtime` |
+| RVT 页面生成、材质回退、开关及实时 GPU 面板 | `engine.terrain_runtime` 及公开项目 MCP 实窗回执 |
+| 新纹理数组编码、项目类型与用例登记 | `resource.codecs`、showcase `case_contract_test.mjs` |
+| Shader 依赖、跨语言 RVT 数据与 MCP 工具登记 | `editor.texture_pipeline`、`engine.render_foundation`、`engine.scene_data`、`engine.scene_schema_cross_language`、`engine.script_tooling` |
+| 依赖方向和源码约束 | `engine.architecture_boundaries`、`engine.architecture_rules` |
+
+`engine.plugin_selection` 通过。另以同一 Release 预设关闭 runtime/editor 插件与测试支持，
+确认不生成地形、FastNoise、MCP、脚本或编辑器目标；核心宿主实际链接并通过 Metal 绘制 4 帧后正常退出。
+运行设置使用项目当前源汇总，旧版本运行设置明确拒绝。
+
+公开 8×8 公里世界使用 16 米采样、固定种子；1 米实验场保留道路、洞穴与层混合。
+MCP 实窗流程已完成四角切换、挖地、保存、重置、恢复、法线通道、生产 RVT 关闭和查看器关闭，
+共 10 张真实截图。四角均等待当前需求页面就绪；关闭 RVT 后 `residentBytes=0`，关闭查看器后
+截图帧 `rvtDebugVisible=false`。归档位于
+`projects/showcase/cache/terrain-world/20261116T074006Z-91663412/`，包含帧证据与操作回执。
+
+公开资源不含付费或私有内容。没有运行 Windows、Android、iOS、WebGPU 实机地形验收；
+四角截图也不等于已经验证所有位置的角色、音频、粒子和碰撞组合。
+专用植被散布规则与二进制制作源块 delta 未实现；当前使用持久配方、有序 edits 和局部生成缓存。
+私有真实资源项目未列入这轮验收。截图、缓存和运行存档继续保持忽略。
+
 ## 执行方式
 
 构建环境与平台预设见[构建指南](building.md)。普通构建只默认编译 `engine_framework_test`、`engine_guid_map_test`、`engine_system_test`；Release 测试预设默认也只选择这三项。其他测试仍保留独立目标，由调用方按模块显式选择，不随普通引擎构建全部编译。

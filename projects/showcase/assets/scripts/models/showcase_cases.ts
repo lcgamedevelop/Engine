@@ -5,6 +5,7 @@ import Courtyard from "../modules/courtyard.js";
 import FontGallery from "../modules/font-gallery.js";
 import Effects from "../modules/effects.js";
 import Terrain from "../modules/terrain.js";
+import TerrainWorld from "../modules/terrain-world.js";
 import Destruction from "../modules/destruction.js";
 import DestructionIntegration from "../modules/destruction-integration.js";
 import ShootingRange from "../modules/shooting-range.js";
@@ -103,4 +104,10 @@ export const showcase_cases: readonly ShowcaseCase[] = [
         goal: "Compare one scene switch, shared instances, LOD and conservative cluster visibility.",
         scene: "scenes/meshlet-culling.scene", game: MeshletCulling,
     },
+    {
+        id: "terrain-world", button: "scene-terrain-world", title: "Terrain world / 8 km",
+        goal: "Visit four distant regions; stream geometry and collision while keeping the current view.",
+        scene: "scenes/terrain-world.scene", game: TerrainWorld,
+    },
+
 ];

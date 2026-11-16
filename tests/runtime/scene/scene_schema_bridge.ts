@@ -2,6 +2,7 @@ import * as flatbuffers from "flatbuffers";
 import { CameraDataT } from "./engine/schema/camera-data";
 import { ComponentDataT } from "./engine/schema/component-data";
 import { ComponentPayload } from "./engine/schema/component-payload";
+import { EnvironmentDataT } from "./engine/schema/environment-data";
 import { LightDataT } from "./engine/schema/light-data";
 import { MeshRendererDataT } from "./engine/schema/mesh-renderer-data";
 import { NodeDataT } from "./engine/schema/node-data";
@@ -42,6 +43,11 @@ function component(value: NodeDataT, type: ComponentPayload): ComponentDataT {
 }
 
 const root = node("Root");
+const environment = component(root, ComponentPayload.EnvironmentData).payload;
+expect(environment instanceof EnvironmentDataT && environment.rvt?.enabled &&
+    environment.rvt.bounds?.minimum?.x === -4000 &&
+    environment.rvt.bounds?.maximum?.z === 4000,
+    "RVT settings and double world bounds survive the generated schema");
 const camera = node("Camera");
 const light = node("Light");
 const cube = node("Cube");

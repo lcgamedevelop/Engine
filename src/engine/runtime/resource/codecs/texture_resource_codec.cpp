@@ -25,10 +25,12 @@ void TextureResourceCodec::initialize_transcoder()
 bool TextureResourceCodec::validate(const schema::TextureDataT& data)
 {
     initialize_transcoder();
-    if (data.schema_version != 2 || !valid_path(data.path) || data.width == 0 || data.height == 0 ||
+    if (data.schema_version != 3 || !valid_path(data.path) || data.width == 0 || data.height == 0 ||
         data.width > 16384 || data.height > 16384 || data.mip_count == 0 ||
         data.format < schema::TextureFormat::MIN || data.format > schema::TextureFormat::MAX ||
-        data.data.empty() || data.data.size() > 64U * 1024U * 1024U)
+        data.array_layers == 0 || data.array_layers > 256 ||
+        (data.cube_map && data.array_layers != 1) || data.data.empty() ||
+        data.data.size() > 64U * 1024U * 1024U)
     {
         return false;
     }
@@ -44,7 +46,7 @@ bool TextureResourceCodec::validate(const schema::TextureDataT& data)
     }
     if (data.encoding == schema::TextureEncoding::native)
     {
-        const auto faces = data.cube_map ? 6U : 1U;
+        const auto faces = data.cube_map ? 6U : data.array_layers;
         if (data.format == schema::TextureFormat::auto_format ||
             data.subresources.size() != data.mip_count * faces ||
             (data.srgb && (data.format == schema::TextureFormat::rgba16f ||
@@ -90,7 +92,8 @@ bool TextureResourceCodec::validate(const schema::TextureDataT& data)
         return end == data.data.size();
     }
     if (data.encoding != schema::TextureEncoding::basis || data.cube_map ||
-        data.format == schema::TextureFormat::rg16f || !data.subresources.empty())
+        data.array_layers != 1 || data.format == schema::TextureFormat::rg16f ||
+        !data.subresources.empty())
     {
         return false;
     }

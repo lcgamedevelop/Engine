@@ -71,7 +71,7 @@ target_link_libraries(engine_resource PRIVATE example::example)
 | 渲染及图像工具 | bgfx.cmake 1.167.9605-606（API 167） | overlay；bgfx/bx/bimg/shaderc 来自同一正式归档。 |
 | Shader 交叉编译 | glslang 16.4.0、SPIRV-Cross/Headers/Tools 1.4.363.0 | baseline；旧 PointSize 查询兼容 overlay 已删除。 |
 | ECS 与任务 | Flecs 4.2.0、oneTBB 2023.2.0 | overlay；TBB 具体 task 类型销毁补丁已由上游覆盖。 |
-| 物理与导航 | Jolt 5.6.0、Recast Navigation 1.6.0 | baseline。 |
+| 物理与导航 | Jolt 5.6.0、Recast Navigation 1.6.0 | Jolt 使用同版 overlay 启用双精度世界位置；Recast 沿用 baseline。 |
 | UI 与编辑器界面 | RmlUi 6.3、Dear ImGui 1.93.0 docking | baseline；仅启用实际需要的绑定。 |
 | 字体离线解析 | FreeType 2.15.0 | baseline；运行包仍消费生成的字体资源。 |
 | 纹理与浮点图像 | Basis Universal 2.50、TinyEXR 3.3.0 | overlay；保留 BasisU 移动端库构建及 stdio 输出适配。 |
@@ -88,6 +88,7 @@ target_link_libraries(engine_resource PRIVATE example::example)
 | V8 后端 | 15.7.112.23，`440c1c46` | Chrome Stable 157.0.8103.38 的 shipping `DEPS`；固定其完整工具链。 |
 | 特效与破坏 | Effekseer 1808，`b5700082`；Blast 5.1.0，`636e7eb4` | 当前正式稳定版，保留必要平台补丁。 |
 | FBX 源文件解析 | ufbx 0.23.1，`26a482ae` | 当前正式稳定版，Git 子模块。 |
+| 地形噪声 | FastNoise2 1.1.1，`903c1f2d` | 固定 Git 子模块，只进入编辑器地形生成目标；关闭上游工具与测试，启用严格浮点选项。 |
 | 无正式发布的固定算法库 | xatlas `f700c779`、efkbgfx `7d89c3c3`、Transvoxel `51a494f0`、lightmapper `4fd3bf4e` | 核查时均等于上游 HEAD；Git 仍固定精确提交，不在构建时追踪分支。 |
 | Android 工具链 | Gradle 9.8.2、AGP 9.5.0、NDK r30、Build Tools 37.0.0 | [平台说明](runtime/android.md)记录官方来源和 wrapper 哈希；min/target API 策略保持。 |
 

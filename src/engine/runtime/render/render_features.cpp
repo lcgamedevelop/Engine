@@ -62,6 +62,11 @@ bool RenderSystem::set_debug_feature(RenderFeature feature, bool enabled)
     {
         return false;
     }
+    if (feature >= RenderFeature::rvt_viewer && feature <= RenderFeature::rvt_invalidated &&
+        debug_requests_[index] != enabled)
+    {
+        ++rvt_debug_revision_;
+    }
     debug_requests_[index] = enabled;
     if (feature == RenderFeature::stats && renderer_initialized_)
     {
@@ -136,7 +141,8 @@ RenderFeatureState RenderSystem::feature_state(RenderFeature feature) const noex
     {
         return result;
     }
-    if (feature != RenderFeature::stats && (world_ == nullptr || world_->scene() == nullptr))
+    if (feature != RenderFeature::stats && feature != RenderFeature::rvt_viewer &&
+        (world_ == nullptr || world_->scene() == nullptr))
     {
         result.effective = false;
         result.reason = RenderFeatureReason::no_scene;
@@ -200,6 +206,13 @@ void RenderSystem::publish_features() noexcept
     feature_applied_.fill(false);
     feature_applied_[static_cast<std::size_t>(RenderFeature::stats)] =
         debug_requests_[static_cast<std::size_t>(RenderFeature::stats)];
+    feature_applied_[static_cast<std::size_t>(RenderFeature::rvt_viewer)] = rvt_debug_visible_;
+    for (auto feature :
+         {RenderFeature::rvt_pages, RenderFeature::rvt_residency, RenderFeature::rvt_invalidated})
+    {
+        feature_applied_[static_cast<std::size_t>(feature)] =
+            debug_requests_[static_cast<std::size_t>(feature)] && rvt_status_.effective;
+    }
     if (scene_resources_ == nullptr)
     {
         return;
@@ -334,7 +347,9 @@ bool RenderSystem::draw_debug_overlay(Camera camera, const float* view, const fl
                         local[(plane + 1) % 3] += std::cos(angle) * cluster.radius();
                         local[(plane + 2) % 3] += std::sin(angle) * cluster.radius();
                         const auto world = render_detail::transform_point(mesh.model.data(), local);
-                        return Vec3(world[0], world[1], world[2]);
+                        return Vec3(world[0] + frame.world_origin.x(),
+                                    world[1] + frame.world_origin.y(),
+                                    world[2] + frame.world_origin.z());
                     };
                     for (std::uint32_t step = 0; step < segments; ++step)
                     {

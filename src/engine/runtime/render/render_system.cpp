@@ -1,4 +1,6 @@
 #include "runtime/render/render_system.hpp"
+#include "runtime/render/rvt/rvt_debug_view.hpp"
+#include "runtime/render/rvt/rvt_pass.hpp"
 
 #include "runtime/render/frame_counters.hpp"
 #include "runtime/render/passes/frame_output.hpp"
@@ -530,6 +532,7 @@ RenderSubmitStatus RenderSystem::render(Camera camera)
 {
     render_detail::ui_draws = 0;
     scene_collected_ = false;
+    rvt_debug_visible_ = false;
     ENGINE_PROFILE_ZONE("Render.frame");
     if (camera.instance_id() != 0 && !camera)
     {
@@ -551,6 +554,32 @@ RenderSubmitStatus RenderSystem::render(Camera camera)
             return RenderSubmitStatus::failed;
         }
     }
+    // Keep page generation after deformation and before any scene material consumer.
+    std::array<bgfx::ViewId, 256> order{};
+    std::size_t next_view = 0;
+    for (bgfx::ViewId id = 0; id < 3; ++id)
+    {
+        order[next_view++] = id;
+    }
+    for (bgfx::ViewId id = render_detail::rvt_page_view - 1;
+         id < render_detail::rvt_page_view + render_detail::maximum_rvt_views; ++id)
+    {
+        order[next_view++] = id;
+    }
+    for (bgfx::ViewId id = 3; id < 256; ++id)
+    {
+        if (id < render_detail::rvt_page_view - 1 ||
+            id >= render_detail::rvt_page_view + render_detail::maximum_rvt_views)
+        {
+            order[next_view++] = id;
+        }
+    }
+    bgfx::setViewOrder(0, 256, order.data());
+    if (!world_ || !world_->scene() || !current_settings.atmosphere.rvt ||
+        !current_settings.atmosphere.rvt->enabled)
+    {
+        release_rvt();
+    }
     bgfx::setViewFrameBuffer(render_detail::main_view, BGFX_INVALID_HANDLE);
     bgfx::setViewClear(render_detail::main_view, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
                        current_settings.clear_color, 1.0F, 0);
@@ -567,6 +596,10 @@ RenderSubmitStatus RenderSystem::render(Camera camera)
     const bool drawn = draw_scene(camera, current_settings) &&
                        draw_diffuse_capture(current_settings) &&
                        (ui_ == nullptr || ui_->render(width_, height_));
+    if (drawn)
+    {
+        draw_rvt_viewer();
+    }
     if (scene_resources_)
     {
         // 在扩展/UI 返回后撤销所有借用，下一次结构修改和 GPU 资源回收前不留旧指针。
@@ -709,6 +742,8 @@ void RenderSystem::shutdown_renderer(bool drain_screenshots) noexcept
     if (renderer_initialized_)
     {
         movie_pass_.reset();
+        release_rvt();
+        rvt_viewer_.reset();
         if (frame_output_)
         {
             frame_output_->release();

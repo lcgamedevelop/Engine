@@ -1,4 +1,5 @@
 #include "runtime/render/render_system.hpp"
+#include "runtime/render/rvt/rvt_pass.hpp"
 
 #include "runtime/font/font_system.hpp"
 #include "runtime/performance/profiling.hpp"
@@ -19,6 +20,7 @@
 #include "runtime/scene/planar_reflection_component.hpp"
 #include "runtime/scene/scene.hpp"
 #include "runtime/scene/transform.hpp"
+#include "runtime/utils/transform_math.hpp"
 #include "runtime/world/world_system.hpp"
 #include <SDL3/SDL.h>
 #include <algorithm>
@@ -59,13 +61,19 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
         return true;
     }
     const Camera camera = view_camera ? view_camera : scene->active_camera();
+    double absolute_camera[16]{};
     float camera_world[16]{}, view[16]{}, projection[16]{};
     const auto camera_transform = camera.node().get_component<Transform>();
     CameraSettings settings;
     const float aspect = static_cast<float>(width_) / static_cast<float>(height_);
     if (!camera.get_settings(settings) || !camera_transform ||
-        !camera_transform.world_matrix(camera_world) ||
-        !camera_detail::view_matrix(camera_world, view) ||
+        !camera_transform.world_matrix(absolute_camera))
+    {
+        return false;
+    }
+    const Vec3 origin{absolute_camera[12], absolute_camera[13], absolute_camera[14]};
+    transform_math::relative(absolute_camera, origin, camera_world);
+    if (!camera_detail::view_matrix(camera_world, view) ||
         !camera_detail::projection_matrix(settings, aspect, bgfx::getCaps()->homogeneousDepth,
                                           projection))
     {
@@ -79,11 +87,20 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
     {
         return true;
     }
-    if (!resources.collect_frame(*world_, resources.frame_data))
+    if (!resources.collect_frame(*world_, origin, resources.frame_data))
     {
         return false;
     }
     scene_collected_ = resources.frame_complete;
+    render_detail::SceneDrawView rvt_view;
+    rvt_view.world_origin = origin;
+    rvt_view.world = camera_world;
+    rvt_view.view = view;
+    rvt_view.projection = projection;
+    rvt_view.width = static_cast<std::uint16_t>(width_);
+    rvt_view.height = static_cast<std::uint16_t>(height_);
+    rvt_view.lod_observer = {camera.instance_id(), scene->id()};
+    prepare_rvt(rendering, resources.frame_data, rvt_view);
     for (std::size_t index = 0; index < resources.targets().planar.size(); ++index)
     {
         auto& target = resources.targets().planar[index];
@@ -95,6 +112,8 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
         const auto base = static_cast<bgfx::ViewId>(3 + index * 39);
         render_detail::SceneDrawView draw;
         draw.renderer = this;
+        draw.world_origin = origin;
+        draw.rvt = rvt_status_.effective ? rvt_pass_.get() : nullptr;
         draw.id = static_cast<bgfx::ViewId>(base + 30);
         draw.width = target.width;
         draw.height = target.height;
@@ -128,6 +147,8 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
     }
     render_detail::SceneDrawView draw;
     draw.renderer = this;
+    draw.world_origin = origin;
+    draw.rvt = rvt_status_.effective ? rvt_pass_.get() : nullptr;
     draw.width = static_cast<std::uint16_t>(width_);
     draw.height = static_cast<std::uint16_t>(height_);
     draw.world = camera_world;
@@ -229,7 +250,7 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
     {
         for (const auto& owner : world_->scenes())
         {
-            if (!fonts_->render_scene(*owner, render_detail::transparent_view, true))
+            if (!fonts_->render_scene(*owner, origin, render_detail::transparent_view, true))
             {
                 return false;
             }
@@ -238,6 +259,7 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
     if (!extensions_.empty())
     {
         RenderContext context{*scene};
+        context.world_origin = origin;
         std::copy_n(view, context.view.size(), context.view.begin());
         std::copy_n(projection, context.projection.size(), context.projection.begin());
         context.view_id = render_detail::extension_view;

@@ -20,6 +20,8 @@ struct RenderFrameSnapshot
     RenderFrameKind kind = RenderFrameKind::clear;
     std::uint32_t mesh_draws = 0;
     std::uint32_t ui_draws = 0;
+    std::uint64_t rvt_demand_revision = 0, rvt_cache_revision = 0, rvt_debug_revision = 0;
+    bool rvt_ready = false, rvt_debug_visible = false;
 };
 enum class ScreenshotSelection
 {

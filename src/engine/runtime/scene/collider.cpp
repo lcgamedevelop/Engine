@@ -160,6 +160,7 @@ bool Collider::apply_settings(const Data& value, ResourceReference prepared)
     runtime()->mesh_ = std::move(replacement);
     runtime()->transient_mesh_ = std::move(transient);
     runtime()->mesh_parts_ = std::move(parts);
+    runtime()->geometry_removed_ = false;
     return true;
 }
 

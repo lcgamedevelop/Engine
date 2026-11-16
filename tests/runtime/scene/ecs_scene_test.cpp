@@ -64,7 +64,7 @@ bool producer_transform_drive()
     drive.active = true;
     flecs::world(world.native_world()).entity(owner.id()).set<ecs_detail::TransformDrive>(drive);
     world.invalidate_scene_state();
-    std::array<float, 16> matrix;
+    std::array<double, 16> matrix;
     if (!expect(transform.world_matrix(matrix.data()) && matrix[12] == 10,
                 "World consumes a valid drive without knowing its producer type") ||
         !light.set_enabled(false))

@@ -6,8 +6,11 @@
 #include "runtime/gameplay/gameplay_session.hpp"
 #include "runtime/gameplay/project_script_request.hpp"
 #include "runtime/gameplay/script_status.hpp"
+#include "runtime/render/render_feature_names.hpp"
 #include "runtime/render/render_system.hpp"
 #include "runtime/utils/path_utils.hpp"
+#include <algorithm>
+#include <array>
 
 #include <SDL3/SDL.h>
 #include <charconv>
@@ -261,7 +264,122 @@ bool RuntimeMcpEndpoint::initialize(RuntimeHost& host, const McpEndpointConfig& 
         };
         return value->system.register_tool(std::move(tool));
     };
-    if (!register_command("execute_project_script",
+    if (!register_command(
+            "set_render_feature",
+            [value](const Json& args, Json& result, std::string&)
+            {
+                if (!value->host.renderer() || !args.is_object() || args.size() != 2 ||
+                    !args.contains("feature") || !args["feature"].is_string() ||
+                    !args.contains("enabled") || !args["enabled"].is_boolean())
+                {
+                    return false;
+                }
+                RenderFeature feature;
+                if (!render_detail::parse_feature(args["feature"].get<std::string>(), feature) ||
+                    !value->host.renderer()->set_debug_feature(feature,
+                                                               args["enabled"].get<bool>()))
+                {
+                    return false;
+                }
+                result = {{"accepted", true}};
+                return true;
+            }) ||
+        !register_command("get_rvt_status",
+                          [value](const Json& args, Json& result, std::string&)
+                          {
+                              RvtStatus status;
+                              if (!args.empty() || !value->host.renderer() ||
+                                  !value->host.renderer()->rvt_status(status))
+                              {
+                                  return false;
+                              }
+                              result = {
+                                  {"requested", status.requested},
+                                  {"supported", status.supported},
+                                  {"effective", status.effective},
+                                  {"reason", status.reason},
+                                  {"deviceGeneration", std::to_string(status.device_generation)},
+                                  {"demandRevision", std::to_string(status.demand_revision)},
+                                  {"cacheRevision", std::to_string(status.cache_revision)},
+                                  {"residentBytes", std::to_string(status.resident_bytes)},
+                                  {"readyPages", status.ready_pages},
+                                  {"requiredPages", status.required_pages}};
+                              return true;
+                          }) ||
+        !register_command("get_rvt_debug_options",
+                          [value](const Json& args, Json& result, std::string&)
+                          {
+                              RvtDebugOptions options;
+                              std::uint64_t revision = 0;
+                              if (!args.empty() || !value->host.renderer() ||
+                                  !value->host.renderer()->rvt_debug_options(options, revision))
+                              {
+                                  return false;
+                              }
+                              constexpr std::array modes{"overview", "virtual_texture",
+                                                         "physical_atlas", "page_table"};
+                              constexpr std::array channels{"base_color", "normal", "roughness",
+                                                            "metallic", "ao"};
+                              result = {{"mode", modes[unsigned(options.mode)]},
+                                        {"channel", channels[unsigned(options.channel)]},
+                                        {"mip", options.mip},
+                                        {"revision", std::to_string(revision)}};
+                              return true;
+                          }) ||
+        !register_command(
+            "set_rvt_debug_options",
+            [value](const Json& args, Json& result, std::string&)
+            {
+                RvtDebugOptions options;
+                std::uint64_t revision = 0;
+                if (!args.is_object() || args.empty() || !value->host.renderer() ||
+                    !value->host.renderer()->rvt_debug_options(options, revision))
+                {
+                    return false;
+                }
+                constexpr std::array modes{"overview", "virtual_texture", "physical_atlas",
+                                           "page_table"};
+                constexpr std::array channels{"base_color", "normal", "roughness", "metallic",
+                                              "ao"};
+                for (const auto& [key, item] : args.items())
+                {
+                    if (key == "mode" && item.is_string())
+                    {
+                        auto i = std::find(modes.begin(), modes.end(), item.get<std::string>());
+                        if (i == modes.end())
+                        {
+                            return false;
+                        }
+                        options.mode = RvtDebugMode(i - modes.begin());
+                    }
+                    else if (key == "channel" && item.is_string())
+                    {
+                        auto i =
+                            std::find(channels.begin(), channels.end(), item.get<std::string>());
+                        if (i == channels.end())
+                        {
+                            return false;
+                        }
+                        options.channel = RvtDebugChannel(i - channels.begin());
+                    }
+                    else if (key == "mip" && item.is_number_integer() && item >= -1 && item <= 8)
+                    {
+                        options.mip = item.get<std::int32_t>();
+                    }
+                    else
+                    {
+                        return false;
+                    }
+                }
+                if (!value->host.renderer()->set_rvt_debug_options(options) ||
+                    !value->host.renderer()->rvt_debug_options(options, revision))
+                {
+                    return false;
+                }
+                result = {{"revision", std::to_string(revision)}};
+                return true;
+            }) ||
+        !register_command("execute_project_script",
                           [value](const Json& args, Json& result, std::string& error)
                           { return value->execute_script(args, result, error); }) ||
         !register_command("capture_frame",

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/scene/scene_types.hpp"
+
 #include <array>
 #include <cstdint>
 
@@ -12,6 +14,7 @@ class Scene;
 struct RenderContext
 {
     const Scene& scene;
+    Vec3 world_origin{};
     std::array<float, 16> view{};
     std::array<float, 16> projection{};
     std::uint16_t view_id = 0;

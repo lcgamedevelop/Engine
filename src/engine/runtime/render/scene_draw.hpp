@@ -14,6 +14,7 @@ struct SceneCaptureRequest;
 namespace render_detail
 {
 class ClusteredLightingPass;
+class RvtPass;
 enum class SceneDrawMode : std::uint8_t
 {
     depth,
@@ -27,6 +28,8 @@ enum class SceneDrawMode : std::uint8_t
 struct SceneDrawView
 {
     RenderSystem* renderer = nullptr;
+    Vec3 world_origin;
+    const RvtPass* rvt = nullptr;
     bgfx::ViewId id = 0;
     std::uint16_t width = 0, height = 0;
     const float* world = nullptr;
