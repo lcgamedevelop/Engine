@@ -107,7 +107,7 @@ int main(int argc, char* argv[])
     }
     for (int index = 1; index < argc; ++index)
     {
-        for (const auto platform : {"windows", "macos", "linux", "android", "ios"})
+        for (const auto platform : {"windows", "macos", "linux", "android", "ios", "web"})
         {
             settings = {};
             if (!engine::editor::load_project_runtime_settings(argv[index], platform, settings,

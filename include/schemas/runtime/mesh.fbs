@@ -27,15 +27,37 @@ struct SkinInfluence {
     w3:float;
 }
 
+// Meshlets retain ordinary topology and address the same vertex array.
+struct Meshlet {
+    first_index:uint;
+    index_count:uint;
+    center:Vec3;
+    radius:float;
+    cone_axis:Vec3;
+    cone_cutoff:float;
+}
+
+struct MeshletRange {
+    first_meshlet:uint;
+    meshlet_count:uint;
+}
+
+table MeshletData {
+    indices:[uint] (required);
+    meshlets:[Meshlet] (required);
+    submeshes:[MeshletRange] (required);
+}
+
 // Additional static rendering topology; all indices address MeshData.vertices.
 table MeshLodData {
     screen_height:float;
     indices:[uint] (required);
     submeshes:[MeshSubmesh];
+    meshlets:MeshletData;
 }
 
 table MeshData {
-    schema_version:uint = 1;
+    schema_version:uint = 2;
     path:string (required);
     vertices:[MeshVertex] (required);
     indices:[uint] (required);
@@ -49,7 +71,8 @@ table MeshData {
     mesh_to_skeleton:[float];
     lightmap_texcoords:[Vec2];
     lods:[MeshLodData];
+    meshlets:MeshletData;
 }
 
 root_type MeshData;
-file_identifier "EMSH";
+file_identifier "EMS2";

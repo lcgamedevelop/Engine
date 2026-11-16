@@ -584,6 +584,9 @@ declare module "engine" {
     /** Scene-wide environment parameters, stored with the scene. */
     export class EnvironmentComponent extends Component {
         private constructor();
+        readonly meshletCullingEnabled: boolean;
+        /** Enables meshlet culling scene-wide for eligible geometry. */
+        SetMeshletCulling(enabled: boolean): boolean;
         /** The directional sun must belong to this scene. Parameters patch the current values. */
         SetAtmosphere(enabled: boolean, sun?: Node | null, parameters?: AtmosphereParameters): boolean;
         /** Uses the scene's precomputed IBL maps; baking does not change this switch. */

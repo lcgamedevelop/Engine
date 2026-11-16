@@ -194,6 +194,13 @@ bool ShaderImporter::convert(const ImportAsset& asset, const ImportContext& cont
     }
     schema::ShaderDataT shader;
     shader.path = asset.path;
+    if (table.contains("meshlet_culling_compatible") &&
+        !table["meshlet_culling_compatible"].is_boolean())
+    {
+        error = "Shader meshlet_culling_compatible must be boolean";
+        return false;
+    }
+    shader.meshlet_culling_compatible = table["meshlet_culling_compatible"].value_or(false);
     const auto* parameters = table["parameters"].as_array();
     if (table.contains("parameters") && parameters == nullptr)
     {

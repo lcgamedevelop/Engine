@@ -47,6 +47,12 @@ export class EnvironmentComponent extends Component {
         return native.EnvironmentAtmosphere(h.scene, h.node, enabled,
             other?.scene ?? 0n, other?.node ?? 0n, JSON.stringify(parameters));
     }
+    get meshletCullingEnabled() {
+        const h = handles.get(this); return native.EnvironmentMeshletEnabled(h.scene, h.node);
+    }
+    SetMeshletCulling(enabled) {
+        const h = handles.get(this); return native.EnvironmentMeshletCulling(h.scene, h.node, enabled);
+    }
     SetIbl(enabled, intensity = 1) {
         const h = handles.get(this); return native.EnvironmentIbl(h.scene, h.node, enabled, intensity);
     }
@@ -197,6 +203,26 @@ void ibl(const Arguments& arguments)
     }
 }
 
+void meshlet_enabled(const Arguments& arguments)
+{
+    const auto target = binding_detail::component<EnvironmentComponent>(arguments, 2);
+    EnvironmentComponent::Data value{};
+    arguments.set_return(target && target.get_settings(value) && value.meshlet_culling_enabled);
+}
+
+void meshlet_culling(const Arguments& arguments)
+{
+    auto target = binding_detail::component<EnvironmentComponent>(arguments, 3);
+    EnvironmentComponent::Data value{};
+    if (!target || !arguments.is_boolean(2) || !target.get_settings(value))
+    {
+        arguments.set_return(false);
+        return;
+    }
+    value.meshlet_culling_enabled = arguments.boolean(2);
+    arguments.set_return(target.set_settings(value));
+}
+
 void atmosphere(const Arguments& arguments)
 {
     auto target = binding_detail::component<EnvironmentComponent>(arguments, 6);
@@ -329,6 +355,8 @@ bool EnvironmentComponentBinding::register_functions(vm::ScriptVm& vm) const
            vm.function("EnvironmentLinearFog", linear_fog) &&
            vm.function("EnvironmentExponentialFog", exponential_fog) &&
            vm.function("EnvironmentClearColor", clear_color) &&
+           vm.function("EnvironmentMeshletEnabled", meshlet_enabled) &&
+           vm.function("EnvironmentMeshletCulling", meshlet_culling) &&
            vm.function("EnvironmentIbl", ibl) && vm.function("EnvironmentAtmosphere", atmosphere);
 }
 } // namespace engine::plugins::script::bindings

@@ -161,6 +161,7 @@ table EnvironmentData {
     atmosphere_height:float = 100;
     atmosphere_ground_albedo:Vec3 (required, native_inline, native_default: "Vec3(0.3, 0.3, 0.3)");
     atmosphere_multiscatter_strength:float = 1;
+    meshlet_culling_enabled:bool = false;
 }
 
 table PostProcessData {

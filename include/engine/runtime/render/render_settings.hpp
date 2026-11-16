@@ -57,6 +57,7 @@ struct RenderSettings
     float ssr_thickness = 0.15F;
     float ssr_roughness_cutoff = 0.7F;
     bool ibl_enabled = false;
+    bool meshlet_culling_enabled = false;
     float ibl_intensity = 1.0F;
     bool directional_shadows = false;
     std::uint16_t shadow_resolution = 2048;

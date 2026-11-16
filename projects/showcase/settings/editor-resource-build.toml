@@ -2,6 +2,14 @@
 name = "game"
 storage = "package"
 roots = [
+    "scripts/modules/meshlet-culling.ts",
+    "scenes/meshlet-culling.scene",
+    "ui/meshlet-culling.rml",
+    "meshes/meshlet-lod-sphere.mesh",
+    "meshes/meshlet-sphere.mesh",
+    "meshes/meshlet-arch.mesh",
+    "meshes/meshlet-wall.mesh",
+    "materials/meshlet-direct.material",
     "scripts/modules/render-features.ts",
     "scenes/render-features.scene",
     "ui/render-features.rml",

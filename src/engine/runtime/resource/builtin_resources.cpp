@@ -130,6 +130,7 @@ schema::ShaderDataT surface_shader(const char* shader_path, float lighting_mode)
     const bool unlit = lighting_mode == 1.0F;
     schema::ShaderDataT shader;
     shader.path = shader_path;
+    shader.meshlet_culling_compatible = true;
     shader.vertex_code.assign(std::begin(vs_cube), std::end(vs_cube));
     shader.instanced_vertex_code.assign(std::begin(vs_cube_instanced), std::end(vs_cube_instanced));
     shader.fragment_code.assign(std::begin(fs_cube), std::end(fs_cube));
@@ -224,6 +225,7 @@ schema::ShaderDataT surface_shader(const char* shader_path, float lighting_mode)
 schema::ShaderDataT water_shader()
 {
     auto shader = surface_shader("builtin://shaders/water", 0.0F);
+    shader.meshlet_culling_compatible = false;
     shader.fragment_code.assign(std::begin(fs_water), std::end(fs_water));
     shader.surface_fragment_code.clear();
     for (auto& parameter : shader.parameters)
@@ -443,8 +445,8 @@ bool builtin_resource_payload(std::string_view guid, ByteBuffer& output)
         return false;
     };
     const auto& definitions = builtin_definitions();
-    if (!serialize(definitions.shaders, "ESHD") && !serialize(definitions.materials, "EMAT") &&
-        !serialize(definitions.meshes, "EMSH") && !serialize(definitions.textures, "ETEX"))
+    if (!serialize(definitions.shaders, "ESH2") && !serialize(definitions.materials, "EMAT") &&
+        !serialize(definitions.meshes, "EMS2") && !serialize(definitions.textures, "ETEX"))
     {
         return false;
     }

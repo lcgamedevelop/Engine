@@ -28,6 +28,20 @@ Json state_json(const RenderFeatureState& state)
             {"persistent", false}};
 }
 
+Json meshlet_sample_json(const MeshletGpuStats& value)
+{
+    constexpr std::array names{"disabled", "unsupported", "pending", "ready", "failed"};
+    return {{"state", names[static_cast<std::size_t>(value.state)]},
+            {"worldEpoch", std::to_string(value.world_epoch)},
+            {"observer", {std::to_string(value.observer[0]), std::to_string(value.observer[1])}},
+            {"frameNumber", value.frame_number},
+            {"candidatePairs", value.candidate_pairs},
+            {"candidateTriangles", value.candidate_triangles},
+            {"visiblePairs", value.visible_pairs},
+            {"nonemptyCommands", value.nonempty_commands},
+            {"visibleTriangles", value.visible_triangles}};
+}
+
 Json features_json(const RenderSystem& renderer)
 {
     Json result = Json::object();
@@ -264,6 +278,10 @@ bool register_render_feature_commands(RenderSystem& renderer, WorldSystem& world
                                                   ? "no_applicable_draws"
                                                   : "none"},
                                    {"persistent", true}}}}}};
+                           auto meshlets =
+                               state_json(renderer.feature_state(RenderFeature::meshlet_culling));
+                           meshlets["persistent"] = true;
+                           result["scene"]["features"]["meshlet_culling"] = std::move(meshlets);
                        }
                    }
                    if (arguments.contains("sceneId"))
@@ -369,9 +387,25 @@ bool register_render_feature_commands(RenderSystem& renderer, WorldSystem& world
                                                   {"culledMeshes", row.culled_meshes},
                                                   {"visibleMeshes", row.visible_meshes},
                                                   {"drawCalls", row.draw_calls},
-                                                  {"instanceBatches", row.instance_batches},
-                                                  {"submittedInstances", row.submitted_instances},
-                                                  {"triangles", row.triangles}});
+                                                  {"directInstanceBatches",
+                                                   row.direct_instance_batches},
+                                                  {"directInstances", row.direct_instances},
+                                                  {"directTriangles", row.direct_triangles},
+                                                  {"indirectBatches", row.indirect_batches},
+                                                  {"indirectCommands", row.indirect_commands},
+                                                  {"meshletInstancedBatches",
+                                                   row.meshlet_instanced_batches},
+                                                  {"meshletCandidatePairs",
+                                                   row.meshlet_candidate_pairs},
+                                                  {"meshletCandidateTriangles",
+                                                   row.meshlet_candidate_triangles},
+                                                  {"meshletMissingData", row.meshlet_missing_data},
+                                                  {"meshletIncompatibleDraws",
+                                                   row.meshlet_incompatible_draws},
+                                                  {"meshletBudgetFallbacks",
+                                                   row.meshlet_budget_fallbacks},
+                                                  {"meshletGpu",
+                                                   meshlet_sample_json(row.meshlet_gpu)}});
                                          }
                                          result = {{"frameNumber", renderer.frame_number()},
                                                    {"views", rows},

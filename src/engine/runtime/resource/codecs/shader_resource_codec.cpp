@@ -100,7 +100,7 @@ bool reserved_uniform(std::string_view name)
 
 bool ShaderResourceCodec::validate(const schema::ShaderDataT& data)
 {
-    if (!valid_path(data.path) || data.schema_version != 1 || data.vertex_code.empty() ||
+    if (!valid_path(data.path) || data.schema_version != 2 || data.vertex_code.empty() ||
         data.fragment_code.empty())
     {
         return false;

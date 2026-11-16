@@ -314,13 +314,13 @@ bool ShadowPass::draw(const RenderFrameData& frame_data, const RenderSettings& s
                 auto [found, inserted] = batch_index.try_emplace(key, batches.size());
                 if (inserted)
                 {
-                    batches.push_back({key, {}, 0});
+                    batches.push_back({key, {}, 0, {}});
                 }
                 batches[found->second].items.push_back(item);
             }
             else
             {
-                batches.push_back({key, {item}, 0});
+                batches.push_back({key, {item}, 0, {}});
             }
             return true;
         };

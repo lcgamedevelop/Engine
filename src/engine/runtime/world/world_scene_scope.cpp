@@ -69,7 +69,7 @@ bool WorldSystem::restore_scope(SceneScopeId id, const ResourceHandle& handle)
         return false;
     }
     const auto* data = scope.resource.data<SceneResource>();
-    if (!data || !data->info || data->schema_version != 3)
+    if (!data || !data->info || data->schema_version != 4)
     {
         scope.resource.reset();
         return false;

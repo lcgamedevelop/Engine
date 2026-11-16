@@ -87,6 +87,7 @@ struct RenderSystem::SceneGpuResources
     std::array<render_detail::ViewDrawList, 4> draw_lists;
     bool culling_applied = false;
     bool lod_applied = false;
+    bool meshlet_bounds_limited = false;
     render_detail::AtmospherePass atmosphere;
     render_detail::DebugDrawPass debug_draw;
     std::map<std::pair<std::uint64_t, std::uint16_t>, std::size_t> selected_lods;
@@ -214,7 +215,7 @@ struct RenderSystem::SceneGpuResources
                                         std::size_t cluster_index, bgfx::ViewId base,
                                         const SceneCaptureRequest* capture);
     [[nodiscard]] bool draw_meshes(const render_detail::RenderFrameData& frame,
-                                   const render_detail::ViewDrawList& list,
+                                   render_detail::ViewDrawList& list,
                                    const RenderSettings& settings,
                                    const render_detail::SceneDrawView& view,
                                    render_detail::SceneDrawMode mode);

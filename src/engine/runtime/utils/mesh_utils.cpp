@@ -56,12 +56,118 @@ Vector orthogonal(const Vector& normal) noexcept
     return tangent;
 }
 
+bool validate_meshlets(const schema::MeshletDataT* data,
+                       const std::vector<schema::MeshVertex>& vertices,
+                       const std::vector<std::uint32_t>& indices,
+                       const std::vector<schema::MeshSubmesh>& submeshes)
+{
+    if (data == nullptr)
+    {
+        return true;
+    }
+    if (data->indices.size() != indices.size() || data->meshlets.empty() ||
+        data->submeshes.size() != std::max<std::size_t>(1, submeshes.size()))
+    {
+        return false;
+    }
+    std::size_t next_index = 0;
+    for (const auto& cluster : data->meshlets)
+    {
+        const auto& center = cluster.center();
+        const auto& axis = cluster.cone_axis();
+        const double axis_length = std::hypot(axis.x(), axis.y(), axis.z());
+        if (cluster.first_index() != next_index || cluster.index_count() == 0 ||
+            cluster.index_count() > 124 * 3 || cluster.index_count() % 3 != 0 ||
+            next_index > data->indices.size() ||
+            cluster.index_count() > data->indices.size() - next_index || !float_value(center.x()) ||
+            !float_value(center.y()) || !float_value(center.z()) ||
+            !float_value(cluster.radius()) || cluster.radius() < 0 || !float_value(axis.x()) ||
+            !float_value(axis.y()) || !float_value(axis.z()) ||
+            !unit_value(cluster.cone_cutoff()) ||
+            (cluster.cone_cutoff() < 1 && std::abs(axis_length - 1.0) > 0.001))
+        {
+            return false;
+        }
+        std::array<std::uint32_t, 64> unique{};
+        std::size_t unique_count = 0;
+        for (std::size_t j = 0; j < cluster.index_count(); ++j)
+        {
+            const auto index = data->indices[next_index + j];
+            if (index >= vertices.size())
+            {
+                return false;
+            }
+            const auto end = unique.begin() + static_cast<std::ptrdiff_t>(unique_count);
+            if (std::find(unique.begin(), end, index) == end)
+            {
+                if (unique_count == unique.size())
+                {
+                    return false;
+                }
+                unique[unique_count++] = index;
+                const auto& vertex = vertices[index];
+                const double distance = std::hypot(vertex.x() - center.x(), vertex.y() - center.y(),
+                                                   vertex.z() - center.z());
+                if (distance > cluster.radius() + std::max(1.0, distance) * 1.0e-5)
+                {
+                    return false;
+                }
+            }
+        }
+        next_index += cluster.index_count();
+    }
+    if (next_index != indices.size())
+    {
+        return false;
+    }
+    // Exact per-material multiset: preserve winding, provoking vertex and duplicate triangles.
+    using Triangle = std::array<std::uint32_t, 3>;
+    std::vector<Triangle> original;
+    std::vector<Triangle> generated;
+    std::size_t next_meshlet = 0;
+    for (std::size_t part = 0; part < data->submeshes.size(); ++part)
+    {
+        const auto& range = data->submeshes[part];
+        if (range.first_meshlet() != next_meshlet || range.meshlet_count() == 0 ||
+            next_meshlet > data->meshlets.size() ||
+            range.meshlet_count() > data->meshlets.size() - next_meshlet)
+        {
+            return false;
+        }
+        const auto first = submeshes.empty() ? 0 : submeshes[part].first_index();
+        const auto count = submeshes.empty() ? indices.size() : submeshes[part].index_count();
+        original.clear();
+        generated.clear();
+        for (std::size_t i = first; i < first + count; i += 3)
+        {
+            original.push_back({indices[i], indices[i + 1], indices[i + 2]});
+        }
+        for (std::size_t i = next_meshlet; i < next_meshlet + range.meshlet_count(); ++i)
+        {
+            const auto& cluster = data->meshlets[i];
+            for (std::size_t j = cluster.first_index();
+                 j < cluster.first_index() + cluster.index_count(); j += 3)
+            {
+                generated.push_back({data->indices[j], data->indices[j + 1], data->indices[j + 2]});
+            }
+        }
+        std::sort(original.begin(), original.end());
+        std::sort(generated.begin(), generated.end());
+        if (original != generated)
+        {
+            return false;
+        }
+        next_meshlet += range.meshlet_count();
+    }
+    return next_meshlet == data->meshlets.size();
+}
+
 } // namespace
 
 bool MeshUtils::validate(const schema::MeshDataT& data) noexcept
 {
     const auto count = data.vertices.size();
-    if (data.schema_version != 1 || count == 0 ||
+    if (data.schema_version != 2 || count == 0 ||
         count > std::numeric_limits<std::uint32_t>::max() / (16 * sizeof(float)) ||
         data.indices.empty() || data.indices.size() % 3 != 0 ||
         data.indices.size() > std::numeric_limits<std::uint32_t>::max() / sizeof(std::uint32_t) ||
@@ -135,7 +241,8 @@ bool MeshUtils::validate(const schema::MeshDataT& data) noexcept
     {
         return false;
     }
-    if (!data.lods.empty() && (!data.skin.empty() || !data.skeleton_guid.empty()))
+    if ((!data.lods.empty() || data.meshlets) &&
+        (!data.skin.empty() || !data.skeleton_guid.empty()))
     {
         return false;
     }
@@ -146,7 +253,8 @@ bool MeshUtils::validate(const schema::MeshDataT& data) noexcept
         if (!lod || !std::isfinite(lod->screen_height) || lod->screen_height <= 0 ||
             lod->screen_height > 1 || lod->screen_height >= previous_height ||
             lod->indices.empty() || lod->indices.size() % 3 != 0 ||
-            lod->indices.size() >= previous_count)
+            lod->indices.size() >= previous_count ||
+            static_cast<bool>(lod->meshlets) != static_cast<bool>(data.meshlets))
         {
             return false;
         }
@@ -175,14 +283,15 @@ bool MeshUtils::validate(const schema::MeshDataT& data) noexcept
             }
             next_index += range.index_count();
         }
-        if (next_index != lod->indices.size())
+        if (next_index != lod->indices.size() ||
+            !validate_meshlets(lod->meshlets.get(), data.vertices, lod->indices, lod->submeshes))
         {
             return false;
         }
         previous_count = lod->indices.size();
         previous_height = lod->screen_height;
     }
-    return true;
+    return validate_meshlets(data.meshlets.get(), data.vertices, data.indices, data.submeshes);
 }
 
 bool MeshUtils::build_tangents(const schema::MeshDataT& data, std::vector<schema::Vec4>& output)

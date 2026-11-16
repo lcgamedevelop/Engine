@@ -88,6 +88,7 @@ RenderSubmitStatus 区分提交、暂缓和失败，GameplayStopCause 显式区�
 
 ## 渲染与影片
 
+- [Meshlet 与 GPU 剔除](../runtime/class-diagrams/meshlet-culling.md)
 - [大气天空与 Hex-Tiling 材质增量](../runtime/class-diagrams/atmosphere-hex-material.md)
 - [场景环境与后处理组件](../runtime/class-diagrams/environment-components.md)
 - [分簇前向、反射与间接光](../runtime/class-diagrams/forward-lighting-reflections.md)
@@ -138,6 +139,7 @@ RenderSubmitStatus 区分提交、暂缓和失败，GameplayStopCause 显式区�
 
 ## 编辑器基础
 
+- [Meshlet 离线生成](../editor/class-diagrams/meshlet-import.md)
 - [通用数据资源导入](../editor/class-diagrams/source-importer.md)
 
 - [Web 运行产物导出](../editor/class-diagrams/web-export.md)

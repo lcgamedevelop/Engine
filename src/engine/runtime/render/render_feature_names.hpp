@@ -8,8 +8,9 @@
 namespace engine::render_detail
 {
 inline constexpr std::array<std::string_view, static_cast<std::size_t>(RenderFeature::count)>
-    feature_names{"frustum_culling", "static_instancing", "static_lod",    "wireframe",
-                  "debug_draw",      "mesh_bounds",       "camera_frusta", "stats"};
+    feature_names{"frustum_culling", "static_instancing", "static_lod",         "meshlet_culling",
+                  "wireframe",       "debug_draw",        "mesh_bounds",        "camera_frusta",
+                  "meshlet_bounds",  "meshlet_colors",    "meshlet_statistics", "stats"};
 
 inline bool parse_feature(std::string_view name, RenderFeature& output) noexcept
 {
@@ -26,8 +27,13 @@ inline bool parse_feature(std::string_view name, RenderFeature& output) noexcept
 
 inline std::string_view feature_reason_name(RenderFeatureReason reason) noexcept
 {
-    constexpr std::array names{"none",     "device_unavailable",  "device_unsupported",
-                               "no_scene", "no_applicable_draws", "resources_unavailable"};
+    constexpr std::array names{"none",
+                               "device_unavailable",
+                               "device_unsupported",
+                               "no_scene",
+                               "no_applicable_draws",
+                               "resources_unavailable",
+                               "capacity_limited"};
     const auto index = static_cast<std::size_t>(reason);
     return index < names.size() ? names[index] : "device_unsupported";
 }

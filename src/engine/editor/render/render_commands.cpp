@@ -62,6 +62,7 @@ Json settings_json(const RenderSettings& value)
     Json result = {{"ambientColor", value.ambient_color},
                    {"ambientIntensity", value.ambient_intensity},
                    {"iblEnabled", value.ibl_enabled},
+                   {"meshletCullingEnabled", value.meshlet_culling_enabled},
                    {"iblIntensity", value.ibl_intensity},
                    {"ambientTricolor", value.ambient_tricolor},
                    {"ambientSkyColor", value.ambient_sky_color},
@@ -253,22 +254,24 @@ bool read_settings(const Json& arguments, RenderSettings& settings, std::string&
         }
         else if (item.key() == "filmicTonemap" || item.key() == "directionalShadows" ||
                  item.key() == "ambientTricolor" || item.key() == "iblEnabled" ||
-                 item.key() == "aoEnabled" || item.key() == "hdrEnabled" ||
-                 item.key() == "bloomEnabled" || item.key() == "ssrEnabled")
+                 item.key() == "meshletCullingEnabled" || item.key() == "aoEnabled" ||
+                 item.key() == "hdrEnabled" || item.key() == "bloomEnabled" ||
+                 item.key() == "ssrEnabled")
         {
             if (!item->is_boolean())
             {
                 error = "Render option must be boolean";
                 return false;
             }
-            bool& value = item.key() == "filmicTonemap"     ? settings.filmic_tonemap
-                          : item.key() == "ambientTricolor" ? settings.ambient_tricolor
-                          : item.key() == "iblEnabled"      ? settings.ibl_enabled
-                          : item.key() == "aoEnabled"       ? settings.ao_enabled
-                          : item.key() == "hdrEnabled"      ? settings.hdr_enabled
-                          : item.key() == "bloomEnabled"    ? settings.bloom_enabled
-                          : item.key() == "ssrEnabled"      ? settings.ssr_enabled
-                                                            : settings.directional_shadows;
+            bool& value = item.key() == "filmicTonemap"           ? settings.filmic_tonemap
+                          : item.key() == "ambientTricolor"       ? settings.ambient_tricolor
+                          : item.key() == "iblEnabled"            ? settings.ibl_enabled
+                          : item.key() == "meshletCullingEnabled" ? settings.meshlet_culling_enabled
+                          : item.key() == "aoEnabled"             ? settings.ao_enabled
+                          : item.key() == "hdrEnabled"            ? settings.hdr_enabled
+                          : item.key() == "bloomEnabled"          ? settings.bloom_enabled
+                          : item.key() == "ssrEnabled"            ? settings.ssr_enabled
+                                                                  : settings.directional_shadows;
             value = item->get<bool>();
         }
         else if (item.key() == "ssrMaxSteps")
@@ -591,6 +594,7 @@ private:
             settings.fog_density = after_.fog_density;
             settings.clear_color = after_.clear_color;
             settings.ibl_enabled = after_.ibl_enabled;
+            settings.meshlet_culling_enabled = after_.meshlet_culling_enabled;
             settings.ibl_intensity = after_.ibl_intensity;
             if (!environment.set_settings(settings))
             {

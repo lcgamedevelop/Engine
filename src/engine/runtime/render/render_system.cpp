@@ -1,6 +1,8 @@
 #include "runtime/render/render_system.hpp"
+
 #include "runtime/render/frame_counters.hpp"
 #include "runtime/render/passes/frame_output.hpp"
+#include "runtime/render/passes/meshlet_cull_pass.hpp"
 
 #include "runtime/font/font_system.hpp"
 #include "runtime/performance/profiling.hpp"
@@ -205,9 +207,12 @@ bool RenderSystem::on_initialize(const EngineConfig&)
     preparation_.reset();
     if (config_.cluster_tile_size < 16 || config_.cluster_tile_size > 256 ||
         config_.cluster_depth_slices == 0 || config_.cluster_depth_slices > 64 ||
-        config_.maximum_lights == 0 || config_.maximum_lights > 4096 ||
-        config_.maximum_cluster_lights == 0 || config_.maximum_cluster_lights > 256 ||
-        config_.shadow_atlas_size < 512 || config_.shadow_atlas_size > 8192 ||
+        config_.maximum_meshlet_candidates == 0 ||
+        config_.maximum_meshlet_candidates > UINT32_MAX / 128 ||
+        config_.maximum_meshlet_candidates > UINT32_MAX / 124 || config_.maximum_lights == 0 ||
+        config_.maximum_lights > 4096 || config_.maximum_cluster_lights == 0 ||
+        config_.maximum_cluster_lights > 256 || config_.shadow_atlas_size < 512 ||
+        config_.shadow_atlas_size > 8192 ||
         (config_.shadow_atlas_size & (config_.shadow_atlas_size - 1)) != 0 ||
         config_.local_shadow_tile_size < 64 || config_.local_shadow_tile_size > 2048 ||
         (config_.local_shadow_tile_size & (config_.local_shadow_tile_size - 1)) != 0 ||
@@ -572,6 +577,7 @@ RenderSubmitStatus RenderSystem::render(Camera camera)
         frame.world_epoch = 0;
         for (auto& list : scene_resources_->draw_lists)
         {
+            list.batches.clear();
             list.opaque.clear();
             list.transparent.clear();
         }
@@ -590,6 +596,10 @@ RenderSubmitStatus RenderSystem::render(Camera camera)
                                                         : RenderFrameKind::clear);
         }
         frame_number_ = bgfx::frame();
+        if (meshlet_culling_)
+        {
+            meshlet_culling_->poll(frame_number_);
+        }
         if (drawn)
         {
             record_frame(world_ && world_->scene() ? RenderFrameKind::scene
@@ -635,6 +645,10 @@ RenderSubmitStatus RenderSystem::present_movie_frame(const MovieFrame& frame)
     frame_output_->present(0x000000ff, true);
     submit_screenshot(RenderFrameKind::movie);
     frame_number_ = bgfx::frame();
+    if (meshlet_culling_)
+    {
+        meshlet_culling_->poll(frame_number_);
+    }
     record_frame(RenderFrameKind::movie);
     collect_preparation(false);
     ENGINE_PROFILE_FRAME();
@@ -659,6 +673,10 @@ void RenderSystem::shutdown_renderer(bool drain_screenshots) noexcept
         for (int attempt = 0; attempt < 16 && active_screenshot_; ++attempt)
         {
             frame_number_ = bgfx::frame();
+            if (meshlet_culling_)
+            {
+                meshlet_culling_->poll(frame_number_);
+            }
             advance_screenshots();
             if (callbacks_)
             {
@@ -696,6 +714,7 @@ void RenderSystem::shutdown_renderer(bool drain_screenshots) noexcept
             frame_output_->release();
         }
         bgfx::shutdown();
+        meshlet_culling_.reset();
         frame_output_.reset();
         renderer_initialized_ = false;
         active_renderer = nullptr;

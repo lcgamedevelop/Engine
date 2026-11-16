@@ -147,3 +147,42 @@ classDiagram
 EnvironmentComponentBinding 与 PostProcessComponentBinding 各自独立实现 ScriptBinding，只通过 BindingContext 校验当前 Run、节点与组件实例后访问对应原生组件。Node.AddComponent/GetComponent 使用既有组件登记，无需新增节点专用接口。所有渲染组件须满足公共 Component 的 `active` 与 `visibleInHierarchy`。EnvironmentComponent 只允许一个激活且可见组件参与渲染；PostProcessComponent 由活动场景相机节点提供，预览镜头借用同一份参数。Light.SetShadows 支持方向光、点光与聚光，级联参数只适用于方向光，分辨率、bias 与原生组件保持同一校验。
 
 Transform 脚本门面提供 `GetWorldPosition()` 与 `GetWorldForward()`，返回普通 `{x,y,z}` 值快照或 null。两者直接读取核心 world_matrix，forward 为归一化局部 -Z 世界方向；不改变持久数据或增加相机/武器专用核心接口。
+
+## Meshlet 场景总开关
+
+状态：**已实现**。绑定和 `include/engine.d.ts` 使用本节接口。
+运行功能直接暴露在场景的 `EnvironmentComponent` 上，资源生成选择和渲染细节见
+[Meshlet 设计](../../../runtime/class-diagrams/meshlet-culling.md#场景统一控制)。
+
+```mermaid
+classDiagram
+    direction TB
+    class Component
+    class Node
+    class EnvironmentComponent {
+        <<TS component>>
+        +meshletCullingEnabled boolean
+        +SetMeshletCulling(boolean enabled) boolean
+    }
+    class NativeEnvironment["Native EnvironmentComponent"]
+    class EnvironmentDataT
+    Component <|-- EnvironmentComponent
+    Node ..> EnvironmentComponent : GetComponent
+    EnvironmentComponent ..> NativeEnvironment : binding
+    NativeEnvironment ..> EnvironmentDataT : get_settings / set_settings
+```
+
+- `meshletCullingEnabled` 为只读 boolean，返回该场景保存的请求值，默认 false；
+  它不是设备支持或 GPU 生效查询。失效句柄按组件绑定的安全默认规则返回 false。
+- `SetMeshletCulling(enabled: boolean): boolean` 校验类型和组件身份；
+  成功只更新同一 `EnvironmentDataT.meshlet_culling_enabled`，失败保留旧值并返回 false。
+  true 表示请求已保存到运行世界，实际绘制从后续帧的状态确认。
+- 绑定借用原生 `EnvironmentComponent` 的 `get_settings / set_settings`，
+  只改对应字段，不覆盖环境光、雾、IBL 或大气参数，也不产生另一份运行时开关。
+- 项目通过已有 `Node.GetComponent(EnvironmentComponent)` 取得场景环境组件；
+  原生设置入口与脚本方法操作同一个 ECS 生成数据字段。
+- 编辑器场景属性、场景保存／恢复、热重载、撤销和项目脚本均使用这一字段。
+  缺少或禁用环境组件时按关闭处理，切换场景使用新场景的值。
+- Meshlet 调试视图与临时 GPU 采样只通过编辑器 MCP 控制；
+  不在 `Render` 静态门面、场景组件、对象组件或运行端 MCP 增加诊断开关。
+- Schema、组件编解码、逐类绑定、`engine.d.ts` 与调用方使用同一个当前契约。

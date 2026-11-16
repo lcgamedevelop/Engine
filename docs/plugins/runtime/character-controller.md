@@ -8,6 +8,6 @@
 
 `CharacterVisual` 标记身体、头部和第一人称部件；角色视图系统在镜头求解后更新该相机的瞬态隐藏列表，不修改 MeshRenderer 全局可见性。第一人称可隐藏自身身体并保留投影，专用部件只向对应镜头显示。组件字段与所有权见[镜头和角色表现](class-diagrams/character-integration-design.md)。
 
-TOML、MCP 与 TS 使用同一 Schema 生成的数据；编辑器完整设置替换参与撤销，输入、参数和状态查询保持瞬态。持久引用使用场景 local ID；运行时目标覆盖使用有效 Node 句柄。接口只保留当前版本，未知字段、无效类型与未登记能力明确失败；源场景按当前结构导入为版本 3 缓存。操作入口见[编辑器接入](../editor/class-diagrams/character-control-design.md)。
+TOML、MCP 与 TS 使用同一 Schema 生成的数据；编辑器完整设置替换参与撤销，输入、参数和状态查询保持瞬态。持久引用使用场景 local ID；运行时目标覆盖使用有效 Node 句柄。接口只保留当前版本，未知字段、无效类型与未登记能力明确失败；源场景按当前结构导入为版本 4 缓存。操作入口见[编辑器接入](../editor/class-diagrams/character-control-design.md)。
 
 动作播放、InPlace 与蒙皮继续使用[动画模块](../../runtime/animation.md)。项目接入和键位见[公开范例](../../../projects/showcase/docs/character-control.md)，已执行的平台与测试范围见[测试文档](../../testing.md#镜头与角色模块验证)。

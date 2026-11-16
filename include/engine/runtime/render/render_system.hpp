@@ -34,6 +34,7 @@ namespace render_detail
 class FrameOutput;
 class RenderSurface;
 class MoviePass;
+class MeshletCullPass;
 enum class FramePrepareStatus;
 } // namespace render_detail
 
@@ -57,6 +58,7 @@ struct RenderConfig
     std::uint16_t cluster_tile_size = 64;
     std::uint16_t cluster_depth_slices = 24;
     std::uint32_t maximum_lights = 256;
+    std::uint32_t maximum_meshlet_candidates = 65536;
     std::uint16_t maximum_cluster_lights = 64;
     std::uint16_t shadow_atlas_size = 4096;
     std::uint16_t local_shadow_tile_size = 512;
@@ -201,6 +203,7 @@ private:
     WindowSystem& windows_;
     WorldSystem* world_ = nullptr;
     std::unique_ptr<render_detail::MoviePass> movie_pass_;
+    std::unique_ptr<render_detail::MeshletCullPass> meshlet_culling_;
     FontSystem* fonts_ = nullptr;
     UiSystem* ui_ = nullptr;
     TaskSystem* tasks_ = nullptr;

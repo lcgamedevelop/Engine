@@ -79,6 +79,7 @@ nodes_per_step = 128
 max_seconds = 0.002
 
 [common.rendering]
+maximum_meshlet_candidates = 65536
 texture_batch_size = 8
 texture_staging_bytes = 134217728
 prepare_items_per_step = 64

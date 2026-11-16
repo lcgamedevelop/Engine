@@ -324,7 +324,7 @@ bool external_builtins(ResourceSystem& resources, const std::filesystem::path& r
     valid.data.schema_version = 3;
     valid.data.revision = "external-cube";
     valid.data.target_platform = platform();
-    if (!valid.add(cube_guid, cube_path, schema::AssetKind::mesh, pack(external_mesh, "EMSH")) ||
+    if (!valid.add(cube_guid, cube_path, schema::AssetKind::mesh, pack(external_mesh, "EMS2")) ||
         !write(root / "gen" / cube_guid, valid.files.at(cube_guid)) ||
         !resources.update_catalog(valid.data, mounts))
     {
@@ -367,7 +367,7 @@ bool run(const std::filesystem::path& root)
         return false;
     }
     schema::SceneDataT scene_data;
-    scene_data.schema_version = 3;
+    scene_data.schema_version = 4;
     if (!scene->build_data(scene_data))
     {
         return false;
@@ -407,11 +407,11 @@ bool run(const std::filesystem::path& root)
     fixture.data.schema_version = 3;
     fixture.data.revision = "test-revision";
     fixture.data.target_platform = platform();
-    if (!fixture.add(shader_guid, shader.path, schema::AssetKind::shader, pack(shader, "ESHD"),
+    if (!fixture.add(shader_guid, shader.path, schema::AssetKind::shader, pack(shader, "ESH2"),
                      shader_dependencies) ||
         !fixture.add(material_guid, material.type_path, schema::AssetKind::material,
                      pack(material, "EMAT"), {shader_guid}) ||
-        !fixture.add(mesh_guid, mesh.path, schema::AssetKind::mesh, pack(mesh, "EMSH")) ||
+        !fixture.add(mesh_guid, mesh.path, schema::AssetKind::mesh, pack(mesh, "EMS2")) ||
         !fixture.add(scene_guid, "scenes/main.scene", schema::AssetKind::scene,
                      pack(scene_data, "ESCN"), {mesh_guid, material_guid}) ||
         !fixture.add(source_guid, "data/raw.bin", schema::AssetKind::source,

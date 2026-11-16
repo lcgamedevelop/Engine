@@ -49,7 +49,8 @@ bool register_render_tools(McpSystem& system, EditorMcpTools& editor)
         {"type", "string"},
         {"enum",
          {"frustum_culling", "static_instancing", "static_lod", "wireframe", "debug_draw",
-          "mesh_bounds", "camera_frusta", "stats", "atmosphere", "hex_tiling"}}};
+          "mesh_bounds", "camera_frusta", "stats", "atmosphere", "hex_tiling", "meshlet_culling",
+          "meshlet_bounds", "meshlet_colors", "meshlet_statistics"}}};
     feature["enabled"] = {{"type", "boolean"}};
     const auto vector =
         Json{{"type", "array"}, {"items", {{"type", "number"}}}, {"minItems", 3}, {"maxItems", 3}};
@@ -108,18 +109,20 @@ bool register_render_tools(McpSystem& system, EditorMcpTools& editor)
                               {"type", "float"},
                               {"value", enabled ? 1 : 0}};
              }
-             else if (name == "atmosphere")
+             else if (name == "atmosphere" || name == "meshlet_culling")
              {
                  if (!arguments.contains("sceneId") || !arguments.contains("nodeId") ||
                      arguments.contains("slot"))
                  {
-                     reply = {{"error", "atmosphere requires sceneId/nodeId environment identity"}};
+                     reply = {{"error",
+                               "Environment features require sceneId/nodeId environment identity"}};
                      return false;
                  }
                  command = "set_render_settings";
                  forwarded = {{"sceneId", arguments["sceneId"]},
                               {"nodeId", arguments["nodeId"]},
-                              {"atmosphereEnabled", enabled}};
+                              {name == "atmosphere" ? "atmosphereEnabled" : "meshletCullingEnabled",
+                               enabled}};
              }
              else
              {
@@ -169,6 +172,13 @@ bool register_render_tools(McpSystem& system, EditorMcpTools& editor)
                      {{"type", "array"}, {"items", line}, {"minItems", 1}, {"maxItems", 4096}}},
                     {"lifetimeFrames", {{"type", "integer"}, {"minimum", 1}, {"maximum", 600}}}},
                    {"lines"})) &&
+           add("get_meshlet_import",
+               "Read source meshlet settings and published per-LOD meshlet counts.",
+               object_schema(lod, {"path"})) &&
+           add("set_meshlet_import",
+               "Save meshlet generation settings and reimport through the existing asset pipeline.",
+               object_schema({{"path", lod["path"]}, {"enabled", {{"type", "boolean"}}}},
+                             {"path", "enabled"})) &&
            add("get_mesh_lod_import",
                "Read source resource LOD import settings without modifying the resource.",
                object_schema(std::move(lod), {"path"})) &&
@@ -186,6 +196,7 @@ bool register_render_tools(McpSystem& system, EditorMcpTools& editor)
                    {{"sceneId", identity["sceneId"]},
                     {"nodeId", identity["nodeId"]},
                     {"atmosphereEnabled", {{"type", "boolean"}}},
+                    {"meshletCullingEnabled", {{"type", "boolean"}}},
                     {"atmosphereSunNodeId",
                      {{"type", "string"}, {"minLength", 1}, {"maxLength", 20}}},
                     {"atmosphereGroundHeight", {{"type", "number"}}},

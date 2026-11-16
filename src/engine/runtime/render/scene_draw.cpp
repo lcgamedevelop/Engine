@@ -12,6 +12,118 @@
 #include <cstring>
 #include <map>
 
+namespace engine::render_detail
+{
+bool prepare_draw_batches(const RenderFrameData& frame_data, const ViewDrawList& list,
+                          const SceneDrawView& draw, SceneDrawMode mode,
+                          std::vector<DrawBatch>& batches)
+{
+    const bool transparent = mode == SceneDrawMode::transparent;
+    const bool depth_only = mode == SceneDrawMode::depth;
+    const bool capture = mode == SceneDrawMode::capture;
+    const bool instancing = bgfx::getCaps()->limits.maxInstanceData >= 7;
+    const auto& items = transparent ? list.transparent : list.opaque;
+    std::map<render_detail::DrawBatchKey, std::size_t> batch_index;
+    batches.clear();
+    {
+        ENGINE_PROFILE_ZONE("Render.buildBatches");
+        for (std::size_t index = 0; index < items.size(); ++index)
+        {
+            const auto& item = items[index];
+            const auto& mesh = frame_data.meshes[item.mesh];
+            const auto& material = mesh.gpu->materials[item.slot];
+            const auto* program = material.program;
+            if (!program)
+            {
+                return false;
+            }
+            if (mode == SceneDrawMode::surface && !bgfx::isValid(program->surface_program))
+            {
+                continue;
+            }
+            auto cull = capture ? std::uint64_t{0}
+                                : render_detail::cull_state(material.cull, mesh.model.data());
+            if (draw.reflection)
+            {
+                if (cull == BGFX_STATE_CULL_CW)
+                {
+                    cull = BGFX_STATE_CULL_CCW;
+                }
+                else if (cull == BGFX_STATE_CULL_CCW)
+                {
+                    cull = BGFX_STATE_CULL_CW;
+                }
+            }
+            auto state = cull | BGFX_STATE_DEPTH_TEST_LESS;
+            if (!transparent)
+            {
+                state |= BGFX_STATE_WRITE_Z;
+            }
+            if (!depth_only)
+            {
+                state |= BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A;
+            }
+            if (mode == SceneDrawMode::surface)
+            {
+                state =
+                    cull | BGFX_STATE_DEPTH_TEST_EQUAL | BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A;
+            }
+            if (transparent)
+            {
+                const auto alpha_source =
+                    material.unlit ? BGFX_STATE_BLEND_ZERO : BGFX_STATE_BLEND_ONE;
+                state |= material.blend == schema::BlendMode::premultiplied
+                             ? BGFX_STATE_BLEND_FUNC_SEPARATE(
+                                   BGFX_STATE_BLEND_ONE, BGFX_STATE_BLEND_INV_SRC_ALPHA,
+                                   alpha_source, BGFX_STATE_BLEND_INV_SRC_ALPHA)
+                             : BGFX_STATE_BLEND_FUNC_SEPARATE(
+                                   BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA,
+                                   alpha_source, BGFX_STATE_BLEND_INV_SRC_ALPHA);
+            }
+            if (draw.multisampling)
+            {
+                state |= BGFX_STATE_MSAA;
+            }
+            render_detail::DrawBatchKey key;
+            key.geometry = reinterpret_cast<std::uintptr_t>(item.geometry);
+            key.state = state;
+            key.binding = material.binding_id;
+            key.lod = item.lod;
+            key.first = item.first;
+            key.count = item.count;
+            key.program = (mode == SceneDrawMode::surface ? program->instanced_surface_program
+                                                          : program->instanced_program)
+                              .idx;
+            key.lightmap = item.lightmap.idx;
+            key.has_lightmap = item.has_lightmap;
+            key.has_probe = item.has_probe;
+            if (item.has_probe)
+            {
+                key.coefficients = item.coefficients;
+            }
+            const bool eligible = instancing && mesh.instancing && mesh.instance_eligible &&
+                                  !mesh.plane && !material.frame_textures && !transparent &&
+                                  !capture && item.geometry == mesh.gpu->geometry.get() &&
+                                  key.program != bgfx::kInvalidHandle;
+            if (eligible)
+            {
+                auto [position, inserted] = batch_index.try_emplace(key, batches.size());
+                if (inserted)
+                {
+                    batches.push_back({key, {}, 0, {}});
+                }
+                batches[position->second].items.push_back(index);
+            }
+            else
+            {
+                batches.push_back({key, {index}, 0, {}});
+            }
+        }
+    }
+    return true;
+}
+} // namespace engine::render_detail
+
 namespace engine
 {
 bool RenderSystem::SceneGpuResources::prepare_lighting(
@@ -149,16 +261,25 @@ bool RenderSystem::SceneGpuResources::prepare_lighting(
 }
 
 bool RenderSystem::SceneGpuResources::draw_meshes(const render_detail::RenderFrameData& frame_data,
-                                                  const render_detail::ViewDrawList& list,
+                                                  render_detail::ViewDrawList& list,
                                                   const RenderSettings& settings,
                                                   const render_detail::SceneDrawView& draw,
                                                   render_detail::SceneDrawMode mode)
 {
     using render_detail::SceneDrawMode;
     ENGINE_PROFILE_ZONE("Render.submitMeshes");
-    const bool instancing = bgfx::getCaps()->limits.maxInstanceData >= 7;
     RenderViewStats stats =
         mode == SceneDrawMode::transparent ? list.transparent_stats : list.opaque_stats;
+    if (mode != SceneDrawMode::opaque || draw.reflection)
+    {
+        stats.meshlet_candidate_pairs = 0;
+        stats.meshlet_candidate_triangles = 0;
+        stats.meshlet_missing_data = 0;
+        stats.meshlet_incompatible_draws = 0;
+        stats.meshlet_budget_fallbacks = 0;
+        stats.meshlet_instanced_batches = 0;
+        stats.meshlet_gpu = {};
+    }
     stats.view_id = draw.id;
     const auto frame = draw.renderer ? draw.renderer->frame_number() : 0;
     if (frame_time_stamp != frame)
@@ -201,104 +322,14 @@ bool RenderSystem::SceneGpuResources::draw_meshes(const render_detail::RenderFra
     const float zero[4]{};
     const float frame_value[]{1.0F / draw.width, 1.0F / draw.height, frame_time[0],
                               bgfx::getCaps()->originBottomLeft ? 1.0F : 0.0F};
-    const auto& items = transparent ? list.transparent : list.opaque;
-    std::map<render_detail::DrawBatchKey, std::size_t> batch_index;
-    std::vector<render_detail::DrawBatch> batches;
+    auto& items = transparent ? list.transparent : list.opaque;
+    std::vector<render_detail::DrawBatch> temporary_batches;
+    if ((transparent || capture) &&
+        !render_detail::prepare_draw_batches(frame_data, list, draw, mode, temporary_batches))
     {
-        ENGINE_PROFILE_ZONE("Render.buildBatches");
-        for (std::size_t index = 0; index < items.size(); ++index)
-        {
-            const auto& item = items[index];
-            const auto& mesh = frame_data.meshes[item.mesh];
-            const auto& material = mesh.gpu->materials[item.slot];
-            const auto* program = material.program;
-            if (!program)
-            {
-                return false;
-            }
-            if (mode == SceneDrawMode::surface && !bgfx::isValid(program->surface_program))
-            {
-                continue;
-            }
-            auto cull = capture ? std::uint64_t{0}
-                                : render_detail::cull_state(material.cull, mesh.model.data());
-            if (draw.reflection)
-            {
-                if (cull == BGFX_STATE_CULL_CW)
-                {
-                    cull = BGFX_STATE_CULL_CCW;
-                }
-                else if (cull == BGFX_STATE_CULL_CCW)
-                {
-                    cull = BGFX_STATE_CULL_CW;
-                }
-            }
-            auto state = cull | BGFX_STATE_DEPTH_TEST_LESS;
-            if (!transparent)
-            {
-                state |= BGFX_STATE_WRITE_Z;
-            }
-            if (!depth_only)
-            {
-                state |= BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A;
-            }
-            if (mode == SceneDrawMode::surface)
-            {
-                state =
-                    cull | BGFX_STATE_DEPTH_TEST_EQUAL | BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A;
-            }
-            if (transparent)
-            {
-                const auto alpha_source =
-                    material.unlit ? BGFX_STATE_BLEND_ZERO : BGFX_STATE_BLEND_ONE;
-                state |= material.blend == schema::BlendMode::premultiplied
-                             ? BGFX_STATE_BLEND_FUNC_SEPARATE(
-                                   BGFX_STATE_BLEND_ONE, BGFX_STATE_BLEND_INV_SRC_ALPHA,
-                                   alpha_source, BGFX_STATE_BLEND_INV_SRC_ALPHA)
-                             : BGFX_STATE_BLEND_FUNC_SEPARATE(
-                                   BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA,
-                                   alpha_source, BGFX_STATE_BLEND_INV_SRC_ALPHA);
-            }
-            if (draw.multisampling)
-            {
-                state |= BGFX_STATE_MSAA;
-            }
-            render_detail::DrawBatchKey key;
-            key.geometry = reinterpret_cast<std::uintptr_t>(item.geometry);
-            key.state = state;
-            key.binding = material.binding_id;
-            key.lod = item.lod;
-            key.first = item.first;
-            key.count = item.count;
-            key.program = (mode == SceneDrawMode::surface ? program->instanced_surface_program
-                                                          : program->instanced_program)
-                              .idx;
-            key.lightmap = item.lightmap.idx;
-            key.has_lightmap = item.has_lightmap;
-            key.has_probe = item.has_probe;
-            if (item.has_probe)
-            {
-                key.coefficients = item.coefficients;
-            }
-            const bool eligible = instancing && mesh.instancing && mesh.instance_eligible &&
-                                  !mesh.plane && !material.frame_textures && !transparent &&
-                                  !capture && item.geometry == mesh.gpu->geometry.get() &&
-                                  key.program != bgfx::kInvalidHandle;
-            if (eligible)
-            {
-                auto [position, inserted] = batch_index.try_emplace(key, batches.size());
-                if (inserted)
-                {
-                    batches.push_back({key, {}, 0});
-                }
-                batches[position->second].items.push_back(index);
-            }
-            else
-            {
-                batches.push_back({key, {index}, 0});
-            }
-        }
+        return false;
     }
+    const auto& batches = transparent || capture ? temporary_batches : list.batches;
     const bool use_ao = draw.ambient_occlusion && !depth_only && mode != SceneDrawMode::surface;
     const float ao[]{1.0F / draw.width, 1.0F / draw.height, use_ao ? 1.0F : 0.0F, 0};
     bgfx::setViewUniform(draw.id, camera_position, camera_position_value);
@@ -323,14 +354,22 @@ bool RenderSystem::SceneGpuResources::draw_meshes(const render_detail::RenderFra
     bgfx::setViewUniform(draw.id, shadow_params, draw.shadow->parameters.data());
     bgfx::setViewUniform(draw.id, shadow_settings, shadow_values);
     draw.cluster->bind_view(draw.id);
-    for (auto& batch : batches)
+    for (const auto& batch : batches)
     {
-        while (batch.cursor < batch.items.size())
+        std::size_t cursor = 0;
+        while (cursor < batch.items.size())
         {
-            const auto& item = items[batch.items[batch.cursor]];
+            const auto& item = items[batch.items[cursor]];
             const auto& mesh = frame_data.meshes[item.mesh];
             const auto& material = mesh.gpu->materials[item.slot];
             const auto* program = material.program;
+            if (mode == SceneDrawMode::surface && !bgfx::isValid(program->surface_program))
+            {
+                break;
+            }
+            const auto instanced_program = mode == SceneDrawMode::surface
+                                               ? program->instanced_surface_program
+                                               : program->instanced_program;
             auto frame_textures = draw.textures;
             std::array<float, 4> valid{};
             for (std::size_t index = 0; index < frame_textures.size(); ++index)
@@ -390,9 +429,12 @@ bool RenderSystem::SceneGpuResources::draw_meshes(const render_detail::RenderFra
                                  : UINT32_MAX);
             bgfx::InstanceDataBuffer instance_buffer{};
             constexpr std::uint16_t instance_stride = 7 * 4 * sizeof(float);
-            const auto remaining = static_cast<std::uint32_t>(batch.items.size() - batch.cursor);
+            const bool indirect = bgfx::isValid(batch.meshlets.commands);
+            const auto remaining = static_cast<std::uint32_t>(batch.items.size() - cursor);
             const auto available =
-                remaining > 1 ? bgfx::getAvailInstanceDataBuffer(remaining, instance_stride) : 0;
+                !indirect && remaining > 1 && bgfx::isValid(instanced_program)
+                    ? bgfx::getAvailInstanceDataBuffer(remaining, instance_stride)
+                    : 0;
             const auto count = available >= 2 ? available : 1U;
             if (count > 1)
             {
@@ -401,7 +443,7 @@ bool RenderSystem::SceneGpuResources::draw_meshes(const render_detail::RenderFra
                 for (std::uint32_t index = 0; index < count; ++index)
                 {
                     const auto& instance =
-                        frame_data.meshes[items[batch.items[batch.cursor + index]].mesh];
+                        frame_data.meshes[items[batch.items[cursor + index]].mesh];
                     auto* destination = instance_buffer.data + index * instance_stride;
                     std::memcpy(destination, instance.model.data(), 16 * sizeof(float));
                     std::memcpy(destination + 16 * sizeof(float), instance.normal.data(),
@@ -409,7 +451,21 @@ bool RenderSystem::SceneGpuResources::draw_meshes(const render_detail::RenderFra
                 }
                 bgfx::setInstanceDataBuffer(&instance_buffer);
             }
-            batch.cursor += count;
+            if (indirect && remaining > 1)
+            {
+                bgfx::setInstanceDataBuffer(batch.meshlets.instances, 0,
+                                            batch.meshlets.first_instance +
+                                                batch.meshlets.instance_capacity);
+            }
+            const auto submitted_count = indirect ? remaining : count;
+            if (mode == SceneDrawMode::opaque && draw.id == render_detail::main_view)
+            {
+                for (std::uint32_t index = 0; index < submitted_count; ++index)
+                {
+                    items[batch.items[cursor + index]].instanced_transform = submitted_count > 1;
+                }
+            }
+            cursor += submitted_count;
             draw.cluster->bind();
             bgfx::setTransform(mesh.model.data());
             if (item.geometry == mesh.gpu->geometry.get())
@@ -420,13 +476,47 @@ bool RenderSystem::SceneGpuResources::draw_meshes(const render_detail::RenderFra
             {
                 bgfx::setVertexBuffer(0, item.geometry->vertices);
             }
-            bgfx::setIndexBuffer(item.geometry->index_buffer(item.lod), item.first, item.count);
-            bgfx::setState(batch.key.state);
+            if (indirect)
+            {
+                bgfx::setIndexBuffer(item.geometry->meshlet_indices(item.lod));
+            }
+            else
+            {
+                bgfx::setIndexBuffer(item.geometry->index_buffer(item.lod), item.first, item.count);
+            }
+            auto state = batch.key.state & ~BGFX_STATE_MSAA;
+            if (depth_only)
+            {
+                state &= ~(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A);
+            }
+            else if (mode == SceneDrawMode::surface)
+            {
+                state = (state & ~(BGFX_STATE_WRITE_Z | BGFX_STATE_DEPTH_TEST_MASK)) |
+                        BGFX_STATE_DEPTH_TEST_EQUAL;
+            }
+            if (draw.multisampling)
+            {
+                state |= BGFX_STATE_MSAA;
+            }
+            bgfx::setState(state);
             ++stats.draw_calls;
-            stats.submitted_instances += count;
-            stats.triangles += static_cast<std::uint64_t>(item.count / 3) * count;
-            stats.instance_batches += count > 1;
-            bgfx::submit(draw.id, count > 1 ? bgfx::ProgramHandle{batch.key.program}
+            if (indirect)
+            {
+                ++stats.indirect_batches;
+                stats.indirect_commands += batch.meshlets.command_count;
+                // Preserve the ordinary MVP arithmetic for singleton batches. Only
+                // actual multi-instance batches consume the compacted transforms.
+                const auto selected = remaining > 1                    ? instanced_program
+                                      : mode == SceneDrawMode::surface ? program->surface_program
+                                                                       : program->program;
+                bgfx::submit(draw.id, selected, batch.meshlets.commands,
+                             batch.meshlets.first_command, batch.meshlets.command_count);
+                continue;
+            }
+            stats.direct_instances += count;
+            stats.direct_triangles += static_cast<std::uint64_t>(item.count / 3) * count;
+            stats.direct_instance_batches += count > 1;
+            bgfx::submit(draw.id, count > 1                        ? instanced_program
                                   : mode == SceneDrawMode::surface ? program->surface_program
                                                                    : program->program);
         }
@@ -444,9 +534,9 @@ bool RenderSystem::SceneGpuResources::draw_meshes(const render_detail::RenderFra
         previous->culled_meshes += stats.culled_meshes;
         previous->visible_meshes += stats.visible_meshes;
         previous->draw_calls += stats.draw_calls;
-        previous->instance_batches += stats.instance_batches;
-        previous->submitted_instances += stats.submitted_instances;
-        previous->triangles += stats.triangles;
+        previous->direct_instance_batches += stats.direct_instance_batches;
+        previous->direct_instances += stats.direct_instances;
+        previous->direct_triangles += stats.direct_triangles;
     }
     return true;
 }

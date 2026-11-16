@@ -4,6 +4,7 @@
 #include <array>
 #include <bgfx/bgfx.h>
 #include <cstdint>
+#include <vector>
 
 namespace engine
 {
@@ -49,5 +50,11 @@ struct SceneDrawView
     std::array<bgfx::TextureHandle, 3> textures = {
         {BGFX_INVALID_HANDLE, BGFX_INVALID_HANDLE, BGFX_INVALID_HANDLE}};
 };
+struct RenderFrameData;
+struct ViewDrawList;
+struct DrawBatch;
+[[nodiscard]] bool prepare_draw_batches(const RenderFrameData& frame_data, const ViewDrawList& list,
+                                        const SceneDrawView& draw, SceneDrawMode mode,
+                                        std::vector<DrawBatch>& batches);
 } // namespace render_detail
 } // namespace engine

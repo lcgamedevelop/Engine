@@ -106,7 +106,23 @@ macOS arm64 已通过受影响目标的 Debug / Release 构建；Release 的上�
 
 公开项目入口、场景、资源来源和操作说明统一在 [showcase 文档](../projects/showcase/docs/index.md)。引擎文档不再重复维护逐场景节点数量、操作长表和每次验收日志。
 
+[Meshlet 标准场景](../projects/showcase/docs/meshlet-culling.md)提供公开几何、运行开关及可复现的截图检查；当前验证结果见下节。
+
 通过编辑器启动、MCP 控制和退出的操作见[编辑器](editor/editor.md)与[MCP](plugins/editor/mcp.md)。运行前核对项目、运行目录和编辑器会话；只关闭本次测试拥有的进程。脚本后端、资源目录、分辨率和设备必须在结果中说明。
+
+## Meshlet 与 GPU 剔除
+
+2026-11-15 至 16 日，macOS arm64 / Metal / QuickJS，Ninja 与 ccache。受影响目标的 Debug、Release 编译和链接通过，Debug 未运行测试。Release 的 9 项模块检查通过：`editor.mesh_lod`、`editor.mesh_lod_pipeline`、`editor.scene_persistence`、`resource.codecs`、`engine.render_submission`、`engine.runtime_settings`、`editor.runtime_settings`、`engine.architecture_rules`、`engine.architecture_boundaries`。本项没有重跑无关模块或全量测试。
+
+离线检查覆盖多材质和各级 LOD 的生成、原三角形顺序、精确拓扑校验、稳定 GUID、无变更不重建及关闭生成后移除附加数据。原生 Metal 渲染用例检查普通／间接路径的严格线性 HDR 对照，以及 GPU 数据尚未准备时保持普通帧、预算不足整批回退、LOD、镜像、材质、探针和阴影；像素对照通过，最大差值为 0。
+
+公开范例的 15 项菜单配置检查及 Meshlet 实窗用例通过。实窗使用 960×640 逻辑窗口、1920×1280 后缓冲和正常导入缓存，实际点击场景按钮与开关，并用编辑器 MCP 查询同一运行实例。透视、正交两组截图排除顶部 UI 后均逐像素一致，最大通道差值为 0；临时边界视图、GPU 统计、透明与不适用材质的普通路径、返回菜单和重入默认值均通过。该固定透视镜头的一次已完成 GPU 样本为 1,008 个候选 Meshlet／实例组合、895 个保留组合，候选三角形 56,976、保留三角形 49,925；这是提交内容统计，不是帧率或耗时收益。
+
+`meshlet_colors` 的原生渲染与公开实窗检查通过：实际表面以稳定的逐簇色块显示，场景剔除关闭时仍可单独开启，与包围线可组合；连续帧及关闭后 PBR 恢复的最大通道差值均为 0。公开用例还将 18 个球体和 4 个拱门切换为普通绘制，与实例化色块核对表面覆盖，未发现漏色或超出容差的边界像素。调试绘制沿用主通道实际采用的顶点变换输入及顺序，不通过放宽深度比较或深度偏移覆盖误差。
+
+私有真实资源沿同一导入和渲染链路检查。等待普通画面连续稳定后，普通／Meshlet／关闭后恢复三张完整截图逐像素一致，最大通道差值为 0。独立色块视图也完成稳定帧截图，关闭后完整 PBR 截图逐像素恢复；色块启停没有改变场景剔除开关。该镜头未开启视锥剔除，因此本次只证明真实资源的路径与画面一致性，不将其用于视锥剔除效果或性能结论；公开用例另有透视、正交视锥覆盖。私有资产、源 meta、回执及截图全部留在私有项目自身的忽略目录。
+
+公开结果与完整回执保存在项目 `cache/visual-tests/meshlet-culling/<run-id>/`，私有结果在自身 `cache/meshlet-validation/`；使用同目录自包含 `review.html` 查看截图。操作入口和夹具说明统一见[项目文档](../projects/showcase/docs/meshlet-culling.md)。上述结果仅覆盖本机 Metal，不包含 Windows、Android、iOS、WebGPU 或性能测量，也不代表所有场景的视觉质量验收。格式为 Mesh `EMS2`／版本 2、Shader `ESH2`／版本 2、Scene／Prefab 版本 4；旧缓存与运行包须从源资源重新生成。
 
 ## 镜头与角色模块验证
 
@@ -120,7 +136,7 @@ Release 的 13 项 CTest 全部通过（9.06 秒）：`engine.character_motor`�
 
 公开范例 TypeScript 构建及 `launcher_test.mjs` 的 8 项检查通过。实际编辑器窗口使用 `projects/showcase` 源资源导入缓存，逻辑尺寸 960×540、Metal 后缓冲 1920×1080；通过真实菜单按钮进入角色庭院，确认角色就绪、接地和镜头 ready。调用角色镜头接口切换第一／第三人称，截图确认第一人称隐藏自身身体、保留其他角色与自身阴影；随后恢复第三人称并正常关闭测试编辑器。项目配置、控制方式与复现入口见[角色与镜头范例](../projects/showcase/docs/character-control.md)。
 
-此结果不包含实体手柄操作、移动平台场景验收、Windows／Android／iOS、V8 后端、旧版 macOS 发行验证或性能采样，不代表所有范例均已实窗验收。场景／预制体只接受版本 3，旧二进制需通过当前源描述重新导入和打包。
+此结果不包含实体手柄操作、移动平台场景验收、Windows／Android／iOS、V8 后端、旧版 macOS 发行验证或性能采样，不代表所有范例均已实窗验收。场景／预制体只接受当前格式，旧二进制需通过当前源描述重新导入和打包。
 
 ## 渲染性能基线
 

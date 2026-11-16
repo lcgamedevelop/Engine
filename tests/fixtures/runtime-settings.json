@@ -68,6 +68,7 @@
       "cluster_depth_slices": 24,
       "maximum_lights": 256,
       "maximum_cluster_lights": 64,
+      "maximum_meshlet_candidates": 65536,
       "shadow_atlas_size": 4096,
       "local_shadow_tile_size": 512,
       "maximum_local_shadow_faces": 24,

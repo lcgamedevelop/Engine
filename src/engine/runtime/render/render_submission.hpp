@@ -41,23 +41,6 @@ struct RenderFrameData
     std::vector<Probe> probes;
 };
 
-struct ViewDrawList
-{
-    struct Item
-    {
-        std::size_t mesh = 0, slot = 0, lod = 0;
-        const GpuGeometry* geometry = nullptr;
-        std::uint32_t first = 0, count = 0;
-        float depth = 0;
-        std::array<std::array<float, 4>, 9> coefficients{};
-        bgfx::TextureHandle lightmap = BGFX_INVALID_HANDLE;
-        bool has_lightmap = false, has_probe = false;
-    };
-    std::array<std::uint64_t, 2> observer{};
-    std::vector<Item> opaque, transparent;
-    RenderViewStats opaque_stats{}, transparent_stats{};
-};
-
 // 逐字段比较完整有效状态；不以哈希相等替代状态相等，不读取 struct 填充。
 struct DrawBatchKey
 {
@@ -73,10 +56,39 @@ struct DrawBatchKey
     auto operator<=>(const DrawBatchKey&) const = default;
 };
 
+struct MeshletDrawRange
+{
+    bgfx::IndirectBufferHandle commands = BGFX_INVALID_HANDLE;
+    bgfx::DynamicVertexBufferHandle instances = BGFX_INVALID_HANDLE;
+    std::uint32_t first_command = 0, command_count = 0;
+    std::uint32_t first_instance = 0, instance_capacity = 0;
+};
+
 struct DrawBatch
 {
     DrawBatchKey key;
     std::vector<std::size_t> items;
     std::size_t cursor = 0;
+    MeshletDrawRange meshlets;
 };
+struct ViewDrawList
+{
+    struct Item
+    {
+        std::size_t mesh = 0, slot = 0, lod = 0;
+        const GpuGeometry* geometry = nullptr;
+        std::uint32_t first = 0, count = 0;
+        float depth = 0;
+        std::array<std::array<float, 4>, 9> coefficients{};
+        bgfx::TextureHandle lightmap = BGFX_INVALID_HANDLE;
+        bool has_lightmap = false, has_probe = false;
+        // Actual main-pass transform path, including transient-buffer fallbacks.
+        bool instanced_transform = false;
+    };
+    std::array<std::uint64_t, 2> observer{};
+    std::vector<Item> opaque, transparent;
+    RenderViewStats opaque_stats{}, transparent_stats{};
+    std::vector<DrawBatch> batches;
+};
+
 } // namespace engine::render_detail

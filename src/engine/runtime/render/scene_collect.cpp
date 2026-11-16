@@ -333,6 +333,7 @@ bool RenderSystem::SceneGpuResources::collect_view(const render_detail::RenderFr
                                                    render_detail::ViewDrawList& output)
 {
     ENGINE_PROFILE_ZONE("Render.collectView");
+    output.batches.clear();
     output.opaque.clear();
     output.transparent.clear();
     output.opaque_stats = {};
@@ -510,6 +511,7 @@ bool RenderSystem::SceneGpuResources::collect_view(const render_detail::RenderFr
     }
     std::stable_sort(output.transparent.begin(), output.transparent.end(),
                      [](const auto& left, const auto& right) { return left.depth > right.depth; });
-    return true;
+    return render_detail::prepare_draw_batches(
+        frame, output, draw, render_detail::SceneDrawMode::opaque, output.batches);
 }
 } // namespace engine

@@ -99,6 +99,8 @@ int main(int argc, char* argv[])
         R"({"parallel":{"rendering":{"cluster_tile_size":15}}})",
         R"({"parallel":{"rendering":{"cluster_depth_slices":65}}})",
         R"({"parallel":{"rendering":{"maximum_lights":4097}}})",
+        R"({"parallel":{"rendering":{"maximum_meshlet_candidates":0}}})",
+        R"({"parallel":{"rendering":{"maximum_meshlet_candidates":33554432}}})",
         R"({"parallel":{"rendering":{"maximum_cluster_lights":0}}})",
         R"({"parallel":{"rendering":{"shadow_atlas_size":3000}}})",
         R"({"parallel":{"rendering":{"local_shadow_tile_size":768}}})",

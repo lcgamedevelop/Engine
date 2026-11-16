@@ -74,6 +74,20 @@ schema::MeshDataT grid()
     lod->screen_height = .2F;
     lod->indices = {0, 8, 80, 0, 80, 72};
     lod->submeshes.emplace_back(0, 6, 0);
+    // Two independently bounded half-grids, plus one lower-detail cluster.
+    mesh.meshlets = std::make_unique<schema::MeshletDataT>();
+    mesh.meshlets->indices = mesh.indices;
+    for (std::uint32_t half = 0; half < 2; ++half)
+    {
+        mesh.meshlets->meshlets.emplace_back(half * 192, 192,
+                                             schema::Vec3{0, half == 0 ? -.25 : .25, 0}, .57F,
+                                             schema::Vec3{0, 0, 1}, 0);
+    }
+    mesh.meshlets->submeshes.emplace_back(0, 2);
+    lod->meshlets = std::make_unique<schema::MeshletDataT>();
+    lod->meshlets->indices = lod->indices;
+    lod->meshlets->meshlets.emplace_back(0, 6, schema::Vec3{}, .72F, schema::Vec3{0, 0, 1}, 0);
+    lod->meshlets->submeshes.emplace_back(0, 1);
     mesh.lods.push_back(std::move(lod));
     return mesh;
 }
@@ -490,10 +504,10 @@ int benchmark(int argc, char** argv)
         csv << index << ',' << s.prepare_ms << ',' << s.render_ms << ',' << s.gpu_frame << ','
             << s.gpu_ms << ',' << s.submit_ms << ',' << s.draws << ',' << s.compute << ','
             << s.blits << ',' << s.scene.visible_meshes << ',' << s.scene.draw_calls << ','
-            << s.scene.instance_batches << ',' << s.scene.submitted_instances << ','
-            << s.scene.triangles << ',' << s.textures << ',' << s.vertices << ',' << s.indices
-            << ',' << s.targets << ',' << s.texture_bytes << ',' << s.target_bytes << ','
-            << s.transient_bytes << '\n';
+            << s.scene.direct_instance_batches << ',' << s.scene.direct_instances << ','
+            << s.scene.direct_triangles << ',' << s.textures << ',' << s.vertices << ','
+            << s.indices << ',' << s.targets << ',' << s.texture_bytes << ',' << s.target_bytes
+            << ',' << s.transient_bytes << '\n';
     }
     std::ofstream view_csv(output / "views.csv");
     view_csv << "frame,view,candidates,culled,visible,draws,batches,instances,triangles\n";
@@ -503,8 +517,8 @@ int benchmark(int argc, char** argv)
         {
             view_csv << index << ',' << view.view_id << ',' << view.candidate_meshes << ','
                      << view.culled_meshes << ',' << view.visible_meshes << ',' << view.draw_calls
-                     << ',' << view.instance_batches << ',' << view.submitted_instances << ','
-                     << view.triangles << '\n';
+                     << ',' << view.direct_instance_batches << ',' << view.direct_instances << ','
+                     << view.direct_triangles << '\n';
         }
     }
     std::vector<double> times;
@@ -540,7 +554,9 @@ int test()
     auto& resources = services.core;
     engine::WorldSystem world(&services.loader);
     WindowSystem window;
-    RenderSystem renderer(window, &world);
+    RenderConfig render_config;
+    render_config.maximum_meshlet_candidates = 16;
+    RenderSystem renderer(window, &world, nullptr, nullptr, nullptr, render_config);
     test_support::ResourceFixture fixture;
     const auto geometry = grid();
     const auto left_probes = probes("lighting/submission-left", true);
@@ -620,11 +636,80 @@ int test()
                 "culling removes only the eight truly offscreen submissions") ||
         !set_instancing(meshes, true) || !capture(window, renderer, instanced, instance_stats) ||
         !pixels(culled, instanced, "shared opaque instances preserve every pixel") ||
-        !expect(instance_stats.instance_batches > 0 &&
+        !expect(instance_stats.direct_instance_batches > 0 &&
                     instance_stats.draw_calls < cull_stats.draw_calls &&
-                    instance_stats.submitted_instances == 6 &&
-                    instance_stats.triangles == cull_stats.triangles,
+                    instance_stats.direct_instances == 6 &&
+                    instance_stats.direct_triangles == cull_stats.direct_triangles,
                 "instances reduce draw calls without losing meshes or triangles"))
+    {
+        return 1;
+    }
+    constexpr auto meshlet_caps = BGFX_CAPS_COMPUTE | BGFX_CAPS_DRAW_INDIRECT;
+    const bool meshlet_supported = (bgfx::getCaps()->supported & meshlet_caps) == meshlet_caps &&
+                                   bgfx::getCaps()->limits.maxInstanceData >= 7 &&
+                                   bgfx::getCaps()->limits.maxComputeBindings >= 5;
+    const auto meshlet_pixels = [&](const SceneCaptureImage& reference, const char* message)
+    {
+        auto settings = test_support::read_settings(environment);
+        settings.meshlet_culling_enabled = true;
+        SceneCaptureImage image;
+        RenderViewStats stats;
+        if (!environment.set_settings(settings) ||
+            !expect(renderer.render() == RenderSubmitStatus::submitted,
+                    "enabling before GPU preparation keeps the ordinary frame drawable") ||
+            !capture(window, renderer, image, stats) || !pixels(reference, image, message) ||
+            !expect(!meshlet_supported || stats.indirect_batches > 0,
+                    "compatible geometry uses actual GPU indirect submissions"))
+        {
+            return false;
+        }
+        settings.meshlet_culling_enabled = false;
+        return environment.set_settings(settings);
+    };
+    if (!meshlet_pixels(instanced, "Meshlet indirect instances preserve every pixel"))
+    {
+        return 1;
+    }
+    if ((bgfx::getCaps()->supported & BGFX_CAPS_COMPUTE) != 0 &&
+        bgfx::getCaps()->limits.maxComputeBindings >= 4)
+    {
+        SceneCaptureImage colored, repeated, restored;
+        RenderViewStats color_stats;
+        if (!renderer.set_debug_feature(RenderFeature::meshlet_colors, true) ||
+            !capture(window, renderer, colored, color_stats) ||
+            !expect(renderer.feature_state(RenderFeature::meshlet_colors).effective &&
+                        !test_support::read_settings(environment).meshlet_culling_enabled &&
+                        color_stats.indirect_batches == 0,
+                    "cluster colors work independently of scene culling") ||
+            !expect(std::inner_product(colored.rgba.begin(), colored.rgba.end(),
+                                       instanced.rgba.begin(), std::size_t{0}, std::plus<>{},
+                                       [](float a, float b)
+                                       { return std::abs(a - b) > .05F; }) > 100,
+                    "cluster colors replace actual surface pixels") ||
+            !capture(window, renderer, repeated, color_stats) ||
+            !pixels(colored, repeated, "cluster colors are stable across frames") ||
+            !renderer.set_debug_feature(RenderFeature::meshlet_colors, false) ||
+            !capture(window, renderer, restored, color_stats) ||
+            !pixels(instanced, restored, "closing cluster colors restores the exact PBR image"))
+        {
+            return 1;
+        }
+    }
+    lighting.meshlet_culling_enabled = true;
+    SceneCaptureImage budget_image;
+    RenderViewStats budget_stats;
+    if (!set_culling(camera, false) || !environment.set_settings(lighting) ||
+        !capture(window, renderer, budget_image, budget_stats) ||
+        !pixels(baseline, budget_image, "Meshlet capacity fallback preserves the whole batch") ||
+        !expect(!meshlet_supported ||
+                    (budget_stats.meshlet_budget_fallbacks == 14 &&
+                     budget_stats.indirect_batches == 0 && budget_stats.direct_instances == 14),
+                "candidate overflow falls back without dropping or splitting instances"))
+    {
+        return 1;
+    }
+    lighting.meshlet_culling_enabled = false;
+    if (!environment.set_settings(lighting) || !set_culling(camera, true))
     {
         return 1;
     }
@@ -633,8 +718,8 @@ int test()
         !pixels(culled, instance_opt_out,
                 "one mesh can opt out without changing other instances") ||
         !expect(instance_opt_out_stats.draw_calls == 2 &&
-                    instance_opt_out_stats.instance_batches == 1 &&
-                    instance_opt_out_stats.submitted_instances == 6 &&
+                    instance_opt_out_stats.direct_instance_batches == 1 &&
+                    instance_opt_out_stats.direct_instances == 6 &&
                     visible[1].static_instancing_enabled(),
                 "one ordinary draw and one five-instance batch respect local mesh attributes") ||
         !visible[0].set_static_instancing_enabled(true))
@@ -644,10 +729,10 @@ int test()
     if (!capture(window, renderer, exhausted, exhausted_stats, true) ||
         !pixels(culled, exhausted,
                 "exhausted transient instances fall back without losing pixels") ||
-        !expect(exhausted_stats.instance_batches == 0 &&
+        !expect(exhausted_stats.direct_instance_batches == 0 &&
                     exhausted_stats.draw_calls == cull_stats.draw_calls &&
-                    exhausted_stats.submitted_instances == cull_stats.submitted_instances &&
-                    exhausted_stats.triangles == cull_stats.triangles,
+                    exhausted_stats.direct_instances == cull_stats.direct_instances &&
+                    exhausted_stats.direct_triangles == cull_stats.direct_triangles,
                 "no transient capacity safely selects ordinary draws for every mesh"))
     {
         return 1;
@@ -663,7 +748,7 @@ int test()
         !pixels(changed_baseline, changed_instanced,
                 "material overrides and mirrored culling stay isolated") ||
         !expect(changed_instance_stats.draw_calls >= 3 &&
-                    changed_instance_stats.instance_batches > 0,
+                    changed_instance_stats.direct_instance_batches > 0,
                 "material and mirrored winding differences split incompatible batches"))
     {
         return 1;
@@ -677,18 +762,23 @@ int test()
         !capture(window, renderer, lod_instanced, lod_instance_stats) ||
         !pixels(lod_baseline, lod_instanced,
                 "different LOD topology cannot be merged into one batch") ||
-        !expect(lod_instance_stats.triangles == geometry.indices.size() / 3 + 5 * 2 &&
-                    lod_stats.triangles == lod_instance_stats.triangles &&
-                    lod_instance_stats.triangles < cull_stats.triangles &&
-                    lod_instance_stats.draw_calls >= 3 && lod_instance_stats.instance_batches > 0,
+        !expect(lod_instance_stats.direct_triangles == geometry.indices.size() / 3 + 5 * 2 &&
+                    lod_stats.direct_triangles == lod_instance_stats.direct_triangles &&
+                    lod_instance_stats.direct_triangles < cull_stats.direct_triangles &&
+                    lod_instance_stats.draw_calls >= 3 &&
+                    lod_instance_stats.direct_instance_batches > 0,
                 "one large LOD0 and five small LOD1 instances submit the exact expected triangle "
                 "count"))
     {
         return 1;
     }
+    if (!meshlet_pixels(lod_instanced, "Meshlet LOD and mirrored materials preserve every pixel"))
+    {
+        return 1;
+    }
     if (!visible[2].set_static_lod_enabled(false) ||
         !capture(window, renderer, lod_opt_out, lod_opt_out_stats) ||
-        !expect(lod_opt_out_stats.triangles == 2 * geometry.indices.size() / 3 + 4 * 2 &&
+        !expect(lod_opt_out_stats.direct_triangles == 2 * geometry.indices.size() / 3 + 4 * 2 &&
                     visible[3].static_lod_enabled(),
                 "disabling LOD on one small mesh preserves its original topology only") ||
         !visible[2].set_static_lod_enabled(true))
@@ -721,9 +811,9 @@ int test()
         !pixels(probe_baseline, probe_instanced,
                 "incompatible probe lighting bindings cannot share a batch") ||
         !expect(
-            probe_instanced.rgba != culled.rgba && probe_instance_stats.instance_batches == 3 &&
-                probe_instance_stats.draw_calls == 3 &&
-                probe_instance_stats.submitted_instances == 6,
+            probe_instanced.rgba != culled.rgba &&
+                probe_instance_stats.direct_instance_batches == 3 &&
+                probe_instance_stats.draw_calls == 3 && probe_instance_stats.direct_instances == 6,
             "left probes, right probes and unbound meshes form three distinct lighting batches"))
     {
         return 1;
@@ -764,8 +854,8 @@ int test()
     }
     std::printf("render submission: draws %u -> %u -> %u; LOD triangles %llu -> %llu\n",
                 all_stats.draw_calls, cull_stats.draw_calls, instance_stats.draw_calls,
-                static_cast<unsigned long long>(cull_stats.triangles),
-                static_cast<unsigned long long>(lod_instance_stats.triangles));
+                static_cast<unsigned long long>(cull_stats.direct_triangles),
+                static_cast<unsigned long long>(lod_instance_stats.direct_triangles));
     renderer.shutdown();
     world.destroy_scene();
     return 0;

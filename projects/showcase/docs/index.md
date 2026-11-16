@@ -4,6 +4,7 @@
 
 ## 功能范例
 
+- [Meshlet 标准测试场景](meshlet-culling.md)
 - [角色控制与第一／第三人称镜头](character-control.md)
 - [地形、建筑与火箭综合联动](destruction-integration.md)
 - [群体导航与地形变化](navigation.md)

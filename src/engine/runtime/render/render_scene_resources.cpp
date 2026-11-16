@@ -1,10 +1,14 @@
+#include "runtime/render/render_system.hpp"
+
 #include "runtime/font/font_system.hpp"
 #include "runtime/performance/profiling.hpp"
+#include "runtime/render/passes/meshlet_cull_pass.hpp"
 #include "runtime/render/render_surface.hpp"
-#include "runtime/render/render_system.hpp"
 #include "runtime/render/scene_gpu_resources.hpp"
 #include "runtime/render/scene_render_query.hpp"
+#include "runtime/render/scene_render_settings.hpp"
 #include "runtime/resource/resource.hpp"
+#include "runtime/resource/types/mesh_resource.hpp"
 #include "runtime/scene/camera_math.hpp"
 #include "runtime/scene/ecs_scene.hpp"
 #include "runtime/scene/ecs_storage.hpp"
@@ -983,6 +987,91 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
     {
         return fail("Cannot resolve render target settings");
     }
+    bool meshlet_demand = rendering.meshlet_culling_enabled;
+    if (!meshlet_demand)
+    {
+        // Published active environment and preparing scopes share immutable geometry uploads.
+        const auto inspect = [&](Scene* scene)
+        {
+            render_detail::SceneRenderComponents components;
+            EnvironmentSettings environment;
+            return scene && render_detail::scene_render_components(*scene, components) &&
+                   components.environment.get_settings(environment) &&
+                   environment.meshlet_culling_enabled;
+        };
+        meshlet_demand = inspect(world_->scene());
+        for (const auto& [scope, record] : scope_preparations_)
+        {
+            (void)record;
+            meshlet_demand = meshlet_demand || inspect(world_->scope_candidate(scope));
+        }
+    }
+    meshlet_demand = meshlet_demand && render_detail::meshlet_supported();
+    if (meshlet_demand)
+    {
+        if (!meshlet_culling_)
+        {
+            meshlet_culling_ = std::make_unique<render_detail::MeshletCullPass>();
+        }
+        if (!meshlet_culling_->prepare(config_))
+        {
+            return fail("Cannot prepare meshlet GPU work buffers");
+        }
+    }
+    else if (meshlet_culling_)
+    {
+        meshlet_culling_->reset_scene();
+    }
+    const bool meshlet_geometry_demand =
+        meshlet_demand ||
+        (debug_requests_[static_cast<std::size_t>(RenderFeature::meshlet_colors)] &&
+         render_detail::DebugDrawPass::supports_meshlet_colors());
+    for (auto& [source, weak] : resources.geometries)
+    {
+        (void)source;
+        if (auto geometry = weak.lock())
+        {
+            if (!meshlet_geometry_demand)
+            {
+                geometry->release_meshlets();
+                continue;
+            }
+            const auto* mesh = geometry->resource.data<MeshResource>();
+            if (!mesh || !mesh->meshlets || bgfx::isValid(geometry->meshlet_indices(0)))
+            {
+                continue;
+            }
+            std::uint64_t bytes = 0;
+            const auto count_bytes = [&bytes](const schema::MeshletDataT& data)
+            {
+                bytes += data.indices.size() * sizeof(std::uint32_t) +
+                         data.meshlets.size() * 3 * 4 * sizeof(float);
+            };
+            count_bytes(*mesh->meshlets);
+            for (const auto& lod : mesh->lods)
+            {
+                if (lod->meshlets)
+                {
+                    count_bytes(*lod->meshlets);
+                }
+            }
+            // Geometry creation is atomic. One oversized item can advance an otherwise
+            // empty step; subsequent items wait for the next existing upload budget.
+            if (!budget() || (uploaded != 0 && (uploaded >= config_.upload_bytes_per_step ||
+                                                bytes > config_.upload_bytes_per_step - uploaded)))
+            {
+                state.status = RenderPrepareStatus::preparing;
+                output = state.progress;
+                return state.status;
+            }
+            if (!geometry->prepare_meshlets())
+            {
+                return fail("Cannot prepare meshlet geometry buffers");
+            }
+            uploaded += bytes;
+            ++items;
+        }
+    }
     const bool drawable = render_detail::drawable_scene(*world_, camera, !extensions_.empty(),
                                                         scope_preparing_scene_);
     if (!drawable && hdr_capture_status_ == SceneCaptureStatus::pending &&
@@ -1304,6 +1393,10 @@ void RenderSystem::collect_preparation(bool wait) noexcept
 void RenderSystem::release_scene() noexcept
 {
     scope_frames_.clear();
+    if (meshlet_culling_)
+    {
+        meshlet_culling_->reset_scene();
+    }
     for (auto& [id, record] : scope_preparations_)
     {
         (void)id;
@@ -1379,6 +1472,7 @@ void RenderSystem::release_draw_resources() noexcept
 
 std::uint32_t RenderSystem::gpu_resource_count() const noexcept
 {
-    return scene_resources_ ? scene_resources_->resource_count() : 0;
+    return (scene_resources_ ? scene_resources_->resource_count() : 0) +
+           (meshlet_culling_ ? meshlet_culling_->resource_count() : 0);
 }
 } // namespace engine

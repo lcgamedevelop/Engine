@@ -121,7 +121,7 @@ std::unique_ptr<schema::NodeDataT> node_data(std::uint64_t id, std::uint64_t par
 schema::PrefabDataT template_data()
 {
     schema::PrefabDataT data;
-    data.schema_version = 3;
+    data.schema_version = 4;
     data.root_id = 9;
     // 故意让子节点先于根，并使用稀疏源身份。
     auto camera = node_data(20, 9, "Camera");

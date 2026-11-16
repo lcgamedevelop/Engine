@@ -1,10 +1,12 @@
+#include "runtime/render/render_system.hpp"
+
 #include "runtime/font/font_system.hpp"
 #include "runtime/performance/profiling.hpp"
+#include "runtime/render/passes/meshlet_cull_pass.hpp"
 #include "runtime/render/render_constants.hpp"
 #include "runtime/render/render_context.hpp"
 #include "runtime/render/render_extension.hpp"
 #include "runtime/render/render_math.hpp"
-#include "runtime/render/render_system.hpp"
 #include "runtime/render/scene_gpu_resources.hpp"
 #include "runtime/render/scene_render_query.hpp"
 #include "runtime/resource/resource.hpp"
@@ -133,7 +135,7 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
     draw.projection = projection;
     draw.visibility = camera;
     draw.frustum_culling_enabled = settings.frustum_culling_enabled;
-    draw.lod_observer = {camera.instance_id(), 0};
+    draw.lod_observer = {camera.instance_id(), world_->scene() ? world_->scene()->id() : 0};
     draw.max_anisotropy = config_.max_anisotropy;
     render_detail::ShadowFrame shadow;
     if (!resources.prepare_lighting(resources.frame_data, rendering, config_, draw, settings,
@@ -144,6 +146,21 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
     if (!resources.collect_view(resources.frame_data, draw, resources.draw_lists[2]))
     {
         return false;
+    }
+    if (rendering.meshlet_culling_enabled && render_detail::meshlet_supported())
+    {
+        if (meshlet_culling_ &&
+            !meshlet_culling_->dispatch(
+                resources.frame_data, draw, resources.draw_lists[2],
+                debug_requests_[static_cast<std::size_t>(RenderFeature::meshlet_statistics)]))
+        {
+            return false;
+        }
+    }
+    else if (meshlet_culling_ &&
+             meshlet_culling_->statistics().state != MeshletSampleState::disabled)
+    {
+        meshlet_culling_->reset_scene();
     }
     resources.targets().surface_pass.begin(view, projection);
     draw.id = render_detail::ambient_occlusion_depth_view;

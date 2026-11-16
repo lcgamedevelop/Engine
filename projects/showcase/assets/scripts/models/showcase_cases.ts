@@ -13,6 +13,7 @@ import PhysicsInteractions from "../modules/physics-interactions.js";
 import PersistentUi from "../modules/persistent-ui.js";
 import EcsManyObjects from "../modules/ecs-many-objects.js";
 import RenderFeatures from "../modules/render-features.js";
+import MeshletCulling from "../modules/meshlet-culling.js";
 
 export type ShowcaseGame = Gameplay & { scene: Scene | null };
 
@@ -96,5 +97,10 @@ export const showcase_cases: readonly ShowcaseCase[] = [
         id: "render-features", button: "scene-render", title: "Rendering features and submission",
         goal: "Compare culling, instances, LOD, debug geometry, physical atmosphere and PBR Hex tiling.",
         scene: "scenes/render-features.scene", game: RenderFeatures,
+    },
+    {
+        id: "meshlet-culling", button: "scene-meshlet", title: "Meshlets and GPU culling",
+        goal: "Compare one scene switch, shared instances, LOD and conservative cluster visibility.",
+        scene: "scenes/meshlet-culling.scene", game: MeshletCulling,
     },
 ];

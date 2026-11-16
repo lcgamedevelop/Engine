@@ -725,7 +725,7 @@ bool prepare_mesh_parts(BodySnapshot& snapshot, const BodySnapshot* previous)
         {
             shape = (*previous->part_shapes)[slot];
         }
-        else if (mesh->schema_version != 1 ||
+        else if (mesh->schema_version != 2 ||
                  !make_shape(*snapshot.collider, mesh.get(), snapshot.shape_scale, shape, true))
         {
             return false;
@@ -2549,7 +2549,7 @@ bool PhysicsSystem::set_mesh_data(Collider collider, const schema::MeshDataT& me
     ENGINE_PROFILE_ZONE("Physics.set_mesh");
     auto node = collider.node();
     if (state_ == nullptr || world_ == nullptr || world_->find_node(node.id()) != node ||
-        node.get_component<Collider>() != collider || mesh.schema_version != 1)
+        node.get_component<Collider>() != collider || mesh.schema_version != 2)
     {
         return false;
     }

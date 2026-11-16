@@ -11,7 +11,9 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import sys
+import struct
 import uuid
+import zlib
 
 from mcp_interaction_test import (PROJECT, EditorMcpSession, capture_for_review, click, execute,
                                   get_status, lifecycle, require, wait_for)
@@ -106,7 +108,7 @@ def check(session, results, output):
     results["initial"] = ready(session, run)
     results["baseline"] = main_stats(session)
     require(results["baseline"]["culledMeshes"] > 0 and
-            results["baseline"]["instanceBatches"] > 0,
+            results["baseline"]["directInstanceBatches"] > 0,
             "Fixed scene does not actually use frustum culling and static instancing")
     capture_for_review(session, results, output, "initial")
     lod = session.call("get_mesh_lod_import", {"path": "meshes/render-lod-sphere.mesh"})
@@ -126,10 +128,10 @@ def check(session, results, output):
             require(disabled["culledMeshes"] == 0 and disabled["visibleMeshes"] >= before["visibleMeshes"],
                     "Objects were still culled after culling was disabled")
         elif feature == "static_instancing":
-            require(disabled["instanceBatches"] == 0 and disabled["drawCalls"] > before["drawCalls"],
+            require(disabled["directInstanceBatches"] == 0 and disabled["drawCalls"] > before["drawCalls"],
                     "Disabling instancing did not restore individual draw submissions")
         else:
-            require(disabled["triangles"] > before["triangles"], "Disabling LOD did not restore LOD0 topology")
+            require(disabled["directTriangles"] > before["directTriangles"], "Disabling LOD did not restore LOD0 topology")
         click(session, f"render-{feature}")
         wait_feature(session, feature, True, disabled["frameNumber"])
         results.setdefault("pathComparisons", {})[feature] = {"enabled": before, "disabled": disabled}
@@ -141,7 +143,7 @@ def check(session, results, output):
     click(session, "render-static_lod")
     wait_feature(session, "static_lod", False, far_on["frameNumber"])
     far_off = main_stats(session, far_on["frameNumber"])
-    require(far_off["triangles"] > far_on["triangles"], "Toggling LOD from the distant view did not change the triangle count")
+    require(far_off["directTriangles"] > far_on["directTriangles"], "Toggling LOD from the distant view did not change the triangle count")
     click(session, "render-static_lod")
     wait_feature(session, "static_lod", True, far_off["frameNumber"])
     click(session, "render-camera")
@@ -252,22 +254,221 @@ def check(session, results, output):
     print("PASS 384 fixed objects: actual UI/MCP toggles, imported LOD, per-view submissions, debug drawing, sky/Hex and menu cleanup", flush=True)
 
 
+def meshlet_check(session, results, output):
+    read_source = READ.replace("RenderFeatures", "MeshletCulling").replace(
+        "./modules/render-features.js", "./modules/meshlet-culling.js")
+    status = get_status(session)
+    if not status.get("running"):
+        status = lifecycle(session, "start_project", "running")
+    run = status["runId"]
+
+    def read():
+        value = execute(session, run, read_source, None, "mcp-meshlet.ts")
+        require(value["error"] is None, f"Meshlet scene failed: {value}")
+        return value
+
+    def stats(after=0):
+        value = wait_for("meshlet main frame", lambda: session.call("get_render_submission_stats"),
+            lambda item: item["frameNumber"] > after and any(
+                row["viewId"] == 113 and row["candidateMeshes"] == 28 for row in item["views"]),
+            session.timeout)
+        return next(row for row in value["views"] if row["viewId"] == 113)
+
+    def frame_pixels(path):
+        # Runtime captures have a fixed unfiltered RGBA PNG contract, also used by
+        # EditorMcpSession. Compare below the UI without requiring image packages.
+        data = Path(path).read_bytes()
+        require(data[:8] == b"\x89PNG\r\n\x1a\n", "Expected PNG capture")
+        offset, compressed, header = 8, bytearray(), None
+        while offset + 12 <= len(data):
+            length = struct.unpack_from(">I", data, offset)[0]
+            kind = data[offset + 4:offset + 8]
+            payload = data[offset + 8:offset + 8 + length]
+            if kind == b"IHDR":
+                header = struct.unpack(">IIBBBBB", payload)
+            elif kind == b"IDAT":
+                compressed.extend(payload)
+            offset += length + 12
+        require(header and header[2:] == (8, 6, 0, 0, 0), "Unexpected capture pixel format")
+        width, height = header[:2]
+        raw = zlib.decompress(compressed)
+        stride = width * 4 + 1
+        require(len(raw) == stride * height and all(raw[y * stride] == 0 for y in range(height)),
+                "Unexpected PNG row filtering")
+        # Exclude the controls in the top quarter; compare the rendered scene.
+        return header[:2], b"".join(raw[y * stride + 1:(y + 1) * stride]
+                                   for y in range(height // 4, height))
+
+    def compare(a, b, label):
+        size_a, left = frame_pixels(a["path"])
+        size_b, right = frame_pixels(b["path"])
+        require(size_a == size_b, "Comparison requires identical dimensions")
+        maximum = max(abs(x - y) for x, y in zip(left, right))
+        changed = sum(abs(x - y) > 2 for x, y in zip(left, right))
+        results.setdefault("pixelComparisons", {})[label] = {
+            "maximumChannelDifference": maximum, "channelsOverTwo": changed,
+            "comparedChannels": len(left)}
+        require(changed == 0,
+                f"Meshlet {label} changed scene pixels: {changed}, max {maximum}")
+
+    require(read()["selected"] is None, "Return to the menu before Meshlet checks")
+    click(session, "scene-meshlet")
+    wait_for("meshlet scene", read, lambda item: item["selected"] == "meshlet-culling" and
+             item["rendering"] is not None and item["rendering"]["objects"] == 29, session.timeout)
+    require(not read()["rendering"]["enabled"], "Scene meshlets must default off")
+    baseline = stats()
+    require(baseline["indirectBatches"] == 0, "Disabled scene submitted meshlets")
+    ordinary = capture_for_review(session, results, output, "ordinary")
+    imported = session.call("get_meshlet_import", {"path": "meshes/meshlet-lod-sphere.mesh"})
+    levels = imported["meshes"][0]["levels"]
+    require(imported["settings"]["enabled"] and len(levels) > 1 and
+            all(level["meshletCount"] > 0 for level in levels), "LOD fixture lacks cluster data")
+    results["imported"] = imported
+    expect_failure(session, "set_render_feature", {"feature": "meshlet_culling", "enabled": True})
+    click(session, "meshlet-toggle")
+    wait_feature(session, "meshlet_culling", True, baseline["frameNumber"])
+    active = stats(baseline["frameNumber"])
+    require(active["indirectBatches"] > 0 and active["meshletInstancedBatches"] > 0 and
+            active["meshletMissingData"] > 0 and active["meshletIncompatibleDraws"] > 0,
+            f"Expected shared indirect batches and explicit ordinary fallbacks: {active}")
+    require(states(session)["static_instancing"]["effective"],
+            "Meshlet instance batches must count as effective static instancing")
+    require(read()["rendering"]["enabled"], "TS did not expose the real scene switch")
+    transparent = next(row for row in session.call("get_render_submission_stats")["views"]
+                       if row["viewId"] == 130)
+    require(transparent["directInstances"] == 1 and transparent["indirectBatches"] == 0,
+            "Transparent control must keep its ordinary sorted pass")
+    optimized = capture_for_review(session, results, output, "meshlets")
+    compare(ordinary, optimized, "perspective")
+    results.update(baseline=baseline, active=active)
+    session.call("set_render_feature", {"feature": "meshlet_statistics", "enabled": True})
+    sampled = wait_for("completed meshlet GPU sample", stats,
+        lambda row: row["meshletGpu"]["state"] in ("ready", "failed"), session.timeout)
+    gpu = sampled["meshletGpu"]
+    require(gpu["state"] == "ready" and int(gpu["worldEpoch"]) > 0 and
+            int(gpu["observer"][1]) > 0 and gpu["frameNumber"] > active["frameNumber"] and
+            0 < gpu["visiblePairs"] < gpu["candidatePairs"] and
+            0 < gpu["visibleTriangles"] < gpu["candidateTriangles"], f"Invalid GPU sample: {gpu}")
+    results["gpu"] = gpu
+    identity = {key: session.call("get_render_features")["scene"][key] for key in ("sceneId", "nodeId")}
+
+    # Exercise the same scene property through the editor and the project UI.
+    session.call("set_render_feature", {"feature": "meshlet_culling", "enabled": False, **identity})
+    wait_feature(session, "meshlet_culling", False)
+    require(not read()["rendering"]["enabled"] and stats()["indirectBatches"] == 0,
+            "Editor switch did not restore the ordinary path")
+    session.call("set_render_feature", {"feature": "meshlet_colors", "enabled": True})
+    wait_feature(session, "meshlet_colors", True)
+    colored = capture_for_review(session, results, output, "cluster-colors")
+    require(not read()["rendering"]["enabled"] and stats()["indirectBatches"] == 0,
+            "Cluster colors changed the scene culling switch")
+    _, normal_pixels = frame_pixels(ordinary["path"])
+    _, color_pixels = frame_pixels(colored["path"])
+    require(sum(abs(a - b) > 8 for a, b in zip(normal_pixels, color_pixels)) > 1000,
+            "Cluster colors did not paint the actual mesh surfaces")
+    repeated = capture_for_review(session, results, output, "cluster-colors-repeat")
+    compare(colored, repeated, "stable-cluster-colors")
+    instance_source = """
+import { MeshRenderer } from "engine";
+import MeshletCulling from "./modules/meshlet-culling.js";
+export default function(enabled: boolean, gameplay: unknown) {
+    const scene = (gameplay as {active: MeshletCulling}).active.scene;
+    const names = [];
+    for (let row = 0; row < 3; ++row) for (let column = 0; column < 6; ++column)
+        names.push(`Cluster sphere ${row}:${column}`);
+    for (const x of [-9, -3, 3, 9]) names.push(`Arch ${x}`);
+    return names.every(name => scene?.FindNode(name)?.GetComponent(MeshRenderer)?.SetStaticInstancing(enabled));
+}
+"""
+    require(execute(session, run, instance_source, False, "mcp-meshlet-instances.ts"),
+            "Cannot switch the shared geometry to direct draws")
+    direct_colors = capture_for_review(session, results, output, "cluster-colors-direct")
+    (width, _), direct_pixels = frame_pixels(direct_colors["path"])
+    # Compare solid interiors against direct rendering. Exclude only a one-pixel
+    # band around reference color boundaries, where raster coverage can differ.
+    # Speckles in the tested instanced image cannot exclude their own pixels.
+    height = len(color_pixels) // (width * 4)
+    edge_pixels = 0
+    for offset in range(0, len(color_pixels), 4):
+        if max(abs(color_pixels[offset + c] - direct_pixels[offset + c]) for c in range(3)) <= 2:
+            continue
+        y, x = divmod(offset // 4, width)
+        neighbors = [(yy * width + xx) * 4
+                     for yy in range(max(0, y - 1), min(height, y + 2))
+                     for xx in range(max(0, x - 1), min(width, x + 2))]
+        boundary = any(max(direct_pixels[p + c] for p in neighbors) -
+                       min(direct_pixels[p + c] for p in neighbors) > 4 for c in range(3))
+        require(boundary, f"Instanced cluster color has an uncovered surface pixel at {x},{y}")
+        edge_pixels += 1
+    results["clusterCoveragePassed"] = True
+    results["clusterCoverageEdgePixels"] = edge_pixels
+    require(execute(session, run, instance_source, True, "mcp-meshlet-instances.ts"),
+            "Cannot restore shared geometry instancing")
+    session.call("set_render_feature", {"feature": "meshlet_bounds", "enabled": True})
+    wait_feature(session, "meshlet_bounds", True)
+    capture_for_review(session, results, output, "cluster-colors-and-bounds")
+    session.call("set_render_feature", {"feature": "meshlet_colors", "enabled": False})
+    wait_feature(session, "meshlet_colors", False)
+    session.call("set_render_feature", {"feature": "meshlet_bounds", "enabled": False})
+    wait_feature(session, "meshlet_bounds", False)
+    restored = capture_for_review(session, results, output, "cluster-colors-restored")
+    compare(ordinary, restored, "restored-cluster-colors")
+    session.call("set_render_feature", {"feature": "meshlet_bounds", "enabled": True})
+    wait_feature(session, "meshlet_bounds", True)
+    capture_for_review(session, results, output, "bounds-while-disabled")
+    require(not read()["rendering"]["enabled"], "Debug bounds enabled the runtime mode")
+    session.call("set_render_feature", {"feature": "meshlet_bounds", "enabled": False})
+
+    # Native regression covers whole-batch budget overflow. This real-project route
+    # covers orthographic cone/frustum logic and a second camera distance using imported LODs.
+    camera_source = """
+import { Camera, Transform } from "engine";
+import MeshletCulling from "./modules/meshlet-culling.js";
+export default function(_args: unknown, gameplay: unknown) {
+    const scene = (gameplay as {active: MeshletCulling}).active.scene;
+    const node = scene?.FindNode("Render Camera");
+    return !!node?.GetComponent(Camera)?.SetOrthographic(20, 0.1, 400) &&
+           !!node.GetComponent(Transform)?.SetPosition(24, 18, 42);
+}
+"""
+    require(execute(session, run, camera_source, None, "mcp-meshlet-camera.ts"), "Cannot change camera")
+    ortho_off = capture_for_review(session, results, output, "orthographic-ordinary")
+    session.call("set_render_feature", {"feature": "meshlet_culling", "enabled": True, **identity})
+    wait_feature(session, "meshlet_culling", True)
+    ortho_on = capture_for_review(session, results, output, "orthographic-meshlets")
+    compare(ortho_off, ortho_on, "orthographic")
+    session.call("set_render_feature", {"feature": "meshlet_statistics", "enabled": False})
+    wait_feature(session, "meshlet_statistics", False)
+    click(session, "back-menu")
+    wait_for("meshlet scene cleanup", read, lambda item: item["selected"] is None, session.timeout)
+    click(session, "scene-meshlet")
+    wait_for("fresh meshlet scene", read, lambda item: item["rendering"] is not None, session.timeout)
+    require(not read()["rendering"]["enabled"] and stats()["indirectBatches"] == 0,
+            "Reentry retained a previous scene's runtime switch or indirect work")
+    click(session, "back-menu")
+    wait_for("final meshlet cleanup", read, lambda item: item["selected"] is None, session.timeout)
+    print("PASS Meshlet GPU visibility, scene toggle, LOD/material fallbacks, debug isolation, pixels and cleanup", flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--server", required=True, type=Path)
     parser.add_argument("--runtime-dir", required=True, type=Path)
     parser.add_argument("--timeout", type=float, default=180)
+    parser.add_argument("--case", choices=("rendering", "meshlets"), default="rendering")
     args = parser.parse_args()
     if args.timeout <= 0:
         parser.error("--timeout must be positive")
     label = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8]
-    output = PROJECT / "cache" / "render-features" / label
+    output = (PROJECT / "cache" / "visual-tests" / "meshlet-culling" / label if args.case == "meshlets"
+              else PROJECT / "cache" / "render-features" / label)
     output.mkdir(parents=True, exist_ok=False)
-    results = {"passed": False, "objects": 384, "timingsCollected": False}
+    results = {"passed": False, "objects": 29 if args.case == "meshlets" else 384,
+               "timingsCollected": False}
     try:
         with EditorMcpSession(args.server, PROJECT, args.runtime_dir, output / "receipts.jsonl",
                               timeout=args.timeout) as session:
-            check(session, results, output)
+            (meshlet_check if args.case == "meshlets" else check)(session, results, output)
         results["functionalChecksPassed"] = True
         require(not results.get("invalidCaptures"),
                 f"Screenshots are black or could not be inspected: {results.get('invalidCaptures')}")

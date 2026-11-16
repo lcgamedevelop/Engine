@@ -158,7 +158,7 @@ bool prepare_geometry(std::span<const NavigationGeometry> sources, InputGeometry
     {
         const auto* mesh = source.mesh;
         const auto& m = source.transform;
-        if (!mesh || mesh->schema_version != 1 || mesh->indices.size() % 3 != 0 ||
+        if (!mesh || mesh->schema_version != 2 || mesh->indices.size() % 3 != 0 ||
             mesh->vertices.empty() != mesh->indices.empty() ||
             mesh->vertices.size() > maximum_vertices - output.vertices.size() / 3 ||
             mesh->indices.size() / 3 > maximum_triangles - output.triangles.size() / 3 ||

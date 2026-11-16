@@ -4,6 +4,13 @@
 
 环境属于普通节点的 `EnvironmentComponent`，相机画面参数属于相机节点的 `PostProcessComponent`。两者直接使用 FlatBuffers 生成载荷，不增加环境系统或 Scene 专用字段。
 
+Meshlet 场景总开关归同一环境生成数据，完整字段与作用范围只在
+[Meshlet 统一控制](meshlet-culling.md#场景统一控制)定义。
+面向项目的只读开关属性与启停方法明确暴露在场景 `EnvironmentComponent` 上，
+完整签名见[场景组件脚本类图](../../plugins/runtime/class-diagrams/render-script-api.md#meshlet-场景总开关)。
+编辑器将同一字段展示为 `Meshlet Culling` 选项；调试视图只通过编辑器 MCP 控制。
+当前图中的其他已实现字段保持现状。
+
 ```mermaid
 classDiagram
     class Component

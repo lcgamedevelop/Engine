@@ -72,6 +72,7 @@ if(ENGINE_ENABLE_RUNTIME_DEPS)
                 src/engine/runtime/render/passes/shadow_frame.cpp
                 src/engine/runtime/render/passes/shadow_pass.cpp
                 src/engine/runtime/render/passes/skinning_pass.cpp
+                src/engine/runtime/render/passes/meshlet_cull_pass.cpp
                 src/engine/runtime/render/passes/ambient_occlusion_pass.cpp
                 src/engine/runtime/render/passes/hdr_post_process_pass.cpp)
     target_include_directories(engine_render PRIVATE "${PROJECT_SOURCE_DIR}/src/engine")
@@ -94,6 +95,7 @@ if(ENGINE_ENABLE_RUNTIME_DEPS)
     engine_embed_upstream_feature_shaders(engine_render)
     engine_embed_assao_shaders(engine_render)
     engine_embed_skinning_shader(engine_render)
+    engine_embed_meshlet_shaders(engine_render)
     engine_embed_hdr_shaders(engine_render)
     engine_embed_clustered_shader(engine_render)
     engine_embed_ssr_shaders(engine_render)

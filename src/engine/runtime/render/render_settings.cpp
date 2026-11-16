@@ -154,6 +154,7 @@ RenderSettings render_settings(const SceneRenderComponents& components)
         settings.fog_density = environment.fog_density;
         settings.clear_color = environment.clear_color;
         settings.ibl_enabled = environment.ibl_enabled;
+        settings.meshlet_culling_enabled = environment.meshlet_culling_enabled;
         settings.ibl_intensity = environment.ibl_intensity;
         settings.atmosphere = environment;
         settings.atmosphere_scene_id = components.environment.node().scene()->id();

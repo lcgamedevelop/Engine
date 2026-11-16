@@ -41,6 +41,10 @@ struct GpuGeometry
     [[nodiscard]] std::span<const schema::MeshSubmesh>
     submeshes(std::size_t level = 0) const noexcept;
     [[nodiscard]] std::size_t lod_count() const noexcept;
+    [[nodiscard]] bool prepare_meshlets();
+    void release_meshlets() noexcept;
+    [[nodiscard]] bgfx::IndexBufferHandle meshlet_indices(std::size_t level) const noexcept;
+    [[nodiscard]] bgfx::VertexBufferHandle meshlet_descriptors(std::size_t level) const noexcept;
     void release() noexcept;
     [[nodiscard]] static bgfx::VertexLayout vertex_layout();
     [[nodiscard]] static bgfx::VertexLayout vector_layout();
@@ -58,6 +62,12 @@ struct GpuGeometry
     std::array<float, 3> maximum{};
 
 private:
+    struct MeshletBuffers
+    {
+        bgfx::IndexBufferHandle indices = BGFX_INVALID_HANDLE;
+        bgfx::VertexBufferHandle descriptors = BGFX_INVALID_HANDLE;
+    };
+    std::vector<MeshletBuffers> meshlets_;
     struct Lod
     {
         bgfx::IndexBufferHandle indices = BGFX_INVALID_HANDLE;
