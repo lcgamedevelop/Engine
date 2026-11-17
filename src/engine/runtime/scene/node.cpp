@@ -21,7 +21,7 @@ bool ecs_detail::scope_writable(Node node) noexcept
     flecs::world current(node.world()->native_world());
     const auto metadata = current.entity(node.id()).target<SceneMember>();
     const auto* scope = metadata ? metadata.try_get<ScopeState>() : nullptr;
-    return scope == nullptr || !scope->sealed || scope->simulating ||
+    return scope == nullptr || (!scope->sealed && !scope->frozen) || scope->simulating ||
            current.entity(node.id()).has<Simulating>() ||
            (preparing_epoch == node.world()->epoch() && preparing_scope == scope->scope);
 }

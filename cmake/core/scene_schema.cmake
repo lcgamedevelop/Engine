@@ -98,6 +98,7 @@ function(engine_add_scene_schema)
         animation_retarget
         effect
         terrain
+        terrain_block
         terrain_state
         destruction
         destruction_state
@@ -154,6 +155,7 @@ function(engine_add_scene_schema)
         DEPENDS "${PROJECT_SOURCE_DIR}/scripts/generate_control_codecs.py"
                 "${PROJECT_SOURCE_DIR}/include/engine.d.ts"
                 "${_schema_dir}/camera.fbs" "${_schema_dir}/character_controller.fbs"
+                "${_schema_dir}/terrain.fbs" "${_schema_dir}/scene.fbs" "${_schema_dir}/common.fbs"
         VERBATIM)
     add_custom_target(engine_scene_schema DEPENDS ${_cpp_headers} "${_stamp}" "${_ts_barrel}" "${_control_json}")
     add_library(engine_scene_data INTERFACE ${_schemas})

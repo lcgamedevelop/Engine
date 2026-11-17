@@ -83,6 +83,7 @@ struct NavigationData
     NavMeshPtr mesh{nullptr, dtFreeNavMesh};
     NavQueryPtr query{nullptr, dtFreeNavMeshQuery};
     NavigationBounds bounds;
+    Vec3 origin;
     NavigationSettings settings;
     int columns = 0;
     int rows = 0;
@@ -144,8 +145,8 @@ bool valid_settings(const NavigationSettings& settings, const NavigationBounds& 
     return true;
 }
 
-bool prepare_geometry(std::span<const NavigationGeometry> sources, InputGeometry& output,
-                      std::string& error)
+bool prepare_geometry(std::span<const NavigationGeometry> sources, const Vec3& origin,
+                      InputGeometry& output, std::string& error)
 {
     ENGINE_PROFILE_ZONE("Navigation.prepare_geometry");
     output = {};
@@ -158,11 +159,11 @@ bool prepare_geometry(std::span<const NavigationGeometry> sources, InputGeometry
     {
         const auto* mesh = source.mesh;
         const auto& m = source.transform;
-        if (!mesh || mesh->schema_version != 1 || mesh->indices.size() % 3 != 0 ||
+        if (!mesh || mesh->schema_version != 2 || mesh->indices.size() % 3 != 0 ||
             mesh->vertices.empty() != mesh->indices.empty() ||
             mesh->vertices.size() > maximum_vertices - output.vertices.size() / 3 ||
             mesh->indices.size() / 3 > maximum_triangles - output.triangles.size() / 3 ||
-            !std::all_of(m.begin(), m.end(), [](float value) { return std::isfinite(value); }) ||
+            !std::all_of(m.begin(), m.end(), [](double value) { return std::isfinite(value); }) ||
             std::abs(m[3]) > 0.000001F || std::abs(m[7]) > 0.000001F ||
             std::abs(m[11]) > 0.000001F || std::abs(m[15] - 1) > 0.000001F)
         {
@@ -186,11 +187,11 @@ bool prepare_geometry(std::span<const NavigationGeometry> sources, InputGeometry
         {
             const Vec3 value{
                 static_cast<double>(m[0]) * vertex.x() + static_cast<double>(m[4]) * vertex.y() +
-                    static_cast<double>(m[8]) * vertex.z() + m[12],
+                    static_cast<double>(m[8]) * vertex.z() + (m[12] - origin.x()),
                 static_cast<double>(m[1]) * vertex.x() + static_cast<double>(m[5]) * vertex.y() +
-                    static_cast<double>(m[9]) * vertex.z() + m[13],
+                    static_cast<double>(m[9]) * vertex.z() + (m[13] - origin.y()),
                 static_cast<double>(m[2]) * vertex.x() + static_cast<double>(m[6]) * vertex.y() +
-                    static_cast<double>(m[10]) * vertex.z() + m[14]};
+                    static_cast<double>(m[10]) * vertex.z() + (m[14] - origin.z())};
             if (!valid_vector(value))
             {
                 error = "Navigation world geometry is nonfinite or exceeds coordinate bounds";
@@ -255,12 +256,16 @@ rcConfig tile_config(const NavigationData& data, int x, int z)
     config.detailSampleMaxError = config.ch;
     const float width = config.tileSize * config.cs;
     const float border = config.borderSize * config.cs;
-    config.bmin[0] = static_cast<float>(data.bounds.minimum.x()) + x * width - border;
-    config.bmin[1] = static_cast<float>(data.bounds.minimum.y());
-    config.bmin[2] = static_cast<float>(data.bounds.minimum.z()) + z * width - border;
-    config.bmax[0] = static_cast<float>(data.bounds.minimum.x()) + (x + 1) * width + border;
-    config.bmax[1] = static_cast<float>(data.bounds.maximum.y());
-    config.bmax[2] = static_cast<float>(data.bounds.minimum.z()) + (z + 1) * width + border;
+    config.bmin[0] =
+        static_cast<float>(data.bounds.minimum.x() - data.origin.x()) + x * width - border;
+    config.bmin[1] = static_cast<float>(data.bounds.minimum.y() - data.origin.y());
+    config.bmin[2] =
+        static_cast<float>(data.bounds.minimum.z() - data.origin.z()) + z * width - border;
+    config.bmax[0] =
+        static_cast<float>(data.bounds.minimum.x() - data.origin.x()) + (x + 1) * width + border;
+    config.bmax[1] = static_cast<float>(data.bounds.maximum.y() - data.origin.y());
+    config.bmax[2] =
+        static_cast<float>(data.bounds.minimum.z() - data.origin.z()) + (z + 1) * width + border;
     return config;
 }
 
@@ -340,8 +345,10 @@ bool build_tile(const NavigationData& data, const InputGeometry& input, TileData
         {
             const double px = compact->bmin[0] + (x + 0.5) * compact->cs;
             const double pz = compact->bmin[2] + (z + 0.5) * compact->cs;
-            if (px >= data.bounds.minimum.x() && px <= data.bounds.maximum.x() &&
-                pz >= data.bounds.minimum.z() && pz <= data.bounds.maximum.z())
+            if (px >= data.bounds.minimum.x() - data.origin.x() &&
+                px <= data.bounds.maximum.x() - data.origin.x() &&
+                pz >= data.bounds.minimum.z() - data.origin.z() &&
+                pz <= data.bounds.maximum.z() - data.origin.z())
             {
                 continue;
             }
@@ -474,9 +481,9 @@ bool initialize_grid(NavigationData& data)
         return false;
     }
     dtNavMeshParams params{};
-    params.orig[0] = static_cast<float>(data.bounds.minimum.x());
-    params.orig[1] = static_cast<float>(data.bounds.minimum.y());
-    params.orig[2] = static_cast<float>(data.bounds.minimum.z());
+    params.orig[0] = static_cast<float>(data.bounds.minimum.x() - data.origin.x());
+    params.orig[1] = static_cast<float>(data.bounds.minimum.y() - data.origin.y());
+    params.orig[2] = static_cast<float>(data.bounds.minimum.z() - data.origin.z());
     params.tileWidth = params.tileHeight = data.settings.tile_size * data.settings.cell_size;
     params.maxTiles = 1;
     while (params.maxTiles < data.columns * data.rows)
@@ -569,8 +576,8 @@ bool project_position(const NavigationData& data, const Vec3& value, dtPolyRef& 
     {
         return false;
     }
-    const float position[3]{static_cast<float>(value.x()), static_cast<float>(value.y()),
-                            static_cast<float>(value.z())};
+    const float position[3]{float(value.x() - data.origin.x()), float(value.y() - data.origin.y()),
+                            float(value.z() - data.origin.z())};
     const auto& range = data.settings.query_half_extents;
     const float extents[3]{static_cast<float>(range.x()), static_cast<float>(range.y()),
                            static_cast<float>(range.z())};
@@ -692,7 +699,9 @@ struct NavigationSystem::State
             return false;
         }
         record.index = index;
-        record.state.position = {current->npos[0], current->npos[1], current->npos[2]};
+        record.state.position = {current->npos[0] + data->origin.x(),
+                                 current->npos[1] + data->origin.y(),
+                                 current->npos[2] + data->origin.z()};
         record.state.status = NavigationAgentStatus::idle;
         return true;
     }
@@ -704,7 +713,9 @@ struct NavigationSystem::State
             return;
         }
         const auto* current = crowd->getAgent(record.index);
-        record.state.position = {current->npos[0], current->npos[1], current->npos[2]};
+        record.state.position = {current->npos[0] + data->origin.x(),
+                                 current->npos[1] + data->origin.y(),
+                                 current->npos[2] + data->origin.z()};
         record.state.velocity = {current->vel[0], current->vel[1], current->vel[2]};
         if (!current->active || current->state == DT_CROWDAGENT_STATE_INVALID)
         {
@@ -733,9 +744,9 @@ struct NavigationSystem::State
             return;
         }
         record.state.status = NavigationAgentStatus::moving;
-        const double x = record.state.position.x() - record.projected_target[0];
-        const double y = record.state.position.y() - record.projected_target[1];
-        const double z = record.state.position.z() - record.projected_target[2];
+        const double x = record.state.position.x() - data->origin.x() - record.projected_target[0];
+        const double y = record.state.position.y() - data->origin.y() - record.projected_target[1];
+        const double z = record.state.position.z() - data->origin.z() - record.projected_target[2];
         const double distance = record.settings.arrival_distance;
         if (x * x + y * y + z * z <= distance * distance)
         {
@@ -908,6 +919,9 @@ bool NavigationSystem::build(std::span<const NavigationGeometry> geometry,
     state_->rebuilt = 0;
     auto candidate = std::make_unique<NavigationData>();
     candidate->bounds = bounds;
+    candidate->origin = {(bounds.minimum.x() + bounds.maximum.x()) * .5,
+                         (bounds.minimum.y() + bounds.maximum.y()) * .5,
+                         (bounds.minimum.z() + bounds.maximum.z()) * .5};
     candidate->settings = settings;
     const auto fail = [&](std::string error)
     {
@@ -921,7 +935,7 @@ bool NavigationSystem::build(std::span<const NavigationGeometry> geometry,
         return fail("Invalid navigation configuration, bounds or tile grid limit");
     }
     InputGeometry input;
-    if (!prepare_geometry(geometry, input, state_->error))
+    if (!prepare_geometry(geometry, candidate->origin, input, state_->error))
     {
         return fail(state_->error);
     }
@@ -988,9 +1002,12 @@ bool NavigationSystem::replace(std::span<const NavigationGeometry> geometry,
         for (int x = 0; x < data.columns; ++x)
         {
             const auto config = tile_config(data, x, z);
-            if (dirty.maximum.x() < config.bmin[0] || dirty.minimum.x() > config.bmax[0] ||
-                dirty.maximum.z() < config.bmin[2] || dirty.minimum.z() > config.bmax[2] ||
-                dirty.maximum.y() < config.bmin[1] || dirty.minimum.y() > config.bmax[1])
+            if ((dirty.maximum.x() - data.origin.x()) < config.bmin[0] ||
+                (dirty.minimum.x() - data.origin.x()) > config.bmax[0] ||
+                (dirty.maximum.z() - data.origin.z()) < config.bmin[2] ||
+                (dirty.minimum.z() - data.origin.z()) > config.bmax[2] ||
+                (dirty.maximum.y() - data.origin.y()) < config.bmin[1] ||
+                (dirty.minimum.y() - data.origin.y()) > config.bmax[1])
             {
                 continue;
             }
@@ -1011,7 +1028,7 @@ bool NavigationSystem::replace(std::span<const NavigationGeometry> geometry,
         return false;
     };
     InputGeometry input;
-    if (!prepare_geometry(geometry, input, state_->error))
+    if (!prepare_geometry(geometry, data.origin, input, state_->error))
     {
         return fail(state_->error);
     }
@@ -1067,10 +1084,12 @@ bool NavigationSystem::find_path(const Vec3& start, const Vec3& end,
         state_->error = "Navigation path endpoints must be finite and inside the build bounds";
         return false;
     }
-    const float begin[3]{static_cast<float>(start.x()), static_cast<float>(start.y()),
-                         static_cast<float>(start.z())};
-    const float target[3]{static_cast<float>(end.x()), static_cast<float>(end.y()),
-                          static_cast<float>(end.z())};
+    const float begin[3]{static_cast<float>(start.x() - data.origin.x()),
+                         static_cast<float>(start.y() - data.origin.y()),
+                         static_cast<float>(start.z() - data.origin.z())};
+    const float target[3]{static_cast<float>(end.x() - data.origin.x()),
+                          static_cast<float>(end.y() - data.origin.y()),
+                          static_cast<float>(end.z() - data.origin.z())};
     const auto& range = data.settings.query_half_extents;
     const float extent[3]{static_cast<float>(range.x()), static_cast<float>(range.y()),
                           static_cast<float>(range.z())};
@@ -1110,9 +1129,9 @@ bool NavigationSystem::find_path(const Vec3& start, const Vec3& end,
     output.reserve(static_cast<std::size_t>(point_count));
     for (int index = 0; index < point_count; ++index)
     {
-        output.emplace_back(points[static_cast<std::size_t>(index) * 3],
-                            points[static_cast<std::size_t>(index) * 3 + 1],
-                            points[static_cast<std::size_t>(index) * 3 + 2]);
+        output.emplace_back(data.origin.x() + points[static_cast<std::size_t>(index) * 3],
+                            data.origin.y() + points[static_cast<std::size_t>(index) * 3 + 1],
+                            data.origin.z() + points[static_cast<std::size_t>(index) * 3 + 2]);
     }
     state_->error.clear();
     return true;

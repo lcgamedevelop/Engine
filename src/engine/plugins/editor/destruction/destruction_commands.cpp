@@ -252,14 +252,17 @@ bool register_destruction_commands(WorldSystem& world, editor::SceneCommands& sc
                                                  std::string& error)
             {
                 if (!editor::components::fields(arguments,
-                                                {"supportNodeId", "maxGap", "minCoverage"}, error))
+                                                {"supportNodeIds", "maxGap", "minCoverage"}, error))
                 {
                     return false;
                 }
                 auto component = target(world, arguments, error);
                 float max_gap = 0;
                 float min_coverage = 0;
-                if (!component || !component.ready() || !arguments.contains("supportNodeId") ||
+                if (!component || !component.ready() ||
+                    (!arguments.contains("supportNodeIds") ||
+                     !arguments["supportNodeIds"].is_array() ||
+                     arguments["supportNodeIds"].size() > 4096) ||
                     !arguments.contains("maxGap") || !arguments.contains("minCoverage") ||
                     !editor::components::number(arguments["maxGap"], max_gap) || max_gap <= 0 ||
                     max_gap > 1000 ||
@@ -269,41 +272,41 @@ bool register_destruction_commands(WorldSystem& world, editor::SceneCommands& sc
                     if (error.empty())
                     {
                         error = "Support refresh requires a ready destruction object, "
-                                "supportNodeId, maxGap in (0,1000], minCoverage in (0,1]";
+                                "supportNodeIds, maxGap in (0,1000], minCoverage in (0,1]";
                     }
                     return false;
                 }
-                Json support_target = {{"sceneId", arguments["sceneId"]},
-                                       {"nodeId", arguments["supportNodeId"]}};
-                auto support = editor::components::target(world, support_target, error);
-                if (!support || !support.get_component<Collider>())
+                std::vector<std::shared_ptr<std::uint64_t>> support_identities;
+                for (const auto& id : arguments["supportNodeIds"])
                 {
-                    if (error.empty())
+                    Json support_target = {{"sceneId", arguments["sceneId"]}, {"nodeId", id}};
+                    auto support = editor::components::target(world, support_target, error);
+                    auto identity = support ? scene_commands.node_identity(support.id()) : nullptr;
+                    if (!identity || !support.get_component<Collider>())
                     {
                         error = "Support node has no collider";
+                        return false;
                     }
-                    return false;
+                    support_identities.push_back(std::move(identity));
                 }
                 auto identity = scene_commands.node_identity(component.node().id());
-                auto support_identity = scene_commands.node_identity(support.id());
                 ByteBuffer before;
                 schema::ComponentDataT settings;
                 settings.flags = std::make_unique<schema::ComponentFlagsT>();
-                if (!identity || !support_identity || !component.snapshot(before) ||
-                    !component.build_data(settings))
+                if (!identity || !component.snapshot(before) || !component.build_data(settings))
                 {
                     error = "Cannot snapshot foundation support state";
                     return false;
                 }
                 result = {{"sceneId", std::to_string(component.node().scene()->id())},
                           {"nodeId", std::to_string(component.node().id())},
-                          {"supportNodeId", std::to_string(support.id())},
+                          {"supportNodeIds", arguments["supportNodeIds"]},
                           {"operation", "refresh_support"},
                           {"undoable", true}};
                 edit = std::make_unique<DestructionStateEdit>(
                     world, component.node().scene()->id(), std::move(identity),
                     edit_revision(*revisions, component.node(), component), std::move(settings),
-                    std::move(before), std::move(support_identity), max_gap, min_coverage);
+                    std::move(before), std::move(support_identities), max_gap, min_coverage);
                 return true;
             }))
     {

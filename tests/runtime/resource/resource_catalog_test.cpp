@@ -246,7 +246,7 @@ bool external_builtins(ResourceSystem& resources, const std::filesystem::path& r
     external_mesh.vertices.front() = {vertex.x() + 2.0F, vertex.y(),  vertex.z(),
                                       vertex.nx(),       vertex.ny(), vertex.nz()};
     Fixture fixture;
-    fixture.data.schema_version = 3;
+    fixture.data.schema_version = 4;
     fixture.data.revision = "external-builtins";
     fixture.data.target_platform = platform();
     const ByteBuffer invalid_payload{std::byte{1}, std::byte{2}};
@@ -321,10 +321,10 @@ bool external_builtins(ResourceSystem& resources, const std::filesystem::path& r
         return false;
     }
     Fixture valid;
-    valid.data.schema_version = 3;
+    valid.data.schema_version = 4;
     valid.data.revision = "external-cube";
     valid.data.target_platform = platform();
-    if (!valid.add(cube_guid, cube_path, schema::AssetKind::mesh, pack(external_mesh, "EMSH")) ||
+    if (!valid.add(cube_guid, cube_path, schema::AssetKind::mesh, pack(external_mesh, "EMS2")) ||
         !write(root / "gen" / cube_guid, valid.files.at(cube_guid)) ||
         !resources.update_catalog(valid.data, mounts))
     {
@@ -367,7 +367,7 @@ bool run(const std::filesystem::path& root)
         return false;
     }
     schema::SceneDataT scene_data;
-    scene_data.schema_version = 3;
+    scene_data.schema_version = 6;
     if (!scene->build_data(scene_data))
     {
         return false;
@@ -404,14 +404,14 @@ bool run(const std::filesystem::path& root)
         }
     }
     Fixture fixture;
-    fixture.data.schema_version = 3;
+    fixture.data.schema_version = 4;
     fixture.data.revision = "test-revision";
     fixture.data.target_platform = platform();
-    if (!fixture.add(shader_guid, shader.path, schema::AssetKind::shader, pack(shader, "ESHD"),
+    if (!fixture.add(shader_guid, shader.path, schema::AssetKind::shader, pack(shader, "ESH3"),
                      shader_dependencies) ||
         !fixture.add(material_guid, material.type_path, schema::AssetKind::material,
                      pack(material, "EMAT"), {shader_guid}) ||
-        !fixture.add(mesh_guid, mesh.path, schema::AssetKind::mesh, pack(mesh, "EMSH")) ||
+        !fixture.add(mesh_guid, mesh.path, schema::AssetKind::mesh, pack(mesh, "EMS2")) ||
         !fixture.add(scene_guid, "scenes/main.scene", schema::AssetKind::scene,
                      pack(scene_data, "ESCN"), {mesh_guid, material_guid}) ||
         !fixture.add(source_guid, "data/raw.bin", schema::AssetKind::source,
@@ -504,6 +504,34 @@ bool run(const std::filesystem::path& root)
         return false;
     }
     auto foreign = fixture.data;
+    auto streamed = fixture.data;
+    streamed.entries[3]->stream_dependencies = {source_guid};
+    streamed.entries.back()->stream_dependencies = {scene_guid};
+    if (!expect(catalog.assign(streamed),
+                "stream cycles are export reachability without eager load cycles"))
+    {
+        return false;
+    }
+    for (const auto& references :
+         std::vector<std::vector<std::string>>{{source_guid, source_guid},
+                                               {mesh_guid},
+                                               {scene_guid},
+                                               {"10000000-0000-4000-8000-000000000099"}})
+    {
+        auto invalid = streamed;
+        invalid.entries[3]->stream_dependencies = references;
+        if (!expect(!catalog.assign(invalid) && catalog.data() == streamed,
+                    "invalid streamed references preserve the previous catalog snapshot"))
+        {
+            return false;
+        }
+    }
+    auto obsolete = fixture.data;
+    obsolete.schema_version = 3;
+    if (!expect(!catalog.assign(obsolete), "obsolete catalogs require regeneration"))
+    {
+        return false;
+    }
     foreign.target_platform = platform() == "android" ? "macos" : "android";
     if (!expect(catalog.assign(foreign) && !resources.update_catalog(foreign, mounts),
                 "metadata tools accept foreign platforms but runtime activation rejects them"))
@@ -572,7 +600,7 @@ bool run(const std::filesystem::path& root)
         return false;
     }
     schema::AssetCatalogDataT empty;
-    empty.schema_version = 3;
+    empty.schema_version = 4;
     empty.revision = "empty";
     empty.target_platform = platform();
     std::unique_ptr<Resource> builtin;

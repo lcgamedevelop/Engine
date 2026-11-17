@@ -38,7 +38,7 @@ WorldSystem::~WorldSystem() noexcept
 
 Scene* WorldSystem::create_scene(std::string_view name)
 {
-    if (!is_initialized() || !can_modify() || scene_ != nullptr ||
+    if (!is_initialized() || !can_modify() || scope_write_active_ || scene_ != nullptr ||
         scene_sequence_ == std::numeric_limits<std::uint64_t>::max())
     {
         return nullptr;
@@ -61,7 +61,7 @@ ResourceLoader* WorldSystem::resource_loader() const noexcept
 
 Scene* WorldSystem::load_scene(std::string_view path)
 {
-    if (!is_initialized() || !can_modify() || !resources_ ||
+    if (!is_initialized() || !can_modify() || scope_write_active_ || !resources_ ||
         scene_sequence_ == std::numeric_limits<std::uint64_t>::max())
     {
         return nullptr;
@@ -94,7 +94,7 @@ Scene* WorldSystem::load_scene(std::string_view path)
 
 void WorldSystem::destroy_scene() noexcept
 {
-    if (!can_modify())
+    if (!can_modify() || scope_write_active_)
     {
         return;
     }
@@ -120,7 +120,7 @@ void WorldSystem::retain_persistent()
 
 void WorldSystem::unload_scene() noexcept
 {
-    if (!can_modify())
+    if (!can_modify() || scope_write_active_)
     {
         return;
     }
@@ -132,7 +132,7 @@ void WorldSystem::unload_scene() noexcept
 
 bool WorldSystem::destroy_scene(std::uint64_t id) noexcept
 {
-    if (!can_modify())
+    if (!can_modify() || scope_write_active_)
     {
         return false;
     }
@@ -358,6 +358,22 @@ bool WorldSystem::on_tick(double delta_time)
     {
         return false;
     }
+    const auto notification_count = geometry_notifications_.size();
+    for (std::size_t index = 0; index < notification_count; ++index)
+    {
+        const auto component = geometry_notifications_[index];
+        if (component)
+        {
+            flecs::world(world_)
+                .event<Component>()
+                .id<ecs_detail::NodeRuntime>()
+                .entity(component.node().id())
+                .ctx(component)
+                .emit();
+        }
+    }
+    geometry_notifications_.erase(geometry_notifications_.begin(),
+                                  geometry_notifications_.begin() + notification_count);
     const auto started = std::chrono::steady_clock::now();
     for (std::size_t item = 0; item < restore_config_.nodes_per_step && !retirement_.empty();
          ++item)
@@ -414,7 +430,7 @@ bool WorldSystem::refresh_scene_state()
     {
         return true;
     }
-    if (!can_modify())
+    if (!can_modify() || scope_write_active_)
     {
         return false;
     }
@@ -514,13 +530,12 @@ bool WorldSystem::refresh_scene_state()
                     }
                     for (std::size_t index = 0; index < 16; ++index)
                     {
-                        if (!std::isfinite(result[index]) ||
-                            std::abs(result[index]) > std::numeric_limits<float>::max())
+                        if (!std::isfinite(result[index]))
                         {
                             matrix->valid = false;
                             break;
                         }
-                        matrix->matrix[index] = static_cast<float>(result[index]);
+                        matrix->matrix[index] = result[index];
                     }
                     if (!matrix->valid)
                     {

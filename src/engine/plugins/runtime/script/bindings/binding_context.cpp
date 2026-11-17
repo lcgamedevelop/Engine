@@ -91,8 +91,28 @@ void BindingContext::forget_movie(MoviePlaybackHandle handle) noexcept
     }
 }
 
+void BindingContext::remember_release(std::string key, std::function<void()> release)
+{
+    lifetime_releases_.insert_or_assign(std::move(key), std::move(release));
+}
+void BindingContext::forget_release(std::string_view key)
+{
+    const auto found = lifetime_releases_.find(key);
+    if (found != lifetime_releases_.end())
+    {
+        lifetime_releases_.erase(found);
+    }
+}
+
 void BindingContext::shutdown() noexcept
 {
+    auto releases = std::move(lifetime_releases_);
+    lifetime_releases_.clear();
+    for (auto& [key, release] : releases)
+    {
+        (void)key;
+        release();
+    }
     cancel_movies();
     if (gameplay_)
     {

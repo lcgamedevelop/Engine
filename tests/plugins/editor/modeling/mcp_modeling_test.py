@@ -211,7 +211,7 @@ def test(editor, mcp, root, temporary):
         require(meta.is_file(), "resource pipeline did not create a model meta file")
         guid = tomllib.loads(meta.read_text(encoding="utf-8"))["guid"]
         cached = project / "cache/gen" / guid
-        require(cached.is_file() and resource_payload(cached.read_bytes())[4:8] == b"EMSH", "GUID cache is not MeshData")
+        require(cached.is_file() and resource_payload(cached.read_bytes())[4:8] == b"EMS2", "GUID cache is not MeshData")
         status = read_json(runtime / "project-status.json")
         require(status.get("projectState") == "idle", f"project did not release modeling scene: {status}")
         require(scene_source.with_name(scene_source.name + ".meta").read_text(encoding="utf-8") == scene_meta, "scene GUID changed during import")

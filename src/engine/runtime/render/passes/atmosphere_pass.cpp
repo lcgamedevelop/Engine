@@ -196,8 +196,9 @@ bool AtmospherePass::draw(std::uint64_t scene_id, const RenderSettings& settings
         medium_valid_ = true;
     }
     // The upstream model is near-ground, Y-up. Engine world distances are metres, LUT distances km.
-    const float altitude = std::clamp((view.world[13] - data.atmosphere_ground_height) * 0.001F,
-                                      0.001F, data.atmosphere_height - 0.001F);
+    const float altitude = std::clamp(
+        float((view.world_origin.y() + view.world[13] - data.atmosphere_ground_height) * 0.001),
+        0.001F, data.atmosphere_height - 0.001F);
     const float radius =
         std::max(data.atmosphere_planet_radius + altitude,
                  std::nextafter(data.atmosphere_planet_radius,

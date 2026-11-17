@@ -24,7 +24,7 @@ table ShaderSampler {
 }
 
 table ShaderData {
-    schema_version:uint = 1;
+    schema_version:uint = 3;
     // Canonical resource path: assets-relative or in the builtin:// namespace.
     path:string (required);
     vertex_code:[ubyte] (required);
@@ -32,8 +32,10 @@ table ShaderData {
     parameters:[ShaderParameter] (required);
     samplers:[ShaderSampler];
     surface_fragment_code:[ubyte];
+    rvt_fragment_code:[ubyte];
     instanced_vertex_code:[ubyte];
+    meshlet_culling_compatible:bool = false;
 }
 
 root_type ShaderData;
-file_identifier "ESHD";
+file_identifier "ESH3";

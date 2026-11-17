@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate boundary JSON codecs from camera/character_controller schemas without a duplicate field model."""
+"""Generate boundary JSON codecs from selected runtime schemas without a duplicate field model."""
 import argparse
 import json
 import re
@@ -12,13 +12,15 @@ parser.add_argument('--declarations', type=Path)
 parser.add_argument('--check-declarations', action='store_true')
 args = parser.parse_args()
 texts = [(name, re.sub(r'//[^\n]*', '', (args.schema_dir / (name + '.fbs')).read_text(encoding='utf-8')))
-         for name in ('camera', 'character_controller')]
+         for name in ('camera', 'character_controller', 'terrain', 'scene', 'common')]
 enums = {}
 tables = {}
-for _, text in texts:
+for schema_name, text in texts:
     for name, body in re.findall(r'enum\s+(\w+)\s*:\w+\s*\{([^}]+)\}', text):
+        if schema_name in ('terrain', 'scene', 'common') and name not in ('RvtRole', 'ShadowMethod'): continue
         enums[name] = [v.strip().split('=')[0].strip() for v in body.split(',') if v.strip()]
     for name, body in re.findall(r'table\s+(\w+)\s*\{([^}]+)\}', text):
+        if schema_name in ('terrain', 'scene', 'common') and name not in ('TerrainData', 'TerrainViewData', 'TerrainBudgetData', 'RvtSettings', 'VsmSettings'): continue
         fields = []
         for item in body.split(';'):
             if not item.strip(): continue
@@ -31,7 +33,7 @@ def camel(name):
     parts = name.split('_')
     return parts[0] + ''.join(p.title() for p in parts[1:])
 
-out = ['''// Generated from runtime camera and character schemas. Do not edit.
+out = ['''// Generated from runtime runtime schemas. Do not edit.
 #pragma once
 #include "runtime/schema/scene_generated.h"
 #include <nlohmann/json.hpp>
@@ -77,6 +79,8 @@ for n in ('Vec2','Vec3'):
             'if('+ '||'.join(f'!j.contains("{a}")||!read(j["{a}"],{a},e,script,p)' for a in axes)+')return false;',
             f'out={n}('+','.join(axes)+');return true;}',
             f'inline Json write(const {n}& v,bool script){{return Json{{'+','.join('{"'+a+'",write(v.'+a+'(),script)}' for a in axes)+'};}']
+out += ['inline bool read(const Json& j,Bounds3& out,std::string& e,bool script,std::string_view p){Vec3 a,b;if(!j.is_object()||j.size()!=2||!j.contains("minimum")||!j.contains("maximum")||!read(j["minimum"],a,e,script,p)||!read(j["maximum"],b,e,script,p))return reject(e,p);out=Bounds3(a,b);return true;}',
+        'inline Json write(const Bounds3& v,bool script){return Json{{"minimum",write(v.minimum(),script)},{"maximum",write(v.maximum(),script)}};}']
 for name, vals in enums.items():
     out += [f'inline bool read(const Json& j,{name}& out,std::string& e,bool script,std::string_view p){{',
             'if(script){std::int32_t v=0;if(!read(j,v,e,script,p))return false;',
@@ -125,6 +129,7 @@ def describe(ty):
         return {'type': 'object', 'additionalProperties': False, 'properties': properties}
     if ty in enums:
         return {'type': 'string', 'enum': enums[ty]}
+    if ty == 'Bounds3': return {'type':'object','properties':{'minimum':describe('Vec3'),'maximum':describe('Vec3')},'required':['minimum','maximum'],'additionalProperties':False}
     if ty in ('Vec2', 'Vec3'):
         axes = list('xyz')[:int(ty[-1])]
         return {'type': 'object', 'additionalProperties': False, 'required': axes,
@@ -132,6 +137,8 @@ def describe(ty):
     if ty == 'ulong':
         return {'type': 'string', 'minLength': 1, 'maxLength': 20,
                 'description': 'Unsigned 64-bit identity, encoded as a decimal string.'}
+    if ty in ('ubyte', 'ushort'):
+        return {'type': 'integer', 'minimum': 0, 'maximum': 255 if ty == 'ubyte' else 65535}
     if ty == 'int':
         return {'type': 'integer', 'minimum': -2147483648, 'maximum': 2147483647}
     if ty == 'uint':
@@ -140,7 +147,7 @@ def describe(ty):
         raise ValueError(f'Unsupported control schema type: {ty}')
     return {'type': {'string': 'string', 'bool': 'boolean'}.get(ty, 'number')}
 
-for root in ('CameraControllerData', 'CharacterControllerData', 'CharacterCameraData'):
+for root in ('CameraControllerData', 'CharacterControllerData', 'CharacterCameraData', 'TerrainData', 'RvtSettings', 'VsmSettings'):
     encoded = json.dumps(describe(root), separators=(',', ':'))
     out += [f'inline Json describe(const {root}T*){{return Json::parse(R"schema({encoded})schema",nullptr,false);}}']
 out += ['} // namespace engine::schema::control_json']
@@ -160,6 +167,7 @@ if args.declarations:
         if t.startswith('['): return ts_type(t[1:-1]) + "[]"
         if t in tables: return t + "T"
         if t in enums: return t
+        if t == 'Bounds3': return '{ minimum: Vec3T; maximum: Vec3T; }'
         if t in ('Vec2','Vec3'): return t + 'T'
         return {'string':'string','bool':'boolean','ulong':'bigint'}.get(t,'number')
     for name, fields in tables.items():

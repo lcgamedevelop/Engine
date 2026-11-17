@@ -1,12 +1,38 @@
-include "terrain.fbs";
+include "terrain_block.fbs";
 namespace engine.schema;
 
-table TerrainStateData {
-    schema_version:uint = 1;
-    base_guid:string (required);
-    base_hash:string (required);
-    volume:TerrainAssetData (required);
+table TerrainRegionState {
+    key:TerrainRegionKey (required, native_inline);
+    content_hash:string (required);
+    payload_key:string (required);
 }
 
-root_type TerrainStateData;
-file_identifier "ETRS";
+table TerrainDebrisState {
+    stable_id:ulong;
+    source_region:TerrainRegionKey (required, native_inline);
+    source_regions:[TerrainRegionKey];
+    bounds:Bounds3 (required, native_inline);
+    blocks:[TerrainRegionState] (required);
+    position:Vec3 (required, native_inline);
+    rotation:Vec4 (required, native_inline, native_default: "Vec4(0, 0, 0, 1)");
+    linear_velocity:Vec3 (required, native_inline);
+    angular_velocity:Vec3 (required, native_inline);
+    density:float = 1600;
+    simulation_age:double;
+    sleeping:bool;
+}
+
+table TerrainCheckpointData {
+    schema_version:uint = 2;
+    base_guid:string (required);
+    base_hash:string (required);
+    checkpoint_id:string (required);
+    revision:ulong;
+    next_debris_id:ulong = 1;
+    regions:[TerrainRegionState] (required);
+    debris:[TerrainDebrisState] (required);
+    retired_ids:[ulong];
+}
+
+root_type TerrainCheckpointData;
+file_identifier "ETC2";

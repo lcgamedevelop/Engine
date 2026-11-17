@@ -116,7 +116,15 @@ bool round_trip(std::vector<std::uint8_t>& bytes)
     light_settings.shadow_distance = 120.0F;
     light_settings.shadow_split_lambda = 0.7F;
     light_settings.shadow_cascade_blend = 0.2F;
+    light_settings.shadow_method = engine::schema::ShadowMethod::virtual_shadow_map;
+    light_settings.virtual_shadow = std::make_unique<engine::schema::VsmSettingsT>();
+    light_settings.virtual_shadow->virtual_resolution = 8192;
+    light_settings.virtual_shadow->first_clipmap_extent = 32;
+    light_settings.virtual_shadow->lod_bias = 1;
     engine::EnvironmentSettings environment_settings;
+    environment_settings.rvt = std::make_unique<engine::schema::RvtSettingsT>();
+    environment_settings.rvt->enabled = true;
+    environment_settings.rvt->bounds = {{-4000, -128, -4000}, {4000, 128, 4000}};
     environment_settings.atmosphere_enabled = true;
     environment_settings.atmosphere_sun_node_id = light_node.local_id();
     environment_settings.atmosphere_ground_height = 17;
@@ -337,6 +345,7 @@ bool round_trip(std::vector<std::uint8_t>& bytes)
     {
         auto local_light = light_settings;
         local_light.kind = kind;
+        local_light.shadow_method = engine::schema::ShadowMethod::shadow_map;
         if (!expect(light.set_settings(local_light) &&
                         test_support::read_settings(light) == local_light,
                     "point and spot lights accept the same atomic shadow settings"))

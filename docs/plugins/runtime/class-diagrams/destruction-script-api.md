@@ -1,5 +1,7 @@
 # 破坏脚本接口
 
+**待评审增量：** RefreshSupport 的 Collider[] 为尚未实现的直接替换签名，不保留单体重载。
+
 `DestructionBinding` 实现现有 `ScriptBinding`，仅在清单选择 `runtime/destruction` 时注册。
 QuickJS 与 V8 共用绑定，不增加另一份虚拟机相关实现。
 
@@ -27,7 +29,7 @@ DestructionBinding ..> CompletionBinding : main-thread completion delegate
 | `node.GetComponent(DestructionComponent)` | 读取普通节点组件 |
 | `DamageSphere(x, y, z, radius, damage, impulse = 0)` | 世界坐标球形损伤，官方 Blast falloff；独立物理冲量 |
 | `DamageSphereAsync(x, y, z, radius, damage, impulse, completed)` | 返回是否接收请求，后台准备后主线程发布；`completed(success)` 调用一次，拒绝请求不回调 |
-| `RefreshSupport(support: Collider, maxGap, minCoverage)` | 显式检查本 Run 已发布节点上的指定碰撞体，允许常驻对象与当前关卡对象跨 Scene；多点覆盖不足则解除 world 支撑，不自动重新连接 |
+| `RefreshSupport(supports: Collider[], maxGap, minCoverage)` | 完整静态支撑集合；跨 Scene 身份仍需属于本 Run 的同一世界。合并覆盖不足才解除支撑，不自动重新连接；未知/未加载区域不得传空数组冒充空气 |
 | `OwnsFragment(nodeId: bigint)` | 当前生成碎块组归属查询；失效 ID 返回 false |
 | `RetireFragments(maxCount, maxAgeSeconds)` | 明确执行本 owner 动态碎片保留预算；成功返回退休数（含 0），失败 null；两个参数必填，非法/额外参数拒绝，详见[退休契约](fragment-retirement.md) |
 | `ApplyStress(x,y,z,elasticLimit,fatalLimit,iterations)` | 显式调用官方 Blast 应力；成功返回本次完全断裂连接数，失败 null；单位 Pa，由项目控制频率 |

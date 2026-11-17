@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 namespace engine
 {
@@ -27,8 +28,8 @@ public:
     DestructionStateEdit(WorldSystem& world, std::uint64_t scene,
                          std::shared_ptr<std::uint64_t> node,
                          std::shared_ptr<std::uint64_t> revision, schema::ComponentDataT settings,
-                         ByteBuffer before, std::shared_ptr<std::uint64_t> support, float max_gap,
-                         float min_coverage);
+                         ByteBuffer before, std::vector<std::shared_ptr<std::uint64_t>> supports,
+                         float max_gap, float min_coverage);
     DestructionStateEdit(WorldSystem& world, std::uint64_t scene,
                          std::shared_ptr<std::uint64_t> node,
                          std::shared_ptr<std::uint64_t> revision, schema::ComponentDataT settings,
@@ -47,7 +48,8 @@ private:
     schema::ComponentDataT settings_;
     ByteBuffer before_;
     ByteBuffer after_;
-    std::shared_ptr<std::uint64_t> support_;
+    std::vector<std::shared_ptr<std::uint64_t>> supports_;
+    bool support_refresh_ = false;
     float max_gap_ = 0;
     float min_coverage_ = 0;
     bool no_change_ = false;

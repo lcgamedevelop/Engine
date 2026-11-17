@@ -23,7 +23,7 @@
 
 相机根节点组合 Camera、CameraController 与 CharacterCamera。相机状态图使用 first_person 参数切换两套 Orbit 方案；yaw、pitch 与 height 驱动观察方向和眼高，Collision 在最终输出阶段处理视线遮挡。CharacterCamera 将实际胶囊高度映射到 height；角色身体和第一人称部件通过 CharacterVisual 控制每镜头可见性。
 
-[control_templates.py](../tools/control_templates.py) 维护当前 Schema 对应的源配置；[庭院生成器](../tools/create_animation_courtyard.py) 与[综合场景生成器](../tools/create_showcase_destruction_integration.py) 复用这些配置。它们是源数据制作入口，不是旧格式转换工具。现有四个场景已使用同一结构；场景和预制体缓存为版本 3，正常导入会根据 Schema 指纹重新生成缓存，旧二进制不参与运行。
+[control_templates.py](../tools/control_templates.py) 维护当前 Schema 对应的源配置；[庭院生成器](../tools/create_animation_courtyard.py) 与[综合场景生成器](../tools/create_showcase_destruction_integration.py) 复用这些配置。它们是源数据制作入口，不是旧格式转换工具。现有四个场景已使用同一结构；场景和预制体缓存为版本 4，正常导入会根据 Schema 指纹重新生成缓存，旧二进制不参与运行。
 
 ## 检查入口
 

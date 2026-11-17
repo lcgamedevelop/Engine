@@ -67,7 +67,7 @@ std::string source_guid(std::string_view name)
 bool publish_scripts(const fs::path& source, const std::map<std::string, std::string>& scripts)
 {
     engine::schema::AssetCatalogDataT catalog;
-    catalog.schema_version = 3;
+    catalog.schema_version = 4;
     catalog.target_platform = "android";
     catalog.revision = "sync-fixture";
     for (const auto& [name, text] : scripts)
@@ -299,7 +299,7 @@ bool guid_exercise(const fs::path& root)
     std::array<char, 17> encoded{};
     std::snprintf(encoded.data(), encoded.size(), "%016llx", static_cast<unsigned long long>(hash));
     engine::schema::AssetCatalogDataT catalog;
-    catalog.schema_version = 3;
+    catalog.schema_version = 4;
     catalog.revision = "guid-sync-test";
     catalog.target_platform = "android";
     auto asset = std::make_unique<engine::schema::AssetEntryT>();

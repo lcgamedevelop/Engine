@@ -51,14 +51,13 @@ bool Transform::set_settings(const TransformSettings& transform) noexcept
     return true;
 }
 
-bool Transform::world_matrix(float* output) const noexcept
+bool Transform::world_matrix(double* output) const noexcept
 {
     if (output == nullptr)
     {
         return false;
     }
-    std::transform(identity.begin(), identity.end(), output,
-                   [](double value) { return static_cast<float>(value); });
+    std::copy(identity.begin(), identity.end(), output);
     const auto owner = node();
     if (!valid() || !owner.world()->refresh_scene_state())
     {

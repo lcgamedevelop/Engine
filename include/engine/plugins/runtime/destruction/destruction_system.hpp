@@ -1,5 +1,6 @@
 #pragma once
 
+#include "runtime/scene/scene_preparation.hpp"
 #include "runtime/schema/destruction_state_generated.h"
 #include "runtime/system/system.hpp"
 
@@ -22,7 +23,7 @@ namespace engine::plugins::destruction
 class DestructionComponent;
 class DestructionGraph;
 
-class DestructionSystem final : public System
+class DestructionSystem final : public System, public ScenePreparation
 {
 public:
     // Borrowed world and physics outlive this system. Mutations occur at frame boundaries.
@@ -42,8 +43,9 @@ public:
     [[nodiscard]] bool request_damage(DestructionComponent component, const schema::Vec3& center,
                                       float radius, float damage, float impulse,
                                       std::function<void(bool)> completed);
-    [[nodiscard]] bool refresh_support(DestructionComponent component, Collider support,
-                                       float max_gap, float min_coverage);
+    [[nodiscard]] bool refresh_support(DestructionComponent component,
+                                       std::span<const Collider> supports, float max_gap,
+                                       float min_coverage);
     [[nodiscard]] bool apply_stress(DestructionComponent component, const schema::Vec3& gravity,
                                     float elastic_limit, float fatal_limit,
                                     std::uint32_t iterations, std::uint32_t& broken_bonds);
@@ -56,6 +58,11 @@ public:
                                 schema::DestructionStateDataT& output) const;
     [[nodiscard]] bool restore(DestructionComponent component,
                                const schema::DestructionStateDataT& state);
+    [[nodiscard]] SceneWorkState prepare_scope(SceneScopeId scope,
+                                               const SceneWorkBudget& budget) override;
+    [[nodiscard]] bool scope_status(SceneScopeId scope,
+                                    ScenePreparationSnapshot& output) const override;
+    void release_scope(SceneScopeId scope) noexcept override;
 
 protected:
     [[nodiscard]] bool on_initialize(const EngineConfig& config) override;

@@ -3,6 +3,8 @@
 
 #include <flatbuffers/verifier.h>
 
+#include <set>
+
 namespace engine::plugins::terrain
 {
 schema::AssetKind TerrainResourceCodec::kind() const noexcept
@@ -33,18 +35,54 @@ bool TerrainResourceCodec::validate_data(const Resource& resource, std::string& 
 {
     error.clear();
     const auto* data = resource_detail::data<ResourceType>(&resource);
-    if (!data || !resource.info().dependencies.empty())
+    if (!data || !TerrainVolume::validate(*data, error))
     {
         error = "Invalid terrain type or dependency declaration";
         return false;
     }
-    return TerrainVolume::validate(*data, error);
+    std::set<std::string> materials;
+    if (!data->surface_material.empty())
+    {
+        materials.insert(data->surface_material);
+    }
+    std::set<std::string> blocks;
+    for (const auto& region : data->regions)
+    {
+        if (region->uniform == schema::TerrainUniformState::mixed)
+        {
+            blocks.insert(region->payload);
+        }
+    }
+    if (materials != std::set<std::string>(resource.info().dependencies.begin(),
+                                           resource.info().dependencies.end()) ||
+        blocks != std::set<std::string>(resource.info().stream_dependencies.begin(),
+                                        resource.info().stream_dependencies.end()))
+    {
+        error = "Terrain index references do not match the resource catalog";
+        return false;
+    }
+    return true;
 }
 bool TerrainResourceCodec::validate_dependencies(const Resource& resource,
                                                  ResourceView dependencies,
                                                  std::string& error) const
 {
     error.clear();
-    return resource.info().dependencies.empty() && dependencies.empty();
+    const auto* data = resource_detail::data<ResourceType>(&resource);
+    if (!data)
+    {
+        error = "Invalid terrain index resource";
+        return false;
+    }
+    if (!data->surface_material.empty())
+    {
+        const auto* material = dependency(dependencies, data->surface_material);
+        if (!material || material->info().kind != schema::AssetKind::material)
+        {
+            error = "Terrain material layer is missing or has the wrong type";
+            return false;
+        }
+    }
+    return true;
 }
 } // namespace engine::plugins::terrain

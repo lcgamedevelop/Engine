@@ -3,6 +3,8 @@ import { Resources, ResourceHandle,
     DestructionComponent, EffectComponent, Gameplay, MeshRenderer, Physics,
     PhysicsImpact, Scene, TerrainComponent, Time, Transform, UiComponent, Vector3,
 } from "engine";
+import { TerrainRequests, terrainReady } from "../terrain_requests.js";
+const terrain_bounds={minimum:{x:-32,y:-16,z:-32},maximum:{x:32,y:16,z:32}};
 import { DestructionIntegrationController } from "../controllers/destruction_integration_controller.js";
 import { DestructionIntegrationModel, IntegrationAction } from "../models/destruction_integration_model.js";
 
@@ -35,6 +37,7 @@ export default class Game extends Gameplay {
     private readonly input = new CharacterControls();
     scene: Scene | null = null;
     private terrain: TerrainComponent | null = null;
+    private readonly requests = new TerrainRequests();
     private motor: CharacterMotor | null = null;
     private animator: Animator | null = null;
     private controller: DestructionIntegrationController | null = null;
@@ -136,12 +139,14 @@ export default class Game extends Gameplay {
         }
         const terrain = this.terrain;
         if (!terrain?.IsValid()) return;
-        const ready = terrain.ready && this.specimens.every(value =>
+        this.requests.Update();
+        const snapshot=terrain.GetRegions({bounds:terrain_bounds,limit:4096});
+        const ready = terrainReady(terrain,terrain_bounds) && this.specimens.every(value =>
             value.component.IsValid() && value.component.ready);
         let changed = this.model.ready !== ready;
         this.model.ready = ready;
         if (ready && !this.started) {
-            if (!this.prepare_ground() || !this.refresh_support() || !this.navigation.Build() || !this.motor?.SetEnabled(true))
+            if (!this.refresh_support() || !this.navigation.Build() || !this.motor?.SetEnabled(true))
                 throw new Error("Cannot start the integration scene support and character");
             this.started = true;
             this.model.status = "Rocket range ready. Fire at structures or ground, or launch a 60-round barrage. Every explosion follows a real collision sweep.";
@@ -153,7 +158,7 @@ export default class Game extends Gameplay {
         if (action !== null) {
             this.model.pending = null;
             if (!ready || !this.perform(action)) {
-                this.model.status = terrain.lastError ||
+                this.model.status = this.requests.error ||
                     this.specimens.find(value => value.component.lastError)?.component.lastError ||
                     `Could not complete ${action}.`;
                 Debug.LogWarning(this.model.status);
@@ -208,7 +213,7 @@ export default class Game extends Gameplay {
         }
         const groups = this.specimens.reduce((sum, item) => sum + (item.component.groupCount ?? 0), 0);
         const dynamic = this.specimens.reduce((sum, item) => sum + (item.component.dynamicGroups ?? 0), 0);
-        const statistics = `${groups} building groups / ${dynamic} dynamic / ${terrain.fragmentCount} soil fragments / ${this.stress_broken} stress breaks`;
+        const statistics = `${groups} building groups / ${dynamic} dynamic / ${Number(snapshot?.fragmentCount ?? 0n)} soil fragments / ${this.stress_broken} stress breaks`;
         const contacts = `${this.impact_contacts} qualifying contacts / ${this.secondary_damage} of ${max_secondary_damage} secondary damage events`;
         changed = changed || statistics !== this.model.statistics || contacts !== this.model.impacts;
         this.model.statistics = statistics;
@@ -228,14 +233,14 @@ export default class Game extends Gameplay {
                 hits: this.rockets.hits, flying: this.rockets.active, missed: this.rockets.missed,
                 remaining: this.barrage_left, blocked: this.rockets.blocked, pendingEdits: pending,
                 actualRate: seconds > 0 ? (count - 1) / seconds : 0,
-                groups, dynamic, soil: terrain.fragmentCount, stressBreaks: this.stress_broken,
+                groups, dynamic, soil: Number(snapshot?.fragmentCount ?? 0n), stressBreaks: this.stress_broken,
                 wallFrameSmoothedMs: this.average_frame_ms, wallFrameMaxMs: this.maximum_frame_ms,
                 route: this.navigation.status })}`);
             this.next_report_ms = wall_ms + 1000;
             if (complete) this.reporting = false;
         }
         if (!ready) {
-            const failure = terrain.lastError ||
+            const failure = this.requests.error ||
                 this.specimens.find(value => value.component.lastError)?.component.lastError;
             if (failure && failure !== this.model.status) {
                 this.model.status = failure;
@@ -289,12 +294,12 @@ export default class Game extends Gameplay {
     }
 
     private refresh_support(): boolean {
-        const collider = this.scene?.FindNode("Terrain")?.GetComponent(Collider);
-        if (!collider) return false;
+        const colliders = this.terrain?.CollectSupport({bounds:terrain_bounds,limit:4096});
+        if (!colliders) return false;
         for (const specimen of this.specimens) {
-            const support = specimen.name === "Stress beam"
-                ? this.scene?.FindNode("Stress foundation")?.GetComponent(Collider) : collider;
-            if (!support || !specimen.component.RefreshSupport(support, 0.3, 0.5)) return false;
+            const foundation=this.scene?.FindNode("Stress foundation")?.GetComponent(Collider);
+            const supports=specimen.name === "Stress beam" ? (foundation ? [foundation] : null) : colliders;
+            if (!supports || !specimen.component.RefreshSupport(supports, 0.3, 0.5)) return false;
         }
         ++this.support_checks;
         return true;
@@ -318,7 +323,9 @@ export default class Game extends Gameplay {
         switch (action) {
             case "dig":
                 if (this.explosion_active || this.pending_explosions.length > 0) return false;
-                if (!terrain.DigSphere(0, -1.5, -2, 6.6) || !this.refresh_support()) return false;
+                return this.requests.Watch(terrain,terrain.RequestEdit({brushes:[{operation:"dig",center:{x:0,y:-1.5,z:-2},extent:{x:6.6,y:6.6,z:6.6}}]}),result=>{
+                    if(result?.state==="completed") {this.refresh_support();this.navigation.Dirty({x:0,y:-1.5,z:-2},8,false);}
+                });
                 this.navigation.Dirty({x:0,y:-1.5,z:-2}, 8, false);
                 // Dust emerges near the visible rim of this excavation, outside the solid tower.
                 if (!this.present(false, 0, 0.6, 2.4)) return false;
@@ -364,8 +371,9 @@ export default class Game extends Gameplay {
                 return this.navigation.Route();
             case "fill":
                 if (this.explosion_active || this.pending_explosions.length > 0) return false;
-                if (!terrain.FillSphere(3, -2, 5, 4) || !this.refresh_support()) return false;
-                this.navigation.Dirty({x:3,y:0,z:5}, 6, false);
+                return this.requests.Watch(terrain,terrain.RequestEdit({brushes:[{operation:"fill",center:{x:3,y:-2,z:5},extent:{x:4,y:4,z:4}}]}),result=>{
+                    if(result?.state==="completed") {this.refresh_support();this.navigation.Dirty({x:3,y:0,z:5},6,false);}
+                });
                 this.model.status = "Soil filled. Broken building anchors remain disconnected; Reset all restores the initial structure.";
                 return true;
             case "reset":
@@ -377,7 +385,7 @@ export default class Game extends Gameplay {
                 this.weak_stress = false;
                 this.stress_broken = 0;
                 this.maximum_frame_ms = this.average_frame_ms = 0;
-                if (!this.rockets.Reset() || !this.stop_emitters() || !terrain.Reset() || !this.prepare_ground()) return false;
+                if (!this.rockets.Reset() || !this.stop_emitters() || this.requests.busy) return false;
                 for (const specimen of this.specimens) {
                     if (!specimen.component.Reset()) return false;
                     specimen.next_impact = this.clock + 0.65;
@@ -385,7 +393,9 @@ export default class Game extends Gameplay {
                 this.secondary_damage = 0;
                 this.impact_contacts = 0;
                 this.support_checks = 0;
-                if (!this.refresh_support() || !this.navigation.Build() || !this.respawn()) return false;
+                return this.requests.Watch(terrain,terrain.RequestReset({bounds:terrain_bounds}),result=>{
+                    if(result?.state==="completed") {this.refresh_support();this.navigation.Build();this.respawn();}
+                });
                 this.model.status = "Original terrain, support anchors and character restored. Contact counters and presentation cleared.";
                 return true;
             case "respawn":
@@ -410,12 +420,6 @@ export default class Game extends Gameplay {
         }
     }
 
-    private prepare_ground(): boolean {
-        // A narrow pedestal and an overhanging cap provide repeatable unsupported-soil tests.
-        return !!this.terrain && this.terrain.FillSphere(-18, 1.3, 7, 1.8) &&
-            this.terrain.FillSphere(-18, 6.9, 7, 4.4);
-    }
-
     private fire(target: Vector3): boolean {
         if (!this.rockets.Fire(target)) return false;
         this.model.status = "Rocket launched from the character. Collision determines the explosion point.";
@@ -433,47 +437,32 @@ export default class Game extends Gameplay {
     }
 
     private start_explosion(): void {
-        const terrain = this.terrain;
-        const point = this.pending_explosions.shift();
-        if (!terrain || !point) return;
-        const {x,y,z} = point;
-        const generation = this.explosion_generation;
-        const before = terrain.fragmentCount ?? 0;
-        this.explosion_active = true;
-        let remaining = this.specimens.length + 1;
-        let ok = true;
-        let terrain_ready = false;
-        const completed = (success: boolean): void => {
-            if (generation !== this.explosion_generation || !this.scene?.IsValid()) return;
-            ok = success && ok;
-            if (--remaining !== 0) return;
-            // All workers have published before synchronous support or soil edits change revisions.
-            if (terrain_ready) {
-                if (!terrain.CollapseDetached(tuning.minSoilSamples, tuning.maxSoilFragments,
-                    tuning.soilFragmentCells, tuning.soilDensity)) ok = false;
-            }
-            if (!this.refresh_support()) ok = false;
-            if (terrain_ready)
-                this.navigation.Dirty(point, tuning.terrainRadius + 2,
-                    (terrain.fragmentCount ?? 0) !== before);
-            this.explosion_active = false;
-            this.next_stress = this.clock;
-            this.model.status = ok
-                ? `Rocket hit (${x.toFixed(1)}, ${y.toFixed(1)}, ${z.toFixed(1)}). Background edits published; support and navigation refreshed.`
-                : terrain.lastError || this.specimens.find(item => item.component.lastError)?.component.lastError ||
-                    "An explosion edit was rejected or cancelled.";
-            if (!ok) Debug.LogWarning(this.model.status);
-            if (!this.controller?.Refresh()) throw new Error("Cannot refresh completed explosion");
+        const terrain=this.terrain, point=this.pending_explosions.shift();
+        if(!terrain || !point) return;
+        const {x,y,z}=point, generation=this.explosion_generation;
+        this.explosion_active=true;
+        let remaining=this.specimens.length+1,ok=true;
+        const finish=(success:boolean):void=>{
+            if(generation!==this.explosion_generation || !this.scene?.IsValid()) return;
+            ok=success && ok;
+            if(--remaining!==0) return;
+            ok=this.refresh_support() && ok;
+            this.navigation.Dirty(point,tuning.terrainRadius+2,true);
+            this.explosion_active=false;this.next_stress=this.clock;
+            this.model.status=ok ? "Explosion geometry, collision and support published." : this.requests.error || "Explosion preparation failed";
+            this.controller?.Refresh();
         };
-        for (const specimen of this.specimens) {
-            if (!specimen.component.DamageSphereAsync(x, y, z, tuning.damageRadius,
-                tuning.damage, tuning.impulse, completed)) completed(false);
-            specimen.next_impact = this.clock + 0.2;
+        for(const specimen of this.specimens) {
+            if(!specimen.component.DamageSphereAsync(x,y,z,tuning.damageRadius,tuning.damage,tuning.impulse,finish)) finish(false);
+            specimen.next_impact=this.clock+.2;
         }
-        if (!terrain.DigSphereAsync(x, y, z, tuning.terrainRadius, success => {
-            terrain_ready = success;
-            completed(success);
-        })) completed(false);
+        const radius=tuning.terrainRadius;
+        if(!this.requests.Watch(terrain,terrain.RequestEdit({brushes:[{operation:"dig",center:point,extent:{x:radius,y:radius,z:radius}}]}),edited=>{
+            if(edited?.state!=="completed") {finish(false);return;}
+            if(!this.requests.Watch(terrain,terrain.RequestCollapse({bounds:terrain_bounds,minSamples:tuning.minSoilSamples,
+                maxFragments:tuning.maxSoilFragments,fragmentCells:tuning.soilFragmentCells,density:tuning.soilDensity}),
+                collapsed=>finish(collapsed?.state==="completed"))) finish(false);
+        })) finish(false);
     }
 
     private respawn(): boolean {
@@ -493,6 +482,7 @@ export default class Game extends Gameplay {
     }
 
     override OnShutdown(): void {
+        this.requests.Shutdown();
         for (const resource of this.resources.splice(0)) {
             if (!Resources.Release(resource)) Debug.LogError("Cannot release showcase resource");
         }

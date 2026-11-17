@@ -92,7 +92,7 @@ bool read_source(const std::filesystem::path& path, std::string_view platform, J
         for (const auto& [name, value] : platforms->items())
         {
             if ((name != "windows" && name != "macos" && name != "linux" && name != "android" &&
-                 name != "ios") ||
+                 name != "ios" && name != "web") ||
                 !value.is_object())
             {
                 error = "Invalid runtime settings platform table: " + name;
@@ -116,7 +116,7 @@ bool load_project_runtime_settings(const std::filesystem::path& project_root,
 {
     error.clear();
     if (platform != "windows" && platform != "macos" && platform != "linux" &&
-        platform != "android" && platform != "ios")
+        platform != "android" && platform != "ios" && platform != "web")
     {
         error = "Unknown runtime settings platform";
         return false;

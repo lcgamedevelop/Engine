@@ -303,7 +303,7 @@ private:
         if (arguments_.contains("lightmap"))
         {
             const auto transform = node.get_component<Transform>();
-            std::array<float, 16> matrix{};
+            std::array<double, 16> matrix{};
             if (!transform || !transform.world_matrix(matrix.data()) || matrix != transform_)
             {
                 error = "The lightmap mesh transform changed outside this edit";
@@ -356,7 +356,7 @@ private:
     Json arguments_;
     std::string before_path_;
     std::string after_path_;
-    std::array<float, 16> transform_{};
+    std::array<double, 16> transform_{};
     std::vector<schema::AssetEntryT> versions_;
     std::vector<ResourceReference> prepared_;
 };

@@ -13,7 +13,8 @@ character::CharacterAbilityRegistry* abilities = nullptr;
 bool reject_initialized = false;
 int calls = 0;
 bool install(RuntimeStage stage, WorldSystem& world, WindowSystem& window, PhysicsSystem& physics,
-             NavigationSystem& navigation, RenderSystem& render, TaskSystem& tasks)
+             NavigationSystem& navigation, RenderSystem& render, TaskSystem& tasks,
+             std::vector<ScenePreparation*>& preparations)
 {
     ++calls;
     if (stage == RuntimeStage::initialized && reject_initialized)
@@ -21,7 +22,7 @@ bool install(RuntimeStage stage, WorldSystem& world, WindowSystem& window, Physi
         return false;
     }
     return assemble_runtime_plugins(stage, world, window, physics, navigation, render, tasks,
-                                    camera_types, abilities);
+                                    preparations, camera_types, abilities);
 }
 bool tick(RuntimeHost& host)
 {

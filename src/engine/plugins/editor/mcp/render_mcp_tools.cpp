@@ -3,6 +3,7 @@
 
 #include "plugins/editor/mcp/editor_mcp_tools.hpp"
 #include "plugins/runtime/mcp/mcp_system.hpp"
+#include "runtime/schema/control_json_generated.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -49,7 +50,9 @@ bool register_render_tools(McpSystem& system, EditorMcpTools& editor)
         {"type", "string"},
         {"enum",
          {"frustum_culling", "static_instancing", "static_lod", "wireframe", "debug_draw",
-          "mesh_bounds", "camera_frusta", "stats", "atmosphere", "hex_tiling"}}};
+          "mesh_bounds", "camera_frusta", "stats", "atmosphere", "hex_tiling", "meshlet_culling",
+          "meshlet_bounds", "meshlet_colors", "meshlet_statistics", "rvt_viewer", "rvt_pages",
+          "rvt_residency", "rvt_invalidated", "vsm_viewer"}}};
     feature["enabled"] = {{"type", "boolean"}};
     const auto vector =
         Json{{"type", "array"}, {"items", {{"type", "number"}}}, {"minItems", 3}, {"maxItems", 3}};
@@ -108,18 +111,20 @@ bool register_render_tools(McpSystem& system, EditorMcpTools& editor)
                               {"type", "float"},
                               {"value", enabled ? 1 : 0}};
              }
-             else if (name == "atmosphere")
+             else if (name == "atmosphere" || name == "meshlet_culling")
              {
                  if (!arguments.contains("sceneId") || !arguments.contains("nodeId") ||
                      arguments.contains("slot"))
                  {
-                     reply = {{"error", "atmosphere requires sceneId/nodeId environment identity"}};
+                     reply = {{"error",
+                               "Environment features require sceneId/nodeId environment identity"}};
                      return false;
                  }
                  command = "set_render_settings";
                  forwarded = {{"sceneId", arguments["sceneId"]},
                               {"nodeId", arguments["nodeId"]},
-                              {"atmosphereEnabled", enabled}};
+                              {name == "atmosphere" ? "atmosphereEnabled" : "meshletCullingEnabled",
+                               enabled}};
              }
              else
              {
@@ -142,6 +147,37 @@ bool register_render_tools(McpSystem& system, EditorMcpTools& editor)
     lod_set["screenHeights"] = lod_set["triangleRatios"];
     lod_set["maxRelativeError"] = {{"type", "number"}, {"minimum", 0}, {"maximum", 1}};
     return feature_set &&
+           add("get_vsm_status", "Read virtual shadow residency and actual frame evidence.",
+               object_schema(Json::object(), Json::array())) &&
+           add("get_vsm_debug_options",
+               "Read temporary virtual shadow viewer settings and frame revision.",
+               object_schema(Json::object(), Json::array())) &&
+           add("set_vsm_debug_options",
+               "Select live virtual shadow depth, atlas and page table views.",
+               object_schema(
+                   {{"mode",
+                     {{"type", "string"},
+                      {"enum",
+                       {"overview", "virtual_depth", "physical_atlas", "page_table", "residency",
+                        "invalidated"}}}},
+                    {"clipmapLevel", {{"type", "integer"}, {"minimum", -1}, {"maximum", 15}}}},
+                   Json::array({"mode", "clipmapLevel"}))) &&
+           add("get_rvt_status", "Read actual RVT residency, versions and fallback reason.",
+               object_schema(Json::object(), Json::array())) &&
+           add("get_rvt_debug_options", "Read temporary live texture viewer options and revision.",
+               object_schema(Json::object(), Json::array())) &&
+           add("set_rvt_debug_options",
+               "Select the live GPU texture view. Enable rvt_viewer separately; no scene data is "
+               "changed.",
+               object_schema(
+                   {{"mode",
+                     {{"type", "string"},
+                      {"enum", {"overview", "virtual_texture", "physical_atlas", "page_table"}}}},
+                    {"channel",
+                     {{"type", "string"},
+                      {"enum", {"base_color", "normal", "roughness", "metallic", "ao"}}}},
+                    {"mip", {{"type", "integer"}, {"minimum", -1}, {"maximum", 8}}}},
+                   Json::array())) &&
            add("get_render_features",
                "Query actual feature status and support details for the device, current scene and "
                "selected material.",
@@ -155,7 +191,10 @@ bool register_render_tools(McpSystem& system, EditorMcpTools& editor)
                object_schema({{"sceneId", identity["sceneId"]},
                               {"nodeId", identity["nodeId"]},
                               {"staticInstancingEnabled", {{"type", "boolean"}}},
-                              {"staticLodEnabled", {{"type", "boolean"}}}},
+                              {"staticLodEnabled", {{"type", "boolean"}}},
+                              {"rvtRole",
+                               {{"type", "string"},
+                                {"enum", {"none", "writer", "reader", "writer_reader"}}}}},
                              required_node)) &&
            add("get_render_submission_stats",
                "Return mesh submission counts for each actual view in this module; these do not "
@@ -169,6 +208,13 @@ bool register_render_tools(McpSystem& system, EditorMcpTools& editor)
                      {{"type", "array"}, {"items", line}, {"minItems", 1}, {"maxItems", 4096}}},
                     {"lifetimeFrames", {{"type", "integer"}, {"minimum", 1}, {"maximum", 600}}}},
                    {"lines"})) &&
+           add("get_meshlet_import",
+               "Read source meshlet settings and published per-LOD meshlet counts.",
+               object_schema(lod, {"path"})) &&
+           add("set_meshlet_import",
+               "Save meshlet generation settings and reimport through the existing asset pipeline.",
+               object_schema({{"path", lod["path"]}, {"enabled", {{"type", "boolean"}}}},
+                             {"path", "enabled"})) &&
            add("get_mesh_lod_import",
                "Read source resource LOD import settings without modifying the resource.",
                object_schema(std::move(lod), {"path"})) &&
@@ -186,6 +232,9 @@ bool register_render_tools(McpSystem& system, EditorMcpTools& editor)
                    {{"sceneId", identity["sceneId"]},
                     {"nodeId", identity["nodeId"]},
                     {"atmosphereEnabled", {{"type", "boolean"}}},
+                    {"meshletCullingEnabled", {{"type", "boolean"}}},
+                    {"rvt", schema::control_json::describe(
+                                static_cast<const schema::RvtSettingsT*>(nullptr))},
                     {"atmosphereSunNodeId",
                      {{"type", "string"}, {"minLength", 1}, {"maxLength", 20}}},
                     {"atmosphereGroundHeight", {{"type", "number"}}},

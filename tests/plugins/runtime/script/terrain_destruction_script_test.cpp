@@ -2,11 +2,13 @@
 #include "plugins/runtime/destruction/destruction_component.hpp"
 #include "plugins/runtime/destruction/destruction_system.hpp"
 #include "plugins/runtime/script/script_system.hpp"
+#include "plugins/runtime/terrain/codecs/terrain_block_resource_codec.hpp"
 #include "plugins/runtime/terrain/codecs/terrain_resource_codec.hpp"
 #include "plugins/runtime/terrain/terrain_component.hpp"
 #include "plugins/runtime/terrain/terrain_system.hpp"
 #include "resource_fixture.hpp"
 #include "runtime/app/app.hpp"
+#include "runtime/app/runtime_host.hpp"
 #include "runtime/engine_config.hpp"
 #include "runtime/log/log_system.hpp"
 #include "runtime/physics/physics_system.hpp"
@@ -14,8 +16,10 @@
 #include "runtime/task/task_system.hpp"
 #include "runtime/task/thread_system.hpp"
 #include "runtime/world/world_system.hpp"
+#include "runtime_settings_fixture.hpp"
 #include "scene_snapshot.hpp"
 #include "script_fixture.hpp"
+#include "terrain_fixture.hpp"
 
 #include <chrono>
 #include <cstddef>
@@ -36,114 +40,63 @@ using plugins::destruction::DestructionSystem;
 using plugins::terrain::TerrainComponent;
 using plugins::terrain::TerrainSystem;
 
-constexpr std::string_view terrain_guid = "50000000-0000-4000-8000-000000000021";
+std::string terrain_asset_guid;
+PhysicsSystem* installed_physics = nullptr;
+TerrainSystem* installed_terrain = nullptr;
+DestructionSystem* installed_destruction = nullptr;
 constexpr std::string_view destruction_guid = "50000000-0000-4000-8000-000000000022";
 constexpr std::string_view source = R"js(
-import { Gameplay, Scene, TerrainComponent, DestructionComponent } from 'engine';
+import { Gameplay, Scene, TerrainComponent, DestructionComponent, MeshRenderer } from 'engine';
 function check(value, message) { if (!value) throw new Error(message); }
+const bounds = {minimum:{x:-4,y:-4,z:-4},maximum:{x:4,y:4,z:4}};
+const brush = {center:{x:0,y:-1,z:0},extent:{x:2,y:2,z:2},operation:'dig'};
 export default class extends Gameplay {
-    phase = 0;
-    callbacks = 0;
-    cancelled = 0;
+    phase=0;
+    callbacks=0;
     OnInitialize() {
-        this.scene = Scene.Create('Async edits');
-        this.terrain = this.scene.CreateNode('Terrain').AddComponent(TerrainComponent);
-        this.building = this.scene.CreateNode('Building').AddComponent(DestructionComponent);
-        check(this.terrain && this.building, 'create native components');
-        const unexpected = () => { throw new Error('rejected request delivered a callback'); };
-        check(!this.terrain.DigSphereAsync(0,0,0,1,unexpected) &&
-              !this.building.DamageSphereAsync(0,0,0,2,.25,0,unexpected),
-              'not-ready components accepted asynchronous work');
+        this.scene=Scene.Create('Terrain operations');
+        const mesh=this.scene.CreateNode('RVT binding test').AddComponent(MeshRenderer);
+        check(mesh && mesh.SetRvtRole(3) && mesh.rvtRole===3,'numeric RVT role is not preserved');
+        check(!mesh.SetRvtRole('writer_reader') && !mesh.SetRvtRole(4) &&
+            !mesh.SetRvtRole(-1) && !mesh.SetRvtRole(1.5) && mesh.rvtRole===3,
+            'RVT role accepts only generated numeric enum values');
+        check(mesh.SetRvtRole(0),'cannot reset RVT role');
+        this.terrain=this.scene.CreateNode('Terrain').AddComponent(TerrainComponent);
+        this.building=this.scene.CreateNode('Building').AddComponent(DestructionComponent);
+        check(this.terrain.RequestEdit({brushes:[brush]})===null,'unready request accepted');
         return true;
     }
     Update() {
-        if (this.phase === 0) {
-            check(this.terrain.ready && this.building.ready, 'native fixtures not ready');
-            for (const owner of [this.terrain, this.building]) {
-                check(owner.RetireFragments(128,0) === 0, 'empty dynamic pool must return zero');
-                check(owner.RetireFragments(-1,0) === null &&
-                      owner.RetireFragments(1,-1) === null &&
-                      owner.RetireFragments(1,NaN) === null &&
-                      owner.RetireFragments(1) === null &&
-                      owner.RetireFragments(1,0,0) === null,
-                      'retirement must reject invalid budgets and argument counts');
-            }
-            const unexpected = () => { throw new Error('invalid request delivered callback'); };
-            check(!this.terrain.DigSphereAsync(0,0,0,0,unexpected) &&
-                  !this.terrain.FillSphereAsync(NaN,0,0,1,unexpected) &&
-                  !this.terrain.DigSphereAsync(0,0,0,1,null) &&
-                  !this.building.DamageSphereAsync(0,0,0,2,-1,0,unexpected) &&
-                  !this.building.DamageSphereAsync(0,0,0,2,1,0,null),
-                  'invalid parameters or callback accepted');
-            this.revision = this.terrain.revision;
-            const done = success => {
-                check(success && this.phase === 1, 'callback failed or ran during submission');
-                ++this.callbacks;
-            };
-            check(this.terrain.DigSphereAsync(0,-1,0,2,done) &&
-                  this.terrain.FillSphereAsync(0,-1,0,1,done) &&
-                  this.building.DamageSphereAsync(.5,0,0,2,.25,0,done),
-                  'valid request rejected');
-            check(this.callbacks === 0 && this.terrain.revision === this.revision,
-                  'submission synchronously published data or called a delegate');
-            this.phase = 1;
-            return;
-        }
-        if (this.phase === 1 && this.callbacks === 3) {
-            check(this.terrain.revision > this.revision, 'successful callback preceded publication');
-            check(this.building.DamageSphere(.5,0,0,100,10,0), 'detach script fixture');
-            const fragments = this.building.dynamicGroups;
-            check(fragments > 0 && this.building.RetireFragments(0,0) === fragments &&
-                  this.building.ready && this.building.dynamicGroups === 0 &&
-                  this.building.Reset(), 'script retirement removes actual groups and Reset restores');
-            check(this.terrain.DigSphereAsync(0,-1,0,2,success => {
-                check(!success && this.phase === 2, 'reset did not cancel the queued brush');
-                ++this.cancelled;
-            }) && this.building.DamageSphereAsync(.5,0,0,2,.25,0,success => {
-                check(!success && this.phase === 2, 'reset did not cancel queued damage');
-                ++this.cancelled;
-            }) && this.terrain.Reset() && this.building.Reset(), 'queue and reset');
-            this.phase = 2;
-            return;
-        }
-        if (this.phase === 2 && this.cancelled === 2) {
-            const stale = () => { throw new Error('old scene callback escaped into replacement'); };
-            check(this.terrain.DigSphereAsync(0,-1,0,2,stale) &&
-                  this.building.DamageSphereAsync(.5,0,0,2,.25,0,stale), 'queue before scene change');
-            check(this.scene.Destroy(), 'destroy previous scene');
-            this.scene = Scene.Create('Complete');
-            check(this.scene && !this.terrain.DigSphereAsync(0,0,0,1,stale) &&
-                  !this.building.DamageSphereAsync(0,0,0,2,.25,0,stale) &&
-                  this.terrain.RetireFragments(0,0) === null &&
-                  this.building.RetireFragments(0,0) === null,
-                  'old scene handles remained usable');
-            this.phase = 3;
-        }
-        if (this.phase === 3)
-            check(this.callbacks === 3 && this.cancelled === 2, 'duplicate delegate');
-    }
-}
-)js";
-
-constexpr std::string_view native_replacement_source = R"js(
-import { Gameplay, Scene, TerrainComponent, DestructionComponent } from 'engine';
-export default class extends Gameplay {
-    submitted = false;
-    OnInitialize() {
-        this.scene = Scene.Create('Native replacement source');
-        this.terrain = this.scene.CreateNode('Terrain').AddComponent(TerrainComponent);
-        this.building = this.scene.CreateNode('Building').AddComponent(DestructionComponent);
-        return !!this.terrain && !!this.building;
-    }
-    Update() {
-        if (!this.submitted) {
-            const stale = () => { throw new Error('native scene replacement delivered an old delegate'); };
-            if (!this.terrain.DigSphereAsync(0,-1,0,2,stale) ||
-                !this.building.DamageSphereAsync(.5,0,0,2,.25,0,stale))
-                throw new Error('native replacement requests were rejected');
-            this.submitted = true;
-        } else if (this.scene.IsValid()) {
-            throw new Error('native replacement left the old scene active');
+        if(this.phase===0) {
+            const regions=this.terrain.GetRegions({bounds});
+            if(!regions || regions.state!=='ready' || regions.revision===0n || !this.building.ready) return;
+            check(regions.settingsRevision===regions.publishedSettingsRevision &&
+                regions.demandRevision===regions.publishedDemandRevision && !regions.errorCode,
+                'terrain demand status differs from its published identities');
+            check(this.terrain.RequestEdit({brushes:[]})===null,'empty brush batch accepted');
+            const settings=this.terrain.GetSettings();
+            check(settings.streamingEnabled && settings.collisionEnabled,'generated settings mismatch');
+            this.revision=regions.revision;
+            this.edit=this.terrain.RequestEdit({brushes:[brush],expectedRevision:this.revision});
+            this.cancelled=this.terrain.RequestRetire({maxCount:1});
+            check(this.edit && this.cancelled && this.terrain.CancelOperation(this.cancelled),'request identity or cancellation failed');
+            check(this.terrain.GetOperation({...this.edit,componentInstance:0n})===null,'foreign operation identity accepted');
+            check(this.building.DamageSphereAsync(.5,0,0,2,.25,0,success=>{check(success,'damage failed');++this.callbacks;}),'damage rejected');
+            this.phase=1;
+        } else if(this.phase===1) {
+            const edit=this.terrain.GetOperation(this.edit),cancelled=this.terrain.GetOperation(this.cancelled);
+            check(edit && cancelled && edit.state!=='failed', edit?.error || 'missing operation');
+            if(edit.state!=='completed' || cancelled.state!=='cancelled' || this.callbacks!==1) return;
+            check(edit.publishedRevision>this.revision && this.terrain.ReleaseOperation(this.edit) && this.terrain.ReleaseOperation(this.cancelled),'publication or release failed');
+            check(this.terrain.GetOperation(this.edit)===null,'released operation remains accessible');
+            const supports=this.terrain.CollectSupport({bounds});
+            check(supports && supports.every(c=>c.IsValid()),'support set missing');
+            check(this.building.RefreshSupport(supports,.2,.5),'cross-region support query failed');
+            this.pending=this.terrain.RequestEdit({brushes:[brush]});
+            check(this.pending && this.scene.Destroy(),'queue before scene destruction');
+            this.scene=Scene.Create('Complete');
+            check(this.terrain.GetOperation(this.pending)===null && this.terrain.RequestEdit({brushes:[brush]})===null,'stale owner accepted operations');
+            this.phase=2;
         }
     }
 }
@@ -192,20 +145,27 @@ bool add_resource(test_support::ResourceFixture& files, std::string_view guid,
 
 bool add_fixtures(test_support::ResourceFixture& files)
 {
-    schema::TerrainGeneratorDataT generator;
-    generator.cells_x = generator.cells_y = generator.cells_z = 16;
-    generator.chunk_cells = 16;
-    generator.origin = {-8, -8, -8};
-    generator.amplitude = 0;
-    generator.height = 0;
-    schema::TerrainAssetDataT volume;
-    std::string error;
-    if (!plugins::terrain::TerrainVolume::generate(generator, volume, error))
+    test_support::TerrainFixture fixture({{-8, -8, -8}, {8, 8, 8}}, 1);
+    for (auto& block : fixture.blocks)
+    {
+        if (!files.add("terrain/" + std::to_string(files.catalog.entries.size()), block))
+        {
+            return false;
+        }
+        for (auto& region : fixture.source.regions)
+        {
+            if (region->key == block.key)
+            {
+                region->payload = files.catalog.entries.back()->guid;
+                region->content_hash = files.catalog.entries.back()->content_hash;
+            }
+        }
+    }
+    if (!files.add("test.terrain", fixture.source))
     {
         return false;
     }
-    flatbuffers::FlatBufferBuilder terrain;
-    schema::FinishTerrainAssetDataBuffer(terrain, schema::TerrainAssetData::Pack(terrain, &volume));
+    terrain_asset_guid = files.catalog.entries.back()->guid;
 
     schema::DestructionAssetDataT structure;
     for (std::uint32_t index = 0; index < 2; ++index)
@@ -238,19 +198,12 @@ bool add_fixtures(test_support::ResourceFixture& files)
     flatbuffers::FlatBufferBuilder destruction;
     schema::FinishDestructionAssetDataBuffer(
         destruction, schema::DestructionAssetData::Pack(destruction, &structure));
-    return add_resource(files, terrain_guid, "test.terrain", schema::AssetKind::terrain,
-                        {reinterpret_cast<const std::byte*>(terrain.GetBufferPointer()),
-                         terrain.GetSize()}) &&
-           add_resource(files, destruction_guid, "test.destruction", schema::AssetKind::destruction,
+    return add_resource(files, destruction_guid, "test.destruction", schema::AssetKind::destruction,
                         {reinterpret_cast<const std::byte*>(destruction.GetBufferPointer()),
                          destruction.GetSize()}) &&
            add_resource(files, "50000000-0000-4000-8000-000000000023", "scripts/game.js",
                         schema::AssetKind::script,
-                        {reinterpret_cast<const std::byte*>(source.data()), source.size()}) &&
-           add_resource(files, "50000000-0000-4000-8000-000000000024", "scripts/native-replace.js",
-                        schema::AssetKind::script,
-                        {reinterpret_cast<const std::byte*>(native_replacement_source.data()),
-                         native_replacement_source.size()});
+                        {reinterpret_cast<const std::byte*>(source.data()), source.size()});
 }
 
 bool prepare_components(WorldSystem& world, TerrainSystem& terrain, DestructionSystem& destruction)
@@ -276,7 +229,12 @@ bool prepare_components(WorldSystem& world, TerrainSystem& terrain, DestructionS
     auto destruction_component =
         building ? building.get_component<DestructionComponent>() : DestructionComponent{};
     schema::TerrainDataT terrain_settings;
-    terrain_settings.terrain_guid = terrain_guid;
+    terrain_settings.terrain_guid = terrain_asset_guid;
+    terrain_settings.streaming_enabled = true;
+    terrain_settings.collision_enabled = true;
+    terrain_settings.initial_view = std::make_unique<schema::TerrainViewDataT>();
+    terrain_settings.initial_view->visual_radius = 32;
+    terrain_settings.initial_view->collision_radius = 32;
     schema::DestructionDataT destruction_settings;
     destruction_settings.destruction_guid = destruction_guid;
     return terrain_component && destruction_component &&
@@ -285,110 +243,84 @@ bool prepare_components(WorldSystem& world, TerrainSystem& terrain, DestructionS
            destruction.synchronize();
 }
 
+bool install(RuntimeStage stage, WorldSystem& world, WindowSystem&, PhysicsSystem& physics,
+             NavigationSystem&, RenderSystem& renderer, TaskSystem& tasks,
+             std::vector<ScenePreparation*>& providers)
+{
+    if (stage != RuntimeStage::before_physics)
+    {
+        return true;
+    }
+    std::string error;
+    auto terrain =
+        std::make_unique<TerrainSystem>(world, *world.resource_loader(), tasks, renderer, physics,
+                                        plugins::terrain::create_terrain_region_planner(error),
+                                        plugins::terrain::create_terrain_mesher(error));
+    installed_terrain = terrain.get();
+    installed_physics = &physics;
+    providers.push_back(terrain.get());
+    std::unique_ptr<System> owned = std::move(terrain);
+    if (!world.add_subsystem(owned))
+    {
+        return false;
+    }
+    auto destruction = std::make_unique<DestructionSystem>(world, physics, &tasks);
+    installed_destruction = destruction.get();
+    owned = std::move(destruction);
+    return world.add_subsystem(owned);
+}
 bool run(test_support::ResourceFixture& files)
 {
-    ThreadSystem threads({.worker_limit = 2});
-    test_support::ResourceServices services(&threads);
-    auto& resources = services.core;
-    engine::WorldSystem world(&services.loader);
-    PhysicsSystem physics(&world);
-
-    TaskSystem tasks(threads, {.name = "Async script tests", .max_concurrency = 2});
-    TerrainSystem terrain(world, physics, &tasks);
-    DestructionSystem destruction(world, physics, &tasks);
-    plugins::script::ScriptSystem script(&services.loader, &world, nullptr, nullptr, &physics);
-    const auto expect = [&](bool condition, const char* message)
+    test_support::ResourceServices services;
+    RuntimeSettings settings;
+    if (!test_support::load_runtime_settings(settings))
     {
-        if (!condition)
+        return false;
+    }
+    settings.engine.width = 320;
+    settings.engine.height = 240;
+    RuntimeHost host;
+    if (!services.core.add<plugins::terrain::TerrainResourceCodec>() ||
+        !services.core.add<plugins::terrain::TerrainBlockResourceCodec>() ||
+        !services.core.add<plugins::destruction::DestructionResourceCodec>() ||
+        !services.initialize(settings.engine) || !add_fixtures(files) ||
+        !files.publish(services.core) || !services.prepare_builtins() ||
+        !host.initialize(settings.engine, &services.core, &services.loader, nullptr, install,
+                         &services.threads, settings.parallel))
+    {
+        return false;
+    }
+    plugins::script::ScriptSystem script(&services.loader, host.world(), host.renderer(), host.ui(),
+                                         installed_physics);
+    if (!script.initialize(settings.engine) ||
+        !test_support::start_script(script, services, {{"content", files.root}},
+                                    "scripts/game.js") ||
+        !prepare_components(*host.world(), *installed_terrain, *installed_destruction))
+    {
+        return false;
+    }
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
+    bool passed = false;
+    while (std::chrono::steady_clock::now() < deadline)
+    {
+        if (!services.tick() || host.tick(0) != FrameStatus::running || !script.tick(.016) ||
+            !script.status().running)
         {
-            std::fprintf(stderr, "terrain/destruction script: %s (%s)\n", message,
-                         script.status().last_error.c_str());
+            std::fprintf(stderr, "terrain script: %s\n", script.status().last_error.c_str());
+            break;
         }
-        return condition;
-    };
-    if (!expect((threads.initialize({}) &&
-                 (resources.add<engine::plugins::terrain::TerrainResourceCodec>() &&
-                  resources.add<engine::plugins::destruction::DestructionResourceCodec>() &&
-                  services.initialize({}))) &&
-                    world.initialize({}) && physics.initialize({}) && tasks.initialize({}) &&
-                    terrain.initialize({}) && destruction.initialize({}) && script.initialize({}) &&
-                    add_fixtures(files) && files.publish(resources) &&
-                    test_support::start_script(script, services, {{"content", files.root}},
-                                               "scripts/game.js"),
-                "initialize the real script backend and native edit systems"))
-    {
-        return false;
-    }
-    if (!expect(prepare_components(world, terrain, destruction), "prepare native assets"))
-    {
-        return false;
-    }
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
-    while (world.scene() && world.scene()->name() != "Complete" &&
-           std::chrono::steady_clock::now() < deadline)
-    {
-        if (!expect(terrain.synchronize() && destruction.synchronize() && script.tick(.016) &&
-                        script.status().running,
-                    "publish candidates and deliver one-shot delegates"))
+        if (host.world()->scene() && host.world()->scene()->name() == "Complete")
         {
-            return false;
+            passed = true;
+            break;
         }
-        std::this_thread::yield();
-    }
-    if (!expect(world.scene() && world.scene()->name() == "Complete",
-                "success, reset cancellation and scene replacement finished"))
-    {
-        return false;
-    }
-    if (!expect(tasks.wait(), "finish independently owned worker candidates"))
-    {
-        return false;
-    }
-    for (unsigned index = 0; index < 3; ++index)
-    {
-        if (!expect(terrain.synchronize() && destruction.synchronize() && script.tick(.016) &&
-                        script.status().running,
-                    "old-scene delegates stay discarded"))
-        {
-            return false;
-        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     script.stop_gameplay();
-    for (const bool replace : {false, true})
-    {
-        if (!expect(test_support::start_script(script, services, {{"content", files.root}},
-                                               "scripts/native-replace.js") &&
-                        prepare_components(world, terrain, destruction) && script.tick(.016) &&
-                        script.status().running,
-                    "queue real script delegates before a native scene change"))
-        {
-            return false;
-        }
-        if (replace && !expect(terrain.synchronize() && destruction.synchronize() && tasks.wait() &&
-                                   terrain.synchronize() && destruction.synchronize(),
-                               "prepare completed results without dispatching script delegates"))
-        {
-            return false;
-        }
-        world.destroy_scene();
-        Scene* replacement = replace ? world.create_scene("Native replacement") : nullptr;
-        if (!expect((!replace || replacement != nullptr) && terrain.synchronize() &&
-                        destruction.synchronize() && script.tick(.016) && script.status().running &&
-                        script.tick(.016) && script.status().running,
-                    "native replacement discards pending and completed old-scene delegates"))
-        {
-            return false;
-        }
-        script.stop_gameplay();
-        if (!expect(world.scene() == replacement,
-                    "stopping the old Run preserves a native-owned replacement scene"))
-        {
-            return false;
-        }
-        world.destroy_scene();
-    }
-    return expect(!script.status().running && script.status().last_error.empty(),
-                  "script stops without retaining asynchronous delegates");
+    script.shutdown();
+    host.shutdown();
+    services.shutdown();
+    return passed;
 }
 } // namespace
 

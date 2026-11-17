@@ -1,0 +1,61 @@
+name = "Terrain world / 8 km"
+active_camera = 1
+[[nodes]]
+id = 1
+name = "World camera"
+parent = 0
+[[nodes.components]]
+type = "transform"
+position = [-3260,250,-3210]
+rotation = [-30,42,0]
+[[nodes.components]]
+type = "camera"
+fov_degrees = 58
+near_clip = 0.3
+far_clip = 6000
+[[nodes.components]]
+type = "post_process"
+hdr_enabled = true
+exposure = 1.1
+filmic_tonemap = true
+[[nodes]]
+id = 2
+name = "World environment"
+parent = 0
+[[nodes.components]]
+type = "transform"
+[[nodes.components]]
+type = "environment"
+ambient_color = [0.8,0.86,1]
+ambient_intensity = 0.4
+clear_color = 2359278335
+rvt = { enabled = true, bounds = { minimum = { x = -4000, y = -128, z = -4000 }, maximum = { x = 4000, y = 128, z = 4000 } }, virtual_resolution = 16384, page_size = 128, physical_pages = 64, pages_per_frame = 8 }
+[[nodes]]
+id = 3
+name = "World terrain"
+parent = 0
+[[nodes.components]]
+type = "transform"
+[[nodes.components]]
+type = "terrain"
+terrain_guid = "eea9b866-b4b9-46ea-8112-f45ad120d9c0"
+streaming_enabled = true
+collision_enabled = true
+rvt_role = "writer_reader"
+initial_view = { center = { x = -3600, y = 0, z = -3600 }, visual_radius = 1200, collision_radius = 128 }
+budget = { max_regions = 512, max_tasks = 4, publications_per_frame = 2 }
+[[nodes]]
+id = 4
+name = "World sun"
+parent = 0
+[[nodes.components]]
+type = "transform"
+rotation = [-45,-35,0]
+[[nodes.components]]
+type = "light"
+kind = "directional"
+color = [1,0.94,0.84,1]
+intensity = 2.4
+cast_shadows = true
+shadow_distance = 1200
+shadow_resolution = 2048

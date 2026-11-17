@@ -154,6 +154,7 @@ RenderSettings render_settings(const SceneRenderComponents& components)
         settings.fog_density = environment.fog_density;
         settings.clear_color = environment.clear_color;
         settings.ibl_enabled = environment.ibl_enabled;
+        settings.meshlet_culling_enabled = environment.meshlet_culling_enabled;
         settings.ibl_intensity = environment.ibl_intensity;
         settings.atmosphere = environment;
         settings.atmosphere_scene_id = components.environment.node().scene()->id();
@@ -164,16 +165,17 @@ RenderSettings render_settings(const SceneRenderComponents& components)
     if (components.atmosphere_sun.get_settings(sun) &&
         (!has_light || !light.cast_shadows || components.shadow_light == components.atmosphere_sun))
     {
-        float matrix[16]{};
+        double matrix[16]{};
         const auto transform = components.atmosphere_sun.node().get_component<Transform>();
         if (transform && transform.world_matrix(matrix))
         {
-            const float length = std::hypot(matrix[8], matrix[9], matrix[10]);
+            const double length = std::hypot(matrix[8], matrix[9], matrix[10]);
             if (std::isfinite(length) && length > 0)
             {
                 settings.atmosphere_sun_valid = true;
-                settings.atmosphere_sun_direction = {-matrix[8] / length, -matrix[9] / length,
-                                                     -matrix[10] / length};
+                settings.atmosphere_sun_direction = {float(-matrix[8] / length),
+                                                     float(-matrix[9] / length),
+                                                     float(-matrix[10] / length)};
                 settings.atmosphere_sun_radiance = {sun.color.r() * sun.intensity,
                                                     sun.color.g() * sun.intensity,
                                                     sun.color.b() * sun.intensity};

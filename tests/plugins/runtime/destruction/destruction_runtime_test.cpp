@@ -322,6 +322,111 @@ struct Fixture
     }
 };
 
+bool scene_preparation_contract()
+{
+    Fixture fixture;
+    if (!expect(fixture.initialize(), "initialize candidate destruction preparation"))
+    {
+        return false;
+    }
+    auto* original = fixture.world.create_scene("Original scene");
+    SceneScopeId scope;
+    if (!original || !fixture.world.begin_scope(SceneLoadKind::replace_scene, 0, scope))
+    {
+        return false;
+    }
+    auto* scene = fixture.world.scope_candidate(scope);
+    std::vector<DestructionComponent> owners;
+    for (unsigned index = 0; index < 3; ++index)
+    {
+        auto node = scene->create_node("Prepared building");
+        auto component = node.add_component<DestructionComponent>();
+        auto pose = test_support::read_settings(node.get_component<Transform>());
+        pose.position = {static_cast<double>(index) * 4, 6, 0};
+        auto settings = test_support::read_settings(component);
+        settings.destruction_guid = asset_guid;
+        settings.density = 1;
+        if (!node.get_component<Transform>().set_settings(pose) ||
+            !component.set_settings(settings))
+        {
+            return false;
+        }
+        owners.push_back(component);
+    }
+    ScenePreparationSnapshot status;
+    for (unsigned index = 0; index < owners.size(); ++index)
+    {
+        const auto expected =
+            index + 1 == owners.size() ? SceneWorkState::ready : SceneWorkState::working;
+        if (!expect(fixture.destruction->prepare_scope(scope, {1, 1.0}) == expected &&
+                        fixture.destruction->scope_status(scope, status) &&
+                        status.stages.size() == 1 && status.stages[0].completed == index + 1 &&
+                        status.stages[0].total == owners.size() && fixture.advance(1) &&
+                        generated_ids(*scene).size() == index + 1 &&
+                        !fixture.world.find_node(owners[index].node().id()) &&
+                        fixture.physics.body_count() == 0 && fixture.high_collision(0, false),
+                    "budgeted candidate preparation survives live ticks without exposing bodies",
+                    status.stages.empty() ? "" : status.stages[0].error))
+        {
+            return false;
+        }
+    }
+    const auto fragments = generated_ids(*scene);
+    if (!fixture.world.seal_scope(scope) ||
+        fixture.world.step_scope(scope, {64, 1.0}) != SceneWorkState::ready)
+    {
+        return false;
+    }
+    auto physics_state = SceneWorkState::working;
+    for (unsigned step = 0; step < 32 && physics_state == SceneWorkState::working; ++step)
+    {
+        physics_state = fixture.physics.prepare_scope(scope, {1, 1.0});
+    }
+    if (!expect(physics_state == SceneWorkState::ready && fixture.world.publish_scope(scope) &&
+                    fixture.advance(2) && generated_ids(*scene) == fragments &&
+                    std::all_of(owners.begin(), owners.end(),
+                                [](auto owner) { return owner.ready() && owner.revision() == 1; }),
+                "sealed published scene ticks without rebuilding or mutating prepared groups") ||
+        !expect(fixture.world.activate_scope(scope) && fixture.advance(1) &&
+                    fixture.physics.body_count() == owners.size() &&
+                    fixture.high_collision(0, true) && fixture.high_collision(8, true),
+                "prepared destruction collision joins the activated scene"))
+    {
+        return false;
+    }
+    fixture.destruction->release_scope(scope);
+    fixture.physics.release_scope(scope);
+    fixture.world.release_scope(scope);
+    if (!expect(!fixture.destruction->scope_status(scope, status) && fixture.advance(1) &&
+                    generated_ids(*scene) == fragments,
+                "releasing preparation preserves active destruction groups"))
+    {
+        return false;
+    }
+    SceneScopeId cancelled;
+    if (!fixture.world.begin_scope(SceneLoadKind::append_batch, scene->id(), cancelled))
+    {
+        return false;
+    }
+    auto* staged = fixture.world.scope_candidate(cancelled);
+    auto extra = staged->create_node("Cancelled building").add_component<DestructionComponent>();
+    auto settings = test_support::read_settings(owners.front());
+    if (!extra.set_settings(settings) ||
+        fixture.destruction->prepare_scope(cancelled, {1, 1.0}) != SceneWorkState::ready)
+    {
+        return false;
+    }
+    const auto discarded = staged->find_node(generated_ids(*staged).front());
+    fixture.destruction->release_scope(cancelled);
+    if (!fixture.world.cancel_scope(cancelled))
+    {
+        return false;
+    }
+    fixture.world.release_scope(cancelled);
+    return expect(!extra && !discarded && fixture.advance(1) && generated_ids(*scene) == fragments,
+                  "cancellation removes hidden groups and preserves the active scene");
+}
+
 bool mixed_tangent_sources_contract()
 {
     Fixture fixture;
@@ -778,7 +883,7 @@ bool runtime_contract()
         return false;
     }
     moving = dynamic_group(*scene);
-    float matrix[16]{};
+    double matrix[16]{};
     if (!expect(moving && moving.get_component<Transform>().world_matrix(matrix),
                 "resolve the surviving dynamic group's world transform"))
     {
@@ -944,7 +1049,7 @@ bool incremental_contract()
     {
         return false;
     }
-    float matrix[16]{};
+    double matrix[16]{};
     if (!expect(moving.get_component<Transform>().world_matrix(matrix) &&
                     component.snapshot(before),
                 "capture moving source before incremental split"))
@@ -1072,7 +1177,8 @@ bool support_contract()
     ByteBuffer after;
     if (!expect(own_collider && component.owns_fragment(own_node.id()) &&
                     !component.owns_fragment(owner.id()) && !component.owns_fragment(floor.id()) &&
-                    component.snapshot(intact) && component.refresh_support(support, 0.2F, 1) &&
+                    component.snapshot(intact) &&
+                    component.refresh_support(std::span(&support, 1), 0.2F, 1) &&
                     component.revision() == initial_revision &&
                     generated_ids(*scene) == initial_nodes && component.snapshot(after) &&
                     after == intact,
@@ -1081,14 +1187,14 @@ bool support_contract()
     {
         return false;
     }
-    if (!expect(!component.refresh_support(own_collider, 0.2F, 0.5F) &&
-                    !component.refresh_support(foreign_support, 0.2F, 0.5F) &&
-                    !component.refresh_support(support, 0, 0.5F) &&
-                    !component.refresh_support(support, 1001, 0.5F) &&
-                    !component.refresh_support(support, 0.2F, 0) &&
-                    !component.refresh_support(support, 0.2F, 1.01F) &&
-                    !component.refresh_support(support, std::numeric_limits<float>::quiet_NaN(),
-                                               0.5F) &&
+    if (!expect(!component.refresh_support(std::span(&own_collider, 1), 0.2F, 0.5F) &&
+                    !component.refresh_support(std::span(&foreign_support, 1), 0.2F, 0.5F) &&
+                    !component.refresh_support(std::span(&support, 1), 0, 0.5F) &&
+                    !component.refresh_support(std::span(&support, 1), 1001, 0.5F) &&
+                    !component.refresh_support(std::span(&support, 1), 0.2F, 0) &&
+                    !component.refresh_support(std::span(&support, 1), 0.2F, 1.01F) &&
+                    !component.refresh_support(std::span(&support, 1),
+                                               std::numeric_limits<float>::quiet_NaN(), 0.5F) &&
                     component.snapshot(after) && after == intact &&
                     component.revision() == initial_revision,
                 "self fragments, foreign scene and invalid parameters cannot release anchors"))
@@ -1099,7 +1205,7 @@ bool support_contract()
     {
         std::abort();
     }
-    if (!expect(!component.refresh_support(support, 0.2F, 0.5F),
+    if (!expect(!component.refresh_support(std::span(&support, 1), 0.2F, 0.5F),
                 "disabled destruction component rejects foundation refresh"))
     {
         return false;
@@ -1112,7 +1218,7 @@ bool support_contract()
     {
         std::abort();
     }
-    if (!expect(!component.refresh_support(support, 0.2F, 0.5F),
+    if (!expect(!component.refresh_support(std::span(&support, 1), 0.2F, 0.5F),
                 "disabled source transform rejects foundation refresh"))
     {
         return false;
@@ -1124,14 +1230,14 @@ bool support_contract()
     auto invalid_support = floor_shape;
     invalid_support.is_trigger = true;
     if (!expect(fixture.physics.set_collider_data(support, invalid_support) &&
-                    !component.refresh_support(support, 0.2F, 0.5F) &&
+                    !component.refresh_support(std::span(&support, 1), 0.2F, 0.5F) &&
                     fixture.physics.set_collider_data(support, floor_shape),
                 "trigger support is rejected without graph mutation"))
     {
         return false;
     }
     auto floor_body = floor.add_component<RigidBody>();
-    if (!expect(floor_body && !component.refresh_support(support, 0.2F, 0.5F) &&
+    if (!expect(floor_body && !component.refresh_support(std::span(&support, 1), 0.2F, 0.5F) &&
                     floor.remove_component(RigidBody::component_type) &&
                     component.snapshot(after) && after == intact,
                 "dynamic support is rejected without graph mutation"))
@@ -1139,7 +1245,7 @@ bool support_contract()
         return false;
     }
 
-    float matrix[16];
+    double matrix[16];
     if (!expect(owner.get_component<Transform>().world_matrix(matrix),
                 "resolve transformed bond positions"))
     {
@@ -1196,10 +1302,10 @@ bool support_contract()
     if (!expect(
             floor.get_component<Transform>().set_settings(floor_pose) &&
                 fixture.physics.set_collider_data(support, floor_shape) &&
-                component.refresh_support(support, 0.2F, 0.4F) &&
+                component.refresh_support(std::span(&support, 1), 0.2F, 0.4F) &&
                 component.revision() == supported_revision &&
                 generated_ids(*scene) == supported_nodes &&
-                component.refresh_support(support, 0.2F, 0.6F) &&
+                component.refresh_support(std::span(&support, 1), 0.2F, 0.6F) &&
                 component.revision() == supported_revision + 1 && component.group_count() == 2 &&
                 component.dynamic_groups() == 2 && component.snapshot(after),
             "area coverage threshold releases only the unsupported anchor", component.last_error()))
@@ -1220,7 +1326,7 @@ bool support_contract()
     floor_shape.half_extents = {4, 0.5, 4};
     if (!expect(floor.get_component<Transform>().set_settings(floor_pose) &&
                     fixture.physics.set_collider_data(support, floor_shape) &&
-                    component.refresh_support(support, 0.2F, 1) &&
+                    component.refresh_support(std::span(&support, 1), 0.2F, 1) &&
                     component.revision() == released_revision &&
                     generated_ids(*scene) == released_nodes && component.snapshot(after) &&
                     after == pack(*expected),
@@ -1237,7 +1343,7 @@ bool support_contract()
         std::abort();
     }
     if (!expect(fixture.physics.set_collider_data(support, floor_shape) &&
-                    component.refresh_support(support, 0.2F, 0.5F) &&
+                    component.refresh_support(std::span(&support, 1), 0.2F, 0.5F) &&
                     component.dynamic_groups() == 1,
                 "a disabled committed support collider has zero coverage"))
     {
@@ -1249,7 +1355,7 @@ bool support_contract()
     }
     schema::MeshDataT empty;
     if (!expect(component.restore(intact) && fixture.physics.set_mesh_data(support, empty) &&
-                    component.refresh_support(support, 0.2F, 0.5F) &&
+                    component.refresh_support(std::span(&support, 1), 0.2F, 0.5F) &&
                     component.dynamic_groups() == 1,
                 "a valid empty support mesh releases anchors without a query error"))
     {
@@ -1708,11 +1814,11 @@ bool persistent_destruction_contract()
 
 int main()
 {
-    return mixed_tangent_sources_contract() && retirement_contract() &&
-                   persistent_destruction_contract() && runtime_contract() &&
-                   incremental_contract() && support_contract() && stress_contract() &&
-                   asynchronous_damage_contract() && asynchronous_damage_fairness(1) &&
-                   asynchronous_damage_fairness(2)
+    return scene_preparation_contract() && mixed_tangent_sources_contract() &&
+                   retirement_contract() && persistent_destruction_contract() &&
+                   runtime_contract() && incremental_contract() && support_contract() &&
+                   stress_contract() && asynchronous_damage_contract() &&
+                   asynchronous_damage_fairness(1) && asynchronous_damage_fairness(2)
                ? 0
                : 1;
 }

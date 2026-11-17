@@ -90,6 +90,9 @@ protected:
     void on_shutdown() noexcept override;
 
 private:
+    friend class GeometryUpdate;
+    [[nodiscard]] bool can_publish_geometry(Collider prepared, Collider target) const;
+    void publish_geometry(Collider prepared, Collider target) noexcept;
     struct State;
     WorldSystem* world_ = nullptr;
     TaskSystem* tasks_ = nullptr;

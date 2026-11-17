@@ -271,19 +271,20 @@ bool initialize_runtime_app(RuntimeAppState& state, const AppConfig& requested_a
     state.setup = [](engine::RuntimeStage stage, engine::WorldSystem& world,
                      engine::WindowSystem& window, engine::PhysicsSystem& physics,
                      engine::NavigationSystem& navigation, engine::RenderSystem& renderer,
-                     engine::TaskSystem& tasks)
+                     engine::TaskSystem& tasks,
+                     std::vector<engine::ScenePreparation*>& preparations)
     {
-        const bool assembled =
-            assemble_runtime_plugins(stage, world, window, physics, navigation, renderer, tasks,
+        const bool assembled = assemble_runtime_plugins(stage, world, window, physics, navigation,
+                                                        renderer, tasks, preparations,
 #if ENGINE_HAS_CAMERA
-                                     &camera_types,
+                                                        &camera_types,
 #else
-                                     nullptr,
+                                                        nullptr,
 #endif
 #if ENGINE_HAS_CHARACTER_CONTROLLER
-                                     &character_abilities);
+                                                        &character_abilities);
 #else
-                                     nullptr);
+                                                        nullptr);
 #endif
 #if defined(ENGINE_WEB_RENDER_TEST)
         return assembled &&

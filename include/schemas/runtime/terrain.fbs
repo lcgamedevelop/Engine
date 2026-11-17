@@ -1,37 +1,71 @@
 include "common.fbs";
 namespace engine.schema;
 
-table TerrainSphere {
-    center:Vec3 (required, native_inline);
-    radius:float = 3;
+struct TerrainRegionKey {
+    x:int;
+    y:int;
+    z:int;
+    lod:ubyte;
 }
 
-// Inputs shared by TerrainVolume::generate and the editor terrain importer.
-table TerrainGeneratorData {
-    cells_x:uint = 64;
-    cells_y:uint = 32;
-    cells_z:uint = 64;
-    voxel_size:float = 1;
-    chunk_cells:uint = 16;
-    origin:Vec3 (required, native_inline);
-    height:float = 0;
-    amplitude:float = 4;
-    frequency:float = 0.08;
-    seed:uint = 1;
-    cavities:[TerrainSphere];
+enum TerrainUniformState:ubyte { unknown, air, solid, mixed }
+enum TerrainBrushShape:ubyte { sphere, box }
+enum TerrainBrushOperation:ubyte { dig, fill, flatten, smooth, paint }
+
+struct TerrainLayerSample {
+    layer0:uint;
+    layer1:uint;
+    layer2:uint;
+    layer3:uint;
+    weights:Vec4;
+}
+
+table TerrainRegionEntry {
+    key:TerrainRegionKey (required, native_inline);
+    uniform:TerrainUniformState = unknown;
+    payload:string;
+    content_hash:string;
 }
 
 table TerrainAssetData {
-    schema_version:uint = 1;
-    cells_x:uint;
-    cells_y:uint;
-    cells_z:uint;
-    voxel_size:float = 1;
-    chunk_cells:uint = 16;
+    schema_version:uint = 2;
     origin:Vec3 (required, native_inline);
-    // Negative is solid; x changes fastest, then y, then z. Includes boundary samples.
-    density:[float] (required);
+    bounds:Bounds3 (required, native_inline);
+    voxel_size:double = 1;
+    block_cells:uint = 16;
+    regions:[TerrainRegionEntry] (required);
+    material_layers:[string];
+    surface_material:string;
+}
+
+table TerrainViewData {
+    center:Vec3 (required, native_inline);
+    visual_radius:double = 64;
+    collision_radius:double = 32;
+    lod_bias:int = 0;
+    priority:int = 0;
+}
+
+table TerrainBudgetData {
+    max_requests:uint = 64;
+    max_tasks:uint = 4;
+    max_regions:uint = 256;
+    cpu_bytes:ulong = 268435456;
+    gpu_bytes:ulong = 134217728;
+    collision_bytes:ulong = 134217728;
+    upload_bytes_per_frame:ulong = 4194304;
+    publications_per_frame:uint = 1;
+}
+
+table TerrainBrushData {
+    shape:TerrainBrushShape = sphere;
+    operation:TerrainBrushOperation = dig;
+    center:Vec3 (required, native_inline);
+    extent:Vec3 (required, native_inline, native_default: "Vec3(3, 3, 3)");
+    strength:float = 1;
+    layer:TerrainLayerSample (required, native_inline,
+        native_default: "TerrainLayerSample(0, 0, 0, 0, Vec4(1, 0, 0, 0))");
 }
 
 root_type TerrainAssetData;
-file_identifier "ETRN";
+file_identifier "ETW2";

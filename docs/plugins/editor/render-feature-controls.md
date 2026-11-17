@@ -35,6 +35,10 @@ LOD 离线配置另由资源域提供 `get_mesh_lod_import` / `set_mesh_lod_impo
 | `debug_draw` | renderer 临时诊断，同上 | 只控制调用方提供的临时通用线数据 |
 | `mesh_bounds` | renderer 临时诊断，同上 | 自动绘制真实边界，不依赖额外开启 `debug_draw` |
 | `camera_frusta` | renderer 临时诊断，同上 | 自动绘制已发布相机视锥，范围见底层能力图 |
+| `meshlet_culling` | scene，指定 `EnvironmentComponent` | 明确 `sceneId/nodeId`；修改当前场景唯一总开关 |
+| `meshlet_colors` | renderer 临时诊断，`set_debug_feature` | 按真实分簇填充表面色块，读取当前 LOD；默认关闭 |
+| `meshlet_bounds` | renderer 临时诊断，同上 | 分簇包围球线框，可与色块独立开启或叠加 |
+| `meshlet_statistics` | renderer 临时诊断，同上 | 启停异步 GPU 采样，结果见提交统计；不隐式开启场景功能 |
 | `stats` | renderer，复用现有 stats 状态 | 与原有 `set_render_stats` 双向一致 |
 | `atmosphere` | scene，指定 `EnvironmentComponent` | 明确 `sceneId/nodeId`；组件必须有效。精确字段跟随天空设计，不存在组件时明确失败 |
 | `hex_tiling` | material，指定 `Material` 的具名开关参数 | 明确 `sceneId/nodeId/slot`，只接受声明该参数且数值类型匹配的 Shader。参数名/数值契约由 Hex 材质定义确定 |

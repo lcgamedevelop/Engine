@@ -1,305 +1,136 @@
 #if defined(ENGINE_HAS_TERRAIN_PLUGIN) && ENGINE_HAS_TERRAIN_PLUGIN
-
 #include "plugins/runtime/script/bindings/terrain_binding.hpp"
-#include "plugins/runtime/script/bindings/binding_helpers.hpp"
-
-#include "plugins/runtime/script/bindings/binding_context.hpp"
-#include "plugins/runtime/terrain/terrain_component.hpp"
-#include "plugins/runtime/terrain/terrain_system.hpp"
-#include "runtime/app/app.hpp"
-#include "runtime/scene/node.hpp"
-
-#include <algorithm>
-#include <filesystem>
-#include <string>
-#include <system_error>
-#include <utility>
+#include "plugins/runtime/script/bindings/control_binding_helpers.hpp"
+#include "plugins/runtime/terrain/terrain_control.hpp"
 
 namespace engine::plugins::script::bindings
 {
 namespace
 {
-
 constexpr std::string_view javascript = R"js(
+function terrainInput(value) {
+    if (typeof value === 'bigint') return value.toString();
+    if (Array.isArray(value)) return value.map(terrainInput);
+    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k,v])=>[k.replace(/[A-Z]/g,m=>'_'+m.toLowerCase()),terrainInput(v)]));
+    return value;
+}
+const terrainIntegers = new Set(['world_epoch','node_id','component_instance','sequence','revision','settings_revision','demand_revision','published_settings_revision','published_demand_revision','fragment_count','base_revision','published_revision','content_revision','captured_revision','density_revision','mesh_revision','collision_revision','completed','total']);
+function terrainOutput(value,key='') {
+    if (typeof value==='string' && terrainIntegers.has(key)) return BigInt(value);
+    if (Array.isArray(value)) return value.map(v=>terrainOutput(v));
+    if (value && typeof value==='object') return Object.fromEntries(Object.entries(value).map(([k,v])=>[k.replace(/_([a-z])/g,(_,c)=>c.toUpperCase()),terrainOutput(v,k)]));
+    return value;
+}
+function terrainCall(component,method,args) {
+    const h=handles.get(component);
+    return terrainOutput(native.TerrainCall(h.scene,h.node,method,JSON.stringify(terrainInput(args))));
+}
 export class TerrainComponent extends Component {
-    constructor(token, scene, node) { super(token, scene, node, native.TerrainKind); }
-    DigSphere(x, y, z, radius) {
-        const h = handles.get(this);
-        return native.TerrainDig(h.scene, h.node, x, y, z, radius);
+    constructor(token,scene,node){super(token,scene,node,native.TerrainKind);}
+    GetSettings(){const h=handles.get(this);return copyComponentData(native.TerrainSettings(h.scene,h.node));}
+    SetSettings(settings){const h=handles.get(this);return native.TerrainSetSettings(h.scene,h.node,JSON.stringify(settings,(_,v)=>typeof v==='bigint'?v.toString():v));}
+    SetView(key,view){return terrainCall(this,'set_view',{viewKey:key,view})===true;}
+    RemoveView(key){return terrainCall(this,'remove_view',{viewKey:key})===true;}
+    PinRegions(spec){return terrainCall(this,'pin_regions',spec);}
+    ReleasePin(id){return terrainCall(this,'release_pin',id)===true;}
+    RequestEdit(spec){return terrainCall(this,'request_edit',spec);}
+    RequestCollapse(spec){return terrainCall(this,'request_collapse',spec);}
+    RequestReset(spec){return terrainCall(this,'request_reset',spec);}
+    RequestRetire(spec){return terrainCall(this,'request_retire',spec);}
+    RequestSave(spec){return terrainCall(this,'request_save',spec);}
+    RequestLoad(spec){return terrainCall(this,'request_load',spec);}
+    GetOperation(id){return terrainCall(this,'operation_status',id);}
+    CancelOperation(id){return terrainCall(this,'cancel_operation',id)===true;}
+    ReleaseOperation(id){return terrainCall(this,'release_operation',id)===true;}
+    GetRegions(query){return terrainCall(this,'query_regions',query);}
+    CollectSupport(query){
+        const result=terrainCall(this,'collect_support',query);
+        if(result===null)return null;
+        const h=handles.get(this);
+        return result.map(value=>new Node(key,h.scene,value.nodeId).GetComponent(Collider));
     }
-    FillSphere(x, y, z, radius) {
-        const h = handles.get(this);
-        return native.TerrainFill(h.scene, h.node, x, y, z, radius);
-    }
-    DigSphereAsync(x, y, z, radius, completed) {
-        const h = handles.get(this);
-        return submitCompletion(() => native.TerrainDigAsync(h.scene, h.node, x, y, z, radius), completed);
-    }
-    FillSphereAsync(x, y, z, radius, completed) {
-        const h = handles.get(this);
-        return submitCompletion(() => native.TerrainFillAsync(h.scene, h.node, x, y, z, radius), completed);
-    }
-    CollapseDetached(minSamples, maxFragments, fragmentCells = 4, density = 1600) {
-        const h = handles.get(this);
-        return native.TerrainCollapse(h.scene, h.node, minSamples, maxFragments,
-            fragmentCells, density);
-    }
-    RetireFragments(maxCount, maxAgeSeconds) {
-        if (arguments.length !== 2) return null;
-        const h = handles.get(this);
-        return native.TerrainRetire(h.scene, h.node, maxCount, maxAgeSeconds);
-    }
-    get fragmentCount() { const h = handles.get(this); return native.TerrainFragments(h.scene, h.node); }
-    Reset() { const h = handles.get(this); return native.TerrainReset(h.scene, h.node); }
-    Save(slot) { const h = handles.get(this); return native.TerrainSave(h.scene, h.node, slot); }
-    Load(slot) { const h = handles.get(this); return native.TerrainLoad(h.scene, h.node, slot); }
-    get ready() { const h = handles.get(this); return native.TerrainReady(h.scene, h.node); }
-    get revision() { const h = handles.get(this); return native.TerrainRevision(h.scene, h.node); }
-    get chunkCount() { const h = handles.get(this); return native.TerrainChunks(h.scene, h.node); }
-    get rebuiltChunks() {
-        const h = handles.get(this); return native.TerrainRebuilt(h.scene, h.node);
-    }
-    get triangleCount() {
-        const h = handles.get(this); return native.TerrainTriangles(h.scene, h.node);
-    }
-    get lastError() { const h = handles.get(this); return native.TerrainError(h.scene, h.node); }
 }
-componentTypes.set(TerrainComponent, { add: native.TerrainAdd, kind: native.TerrainKind });
-Object.freeze(TerrainComponent.prototype);
-Object.freeze(TerrainComponent);
+componentTypes.set(TerrainComponent,{add:native.TerrainAdd,kind:native.TerrainKind});
+Object.freeze(TerrainComponent.prototype);Object.freeze(TerrainComponent);
 )js";
-
-bool status(const std::filesystem::path& path, std::filesystem::file_status& output)
+void call(const Arguments& args)
 {
-    std::error_code error;
-    output = std::filesystem::symlink_status(path, error);
-    return !error || (error == std::errc::no_such_file_or_directory &&
-                      output.type() == std::filesystem::file_type::not_found);
-}
-
-bool directory(const std::filesystem::path& path)
-{
-    std::filesystem::file_status state;
-    if (!status(path, state) || !std::filesystem::is_directory(state))
-    {
-        return false;
-    }
-    std::error_code error;
-    const auto canonical = std::filesystem::canonical(path, error);
-    return !error && canonical == path;
-}
-
-bool slot_path(std::string_view slot, bool saving, std::filesystem::path& output)
-{
-    output.clear();
-    if (!App::is_initialized() || slot.empty() || slot.size() > 48 ||
-        !std::all_of(slot.begin(), slot.end(),
-                     [](unsigned char character)
-                     {
-                         return (character >= 'A' && character <= 'Z') ||
-                                (character >= 'a' && character <= 'z') ||
-                                (character >= '0' && character <= '9') || character == '_' ||
-                                character == '-';
-                     }))
-    {
-        return false;
-    }
-    const auto root = App::persistent_data_path().lexically_normal();
-    if (!root.is_absolute() || !directory(root))
-    {
-        return false;
-    }
-    const auto parent = root / "terrain";
-    std::filesystem::file_status parent_status;
-    if (!status(parent, parent_status))
-    {
-        return false;
-    }
-    std::error_code error;
-    if (parent_status.type() == std::filesystem::file_type::not_found)
-    {
-        if (!saving)
-        {
-            return false;
-        }
-        std::filesystem::create_directory(parent, error);
-        if (error)
-        {
-            return false;
-        }
-    }
-    if (!directory(parent))
-    {
-        return false;
-    }
-    const auto candidate = parent / (std::string(slot) + ".bin");
-    std::filesystem::file_status file_status;
-    if (!status(candidate, file_status) ||
-        (file_status.type() != std::filesystem::file_type::not_found &&
-         !std::filesystem::is_regular_file(file_status)) ||
-        (!saving && file_status.type() == std::filesystem::file_type::not_found))
-    {
-        return false;
-    }
-    const auto canonical = std::filesystem::weakly_canonical(candidate, error);
-    if (error || canonical != candidate || canonical.parent_path() != parent)
-    {
-        return false;
-    }
-    output = candidate;
-    return true;
-}
-
-void sphere(const Arguments& arguments)
-{
-    auto value = binding_detail::component<terrain::TerrainComponent>(arguments, 6);
-    double x = 0;
-    double y = 0;
-    double z = 0;
-    float radius = 0;
-    if (value.valid() && BindingContext::number(arguments, 2, x) &&
-        BindingContext::number(arguments, 3, y) && BindingContext::number(arguments, 4, z) &&
-        BindingContext::scalar(arguments, 5, radius) && radius > 0)
-    {
-        arguments.set_return(value.apply_sphere({x, y, z}, radius, arguments.data() != 0));
-    }
-}
-
-void sphere_async(const Arguments& arguments)
-{
-    auto value = binding_detail::component<terrain::TerrainComponent>(arguments, 6);
-    auto* context = BindingContext::current(arguments);
-    auto* system = terrain::TerrainSystem::instance();
-    double x = 0;
-    double y = 0;
-    double z = 0;
-    float radius = 0;
-    if (value && context && system && BindingContext::number(arguments, 2, x) &&
-        BindingContext::number(arguments, 3, y) && BindingContext::number(arguments, 4, z) &&
-        BindingContext::scalar(arguments, 5, radius))
-    {
-        arguments.set_return(context->submit_async(
-            [=, fill = arguments.data() != 0](std::function<void(bool)> completed) mutable
-            {
-                return system->request_apply_sphere(value, {x, y, z}, radius, fill,
-                                                    std::move(completed));
-            }));
-    }
-}
-
-void reset(const Arguments& arguments)
-{
-    auto value = binding_detail::component<terrain::TerrainComponent>(arguments, 2);
-    arguments.set_return(value.valid() && value.reset());
-}
-
-void persistence(const Arguments& arguments)
-{
-    auto value = binding_detail::component<terrain::TerrainComponent>(arguments, 3);
-    std::string slot;
-    std::filesystem::path path;
-    const bool saving = arguments.data() != 0;
-    if (!value || !value.ready() || !BindingContext::text(arguments, 2, slot) ||
-        !slot_path(slot, saving, path))
+    auto component = binding_detail::component<terrain::TerrainComponent>(args, 4);
+    auto* context = BindingContext::current(args);
+    args.set_return({});
+    std::string method, error;
+    control_detail::Json input, output;
+    if (!component || !context || !BindingContext::text(args, 2, method) ||
+        !control_detail::argument(args, 3, input) ||
+        !terrain::control::call(component, method, input, output, error))
     {
         return;
     }
-    arguments.set_return(saving ? value.save_state(path) : value.load_state(path));
-}
-
-void ready(const Arguments& arguments)
-{
-    const auto value = binding_detail::component<terrain::TerrainComponent>(arguments, 2);
-    arguments.set_return(value.valid() && value.ready());
-}
-
-void collapse(const Arguments& arguments)
-{
-    auto value = binding_detail::component<terrain::TerrainComponent>(arguments, 6);
-    float density = 0;
-    if (value && arguments.is_uint32(2) && arguments.is_uint32(3) && arguments.is_uint32(4) &&
-        BindingContext::scalar(arguments, 5, density))
+    const auto prefix = "terrain/" + std::to_string(component.node().id()) + "/" +
+                        std::to_string(component.instance_id()) + "/";
+    if (method == "set_view")
     {
-        arguments.set_return(value.collapse_detached(arguments.unsigned_integer(2),
-                                                     arguments.unsigned_integer(3),
-                                                     arguments.unsigned_integer(4), density));
+        const auto cleanup = input;
+        const auto key = prefix + "view/" + input["view_key"].dump();
+        context->remember_release(key,
+                                  [component, cleanup]()
+                                  {
+                                      control_detail::Json result;
+                                      std::string error;
+                                      (void)terrain::control::call(component, "remove_view",
+                                                                   cleanup, result, error);
+                                  });
     }
-}
-
-void retire(const Arguments& arguments)
-{
-    auto value = binding_detail::component<terrain::TerrainComponent>(arguments, 4);
-    arguments.set_return({});
-    double max_age_seconds = 0;
-    std::uint32_t retired_count = 0;
-    if (value && arguments.is_uint32(2) && BindingContext::number(arguments, 3, max_age_seconds) &&
-        value.retire_fragments(arguments.unsigned_integer(2), max_age_seconds, retired_count))
+    else if (method == "remove_view")
     {
-        arguments.set_return(static_cast<double>(retired_count));
+        context->forget_release(prefix + "view/" + input["view_key"].dump());
     }
-}
-
-void statistic(const Arguments& arguments)
-{
-    const auto value = binding_detail::component<terrain::TerrainComponent>(arguments, 2);
-    arguments.set_return({});
-    if (!value)
+    else if (method == "pin_regions")
     {
-        return;
+        const auto id = output;
+        context->remember_release(prefix + "pin/" + id["sequence"].dump(),
+                                  [component, id]()
+                                  {
+                                      control_detail::Json result;
+                                      std::string error;
+                                      (void)terrain::control::call(component, "release_pin", id,
+                                                                   result, error);
+                                  });
     }
-    switch (arguments.data())
+    else if (method == "release_pin")
     {
-    case 0:
-        arguments.set_return(value.revision());
-        break;
-    case 1:
-        arguments.set_return(static_cast<double>(value.chunk_count()));
-        break;
-    case 2:
-        arguments.set_return(static_cast<double>(value.rebuilt_chunks()));
-        break;
-    case 3:
-        arguments.set_return(static_cast<double>(value.triangle_count()));
-        break;
-    case 4:
-        arguments.set_return(value.last_error());
-        break;
-    case 5:
-        arguments.set_return(static_cast<double>(value.fragment_count()));
-        break;
+        context->forget_release(prefix + "pin/" + input["sequence"].dump());
     }
+    else if (method.starts_with("request_"))
+    {
+        const auto id = output;
+        context->remember_release(prefix + "operation/" + id["sequence"].dump(), [component, id]()
+                                  { terrain::control::abandon_operation(component, id); });
+    }
+    else if (method == "release_operation")
+    {
+        context->forget_release(prefix + "operation/" + input["sequence"].dump());
+    }
+    args.set_return(control_detail::native(output));
 }
-
 } // namespace
-
 std::string_view TerrainBinding::name() const noexcept
 {
     return "TerrainComponent";
 }
-
 std::string_view TerrainBinding::source() const noexcept
 {
     return javascript;
 }
-
 bool TerrainBinding::register_functions(vm::ScriptVm& vm) const
 {
     return vm.integer("TerrainKind", static_cast<int>(terrain::TerrainComponent::component_type)) &&
            vm.function("TerrainAdd", binding_detail::add_component<terrain::TerrainComponent>) &&
-           vm.function("TerrainDig", sphere, 0) && vm.function("TerrainFill", sphere, 1) &&
-           vm.function("TerrainReset", reset) && vm.function("TerrainDigAsync", sphere_async, 0) &&
-           vm.function("TerrainFillAsync", sphere_async, 1) &&
-           vm.function("TerrainCollapse", collapse) && vm.function("TerrainRetire", retire) &&
-           vm.function("TerrainFragments", statistic, 5) &&
-           vm.function("TerrainSave", persistence, 1) &&
-           vm.function("TerrainLoad", persistence, 0) && vm.function("TerrainReady", ready) &&
-           vm.function("TerrainRevision", statistic, 0) &&
-           vm.function("TerrainChunks", statistic, 1) &&
-           vm.function("TerrainRebuilt", statistic, 2) &&
-           vm.function("TerrainTriangles", statistic, 3) &&
-           vm.function("TerrainError", statistic, 4);
+           vm.function("TerrainCall", call) &&
+           vm.function("TerrainSettings",
+                       control_detail::get_settings<terrain::TerrainComponent>) &&
+           vm.function("TerrainSetSettings",
+                       control_detail::set_settings<terrain::TerrainComponent>);
 }
-
 } // namespace engine::plugins::script::bindings
-
 #endif

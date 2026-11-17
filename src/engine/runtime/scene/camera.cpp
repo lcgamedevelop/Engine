@@ -8,6 +8,7 @@
 #include "runtime/scene/node.hpp"
 #include "runtime/scene/transform.hpp"
 
+#include "runtime/utils/transform_math.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -120,12 +121,17 @@ bool Camera::viewport_point_to_ray(const Vec2& point, double aspect, Vec3& origi
         return false;
     }
     auto transform = node().get_component<Transform>();
+    double absolute[16]{};
     float world[16]{};
     float view[16]{};
     float projection[16]{};
     Data data;
-    if (!get_settings(data) || !transform.valid() || !transform.world_matrix(world) ||
-        !camera_detail::view_matrix(world, view) ||
+    if (!get_settings(data) || !transform.valid() || !transform.world_matrix(absolute))
+    {
+        return false;
+    }
+    transform_math::relative(absolute, {absolute[12], absolute[13], absolute[14]}, world);
+    if (!camera_detail::view_matrix(world, view) ||
         !camera_detail::projection_matrix(data, aspect, false, projection))
     {
         return false;
@@ -144,7 +150,7 @@ bool Camera::viewport_point_to_ray(const Vec2& point, double aspect, Vec3& origi
     for (std::size_t axis = 0; axis < 3; ++axis)
     {
         // view 的线性部分是正交相机基的转置，不把节点缩放重新带入射线。
-        world_origin[axis] = world[12 + axis];
+        world_origin[axis] = absolute[12 + axis];
         for (std::size_t component = 0; component < 3; ++component)
         {
             world_origin[axis] += view[axis * 4 + component] * local_origin[component];

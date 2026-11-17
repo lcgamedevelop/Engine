@@ -233,7 +233,7 @@ bool collision_and_rotation()
     auto pose = read_settings(transform);
     pose.position = {0, 2, 4};
     pose.rotation = {25, 130, -15};
-    float expected[16], actual[16];
+    double expected[16], actual[16];
     if (!transform.set_settings(pose) || !transform.world_matrix(expected))
     {
         return false;

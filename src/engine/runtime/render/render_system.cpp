@@ -1,6 +1,13 @@
 #include "runtime/render/render_system.hpp"
+#include "runtime/render/rvt/rvt_debug_view.hpp"
+#include "runtime/render/rvt/rvt_pass.hpp"
+#include "runtime/render/vsm/virtual_shadow_cache.hpp"
+#include "runtime/render/vsm/virtual_shadow_pass.hpp"
+#include "runtime/render/vsm/vsm_debug_view.hpp"
+
 #include "runtime/render/frame_counters.hpp"
 #include "runtime/render/passes/frame_output.hpp"
+#include "runtime/render/passes/meshlet_cull_pass.hpp"
 
 #include "runtime/font/font_system.hpp"
 #include "runtime/performance/profiling.hpp"
@@ -205,13 +212,18 @@ bool RenderSystem::on_initialize(const EngineConfig&)
     preparation_.reset();
     if (config_.cluster_tile_size < 16 || config_.cluster_tile_size > 256 ||
         config_.cluster_depth_slices == 0 || config_.cluster_depth_slices > 64 ||
-        config_.maximum_lights == 0 || config_.maximum_lights > 4096 ||
-        config_.maximum_cluster_lights == 0 || config_.maximum_cluster_lights > 256 ||
-        config_.shadow_atlas_size < 512 || config_.shadow_atlas_size > 8192 ||
+        config_.maximum_meshlet_candidates == 0 ||
+        config_.maximum_meshlet_candidates > UINT32_MAX / 128 ||
+        config_.maximum_meshlet_candidates > UINT32_MAX / 124 || config_.maximum_lights == 0 ||
+        config_.maximum_lights > 4096 || config_.maximum_cluster_lights == 0 ||
+        config_.maximum_cluster_lights > 256 || config_.shadow_atlas_size < 512 ||
+        config_.shadow_atlas_size > 8192 ||
         (config_.shadow_atlas_size & (config_.shadow_atlas_size - 1)) != 0 ||
         config_.local_shadow_tile_size < 64 || config_.local_shadow_tile_size > 2048 ||
         (config_.local_shadow_tile_size & (config_.local_shadow_tile_size - 1)) != 0 ||
         config_.local_shadow_tile_size > config_.shadow_atlas_size ||
+        config_.vsm_physical_pages == 0 || config_.vsm_physical_pages > 4096 ||
+        config_.vsm_pages_per_frame == 0 || config_.vsm_pages_per_frame > 16 ||
         config_.maximum_local_shadow_faces > 24 || config_.maximum_planar_reflections > 2 ||
         !render_detail::valid_msaa_samples(config_.msaa_samples))
     {
@@ -525,6 +537,17 @@ RenderSubmitStatus RenderSystem::render(Camera camera)
 {
     render_detail::ui_draws = 0;
     scene_collected_ = false;
+    rvt_debug_visible_ = false;
+    vsm_debug_visible_ = false;
+    rvt_status_.effective = false;
+    if (rvt_status_.requested)
+    {
+        rvt_status_.reason = "No drawable scene view";
+    }
+    if (vsm_pass_)
+    {
+        vsm_pass_->poll(frame_number_);
+    }
     ENGINE_PROFILE_ZONE("Render.frame");
     if (camera.instance_id() != 0 && !camera)
     {
@@ -546,6 +569,55 @@ RenderSubmitStatus RenderSystem::render(Camera camera)
             return RenderSubmitStatus::failed;
         }
     }
+    // Explicit GPU dependencies: deformation -> RVT -> depth -> VSM -> opaque -> UI -> capture.
+    std::array<bgfx::ViewId, 256> order{};
+    std::array<bool, 256> used{};
+    std::size_t next_view = 0;
+    const auto append = [&](bgfx::ViewId id)
+    {
+        if (!used[id])
+        {
+            order[next_view++] = id;
+            used[id] = true;
+        }
+    };
+    for (bgfx::ViewId id = 0; id < 3; ++id)
+    {
+        append(id);
+    }
+    for (bgfx::ViewId id = render_detail::rvt_page_view - 1;
+         id < render_detail::rvt_page_view + render_detail::maximum_rvt_views; ++id)
+    {
+        append(id);
+    }
+    for (bgfx::ViewId id = 3; id <= render_detail::surface_view; ++id)
+    {
+        append(id);
+    }
+    append(render_detail::vsm_feedback_clear_view);
+    append(render_detail::vsm_feedback_view);
+    for (auto id : render_detail::vsm_page_views)
+    {
+        append(id);
+    }
+    for (bgfx::ViewId id = render_detail::surface_view + 1; id < 256; ++id)
+    {
+        if (id == render_detail::output_present_view)
+        {
+            append(render_detail::vsm_debug_view);
+        }
+        append(id);
+    }
+    bgfx::setViewOrder(0, 256, order.data());
+    if (!world_ || !world_->scene())
+    {
+        release_vsm();
+    }
+    if (!world_ || !world_->scene() || !current_settings.atmosphere.rvt ||
+        !current_settings.atmosphere.rvt->enabled)
+    {
+        release_rvt();
+    }
     bgfx::setViewFrameBuffer(render_detail::main_view, BGFX_INVALID_HANDLE);
     bgfx::setViewClear(render_detail::main_view, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
                        current_settings.clear_color, 1.0F, 0);
@@ -562,6 +634,11 @@ RenderSubmitStatus RenderSystem::render(Camera camera)
     const bool drawn = draw_scene(camera, current_settings) &&
                        draw_diffuse_capture(current_settings) &&
                        (ui_ == nullptr || ui_->render(width_, height_));
+    if (drawn)
+    {
+        draw_rvt_viewer();
+        draw_vsm_viewer();
+    }
     if (scene_resources_)
     {
         // 在扩展/UI 返回后撤销所有借用，下一次结构修改和 GPU 资源回收前不留旧指针。
@@ -572,6 +649,7 @@ RenderSubmitStatus RenderSystem::render(Camera camera)
         frame.world_epoch = 0;
         for (auto& list : scene_resources_->draw_lists)
         {
+            list.batches.clear();
             list.opaque.clear();
             list.transparent.clear();
         }
@@ -590,6 +668,14 @@ RenderSubmitStatus RenderSystem::render(Camera camera)
                                                         : RenderFrameKind::clear);
         }
         frame_number_ = bgfx::frame();
+        if (meshlet_culling_)
+        {
+            meshlet_culling_->poll(frame_number_);
+        }
+        if (vsm_pass_)
+        {
+            vsm_pass_->poll(frame_number_);
+        }
         if (drawn)
         {
             record_frame(world_ && world_->scene() ? RenderFrameKind::scene
@@ -616,6 +702,12 @@ RenderSubmitStatus RenderSystem::render(Camera camera)
 RenderSubmitStatus RenderSystem::present_movie_frame(const MovieFrame& frame)
 {
     render_detail::ui_draws = 0;
+    rvt_status_.effective = false;
+    rvt_debug_visible_ = vsm_debug_visible_ = false;
+    if (rvt_status_.requested)
+    {
+        rvt_status_.reason = "Scene view is not rendered";
+    }
     const auto prepared = prepare_frame();
     if (prepared != render_detail::FramePrepareStatus::ready)
     {
@@ -635,6 +727,14 @@ RenderSubmitStatus RenderSystem::present_movie_frame(const MovieFrame& frame)
     frame_output_->present(0x000000ff, true);
     submit_screenshot(RenderFrameKind::movie);
     frame_number_ = bgfx::frame();
+    if (meshlet_culling_)
+    {
+        meshlet_culling_->poll(frame_number_);
+    }
+    if (vsm_pass_)
+    {
+        vsm_pass_->poll(frame_number_);
+    }
     record_frame(RenderFrameKind::movie);
     collect_preparation(false);
     ENGINE_PROFILE_FRAME();
@@ -659,6 +759,14 @@ void RenderSystem::shutdown_renderer(bool drain_screenshots) noexcept
         for (int attempt = 0; attempt < 16 && active_screenshot_; ++attempt)
         {
             frame_number_ = bgfx::frame();
+            if (meshlet_culling_)
+            {
+                meshlet_culling_->poll(frame_number_);
+            }
+            if (vsm_pass_)
+            {
+                vsm_pass_->poll(frame_number_);
+            }
             advance_screenshots();
             if (callbacks_)
             {
@@ -691,11 +799,18 @@ void RenderSystem::shutdown_renderer(bool drain_screenshots) noexcept
     if (renderer_initialized_)
     {
         movie_pass_.reset();
+        release_rvt();
+        rvt_viewer_.reset();
+        release_vsm();
+        vsm_viewer_.reset();
         if (frame_output_)
         {
             frame_output_->release();
         }
         bgfx::shutdown();
+        meshlet_culling_.reset();
+        vsm_pass_.reset();
+        vsm_cache_.reset();
         frame_output_.reset();
         renderer_initialized_ = false;
         active_renderer = nullptr;

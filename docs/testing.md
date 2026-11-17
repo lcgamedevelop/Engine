@@ -16,6 +16,55 @@
 
 一次修改开始时选定最小验证集合；通过后不因整理文档、准备提交而重复执行。新增用例必须能捕获现有测试缺少的真实契约或回归；优先补入所属模块现有测试，不为每个修改点再建测试程序。不重复验证第三方库本身，不维护临时场景的全排列矩阵。
 
+## 大世界地形与 RVT
+
+当前实现与边界见[地形架构](plugins/runtime/terrain-world-design.md)，
+公开场景和复现命令见 [showcase 地形文档](../projects/showcase/docs/terrain-world.md)。
+macOS arm64 / Metal 已完成受影响 Debug、Release 编译，功能测试只使用 Release。
+本轮验证属于地形及直接依赖链，不代表全引擎或所有平台通过。
+
+| 已覆盖内容 | 证据入口 |
+| --- | --- |
+| 稀疏块、LOD 过渡、区域预算、未知邻区拒绝、取消、显示与碰撞同版本发布；禁用节点和祖先不阻塞准备；当前需求失败与恢复 | `engine.terrain_runtime` |
+| 源格式、噪声/高度图/道路/画层、局部块缓存、层纹理编译、可撤销源事务与重启恢复；宿主生成器注入与实现指纹隔离 | `editor.terrain_pipeline` |
+| 流送依赖随包导出而不自动常驻、目录版本与失败原子性 | `engine.resource_catalog`、`plugins.runtime.resource_graph`、`editor.asset_pipeline`、`editor.asset_build` |
+| 场景准备、几何事务、ECS 生命周期 | `engine.scene`、`engine.runtime_host` |
+| 双精度位置、睡眠状态、局部导航与骨骼世界姿态 | `engine.physics`、`engine.navigation`、`engine.navigation_terrain`、`engine.animation_rigging_events` |
+| 破坏支撑集合、建筑候选分批准备与取消、封存后到激活前的隔离、异步地形脚本、存档与碎块 | `engine.destruction_runtime`、`engine.terrain_destruction_script`、`engine.terrain_runtime` |
+| RVT 页面生成、材质回退、开关及实时 GPU 面板；无相机帧不沿用缓存的生效状态 | `engine.terrain_runtime` 及公开项目 MCP 实窗回执 |
+| 新纹理数组编码、项目类型与用例登记 | `resource.codecs`、showcase `case_contract_test.mjs` |
+| Shader 依赖、跨语言 RVT 数据与 MCP 工具登记 | `editor.texture_pipeline`、`engine.render_foundation`、`engine.scene_data`、`engine.scene_schema_cross_language`、`engine.script_tooling` |
+| 依赖方向和源码约束 | `engine.architecture_boundaries`、`engine.architecture_rules` |
+
+当前修复的 7 项 Release 检查通过：`engine.terrain_runtime`、`editor.terrain_pipeline`、
+`engine.terrain_destruction_script`、`engine.render_submission`、`engine.script_tooling` 及两项架构检查。
+脚本回归包含 RVT 数字枚举及非法输入拒绝；状态查询同时校验当前与已发布需求身份、失败错误及预算恢复。
+公共交付工具的 Android 30 项、桌面/iOS/Web 28 项测试通过；目录夹具从当前 Schema 生成，
+覆盖 terrain_block、流送引用、旧版本拒绝及失败时保留既有输出。
+真实 macOS 运行包包含 4,205 项资源与两个合并包，已通过公共交付工具的复制、实体头和逐项哈希校验。
+这些交付检查不代表 Android、iOS 或浏览器实际运行通过。
+
+`engine.plugin_selection` 通过。另以同一 Release 预设关闭 runtime/editor 插件与测试支持，
+确认不生成地形、FastNoise、MCP、脚本或编辑器目标；核心宿主实际链接并通过 Metal 绘制 4 帧后正常退出。
+运行设置使用项目当前源汇总，旧版本运行设置明确拒绝。
+
+公开 8×8 公里世界使用 16 米采样、固定种子；1 米实验场保留道路、洞穴与层混合。
+MCP 实窗流程已完成四角切换、挖地、保存、重置、恢复、法线通道、生产 RVT 关闭和查看器关闭，
+共 10 张真实截图。四角均等待当前需求页面就绪；关闭 RVT 后 `residentBytes=0`，关闭查看器后
+截图帧 `rvtDebugVisible=false`。归档位于
+`projects/showcase/cache/terrain-world/20261116T074006Z-91663412/`，包含帧证据与操作回执。
+
+定向实窗回归归档在 `projects/showcase/cache/branch-review-fixed/live-corrected/`，包含 4 张截图和 MCP 回执。
+禁用地形节点的追加批次正常到达 ready；将活动地形预算调低后返回 failed / planning_failed，
+旧发布版本与画面保留，恢复预算后发布身份与当前需求再次一致。
+禁用相机后仍保留 RVT 页面缓存，但 effective=false、meshDraws=0、截图 rvtReady=false；
+恢复相机后页面重新生效。运行时业务、脚本与 MCP 读取同一状态，没有额外测试加载流程。
+
+公开资源不含付费或私有内容。没有运行 Windows、Android、iOS、WebGPU 实机地形验收；
+四角截图也不等于已经验证所有位置的角色、音频、粒子和碰撞组合。
+专用植被散布规则与二进制制作源块 delta 未实现；当前使用持久配方、有序 edits 和局部生成缓存。
+私有真实资源项目未列入这轮验收。截图、缓存和运行存档继续保持忽略。
+
 ## 执行方式
 
 构建环境与平台预设见[构建指南](building.md)。普通构建只默认编译 `engine_framework_test`、`engine_guid_map_test`、`engine_system_test`；Release 测试预设默认也只选择这三项。其他测试仍保留独立目标，由调用方按模块显式选择，不随普通引擎构建全部编译。
@@ -106,7 +155,35 @@ macOS arm64 已通过受影响目标的 Debug / Release 构建；Release 的上�
 
 公开项目入口、场景、资源来源和操作说明统一在 [showcase 文档](../projects/showcase/docs/index.md)。引擎文档不再重复维护逐场景节点数量、操作长表和每次验收日志。
 
+[Meshlet 标准场景](../projects/showcase/docs/meshlet-culling.md)提供公开几何、运行开关及可复现的截图检查；当前验证结果见下节。
+
 通过编辑器启动、MCP 控制和退出的操作见[编辑器](editor/editor.md)与[MCP](plugins/editor/mcp.md)。运行前核对项目、运行目录和编辑器会话；只关闭本次测试拥有的进程。脚本后端、资源目录、分辨率和设备必须在结果中说明。
+
+## Meshlet 与 GPU 剔除
+
+2026-11-15 至 16 日，macOS arm64 / Metal / QuickJS，Ninja 与 ccache。受影响目标的 Debug、Release 编译和链接通过，Debug 未运行测试。Release 的 9 项模块检查通过：`editor.mesh_lod`、`editor.mesh_lod_pipeline`、`editor.scene_persistence`、`resource.codecs`、`engine.render_submission`、`engine.runtime_settings`、`editor.runtime_settings`、`engine.architecture_rules`、`engine.architecture_boundaries`。本项没有重跑无关模块或全量测试。
+
+离线检查覆盖多材质和各级 LOD 的生成、原三角形顺序、精确拓扑校验、稳定 GUID、无变更不重建及关闭生成后移除附加数据。原生 Metal 渲染用例检查普通／间接路径的严格线性 HDR 对照，以及 GPU 数据尚未准备时保持普通帧、预算不足整批回退、LOD、镜像、材质、探针和阴影；像素对照通过，最大差值为 0。
+
+公开范例的 15 项菜单配置检查及 Meshlet 实窗用例通过。实窗使用 960×640 逻辑窗口、1920×1280 后缓冲和正常导入缓存，实际点击场景按钮与开关，并用编辑器 MCP 查询同一运行实例。透视、正交两组截图排除顶部 UI 后均逐像素一致，最大通道差值为 0；临时边界视图、GPU 统计、透明与不适用材质的普通路径、返回菜单和重入默认值均通过。该固定透视镜头的一次已完成 GPU 样本为 1,008 个候选 Meshlet／实例组合、895 个保留组合，候选三角形 56,976、保留三角形 49,925；这是提交内容统计，不是帧率或耗时收益。
+
+`meshlet_colors` 的原生渲染与公开实窗检查通过：实际表面以稳定的逐簇色块显示，场景剔除关闭时仍可单独开启，与包围线可组合；连续帧及关闭后 PBR 恢复的最大通道差值均为 0。公开用例还将 18 个球体和 4 个拱门切换为普通绘制，与实例化色块核对表面覆盖，未发现漏色或超出容差的边界像素。调试绘制沿用主通道实际采用的顶点变换输入及顺序，不通过放宽深度比较或深度偏移覆盖误差。
+
+私有真实资源沿同一导入和渲染链路检查。等待普通画面连续稳定后，普通／Meshlet／关闭后恢复三张完整截图逐像素一致，最大通道差值为 0。独立色块视图也完成稳定帧截图，关闭后完整 PBR 截图逐像素恢复；色块启停没有改变场景剔除开关。该镜头未开启视锥剔除，因此本次只证明真实资源的路径与画面一致性，不将其用于视锥剔除效果或性能结论；公开用例另有透视、正交视锥覆盖。私有资产、源 meta、回执及截图全部留在私有项目自身的忽略目录。
+
+公开结果与完整回执保存在项目 `cache/visual-tests/meshlet-culling/<run-id>/`，私有结果在自身 `cache/meshlet-validation/`；使用同目录自包含 `review.html` 查看截图。操作入口和夹具说明统一见[项目文档](../projects/showcase/docs/meshlet-culling.md)。上述结果仅覆盖本机 Metal，不包含 Windows、Android、iOS、WebGPU 或性能测量，也不代表所有场景的视觉质量验收。资源只接受当前格式，旧缓存与运行包须从源资源重新生成。
+
+## 方向光虚拟阴影
+
+macOS arm64 / Metal / QuickJS，使用根预设派生的 Ninja、ccache 配置。受影响目标的 Debug、Release 编译和链接通过，Debug 未运行测试。Release 的 11 项相关检查通过：`editor.commands`、`engine.render_foundation`、`engine.scene_data`、`engine.scene_schema_cross_language`、`editor.scene_persistence`、`engine.architecture_boundaries`、`engine.architecture_rules`、`resource.codecs`、`engine.runtime_settings`、`editor.runtime_settings`、`engine.render_submission`。没有重跑全量用例。
+
+CPU 检查覆盖固定页预算、未发布批次取消、过期反馈拒绝、镜头移动复用、投影物旧/新范围失效和代次隔离；组件与编辑检查覆盖方向光限制、参数原子校验、序列化及精确撤销/重做。Metal 用例验证 GPU 需求反馈、静态缓存的严格 HDR 像素一致性、物体移动后的更新，以及关闭后恢复原 CSM 画面和释放缓存。镜头禁用时的缓存清理回归在修复前复现失败、修复后通过；恢复镜头建立新代次，重建的阴影画面逐像素一致。Scene／Prefab 使用版本 6；旧二进制不兼容读取，项目源资源经现有导入链重新生成。
+
+公开标准场景通过实际菜单进入，并用同一运行实例的 MCP 检查静态零重绘、移动箱体、六种调试模式、非法级别拒绝、关闭/重开和返回菜单清理。归档 10 张 PNG，包含普通画面、移动后画面、虚拟深度/图集/页表等诊断及关闭/恢复对照。固定镜头最终 425 个需求页全部就绪，缺页为 0。真实资源本机验证另归档 3 张截图，覆盖 VSM、实时诊断及 VSM/RVT 同时显示；三张回执均包含实际场景帧的 `vsmReady=true`，RVT 同时开启时也为 ready。私有资源、脚本和截图只保存在私有项目忽略目录。
+
+公开结果在 `projects/showcase/cache/visual-tests/virtual-shadows/<run-id>/`；`result.json` 和 `receipts.jsonl` 保留实际提交帧及 VSM 修订。调用方式见[公开 VSM 场景](../projects/showcase/docs/virtual-shadows.md)，运行契约见[VSM 类图](runtime/class-diagrams/virtual-shadow-maps.md)。CPU 状态 ready 不能替代截图帧证据；镜头还在移动时允许继续预热，不把缺页的 CSM 底图算作已就绪的 VSM。
+
+6 个受影响 Shader 另通过 SPIR-V 与 WGSL 编译；这不是 Windows／Android／iOS／浏览器的实际运行验收。设备恢复及全部蒙皮、地形变形、破坏组合尚未逐项实机验证。首版限主视图的一盏方向光，透明、反射、烘焙和缺页沿用 CSM；未实现 SMRT、局部灯 VSM 或静动双缓存，也未测量性能收益。
 
 ## 镜头与角色模块验证
 
@@ -120,7 +197,7 @@ Release 的 13 项 CTest 全部通过（9.06 秒）：`engine.character_motor`�
 
 公开范例 TypeScript 构建及 `launcher_test.mjs` 的 8 项检查通过。实际编辑器窗口使用 `projects/showcase` 源资源导入缓存，逻辑尺寸 960×540、Metal 后缓冲 1920×1080；通过真实菜单按钮进入角色庭院，确认角色就绪、接地和镜头 ready。调用角色镜头接口切换第一／第三人称，截图确认第一人称隐藏自身身体、保留其他角色与自身阴影；随后恢复第三人称并正常关闭测试编辑器。项目配置、控制方式与复现入口见[角色与镜头范例](../projects/showcase/docs/character-control.md)。
 
-此结果不包含实体手柄操作、移动平台场景验收、Windows／Android／iOS、V8 后端、旧版 macOS 发行验证或性能采样，不代表所有范例均已实窗验收。场景／预制体只接受版本 3，旧二进制需通过当前源描述重新导入和打包。
+此结果不包含实体手柄操作、移动平台场景验收、Windows／Android／iOS、V8 后端、旧版 macOS 发行验证或性能采样，不代表所有范例均已实窗验收。场景／预制体只接受当前格式，旧二进制需通过当前源描述重新导入和打包。
 
 ## 渲染性能基线
 

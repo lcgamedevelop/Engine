@@ -1,6 +1,6 @@
 namespace engine.schema;
 
-enum AssetKind:ubyte { source, script, scene, mesh, shader, material, texture, audio, model, skeleton, animation, font, ui, effect, terrain, destruction, light_probe, prefab, animation_retarget_profile, movie }
+enum AssetKind:ubyte { source, script, scene, mesh, shader, material, texture, audio, model, skeleton, animation, font, ui, effect, terrain, destruction, light_probe, prefab, animation_retarget_profile, movie, terrain_block }
 
 table FileLocation {
     mount:string (required);
@@ -16,6 +16,8 @@ table AssetEntry {
     content_hash:string (required);
     content_size:ulong;
     dependencies:[string];
+    // Export reachability only; consumers load these resources explicitly.
+    stream_dependencies:[string];
     module_path:string;
     format_version:uint = 2;
     // 8-byte prefix plus FlatBuffers header, excluding the payload.

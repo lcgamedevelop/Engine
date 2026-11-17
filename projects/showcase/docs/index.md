@@ -4,8 +4,11 @@
 
 ## 功能范例
 
+- [Meshlet 标准测试场景](meshlet-culling.md)
+- [方向光 VSM 标准测试场景](virtual-shadows.md)
 - [角色控制与第一／第三人称镜头](character-control.md)
 - [地形、建筑与火箭综合联动](destruction-integration.md)
+- [大世界地形与 RVT 实时查看器](terrain-world.md)
 - [群体导航与地形变化](navigation.md)
 - [物理查询与接触事件](physics-interactions.md)
 - [ECS 多对象](ecs-many-objects.md)
@@ -40,7 +43,9 @@
 
 建模 `.mesh` 使用当前版本 2 的编辑源，仅保存 `[modeling]` 数据。568 份源文件已升级，几何、每角属性、元素 ID 与资源 GUID 保持不变；没有原始生成记录的模型不补造参数，仍可编辑，但不能参数重建。接口用法见[建模插件](../../../docs/plugins/editor/modeling.md)。
 
-通用文件使用基础 SourceImporter；项目脚本已通过当前 `engine.d.ts` 的 TypeScript 检查。macOS arm64 / Release 的导入和运行资源打包通过，完整缓存包含 1,469 项，`cache/build/macos/` 包含 1,370 项资源与 2 个包；目录为版本 3、实体为 ERS2 / 版本 2。此项验证覆盖脚本类型、导入和打包，不包含场景画面验收。通用数据读取契约见 [Resources](../../../docs/plugins/runtime/class-diagrams/resources-script-api.md)。
+通用文件使用基础 SourceImporter；项目脚本已通过当前 `engine.d.ts` 的 TypeScript 检查。
+当前目录、资源格式及构建结果以[引擎测试文档](../../../docs/testing.md)为准，不将旧包的资源数量当作当前缓存清单。
+通用数据读取契约见 [Resources](../../../docs/plugins/runtime/class-diagrams/resources-script-api.md)。
 
 菜单注册以 [showcase_cases.ts](../assets/scripts/models/showcase_cases.ts) 为唯一来源；具体模块操作见上面的项目文档。项目测试按需要选择，不把全部场景加入日常回归。
 

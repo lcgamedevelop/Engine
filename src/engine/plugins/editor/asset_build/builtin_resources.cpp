@@ -70,11 +70,35 @@ bool compile_shaders(std::string_view target, const std::filesystem::path& cache
         return false;
     }
     std::vector<std::filesystem::path> inputs{compiler};
-    for (const auto name :
-         {"vs_cube.sc", "fs_cube.sc", "vs_font.sc", "fs_font.sc", "varying.def.sc",
-          "font_varying.def.sc", "pbr_helpers.sh", "pbr_surface.sh", "pbr_lighting.sh",
-          "dfg_approx.sh", "color_space.sh", "material_helpers.sh", "shadow_helpers.sh",
-          "csm_helpers.sh", "local_shadow_helpers.sh", "cluster/lighting.sh"})
+    for (const auto name : {"vs_cube.sc",
+                            "fs_cube.sc",
+                            "vs_font.sc",
+                            "fs_font.sc",
+                            "varying.def.sc",
+                            "font_varying.def.sc",
+                            "pbr_helpers.sh",
+                            "pbr_surface.sh",
+                            "pbr_lighting.sh",
+                            "fs_rvt.sc",
+                            "fs_surface.sc",
+                            "pbr_surface_types.sh",
+                            "terrain_surface.sh",
+                            "cube_fragment.sh",
+                            "surface_fragment.sh",
+                            "rvt_fragment.sh",
+                            "vs_terrain.sc",
+                            "fs_terrain_cube.sc",
+                            "fs_terrain_surface.sc",
+                            "fs_terrain_rvt.sc",
+                            "rvt_cache.sh",
+                            "rvt_surface.sh",
+                            "dfg_approx.sh",
+                            "color_space.sh",
+                            "material_helpers.sh",
+                            "shadow_helpers.sh",
+                            "csm_helpers.sh",
+                            "local_shadow_helpers.sh",
+                            "cluster/lighting.sh"})
     {
         inputs.push_back(sources / name);
     }
@@ -126,8 +150,9 @@ bool compile_shaders(std::string_view target, const std::filesystem::path& cache
         error = "cannot prepare builtin shader cache: " + code.message();
         return false;
     }
-    for (const auto name : {"vs_cube", "vs_cube_instanced", "fs_cube", "fs_surface", "fs_water",
-                            "vs_font", "fs_font"})
+    for (const auto name :
+         {"vs_cube", "vs_cube_instanced", "fs_cube", "fs_surface", "fs_rvt", "fs_water", "vs_font",
+          "fs_font", "vs_terrain", "fs_terrain_cube", "fs_terrain_surface", "fs_terrain_rvt"})
     {
         const std::string shader_name(name);
         const auto output = directory / name;
@@ -218,9 +243,20 @@ bool prepare_builtin_resources(std::string_view target, const std::filesystem::p
             {
                 shader->instanced_vertex_code = shaders.find("vs_cube_instanced")->second;
             }
+            if (!shader->rvt_fragment_code.empty())
+            {
+                shader->rvt_fragment_code = shaders.find("fs_rvt")->second;
+            }
             if (!shader->surface_fragment_code.empty())
             {
                 shader->surface_fragment_code = shaders.find("fs_surface")->second;
+            }
+            if (definition->path == "builtin://shaders/terrain-pbr")
+            {
+                shader->vertex_code = shaders.find("vs_terrain")->second;
+                shader->fragment_code = shaders.find("fs_terrain_cube")->second;
+                shader->surface_fragment_code = shaders.find("fs_terrain_surface")->second;
+                shader->rvt_fragment_code = shaders.find("fs_terrain_rvt")->second;
             }
             flatbuffers::FlatBufferBuilder builder;
             schema::FinishShaderDataBuffer(builder,

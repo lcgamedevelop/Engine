@@ -3,6 +3,7 @@
 #include "editor/render/render_component_commands.hpp"
 #include "editor/render/render_feature_commands.hpp"
 #include "runtime/render/scene_render_settings.hpp"
+#include "runtime/schema/control_json_generated.hpp"
 
 #include "editor/commands/editor_commands.hpp"
 #include "editor/commands/editor_edit.hpp"
@@ -62,6 +63,7 @@ Json settings_json(const RenderSettings& value)
     Json result = {{"ambientColor", value.ambient_color},
                    {"ambientIntensity", value.ambient_intensity},
                    {"iblEnabled", value.ibl_enabled},
+                   {"meshletCullingEnabled", value.meshlet_culling_enabled},
                    {"iblIntensity", value.ibl_intensity},
                    {"ambientTricolor", value.ambient_tricolor},
                    {"ambientSkyColor", value.ambient_sky_color},
@@ -99,6 +101,8 @@ Json settings_json(const RenderSettings& value)
                    {"shadowSplitLambda", value.shadow_split_lambda},
                    {"shadowCascadeBlend", value.shadow_cascade_blend},
                    {"clearColor", clear}};
+    result["rvt"] = schema::control_json::write(value.atmosphere.rvt ? *value.atmosphere.rvt
+                                                                     : schema::RvtSettingsT{});
     render_edit_detail::append_atmosphere(value.atmosphere, result);
     return result;
 }
@@ -174,7 +178,16 @@ bool read_settings(const Json& arguments, RenderSettings& settings, std::string&
             error = "Unknown render setting: " + item.key();
             return false;
         }
-        if (item.key().starts_with("atmosphere"))
+        if (item.key() == "rvt")
+        {
+            auto value = std::make_unique<schema::RvtSettingsT>();
+            if (!schema::control_json::read(*item, *value, error) || !valid_rvt_settings(*value))
+            {
+                return false;
+            }
+            settings.atmosphere.rvt = std::move(value);
+        }
+        else if (item.key().starts_with("atmosphere"))
         {
             if (!render_edit_detail::read_atmosphere(item.key(), *item, settings.atmosphere))
             {
@@ -253,22 +266,24 @@ bool read_settings(const Json& arguments, RenderSettings& settings, std::string&
         }
         else if (item.key() == "filmicTonemap" || item.key() == "directionalShadows" ||
                  item.key() == "ambientTricolor" || item.key() == "iblEnabled" ||
-                 item.key() == "aoEnabled" || item.key() == "hdrEnabled" ||
-                 item.key() == "bloomEnabled" || item.key() == "ssrEnabled")
+                 item.key() == "meshletCullingEnabled" || item.key() == "aoEnabled" ||
+                 item.key() == "hdrEnabled" || item.key() == "bloomEnabled" ||
+                 item.key() == "ssrEnabled")
         {
             if (!item->is_boolean())
             {
                 error = "Render option must be boolean";
                 return false;
             }
-            bool& value = item.key() == "filmicTonemap"     ? settings.filmic_tonemap
-                          : item.key() == "ambientTricolor" ? settings.ambient_tricolor
-                          : item.key() == "iblEnabled"      ? settings.ibl_enabled
-                          : item.key() == "aoEnabled"       ? settings.ao_enabled
-                          : item.key() == "hdrEnabled"      ? settings.hdr_enabled
-                          : item.key() == "bloomEnabled"    ? settings.bloom_enabled
-                          : item.key() == "ssrEnabled"      ? settings.ssr_enabled
-                                                            : settings.directional_shadows;
+            bool& value = item.key() == "filmicTonemap"           ? settings.filmic_tonemap
+                          : item.key() == "ambientTricolor"       ? settings.ambient_tricolor
+                          : item.key() == "iblEnabled"            ? settings.ibl_enabled
+                          : item.key() == "meshletCullingEnabled" ? settings.meshlet_culling_enabled
+                          : item.key() == "aoEnabled"             ? settings.ao_enabled
+                          : item.key() == "hdrEnabled"            ? settings.hdr_enabled
+                          : item.key() == "bloomEnabled"          ? settings.bloom_enabled
+                          : item.key() == "ssrEnabled"            ? settings.ssr_enabled
+                                                                  : settings.directional_shadows;
             value = item->get<bool>();
         }
         else if (item.key() == "ssrMaxSteps")
@@ -591,6 +606,10 @@ private:
             settings.fog_density = after_.fog_density;
             settings.clear_color = after_.clear_color;
             settings.ibl_enabled = after_.ibl_enabled;
+            settings.meshlet_culling_enabled = after_.meshlet_culling_enabled;
+            settings.rvt = after_.atmosphere.rvt
+                               ? std::make_unique<schema::RvtSettingsT>(*after_.atmosphere.rvt)
+                               : nullptr;
             settings.ibl_intensity = after_.ibl_intensity;
             if (!environment.set_settings(settings))
             {

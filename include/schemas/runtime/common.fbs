@@ -1,5 +1,7 @@
 namespace engine.schema;
 
+enum RvtRole:ubyte { none, writer, reader, writer_reader }
+
 struct Vec2 {
     x:double;
     y:double;
@@ -16,6 +18,11 @@ struct Vec4 {
     y:double;
     z:double;
     w:double;
+}
+
+struct Bounds3 {
+    minimum:Vec3;
+    maximum:Vec3;
 }
 
 struct Color {

@@ -1,3 +1,188 @@
-guid = "6f8bc987-33aa-5016-97a9-f2f945106deb"
-importer = "terrain"
+guid = '6f8bc987-33aa-5016-97a9-f2f945106deb'
+importer = 'terrain'
 meta_version = 1
+
+[[subresources]]
+guid = '3c1f21e9-c092-4610-a65a-2cb515aa6bdb'
+key = 'regions/0/0_0_0'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '2ecd290c-3e74-41c0-9e8b-d319e00b0962'
+key = 'regions/0/0_0_1'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = 'c6e80ca0-595f-40c3-92d3-f22e0ebc6f09'
+key = 'regions/0/0_0_2'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '3c69887e-7c75-4a5c-9e7d-a8a05ea543ab'
+key = 'regions/0/0_0_3'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = 'e98dc67e-c0bb-4a64-a8c7-123d6f4bf74f'
+key = 'regions/0/0_1_0'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = 'b0b3e660-189a-4496-8186-887ee42c900d'
+key = 'regions/0/0_1_1'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '62094eeb-1e65-4646-9146-dbc8c565729f'
+key = 'regions/0/0_1_2'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '36b2f76c-ab57-42ac-b48b-8b3b8fa32366'
+key = 'regions/0/0_1_3'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '78ff60bf-12ce-445e-97c7-80fa2ac1710b'
+key = 'regions/0/1_0_0'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = 'f7cd418b-b066-4f85-a1ff-7359f0a4f503'
+key = 'regions/0/1_0_1'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '2e74a386-6f8d-457f-b726-f0e949f44e86'
+key = 'regions/0/1_0_2'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '54b28a6a-cb1c-4ef0-9cb5-9a0ca4a20722'
+key = 'regions/0/1_0_3'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '10bed620-5c6e-4479-bb9d-b5f6c248a61a'
+key = 'regions/0/1_1_0'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '4012678a-5e9d-469b-bac3-7c5d43b7eaf8'
+key = 'regions/0/1_1_1'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = 'bd58c9a1-c257-4d1a-9cb6-09a2e76cd51e'
+key = 'regions/0/1_1_2'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '3a445e83-0301-4ebe-bbba-54deb09f2b2c'
+key = 'regions/0/1_1_3'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = 'b101db54-7bcd-4a14-b3bc-c21eb7fd1a54'
+key = 'regions/0/2_0_0'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '77b85353-a1bb-4603-9aa2-6e9934ef387f'
+key = 'regions/0/2_0_1'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '9831a162-446f-4c6f-a9c8-c873943d9546'
+key = 'regions/0/2_0_2'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '61c88254-f985-4183-b72c-3cda23cd4e13'
+key = 'regions/0/2_0_3'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '824c0c5d-e179-4e86-b2de-1bc1e525fa9e'
+key = 'regions/0/2_1_0'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '37745a31-dc05-4829-a007-511031874ed2'
+key = 'regions/0/2_1_1'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = 'c1289d71-c171-48b6-9daa-e0f744d780b8'
+key = 'regions/0/2_1_2'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = 'be6fe292-fb12-4555-bf50-bcca65281126'
+key = 'regions/0/2_1_3'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '0244cb9a-9d67-4bb0-89d1-18a22374f89e'
+key = 'regions/0/3_0_0'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '39e4748f-9351-4380-85a5-986bc1723225'
+key = 'regions/0/3_0_1'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '34dbb7fa-6bc7-45c7-9b24-3caad050137f'
+key = 'regions/0/3_0_2'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '03303b51-144e-4e29-9cc6-14715f71ced1'
+key = 'regions/0/3_0_3'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = 'c24b390d-9294-4121-875a-77056808e5c0'
+key = 'regions/0/3_1_0'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '1b297d81-5e44-4882-a8dc-1e66094a1c34'
+key = 'regions/0/3_1_1'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '3f58b15f-ccde-4483-80c0-7fdf78075cda'
+key = 'regions/0/3_1_2'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '6b81a2c3-aee4-452f-bb03-2ee7c2886106'
+key = 'regions/0/3_1_3'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '72f0b5ed-c585-4c3a-95de-d64948a11f37'
+key = 'regions/1/0_0_0'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '1bace52e-4131-4d43-a080-18d5e6eaf154'
+key = 'regions/1/0_0_1'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '0d051a41-960f-4118-9c43-91c8e3993688'
+key = 'regions/1/1_0_0'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '7bd7412d-019a-4b51-beb0-7798a3ba1d72'
+key = 'regions/1/1_0_1'
+kind = 'terrain_block'
+
+[[subresources]]
+guid = '784da94a-9c75-4909-94a0-dd1d5fcedc23'
+key = 'regions/2/0_0_0'
+kind = 'terrain_block'

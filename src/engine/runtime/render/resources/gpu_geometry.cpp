@@ -1,12 +1,14 @@
 #include "runtime/render/resources/gpu_geometry.hpp"
 
 #include "runtime/performance/profiling.hpp"
+#include "runtime/resource/types/mesh_resource.hpp"
 #include "runtime/scene/mesh_renderer.hpp"
 #include "runtime/scene/node.hpp"
 #include "runtime/utils/mesh_utils.hpp"
 #include "runtime/world/world_system.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <limits>
 
@@ -278,7 +280,12 @@ bool GpuGeometry::skinning_bounds(std::span<const std::array<float, 16>> palette
 
 std::uint32_t GpuGeometry::resource_count() const noexcept
 {
-    return static_cast<std::uint32_t>(bgfx::isValid(vertices)) +
+    std::uint32_t meshlet_count = 0;
+    for (const auto& buffers : meshlets_)
+    {
+        meshlet_count += bgfx::isValid(buffers.indices) + bgfx::isValid(buffers.descriptors);
+    }
+    return meshlet_count + static_cast<std::uint32_t>(bgfx::isValid(vertices)) +
            static_cast<std::uint32_t>(bgfx::isValid(indices)) +
            static_cast<std::uint32_t>(bgfx::isValid(influences)) +
            static_cast<std::uint32_t>(lods_.size());
@@ -313,6 +320,7 @@ std::size_t GpuGeometry::lod_count() const noexcept
 
 void GpuGeometry::release() noexcept
 {
+    release_meshlets();
     for (auto& lod : lods_)
     {
         if (bgfx::isValid(lod.indices))
@@ -339,6 +347,91 @@ void GpuGeometry::release() noexcept
     resource.reset();
     joint_bounds_.clear();
     vertex_count = 0;
+}
+
+bool GpuGeometry::prepare_meshlets()
+{
+    if (!meshlets_.empty())
+    {
+        return true;
+    }
+    const auto* data = resource.data<MeshResource>();
+    if (!data)
+    {
+        return false;
+    }
+    meshlets_.resize(data->lods.size() + 1);
+    for (std::size_t level = 0; level < meshlets_.size(); ++level)
+    {
+        const auto* source =
+            level == 0 ? data->meshlets.get() : data->lods[level - 1]->meshlets.get();
+        if (!source)
+        {
+            continue;
+        }
+        std::vector<std::array<float, 4>> descriptors;
+        descriptors.reserve(source->meshlets.size() * 3);
+        for (const auto& cluster : source->meshlets)
+        {
+            descriptors.push_back({static_cast<float>(cluster.center().x()),
+                                   static_cast<float>(cluster.center().y()),
+                                   static_cast<float>(cluster.center().z()), cluster.radius()});
+            descriptors.push_back({static_cast<float>(cluster.cone_axis().x()),
+                                   static_cast<float>(cluster.cone_axis().y()),
+                                   static_cast<float>(cluster.cone_axis().z()),
+                                   cluster.cone_cutoff()});
+            descriptors.push_back({std::bit_cast<float>(cluster.first_index()),
+                                   std::bit_cast<float>(cluster.index_count()), 0, 0});
+        }
+        if (descriptors.size() > UINT32_MAX / sizeof(descriptors[0]))
+        {
+            release_meshlets();
+            return false;
+        }
+        auto& buffers = meshlets_[level];
+        buffers.indices = bgfx::createIndexBuffer(
+            bgfx::copy(source->indices.data(),
+                       static_cast<std::uint32_t>(source->indices.size() * sizeof(std::uint32_t))),
+            BGFX_BUFFER_INDEX32 | BGFX_BUFFER_COMPUTE_READ);
+        buffers.descriptors = bgfx::createVertexBuffer(
+            bgfx::copy(descriptors.data(),
+                       static_cast<std::uint32_t>(descriptors.size() * sizeof(descriptors[0]))),
+            vector_layout(), BGFX_BUFFER_COMPUTE_READ);
+        if (!bgfx::isValid(buffers.indices) || !bgfx::isValid(buffers.descriptors))
+        {
+            release_meshlets();
+            return false;
+        }
+    }
+    return true;
+}
+
+void GpuGeometry::release_meshlets() noexcept
+{
+    for (auto& buffers : meshlets_)
+    {
+        if (bgfx::isValid(buffers.indices))
+        {
+            bgfx::destroy(buffers.indices);
+        }
+        if (bgfx::isValid(buffers.descriptors))
+        {
+            bgfx::destroy(buffers.descriptors);
+        }
+    }
+    meshlets_.clear();
+}
+
+bgfx::IndexBufferHandle GpuGeometry::meshlet_indices(std::size_t level) const noexcept
+{
+    return level < meshlets_.size() ? meshlets_[level].indices
+                                    : bgfx::IndexBufferHandle{bgfx::kInvalidHandle};
+}
+
+bgfx::VertexBufferHandle GpuGeometry::meshlet_descriptors(std::size_t level) const noexcept
+{
+    return level < meshlets_.size() ? meshlets_[level].descriptors
+                                    : bgfx::VertexBufferHandle{bgfx::kInvalidHandle};
 }
 
 } // namespace engine::render_detail

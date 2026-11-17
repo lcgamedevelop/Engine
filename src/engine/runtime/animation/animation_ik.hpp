@@ -25,7 +25,7 @@ struct IkOperation
                                  const AnimationIkTarget& target, bool two_bone);
 [[nodiscard]] bool collect_ik_operations(Animator actor, const CompiledSkeleton& skeleton,
                                          const ozz::math::Float4x4& model_to_world,
-                                         std::vector<IkOperation>& output);
+                                         const Vec3& origin, std::vector<IkOperation>& output);
 [[nodiscard]] bool apply_ik(const CompiledSkeleton& skeleton,
                             std::span<const IkOperation> operations,
                             std::vector<ozz::math::SoaTransform>& locals,

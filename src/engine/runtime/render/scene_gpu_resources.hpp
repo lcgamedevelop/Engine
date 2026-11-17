@@ -87,6 +87,7 @@ struct RenderSystem::SceneGpuResources
     std::array<render_detail::ViewDrawList, 4> draw_lists;
     bool culling_applied = false;
     bool lod_applied = false;
+    bool meshlet_bounds_limited = false;
     render_detail::AtmospherePass atmosphere;
     render_detail::DebugDrawPass debug_draw;
     std::map<std::pair<std::uint64_t, std::uint16_t>, std::size_t> selected_lods;
@@ -202,19 +203,18 @@ struct RenderSystem::SceneGpuResources
     SceneGpuResources& operator=(SceneGpuResources&&) = delete;
 
     [[nodiscard]] bool initialize();
-    [[nodiscard]] bool collect_frame(WorldSystem& world, render_detail::RenderFrameData& output);
+    [[nodiscard]] bool collect_frame(WorldSystem& world, const Vec3& origin,
+                                     render_detail::RenderFrameData& output);
     [[nodiscard]] bool collect_view(const render_detail::RenderFrameData& frame,
                                     const render_detail::SceneDrawView& view,
                                     render_detail::ViewDrawList& output);
-    [[nodiscard]] bool prepare_lighting(const render_detail::RenderFrameData& frame_data,
-                                        const RenderSettings& settings, const RenderConfig& config,
-                                        render_detail::SceneDrawView& draw,
-                                        const CameraSettings& lens,
-                                        render_detail::ShadowFrame& frame,
-                                        std::size_t cluster_index, bgfx::ViewId base,
-                                        const SceneCaptureRequest* capture);
+    [[nodiscard]] bool prepare_lighting(
+        const render_detail::RenderFrameData& frame_data, const RenderSettings& settings,
+        const RenderConfig& config, render_detail::SceneDrawView& draw, const CameraSettings& lens,
+        render_detail::ShadowFrame& frame, std::size_t cluster_index, bgfx::ViewId base,
+        const SceneCaptureRequest* capture, const render_detail::VsmPageBatch* vsm);
     [[nodiscard]] bool draw_meshes(const render_detail::RenderFrameData& frame,
-                                   const render_detail::ViewDrawList& list,
+                                   render_detail::ViewDrawList& list,
                                    const RenderSettings& settings,
                                    const render_detail::SceneDrawView& view,
                                    render_detail::SceneDrawMode mode);

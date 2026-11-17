@@ -1,10 +1,15 @@
+#include "runtime/render/render_system.hpp"
+#include "runtime/render/rvt/rvt_pass.hpp"
+#include "runtime/render/vsm/virtual_shadow_cache.hpp"
+#include "runtime/render/vsm/virtual_shadow_pass.hpp"
+
 #include "runtime/font/font_system.hpp"
 #include "runtime/performance/profiling.hpp"
+#include "runtime/render/passes/meshlet_cull_pass.hpp"
 #include "runtime/render/render_constants.hpp"
 #include "runtime/render/render_context.hpp"
 #include "runtime/render/render_extension.hpp"
 #include "runtime/render/render_math.hpp"
-#include "runtime/render/render_system.hpp"
 #include "runtime/render/scene_gpu_resources.hpp"
 #include "runtime/render/scene_render_query.hpp"
 #include "runtime/resource/resource.hpp"
@@ -17,6 +22,7 @@
 #include "runtime/scene/planar_reflection_component.hpp"
 #include "runtime/scene/scene.hpp"
 #include "runtime/scene/transform.hpp"
+#include "runtime/utils/transform_math.hpp"
 #include "runtime/world/world_system.hpp"
 #include <SDL3/SDL.h>
 #include <algorithm>
@@ -52,18 +58,25 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
     if (!scene || !scene_resources_ ||
         !render_detail::drawable_scene(*world_, view_camera, !extensions_.empty()))
     {
+        release_vsm();
         scene_collected_ = scene != nullptr && !render_detail::drawable_scene(*world_, view_camera,
                                                                               !extensions_.empty());
         return true;
     }
     const Camera camera = view_camera ? view_camera : scene->active_camera();
+    double absolute_camera[16]{};
     float camera_world[16]{}, view[16]{}, projection[16]{};
     const auto camera_transform = camera.node().get_component<Transform>();
     CameraSettings settings;
     const float aspect = static_cast<float>(width_) / static_cast<float>(height_);
     if (!camera.get_settings(settings) || !camera_transform ||
-        !camera_transform.world_matrix(camera_world) ||
-        !camera_detail::view_matrix(camera_world, view) ||
+        !camera_transform.world_matrix(absolute_camera))
+    {
+        return false;
+    }
+    const Vec3 origin{absolute_camera[12], absolute_camera[13], absolute_camera[14]};
+    transform_math::relative(absolute_camera, origin, camera_world);
+    if (!camera_detail::view_matrix(camera_world, view) ||
         !camera_detail::projection_matrix(settings, aspect, bgfx::getCaps()->homogeneousDepth,
                                           projection))
     {
@@ -77,11 +90,20 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
     {
         return true;
     }
-    if (!resources.collect_frame(*world_, resources.frame_data))
+    if (!resources.collect_frame(*world_, origin, resources.frame_data))
     {
         return false;
     }
     scene_collected_ = resources.frame_complete;
+    render_detail::SceneDrawView rvt_view;
+    rvt_view.world_origin = origin;
+    rvt_view.world = camera_world;
+    rvt_view.view = view;
+    rvt_view.projection = projection;
+    rvt_view.width = static_cast<std::uint16_t>(width_);
+    rvt_view.height = static_cast<std::uint16_t>(height_);
+    rvt_view.lod_observer = {camera.instance_id(), scene->id()};
+    prepare_rvt(rendering, resources.frame_data, rvt_view);
     for (std::size_t index = 0; index < resources.targets().planar.size(); ++index)
     {
         auto& target = resources.targets().planar[index];
@@ -93,6 +115,8 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
         const auto base = static_cast<bgfx::ViewId>(3 + index * 39);
         render_detail::SceneDrawView draw;
         draw.renderer = this;
+        draw.world_origin = origin;
+        draw.rvt = rvt_status_.effective ? rvt_pass_.get() : nullptr;
         draw.id = static_cast<bgfx::ViewId>(base + 30);
         draw.width = target.width;
         draw.height = target.height;
@@ -107,7 +131,7 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
         draw.max_anisotropy = config_.max_anisotropy;
         render_detail::ShadowFrame shadow;
         if (!resources.prepare_lighting(resources.frame_data, rendering, config_, draw, settings,
-                                        shadow, index, base, nullptr))
+                                        shadow, index, base, nullptr, nullptr))
         {
             return false;
         }
@@ -126,6 +150,8 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
     }
     render_detail::SceneDrawView draw;
     draw.renderer = this;
+    draw.world_origin = origin;
+    draw.rvt = rvt_status_.effective ? rvt_pass_.get() : nullptr;
     draw.width = static_cast<std::uint16_t>(width_);
     draw.height = static_cast<std::uint16_t>(height_);
     draw.world = camera_world;
@@ -133,17 +159,57 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
     draw.projection = projection;
     draw.visibility = camera;
     draw.frustum_culling_enabled = settings.frustum_culling_enabled;
-    draw.lod_observer = {camera.instance_id(), 0};
+    draw.lod_observer = {camera.instance_id(), world_->scene() ? world_->scene()->id() : 0};
     draw.max_anisotropy = config_.max_anisotropy;
-    render_detail::ShadowFrame shadow;
-    if (!resources.prepare_lighting(resources.frame_data, rendering, config_, draw, settings,
-                                    shadow, 2, render_detail::shadow_view, nullptr))
+    render_detail::VsmPageBatch vsm_batch;
+    if (!prepare_vsm(resources.frame_data, draw, settings, vsm_batch))
     {
         return false;
+    }
+    render_detail::ShadowFrame shadow;
+    if (!resources.prepare_lighting(resources.frame_data, rendering, config_, draw, settings,
+                                    shadow, 2, render_detail::shadow_view, nullptr,
+                                    vsm_batch.generation ? &vsm_batch : nullptr))
+    {
+        if (vsm_cache_)
+        {
+            vsm_cache_->cancel_batch();
+        }
+        if (vsm_batch.generation)
+        {
+            vsm_status_.state = VsmState::failed;
+            vsm_status_.error_code = "vsm_lighting_failed";
+            vsm_status_.error = "Cannot upload the virtual shadow page table";
+        }
+        return false;
+    }
+    if (vsm_batch.generation)
+    {
+        if (!vsm_cache_->publish(vsm_batch, submission_sequence_ + 1))
+        {
+            return false;
+        }
+        (void)vsm_cache_->status(vsm_status_);
+        vsm_status_.resident_bytes = draw.vsm.resident_bytes + vsm_batch.gpu_data.size() * 16;
     }
     if (!resources.collect_view(resources.frame_data, draw, resources.draw_lists[2]))
     {
         return false;
+    }
+    if (rendering.meshlet_culling_enabled && render_detail::meshlet_supported())
+    {
+        if (meshlet_culling_ &&
+            !meshlet_culling_->dispatch(
+                resources.frame_data, draw, resources.draw_lists[2],
+                debug_requests_[static_cast<std::size_t>(RenderFeature::meshlet_statistics)]))
+        {
+            return false;
+        }
+    }
+    else if (meshlet_culling_ &&
+             meshlet_culling_->statistics().state != MeshletSampleState::disabled)
+    {
+        meshlet_culling_->reset_scene();
     }
     resources.targets().surface_pass.begin(view, projection);
     draw.id = render_detail::ambient_occlusion_depth_view;
@@ -155,6 +221,12 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
     draw.id = render_detail::surface_view;
     if (!resources.draw_meshes(resources.frame_data, resources.draw_lists[2], rendering, draw,
                                render_detail::SceneDrawMode::surface))
+    {
+        return false;
+    }
+    if (vsm_batch.generation &&
+        !vsm_pass_->submit_feedback(vsm_batch.view, resources.targets().surface_pass.depth(),
+                                    submission_sequence_ + 1))
     {
         return false;
     }
@@ -212,7 +284,7 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
     {
         for (const auto& owner : world_->scenes())
         {
-            if (!fonts_->render_scene(*owner, render_detail::transparent_view, true))
+            if (!fonts_->render_scene(*owner, origin, render_detail::transparent_view, true))
             {
                 return false;
             }
@@ -221,6 +293,7 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
     if (!extensions_.empty())
     {
         RenderContext context{*scene};
+        context.world_origin = origin;
         std::copy_n(view, context.view.size(), context.view.begin());
         std::copy_n(projection, context.projection.size(), context.projection.begin());
         context.view_id = render_detail::extension_view;

@@ -183,6 +183,45 @@ bool tests()
             return false;
         }
     }
+    const auto original = read(source);
+    if (!expect(run("set_meshlet_import", {{"path", "grid.mesh"}, {"enabled", true}}) &&
+                    result["imported"] == true && result["guid"] == guid &&
+                    result["meshes"][0]["levels"].size() > 1 && read(source) == original,
+                "Meshlet command reuses the real pipeline without changing source geometry"))
+    {
+        return false;
+    }
+    for (const auto& level : result["meshes"][0]["levels"])
+    {
+        if (!expect(level["meshletCount"].get<std::size_t>() > 0,
+                    "every imported LOD contains meshlets"))
+        {
+            return false;
+        }
+    }
+    const auto meshlet_meta = read(meta);
+    const auto meshlet_catalog = read(fixture.root / "cache/catalog.bin");
+    if (!expect(run("set_meshlet_import", {{"path", "grid.mesh"}, {"enabled", true}}) &&
+                    result["changed"] == false && result["imported"] == false &&
+                    read(fixture.root / "cache/catalog.bin") == meshlet_catalog,
+                "unchanged Meshlet options do not rebuild") ||
+        !expect(!commands.execute("set_meshlet_import", {{"path", "grid.mesh"}, {"enabled", 1}},
+                                  result, error) &&
+                    read(meta) == meshlet_meta,
+                "invalid Meshlet options preserve source metadata") ||
+        !expect(run("set_meshlet_import", {{"path", "grid.mesh"}, {"enabled", false}}) &&
+                    result["guid"] == guid && result["meshes"][0]["levels"].size() > 1,
+                "disabling Meshlets preserves the same resource and its LODs"))
+    {
+        return false;
+    }
+    for (const auto& level : result["meshes"][0]["levels"])
+    {
+        if (!expect(level["meshletCount"] == 0, "disabling removes all auxiliary cluster data"))
+        {
+            return false;
+        }
+    }
     return expect(run("set_mesh_lod_import", {{"path", "grid.mesh"}, {"enabled", false}}) &&
                       result["meshes"][0]["levels"].size() == 1 && result["guid"] == guid,
                   "disabling generation reimports only original topology with the same GUID");

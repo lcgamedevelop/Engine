@@ -2,7 +2,7 @@ include "common.fbs";
 namespace engine.schema;
 
 table LightProbeData {
-    schema_version:uint = 1;
+    schema_version:uint = 2;
     path:string (required);
     bounds_min:Vec3 (required, native_inline);
     bounds_max:Vec3 (required, native_inline);
@@ -10,7 +10,7 @@ table LightProbeData {
     grid_y:uint;
     grid_z:uint;
     // Column-major local-to-world matrix at bake time; moving a volume invalidates its bake.
-    baked_transform:[float] (required);
+    baked_transform:[double] (required);
     // Probe-major RGB radiance SH9, l=0..2 and m=-l..l, x-fastest grid indexing.
     coefficients:[Vec3] (required);
     valid:[ubyte] (required);
@@ -18,4 +18,4 @@ table LightProbeData {
 }
 
 root_type LightProbeData;
-file_identifier "ELPR";
+file_identifier "ELP2";

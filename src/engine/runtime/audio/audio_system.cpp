@@ -36,7 +36,7 @@ std::atomic<std::uint64_t> next_audio_generation{1};
 
 struct Listener
 {
-    std::array<float, 16> matrix{};
+    std::array<double, 16> matrix{};
     float volume = 1.0F;
     bool available = false;
 };
@@ -85,7 +85,7 @@ bool spatial_mix(const AudioSource& source, const AudioSource::Data& settings,
         return true;
     }
     const auto transform = source.node().get_component<Transform>();
-    std::array<float, 16> matrix{};
+    std::array<double, 16> matrix{};
     if (!transform || !transform.active() || !transform.world_matrix(matrix.data()))
     {
         return false;

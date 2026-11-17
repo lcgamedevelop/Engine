@@ -52,6 +52,14 @@ if(ENGINE_ENABLE_RUNTIME_DEPS)
                 src/engine/runtime/render/render_extension.cpp
                 src/engine/runtime/render/render_math.cpp
                 src/engine/runtime/render/render_settings.cpp
+                src/engine/runtime/render/render_vsm.cpp
+                src/engine/runtime/render/vsm/virtual_shadow_cache.cpp
+                src/engine/runtime/render/vsm/virtual_shadow_pass.cpp
+                src/engine/runtime/render/vsm/vsm_debug_view.cpp
+                src/engine/runtime/render/render_rvt.cpp
+                src/engine/runtime/render/rvt/virtual_texture_cache.cpp
+                src/engine/runtime/render/rvt/rvt_pass.cpp
+                src/engine/runtime/render/rvt/rvt_debug_view.cpp
                 src/engine/runtime/render/renderer_callbacks.cpp
                 src/engine/runtime/render/render_scene.cpp
                 src/engine/runtime/render/scene_draw.cpp
@@ -72,6 +80,7 @@ if(ENGINE_ENABLE_RUNTIME_DEPS)
                 src/engine/runtime/render/passes/shadow_frame.cpp
                 src/engine/runtime/render/passes/shadow_pass.cpp
                 src/engine/runtime/render/passes/skinning_pass.cpp
+                src/engine/runtime/render/passes/meshlet_cull_pass.cpp
                 src/engine/runtime/render/passes/ambient_occlusion_pass.cpp
                 src/engine/runtime/render/passes/hdr_post_process_pass.cpp)
     target_include_directories(engine_render PRIVATE "${PROJECT_SOURCE_DIR}/src/engine")
@@ -90,12 +99,14 @@ if(ENGINE_ENABLE_RUNTIME_DEPS)
                 bgfx::bx
                 basisu::basisu_encoder)
     include(${PROJECT_SOURCE_DIR}/cmake/core/render_shaders.cmake)
-    engine_embed_render_shaders(engine_render shadow shadow_instanced movie)
+    engine_embed_render_shaders(engine_render shadow shadow_instanced movie rvt_debug vsm_debug)
     engine_embed_upstream_feature_shaders(engine_render)
     engine_embed_assao_shaders(engine_render)
     engine_embed_skinning_shader(engine_render)
+    engine_embed_meshlet_shaders(engine_render)
     engine_embed_hdr_shaders(engine_render)
     engine_embed_clustered_shader(engine_render)
+    engine_embed_vsm_shaders(engine_render)
     engine_embed_ssr_shaders(engine_render)
     engine_configure_platform_graphics()
 
@@ -104,6 +115,7 @@ if(ENGINE_ENABLE_RUNTIME_DEPS)
     target_sources(
         engine_resource
         PRIVATE src/engine/runtime/resource/builtin_resources.cpp
+                src/engine/runtime/resource/builtin_font.cpp
                 src/engine/runtime/utils/mesh_utils.cpp
                 src/engine/runtime/resource/resource.cpp
                 src/engine/runtime/resource/resource_read.cpp
@@ -130,7 +142,8 @@ if(ENGINE_ENABLE_RUNTIME_DEPS)
                 src/engine/runtime/resource/virtual_file_system.cpp
                 src/engine/runtime/resource/file_operations.cpp)
     target_include_directories(engine_resource PRIVATE "${PROJECT_SOURCE_DIR}/src/engine")
-    engine_embed_render_shaders(engine_resource cube cube_instanced font surface water)
+    target_include_directories(engine_resource SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/third_party/font8x8")
+    engine_embed_render_shaders(engine_resource cube cube_instanced font surface water rvt terrain terrain_cube terrain_surface terrain_rvt)
     target_link_libraries(
         engine_resource
         PUBLIC engine::scene_data
@@ -257,6 +270,13 @@ if(ENGINE_ENABLE_RUNTIME_DEPS)
         engine::font
         engine::ui
         engine::render)
+
+    add_library(engine_geometry STATIC src/engine/runtime/scene/geometry_update.cpp)
+    add_library(engine::geometry ALIAS engine_geometry)
+    target_include_directories(engine_geometry PRIVATE "${PROJECT_SOURCE_DIR}/src/engine")
+    target_link_libraries(engine_geometry PUBLIC engine::scene_data
+        PRIVATE engine::world engine::render engine::physics engine::task engine::scene_ecs)
+    engine_apply_options(engine_geometry)
 
     add_library(engine_gameplay STATIC src/engine/runtime/gameplay/gameplay_scene_loading.cpp
                 src/engine/runtime/gameplay/gameplay_session.cpp

@@ -583,7 +583,12 @@ declare module "engine" {
     }
     /** Scene-wide environment parameters, stored with the scene. */
     export class EnvironmentComponent extends Component {
+        GetRvtSettings(): ControlData.RvtSettingsT | null;
+        SetRvtSettings(settings: ControlData.RvtSettingsT): boolean;
         private constructor();
+        readonly meshletCullingEnabled: boolean;
+        /** Enables meshlet culling scene-wide for eligible geometry. */
+        SetMeshletCulling(enabled: boolean): boolean;
         /** The directional sun must belong to this scene. Parameters patch the current values. */
         SetAtmosphere(enabled: boolean, sun?: Node | null, parameters?: AtmosphereParameters): boolean;
         /** Uses the scene's precomputed IBL maps; baking does not change this switch. */
@@ -659,6 +664,10 @@ declare module "engine" {
         SetColor(r: number, g: number, b: number): boolean;
         SetIntensity(intensity: number): boolean;
         SetDirectional(): boolean;
+        readonly shadowMethod: ControlData.ShadowMethod;
+        SetShadowMethod(method: ControlData.ShadowMethod): boolean;
+        GetVirtualShadowSettings(): ControlData.VsmSettingsT | null;
+        SetVirtualShadowSettings(settings: ControlData.VsmSettingsT): boolean;
         /** Directional, point and spot shadows; resolution defaults to 2048, bias to 0.001. */
         SetShadows(enabled: boolean, resolution?: number, bias?: number): boolean;
         /** Count: 1/2/4; distance: (0, 100000]. Preserves the shadow enabled state. */
@@ -674,6 +683,8 @@ declare module "engine" {
         SetSpot(range: number, innerAngle: number, outerAngle: number): boolean;
     }
     export class MeshRenderer extends Component {
+        readonly rvtRole: ControlData.RvtRole;
+        SetRvtRole(role: ControlData.RvtRole): boolean;
         readonly staticInstancingEnabled: boolean;
         SetStaticInstancing(enabled: boolean): boolean;
         readonly staticLodEnabled: boolean;
@@ -858,43 +869,62 @@ declare module "engine" {
         readonly playback: "stopped" | "playing" | "paused" | null;
         readonly time: number | null;
     }
-    /** Available when the optional terrain runtime plugin is enabled. */
+    export interface TerrainBounds { minimum: ControlData.Vec3T; maximum: ControlData.Vec3T; }
+    export interface TerrainRegionKey { x: number; y: number; z: number; lod: number; }
+    export interface TerrainOperationId { worldEpoch: bigint; nodeId: bigint; componentInstance: bigint; sequence: bigint; }
+    export interface TerrainPinId { worldEpoch: bigint; nodeId: bigint; componentInstance: bigint; sequence: bigint; }
+    export interface TerrainRegionQuery { bounds: TerrainBounds; lod?: number; limit?: number; cursor?: string; }
+    export interface TerrainPinSpec { regions: TerrainRegionKey[]; collisionRequired: boolean; ownerKey: bigint; reason: string; }
+    export interface TerrainBrush { center: ControlData.Vec3T; extent: ControlData.Vec3T; shape?: "sphere" | "box"; operation: "dig" | "fill" | "flatten" | "smooth" | "paint"; strength?: number; layer?: number; }
+    export interface TerrainEditSpec { brushes: TerrainBrush[]; expectedRevision?: bigint; }
+    export interface TerrainCollapseSpec { bounds: TerrainBounds; expectedRevision?: bigint; minSamples?: number; fragmentCells?: number; maxFragments?: number; density?: number; connectivityBlockLimit?: number; }
+    export interface TerrainResetSpec { bounds: TerrainBounds; expectedRevision?: bigint; }
+    export interface TerrainRetireSpec { maxCount?: number; maxAgeSeconds?: number; expectedRevision?: bigint; }
+    export interface TerrainSaveSpec { slot: string; checkpointId: string; expectedRevision?: bigint; }
+    export interface TerrainLoadSpec { slot: string; checkpointId?: string; expectedBaseHash?: string; }
+    export interface TerrainOperationSnapshot {
+        id: TerrainOperationId; state: "queued" | "waiting" | "preparing" | "ready" | "published" | "completed" | "cancelled" | "failed";
+        baseRevision: bigint; publishedRevision: bigint; contentRevision: bigint; dirtyBounds: TerrainBounds;
+        createdFragments: number; retiredFragments: number; checkpointId: string; capturedRevision: bigint; errorCode: string; error: string;
+        stages: { stage: string; state: string; completed: bigint; total: bigint; totalKnown: boolean }[];
+    }
+    export interface TerrainRegionStatus {
+        key: TerrainRegionKey; densityRevision: bigint; meshRevision: bigint; collisionRevision: bigint;
+        collisionRequired: boolean; known: boolean; dirty: boolean; pinCount: number; state: string; blockedReason: string;
+    }
+    export interface TerrainRegionSnapshot {
+        state: SceneWorkProgress["state"];
+        revision: bigint;
+        settingsRevision: bigint;
+        demandRevision: bigint;
+        publishedSettingsRevision: bigint;
+        publishedDemandRevision: bigint;
+        errorCode: string;
+        error: string;
+        fragmentCount: bigint;
+        regions: TerrainRegionStatus[];
+        nextCursor: string;
+    }
+    /** Optional terrain plugin. All edits publish asynchronously; coordinates are in world space. */
     export class TerrainComponent extends Component {
         private constructor();
-        /** Sphere center and radius are in terrain-node local space. */
-        DigSphere(x: number, y: number, z: number, radius: number): boolean;
-        FillSphere(x: number, y: number, z: number, radius: number): boolean;
-        /** Accept a queued edit; completed runs on the main thread after publish or cancellation.
-         * Scene changes and script shutdown discard callbacks. No callback on rejected requests. */
-        DigSphereAsync(
-            x: number, y: number, z: number, radius: number,
-            completed: (success: boolean) => void,
-        ): boolean;
-        FillSphereAsync(
-            x: number, y: number, z: number, radius: number,
-            completed: (success: boolean) => void,
-        ): boolean;
-        /** Extract unsupported soil; refuses over-budget work without removing that soil. */
-        CollapseDetached(
-            minSamples: number,
-            maxFragments: number,
-            fragmentCells?: number,
-            density?: number,
-        ): boolean;
-        readonly fragmentCount: number | null;
-        /** Keep at most maxCount dynamic fragments; zero retires all. A zero age disables expiry.
-         * Explicit main-thread request; returns retired count, or null for invalid/busy owners. */
-        RetireFragments(maxCount: number, maxAgeSeconds: number): number | null;
-        Reset(): boolean;
-        /** Slot: 1..48 ASCII letters, digits, underscore or hyphen; no filesystem paths. */
-        Save(slot: string): boolean;
-        Load(slot: string): boolean;
-        readonly ready: boolean;
-        readonly revision: bigint | null;
-        readonly chunkCount: number | null;
-        readonly rebuiltChunks: number | null;
-        readonly triangleCount: number | null;
-        readonly lastError: string | null;
+        GetSettings(): ControlData.TerrainDataT | null;
+        SetSettings(settings: ControlData.TerrainDataT): boolean;
+        SetView(key: bigint, view: ControlData.TerrainViewDataT): boolean;
+        RemoveView(key: bigint): boolean;
+        PinRegions(spec: TerrainPinSpec): TerrainPinId | null;
+        ReleasePin(id: TerrainPinId): boolean;
+        RequestEdit(spec: TerrainEditSpec): TerrainOperationId | null;
+        RequestCollapse(spec: TerrainCollapseSpec): TerrainOperationId | null;
+        RequestReset(spec: TerrainResetSpec): TerrainOperationId | null;
+        RequestRetire(spec: TerrainRetireSpec): TerrainOperationId | null;
+        RequestSave(spec: TerrainSaveSpec): TerrainOperationId | null;
+        RequestLoad(spec: TerrainLoadSpec): TerrainOperationId | null;
+        GetOperation(id: TerrainOperationId): TerrainOperationSnapshot | null;
+        CancelOperation(id: TerrainOperationId): boolean;
+        ReleaseOperation(id: TerrainOperationId): boolean;
+        GetRegions(query: TerrainRegionQuery): TerrainRegionSnapshot | null;
+        CollectSupport(query: TerrainRegionQuery): Collider[] | null;
     }
     /** Available when the optional effects runtime plugin is enabled. */
     export class EffectComponent extends Component {
@@ -1117,7 +1147,7 @@ declare module "engine" {
             completed: (success: boolean) => void,
         ): boolean;
         /** Multi-sample foundation coverage against one current-scene static collider. */
-        RefreshSupport(support: Collider, maxGap: number, minCoverage: number): boolean;
+        RefreshSupport(supports: readonly Collider[], maxGap: number, minCoverage: number): boolean;
         OwnsFragment(nodeId: bigint): boolean;
         /** Keep at most maxCount dynamic groups; static support is preserved. Zero retires all.
          * A zero age disables expiry. Returns retired count, or null for invalid/busy owners. */
@@ -1159,8 +1189,10 @@ declare module "engine" {
         /** World-space linear velocity. */
         SetVelocity(x: number, y: number, z: number): boolean;
         GetVelocity(): { readonly x: number; readonly y: number; readonly z: number } | null;
-        /** Last completed fixed-step snapshot; null for an expired component. */
-        GetStatus(): CharacterMotorStatus | null;
+        /** Last physics synchronization; null until a dynamic body is synchronized. */
+        GetSleeping(): boolean | null;
+        /** Request sleep/wake at the next physics synchronization. */
+        SetSleeping(value: boolean): boolean;
         /** A world-space impulse consumed by the next physics synchronization. */
         AddImpulse(x: number, y: number, z: number): boolean;
     }
@@ -1375,6 +1407,10 @@ declare module "engine" {
         export type CharacterCameraSource = 0 | 1 | 2 | 3 | 4 | 5;
         /** 0=body, 1=head, 2=first_person */
         export type CharacterVisualKind = 0 | 1 | 2;
+        /** 0=shadow_map, 1=virtual_shadow_map */
+        export type ShadowMethod = 0 | 1;
+        /** 0=none, 1=writer, 2=reader, 3=writer_reader */
+        export type RvtRole = 0 | 1 | 2 | 3;
         export interface CameraDataT {
             fovDegrees: number;
             nearClip: number;
@@ -1658,6 +1694,46 @@ declare module "engine" {
         }
         export interface CharacterVisualDataT {
             kind: CharacterVisualKind;
+        }
+        export interface TerrainViewDataT {
+            center: Vec3T;
+            visualRadius: number;
+            collisionRadius: number;
+            lodBias: number;
+            priority: number;
+        }
+        export interface TerrainBudgetDataT {
+            maxRequests: number;
+            maxTasks: number;
+            maxRegions: number;
+            cpuBytes: bigint;
+            gpuBytes: bigint;
+            collisionBytes: bigint;
+            uploadBytesPerFrame: bigint;
+            publicationsPerFrame: number;
+        }
+        export interface VsmSettingsT {
+            virtualResolution: number;
+            firstClipmapExtent: number;
+            lodBias: number;
+        }
+        export interface RvtSettingsT {
+            enabled: boolean;
+            bounds: { minimum: Vec3T; maximum: Vec3T; };
+            virtualResolution: number;
+            pageSize: number;
+            pageBorder: number;
+            physicalPages: number;
+            pagesPerFrame: number;
+        }
+        export interface TerrainDataT {
+            terrainGuid: string;
+            surfaceMaterialGuid: string;
+            rvtRole: RvtRole;
+            streamingEnabled: boolean;
+            collisionEnabled: boolean;
+            initialView: TerrainViewDataT | null;
+            budget: TerrainBudgetDataT | null;
         }
     }
     // END GENERATED CONTROL SCHEMA

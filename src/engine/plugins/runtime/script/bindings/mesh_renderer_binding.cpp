@@ -4,6 +4,7 @@
 #include "plugins/runtime/script/bindings/binding_context.hpp"
 #include "runtime/scene/mesh_renderer.hpp"
 #include "runtime/scene/node.hpp"
+#include "runtime/schema/control_json_generated.hpp"
 
 namespace engine::plugins::script::bindings
 {
@@ -27,6 +28,8 @@ export class MeshRenderer extends Component {
     SetStaticLod(enabled) {
         const h = handles.get(this); return native.MeshRendererSetStaticLod(h.scene, h.node, enabled);
     }
+    get rvtRole() {const h=handles.get(this);return native.MeshRendererRvtRole(h.scene,h.node);}
+    SetRvtRole(role) {const h=handles.get(this);return native.MeshRendererSetRvtRole(h.scene,h.node,role);}
     get castShadows() {
         const h = handles.get(this); return native.MeshRendererCastShadows(h.scene, h.node);
     }
@@ -100,6 +103,26 @@ void set_static_feature(const Arguments& arguments)
                               : mesh.set_static_lod_enabled(arguments.boolean(2))));
 }
 
+void get_rvt_role(const Arguments& arguments)
+{
+    const auto mesh = binding_detail::component<MeshRenderer>(arguments, 2);
+    arguments.set_return({});
+    if (mesh)
+    {
+        arguments.set_return(static_cast<std::uint32_t>(mesh.rvt_role()));
+    }
+}
+void set_rvt_role(const Arguments& arguments)
+{
+    auto mesh = binding_detail::component<MeshRenderer>(arguments, 3);
+    arguments.set_return(false);
+    if (mesh && arguments.is_uint32(2) &&
+        arguments.unsigned_integer(2) <= static_cast<std::uint32_t>(schema::RvtRole::MAX))
+    {
+        arguments.set_return(
+            mesh.set_rvt_role(static_cast<schema::RvtRole>(arguments.unsigned_integer(2))));
+    }
+}
 void cast_shadows(const Arguments& arguments)
 {
     auto node = BindingContext::node(arguments);
@@ -182,6 +205,8 @@ bool MeshRendererBinding::register_functions(vm::ScriptVm& vm) const
            vm.function("MeshRendererStaticLod", static_feature, 1) &&
            vm.function("MeshRendererSetStaticInstancing", set_static_feature, 0) &&
            vm.function("MeshRendererSetStaticLod", set_static_feature, 1) &&
+           vm.function("MeshRendererRvtRole", get_rvt_role) &&
+           vm.function("MeshRendererSetRvtRole", set_rvt_role) &&
            vm.function("MeshRendererCastShadows", cast_shadows) &&
            vm.function("MeshRendererSetCastShadows", set_cast_shadows) &&
            vm.function("MeshRendererBakeStatic", bake_static) &&

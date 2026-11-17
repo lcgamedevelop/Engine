@@ -28,6 +28,14 @@ export class RigidBody extends Component {
         const h = handles.get(this);
         return native.RigidBodyGetVelocity(h.scene, h.node);
     }
+    GetSleeping() {
+        const h = handles.get(this);
+        return native.RigidBodyGetSleeping(h.scene, h.node);
+    }
+    SetSleeping(value) {
+        const h = handles.get(this);
+        return native.RigidBodySetSleeping(h.scene, h.node, value);
+    }
     AddImpulse(x, y, z) {
         const h = handles.get(this);
         return native.RigidBodyImpulse(h.scene, h.node, x, y, z);
@@ -125,6 +133,22 @@ void get_velocity(const Arguments& arguments)
     arguments.set_return(
         vm::NativeValue::Object{{"x", vector.x()}, {"y", vector.y()}, {"z", vector.z()}});
 }
+void get_sleeping(const Arguments& arguments)
+{
+    const auto body = binding_detail::component<RigidBody>(arguments, 2);
+    bool sleeping = false;
+    arguments.set_return({});
+    if (body.get_sleeping(sleeping))
+    {
+        arguments.set_return(sleeping);
+    }
+}
+void set_sleeping(const Arguments& arguments)
+{
+    auto body = binding_detail::component<RigidBody>(arguments, 3);
+    arguments.set_return(body && arguments.is_boolean(2) &&
+                         body.set_sleeping(arguments.boolean(2)));
+}
 } // namespace
 
 std::string_view RigidBodyBinding::name() const noexcept
@@ -144,6 +168,8 @@ bool RigidBodyBinding::register_functions(vm::ScriptVm& vm) const
            vm.function("RigidBodyMotion", motion) && vm.function("RigidBodyMass", mass) &&
            vm.function("RigidBodyVelocity", velocity) &&
            vm.function("RigidBodyGetVelocity", get_velocity) &&
+           vm.function("RigidBodyGetSleeping", get_sleeping) &&
+           vm.function("RigidBodySetSleeping", set_sleeping) &&
            vm.function("RigidBodyImpulse", impulse);
 }
 } // namespace engine::plugins::script::bindings

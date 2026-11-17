@@ -851,8 +851,8 @@ bool restore_visual(Node node, const Json& snapshot)
 
 bool relative_matrix(const Node& destination, const Node& source, std::array<double, 16>& output)
 {
-    std::array<float, 16> a{};
-    std::array<float, 16> b{};
+    std::array<double, 16> a{};
+    std::array<double, 16> b{};
     const auto first = destination.get_component<Transform>();
     const auto second = source.get_component<Transform>();
     if (!first || !second || !first.world_matrix(a.data()) || !second.world_matrix(b.data()))
@@ -1505,7 +1505,7 @@ struct ModelingCommands::State
     {
         output = nullptr;
         auto value = node(record, error);
-        std::array<float, 16> matrix{};
+        std::array<double, 16> matrix{};
         if (!value || !value.get_component<Transform>().world_matrix(matrix.data()) ||
             !std::all_of(matrix.begin(), matrix.end(),
                          [](float item) { return std::isfinite(item); }))
@@ -2118,7 +2118,7 @@ struct ModelingCommands::State
         }
         if (original_node.parent())
         {
-            std::array<float, 16> world_matrix{};
+            std::array<double, 16> world_matrix{};
             std::array<double, 16> matrix{};
             if (!original_node.get_component<Transform>().world_matrix(world_matrix.data()) ||
                 (copy->mirror_enabled && !mesh::mirror(copy->source, copy->mirror, error)))
@@ -2185,7 +2185,7 @@ struct ModelingCommands::State
             {
                 return false;
             }
-            std::array<float, 16> world_matrix{};
+            std::array<double, 16> world_matrix{};
             std::array<double, 16> matrix{};
             if (!value.get_component<Transform>().world_matrix(world_matrix.data()))
             {

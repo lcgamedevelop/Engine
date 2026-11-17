@@ -1,5 +1,6 @@
 #include "plugins/runtime/script/bindings/light_binding.hpp"
 #include "plugins/runtime/script/bindings/binding_helpers.hpp"
+#include "plugins/runtime/script/bindings/control_binding_helpers.hpp"
 
 #include "plugins/runtime/script/bindings/binding_context.hpp"
 #include "runtime/scene/light.hpp"
@@ -15,6 +16,10 @@ namespace
 constexpr std::string_view javascript = R"js(
 export class Light extends Component {
     constructor(token, scene, node) { super(token, scene, node, native.LightKind); }
+    get shadowMethod() { const h = handles.get(this); return native.LightGetShadowMethod(h.scene, h.node); }
+    SetShadowMethod(method) { const h = handles.get(this); return native.LightSetShadowMethod(h.scene, h.node, method); }
+    GetVirtualShadowSettings() { const h = handles.get(this); return native.LightGetVsm(h.scene, h.node); }
+    SetVirtualShadowSettings(settings) { const h = handles.get(this); return native.LightSetVsm(h.scene, h.node, JSON.stringify(settings)); }
     SetShadows(enabled, resolution = 2048, bias = 0.001) {
         const h = handles.get(this);
         return native.LightShadows(h.scene, h.node, enabled, resolution, bias);
@@ -43,6 +48,62 @@ componentTypes.set(Light, { add: native.LightAdd, kind: native.LightKind });
 Object.freeze(Light.prototype);
 Object.freeze(Light);
 )js";
+
+void get_shadow_method(const Arguments& arguments)
+{
+    const auto light = binding_detail::component<Light>(arguments, 2);
+    LightSettings settings;
+    arguments.set_return({});
+    if (light && light.get_settings(settings))
+    {
+        arguments.set_return(static_cast<std::int32_t>(settings.shadow_method));
+    }
+}
+void set_shadow_method(const Arguments& arguments)
+{
+    auto light = binding_detail::component<Light>(arguments, 3);
+    LightSettings settings;
+    arguments.set_return(false);
+    if (!light || !light.get_settings(settings) || !arguments.is_uint32(2) ||
+        arguments.unsigned_integer(2) > static_cast<std::uint32_t>(schema::ShadowMethod::MAX))
+    {
+        return;
+    }
+    settings.shadow_method = static_cast<schema::ShadowMethod>(arguments.unsigned_integer(2));
+    arguments.set_return(light.set_settings(settings));
+}
+void get_vsm(const Arguments& arguments)
+{
+    const auto light = binding_detail::component<Light>(arguments, 2);
+    LightSettings settings;
+    arguments.set_return({});
+    if (!light || !light.get_settings(settings))
+    {
+        return;
+    }
+    const schema::VsmSettingsT defaults;
+    arguments.set_return(control_detail::native(schema::control_json::write(
+        settings.virtual_shadow ? *settings.virtual_shadow : defaults, true)));
+}
+void set_vsm(const Arguments& arguments)
+{
+    auto light = binding_detail::component<Light>(arguments, 3);
+    LightSettings settings;
+    control_detail::Json json;
+    std::string error;
+    arguments.set_return(false);
+    if (!light || !light.get_settings(settings) || !control_detail::argument(arguments, 2, json))
+    {
+        return;
+    }
+    auto value = std::make_unique<schema::VsmSettingsT>();
+    if (!schema::control_json::read(json, *value, error, true))
+    {
+        return;
+    }
+    settings.virtual_shadow = std::move(value);
+    arguments.set_return(light.set_settings(settings));
+}
 
 void color(const Arguments& arguments)
 {
@@ -213,6 +274,9 @@ bool LightBinding::register_functions(vm::ScriptVm& vm) const
            vm.function("LightAdd", binding_detail::add_component<Light>) &&
            vm.function("LightColor", color) && vm.function("LightIntensity", intensity) &&
            vm.function("LightShadows", shadows) &&
+           vm.function("LightGetShadowMethod", get_shadow_method) &&
+           vm.function("LightSetShadowMethod", set_shadow_method) &&
+           vm.function("LightGetVsm", get_vsm) && vm.function("LightSetVsm", set_vsm) &&
            vm.function("LightShadowCascades", shadow_cascades) &&
            vm.function("LightDirectional", directional) && vm.function("LightPoint", point) &&
            vm.function("LightSpot", spot);

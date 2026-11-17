@@ -32,7 +32,7 @@ classDiagram
     class NavigationGeometry {
         <<struct>>
         +const MeshDataT* mesh
-        +array~float,16~ transform
+        +array~double,16~ transform
     }
     class NavigationBounds {
         <<struct>>

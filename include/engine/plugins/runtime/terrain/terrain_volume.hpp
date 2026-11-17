@@ -1,51 +1,79 @@
 #pragma once
 
-#include "plugins/runtime/terrain/terrain_fragment.hpp"
-#include "runtime/physics/mesh_collision_data.hpp"
-#include "runtime/schema/mesh_generated.h"
-#include "runtime/schema/terrain_generated.h"
+#include "runtime/scene/scene_types.hpp"
+#include "runtime/schema/terrain_block_generated.h"
 
-#include <cstddef>
 #include <cstdint>
+#include <map>
+#include <memory>
+#include <span>
 #include <string>
 #include <vector>
 
 namespace engine::plugins::terrain
 {
+using TerrainRegionKey = schema::TerrainRegionKey;
 
-// Owns sampled data and a regular-cell mesh cache. No scene, GPU, physics or file access.
+struct TerrainRegionLess
+{
+    [[nodiscard]] bool operator()(const TerrainRegionKey& a,
+                                  const TerrainRegionKey& b) const noexcept;
+};
+
+struct TerrainRegionQuery
+{
+    Bounds3 bounds;
+    std::uint8_t lod = 0;
+    std::uint32_t limit = 256;
+    std::string cursor;
+};
+
+struct TerrainEditSpec
+{
+    // Zero accepts the current revision at the time this operation starts.
+    std::uint64_t expected_revision = 0;
+    std::vector<schema::TerrainBrushDataT> brushes;
+};
+
+using TerrainBlocks =
+    std::map<TerrainRegionKey, std::shared_ptr<const schema::TerrainBlockDataT>, TerrainRegionLess>;
+
+struct TerrainReadSnapshot
+{
+    std::uint64_t source_revision = 0;
+    std::shared_ptr<const schema::TerrainAssetDataT> source;
+    TerrainBlocks blocks;
+    std::vector<TerrainRegionKey> regions;
+};
+
+struct TerrainDelta
+{
+    std::uint64_t base_revision = 0;
+    Bounds3 dirty_bounds;
+    std::shared_ptr<const schema::TerrainAssetDataT> source;
+    TerrainBlocks blocks;
+    std::vector<TerrainRegionKey> changed;
+};
+
+// Pure immutable region storage and editing; no scene, resource loader or device access.
 class TerrainVolume final
 {
 public:
-    [[nodiscard]] static bool validate(const schema::TerrainAssetDataT& data, std::string& error);
-    [[nodiscard]] static bool generate(const schema::TerrainGeneratorDataT& settings,
-                                       schema::TerrainAssetDataT& output, std::string& error);
-    [[nodiscard]] bool initialize(const schema::TerrainAssetDataT& data, std::string& error);
-    [[nodiscard]] bool apply_sphere(const schema::Vec3& center, float radius, bool fill,
-                                    std::string& error);
-    [[nodiscard]] bool build_mesh(schema::MeshDataT& output, std::string& error);
-    // Valid after build_mesh; stable 4-cell leaf slots retain unchanged immutable geometry.
-    [[nodiscard]] const MeshCollisionData& collision_data() const noexcept;
-    // Six-connected solid islands not touching the bottom/side anchoring shell. Atomic on failure.
-    // Small islands remain in place; eligible islands split into bounded cell groups.
-    [[nodiscard]] bool extract_detached(std::uint32_t min_samples, std::uint32_t max_fragments,
-                                        std::uint32_t fragment_cells,
-                                        std::vector<TerrainFragment>& output, std::string& error);
-    [[nodiscard]] const schema::TerrainAssetDataT& data() const noexcept;
-    [[nodiscard]] std::size_t chunk_count() const noexcept;
-    [[nodiscard]] std::size_t rebuilt_chunks() const noexcept;
+    [[nodiscard]] static bool validate(const schema::TerrainAssetDataT& source, std::string& error);
+    [[nodiscard]] bool initialize(const schema::TerrainAssetDataT& source, std::string& error);
+    [[nodiscard]] bool stage_regions(std::span<const schema::TerrainBlockDataT> blocks,
+                                     std::span<const TerrainRegionKey> retire, TerrainDelta& output,
+                                     std::string& error) const;
+    [[nodiscard]] bool read(const TerrainRegionQuery& query, TerrainReadSnapshot& output) const;
+    [[nodiscard]] static bool stage_edit(const TerrainReadSnapshot& input,
+                                         const TerrainEditSpec& edit, TerrainDelta& output,
+                                         std::string& error);
+    [[nodiscard]] bool validate_delta(const TerrainDelta& delta) const noexcept;
+    void publish(TerrainDelta&& delta) noexcept;
 
 private:
-    void mark_sample_dirty(unsigned x, unsigned y, unsigned z);
-    struct Chunk
-    {
-        std::shared_ptr<const schema::MeshDataT> mesh;
-        bool dirty = true;
-    };
-    schema::TerrainAssetDataT data_;
-    std::vector<Chunk> chunks_;
-    MeshCollisionData collision_;
-    std::size_t rebuilt_chunks_ = 0;
+    std::shared_ptr<const schema::TerrainAssetDataT> source_;
+    TerrainBlocks blocks_;
+    std::uint64_t revision_ = 0;
 };
-
 } // namespace engine::plugins::terrain

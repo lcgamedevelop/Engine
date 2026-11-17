@@ -585,7 +585,7 @@ bool TextureImporter::convert(const ImportAsset& asset, const ImportContext& con
         return false;
     }
     schema::TextureDataT texture;
-    texture.schema_version = 2;
+    texture.schema_version = 3;
     texture.path = asset.path;
     texture.width = info.m_orig_width;
     texture.height = info.m_orig_height;

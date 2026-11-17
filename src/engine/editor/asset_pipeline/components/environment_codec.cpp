@@ -1,5 +1,6 @@
 #include "editor/asset_pipeline/components/environment_codec.hpp"
 
+#include "editor/asset_pipeline/control_toml.hpp"
 #include "editor/asset_pipeline/toml_helpers.hpp"
 #include "runtime/scene/scene_settings_validation.hpp"
 
@@ -64,6 +65,17 @@ bool EnvironmentCodec::read(const toml::table& table, schema::ComponentDataT& co
                             std::string& error) const
 {
     EnvironmentSettings settings;
+    if (const auto* source = table.get("rvt"))
+    {
+        const auto* rvt = source->as_table();
+        nlohmann::json value;
+        settings.rvt = std::make_unique<schema::RvtSettingsT>();
+        if (!rvt || !control_toml::read_table(*rvt, value, error) ||
+            !schema::control_json::read(value, *settings.rvt, error))
+        {
+            return false;
+        }
+    }
     if ((table.contains("ambient_color") &&
          !read_color(table.get("ambient_color"), settings.ambient_color)) ||
         (table.contains("ambient_sky_color") &&
@@ -89,6 +101,16 @@ bool EnvironmentCodec::read(const toml::table& table, schema::ComponentDataT& co
     {
         error = "environment numeric fields must be finite numbers";
         return false;
+    }
+    if (table.contains("meshlet_culling_enabled"))
+    {
+        const auto enabled = table["meshlet_culling_enabled"].value_exact<bool>();
+        if (!enabled)
+        {
+            error = "environment meshlet_culling_enabled must be boolean";
+            return false;
+        }
+        settings.meshlet_culling_enabled = *enabled;
     }
     if (table.contains("ibl_enabled"))
     {
@@ -246,6 +268,13 @@ void EnvironmentCodec::write(const schema::ComponentDataT& component, toml::tabl
     table.insert("fog_density", settings.fog_density);
     table.insert("clear_color", settings.clear_color);
     table.insert("ibl_enabled", settings.ibl_enabled);
+    table.insert("meshlet_culling_enabled", settings.meshlet_culling_enabled);
+    if (settings.rvt)
+    {
+        toml::table rvt;
+        control_toml::write_table(schema::control_json::write(*settings.rvt), rvt);
+        table.insert("rvt", std::move(rvt));
+    }
     table.insert("ibl_intensity", settings.ibl_intensity);
     table.insert("ibl_irradiance", settings.ibl_irradiance_guid);
     table.insert("ibl_prefilter", settings.ibl_prefilter_guid);

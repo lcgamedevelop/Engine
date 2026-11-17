@@ -17,6 +17,8 @@ namespace engine::render_detail
 
 struct RenderFrameData;
 struct MaterialBinding;
+struct VsmPageDraw;
+struct VsmPageTarget;
 
 class ShadowPass final
 {
@@ -36,6 +38,8 @@ public:
                             std::span<ClusterLight> lights, const float* camera_world,
                             bgfx::ViewId base_view,
                             const std::span<const std::uint64_t>* caster_ids = nullptr);
+    [[nodiscard]] bool draw_pages(const RenderFrameData& frame, std::span<const VsmPageDraw> pages,
+                                  const VsmPageTarget& target);
     [[nodiscard]] bgfx::TextureHandle texture() const noexcept;
     [[nodiscard]] std::uint32_t resource_count() const noexcept;
     void release() noexcept;

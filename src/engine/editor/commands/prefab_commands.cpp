@@ -547,9 +547,10 @@ class PrefabTrackedEdit final : public EditorEdit
 {
 public:
     PrefabTrackedEdit(WorldSystem& world, SceneCommands& scenes, Node node, ComponentType type,
-                      Fields fields, std::unique_ptr<EditorEdit> edit)
+                      Fields fields, bool whole_component, std::unique_ptr<EditorEdit> edit)
         : world_(world), node_(scenes.node_identity(node.id())), scene_(node.scene()->id()),
-          type_(type), fields_(std::move(fields)), edit_(std::move(edit))
+          type_(type), fields_(std::move(fields)), whole_component_(whole_component),
+          edit_(std::move(edit))
     {
     }
     bool apply(std::string& error) override
@@ -569,7 +570,29 @@ public:
             return false;
         }
         Instance after(before);
-        if (!capture(after, source, node, type_, fields_, error) ||
+        auto fields = fields_;
+        bool serialized = true;
+        if (whole_component_)
+        {
+            schema::ComponentDataT data;
+            toml::table table;
+            serialized = node.get_component(type_).build_data(data) &&
+                         SceneImporter::write_component(data, table, error);
+            if (serialized)
+            {
+                for (const auto& [key, value] : table)
+                {
+                    (void)value;
+                    if (key.str() != "type")
+                    {
+                        fields.emplace_back(key.str());
+                    }
+                }
+            }
+            std::sort(fields.begin(), fields.end());
+            fields.erase(std::unique(fields.begin(), fields.end()), fields.end());
+        }
+        if (!serialized || !capture(after, source, node, type_, fields, error) ||
             !node.scene()->set_prefab_instance(after))
         {
             std::string rollback;
@@ -627,6 +650,7 @@ private:
     std::uint64_t scene_;
     ComponentType type_;
     Fields fields_;
+    bool whole_component_ = false;
     std::unique_ptr<EditorEdit> edit_;
     Instance before_, after_;
 };
@@ -1042,6 +1066,7 @@ bool wrap_edit(WorldSystem& world, SceneCommands& scenes, std::string_view comma
         return true;
     }
     Fields fields;
+    bool whole_component = false;
     ComponentType type = ComponentType::NONE;
     if (command == "set_node_state")
     {
@@ -1093,7 +1118,11 @@ bool wrap_edit(WorldSystem& world, SceneCommands& scenes, std::string_view comma
             {
                 continue;
             }
-            if (name == "light_probe_volume" && argument.key() == "resource")
+            if (argument.key() == "settings" && argument.value().is_object())
+            {
+                whole_component = true;
+            }
+            else if (name == "light_probe_volume" && argument.key() == "resource")
             {
                 fields.emplace_back("probes");
             }
@@ -1112,13 +1141,13 @@ bool wrap_edit(WorldSystem& world, SceneCommands& scenes, std::string_view comma
         error = "This structural edit is not supported on prefab members; unlink the prefab first";
         return false;
     }
-    if (fields.empty())
+    if (fields.empty() && !whole_component)
     {
         error = "Prefab edit did not identify explicit fields";
         return false;
     }
     edit = std::make_unique<PrefabTrackedEdit>(world, scenes, node, type, std::move(fields),
-                                               std::move(edit));
+                                               whole_component, std::move(edit));
     return true;
 }
 } // namespace

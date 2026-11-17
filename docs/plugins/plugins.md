@@ -31,6 +31,10 @@
 
 头文件以完整作用域引用，例如 `plugins/editor/modeling/editable_mesh.hpp`、`plugins/editor/mcp/editor_mcp_tools.hpp`。纯运行时插件不得引用编辑器基础或编辑器插件；编辑器插件可以组合运行时插件和编辑器基础。核心通过自己的抽象接口使用可选实现，不 include 或链接具体插件。
 
+大世界地形、RVT 和 MCP 的能力及限制见[架构入口](runtime/terrain-world-design.md)。
+该设计直接更新 terrain 插件契约，RVT 留在核心渲染；不增加通用插件 Manager 或第二套资源加载器。
+上表仍描述当前实现，不代表目标能力已交付。
+
 ## 插件清单
 
 地形与建筑破坏按各自的运行时/编辑器插件装配，现行职责与跨插件协作见[联动契约](runtime/terrain-destruction.md)，制作流程见[地形与破坏制作](editor/terrain-destruction-authoring.md)。历史独立 ARM 探针与正式插件的测试范围分别记录于[技术研究](runtime/terrain-destruction-feasibility.md)；平台结果以[测试文档](../testing.md)为准。

@@ -154,6 +154,22 @@ bool MeshRenderer::set_bake_static(bool enabled) noexcept
     return true;
 }
 
+schema::RvtRole MeshRenderer::rvt_role() const noexcept
+{
+    return valid() ? read_data<Data>()->rvt_role : schema::RvtRole::none;
+}
+
+bool MeshRenderer::set_rvt_role(schema::RvtRole role) noexcept
+{
+    if (!writable() || role < schema::RvtRole::MIN || role > schema::RvtRole::MAX)
+    {
+        return false;
+    }
+    write_data<Data>()->rvt_role = role;
+    modified();
+    return true;
+}
+
 ResourceHandle MeshRenderer::lightmap_resource() const noexcept
 {
     if (!valid())
@@ -163,7 +179,7 @@ ResourceHandle MeshRenderer::lightmap_resource() const noexcept
     const auto& settings = *read_data<Data>();
     const auto* mesh = mesh_data();
     auto transform = node().get_component<Transform>();
-    std::array<float, 16> matrix{};
+    std::array<double, 16> matrix{};
     if (!runtime()->lightmap_resource_ || !runtime()->mesh_resource_ || !mesh ||
         mesh->lightmap_texcoords.size() != mesh->vertices.size() ||
         settings.lightmap_mesh_hash != runtime()->mesh_resource_->info().content_hash ||
@@ -213,7 +229,7 @@ bool MeshRenderer::set_lightmap(std::string_view path)
     const auto* mesh = mesh_data();
     auto transform = node().get_component<Transform>();
     ResourceReference replacement;
-    std::array<float, 16> matrix{};
+    std::array<double, 16> matrix{};
     if (!runtime()->mesh_resource_ || !mesh || runtime()->skin_joint_count_ != 0 ||
         !runtime()->deformed_vertices_.empty() || !runtime()->skinning_palette_.empty() ||
         mesh->lightmap_texcoords.size() != mesh->vertices.size() || !transform ||
@@ -280,6 +296,7 @@ bool MeshRenderer::set_mesh(std::string_view path)
     }
     write_data<Data>()->mesh_guid = replacement->info().guid;
     runtime()->mesh_resource_ = std::move(replacement);
+    runtime()->geometry_removed_ = false;
     runtime()->lightmap_resource_.reset();
     auto& settings = *write_data<Data>();
     settings.lightmap_guid.clear();
@@ -358,6 +375,7 @@ bool MeshRenderer::set_mesh_data(const schema::MeshDataT& data)
         return false;
     }
     runtime()->mesh_resource_ = std::move(replacement);
+    runtime()->geometry_removed_ = false;
     runtime()->lightmap_resource_.reset();
     auto& settings = *write_data<Data>();
     settings.lightmap_guid.clear();

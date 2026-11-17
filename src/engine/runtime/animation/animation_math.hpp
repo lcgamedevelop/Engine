@@ -6,6 +6,7 @@
 
 #include "runtime/animation/animation_binding.hpp"
 #include "runtime/scene/transform.hpp"
+#include "runtime/utils/transform_math.hpp"
 
 #include <ozz/base/maths/simd_math.h>
 #include <ozz/base/maths/soa_transform.h>
@@ -33,6 +34,20 @@ inline void store_matrix(const ozz::math::Float4x4& value, std::array<float, 16>
     {
         ozz::math::StorePtrU(value.cols[column], output.data() + column * 4);
     }
+}
+inline std::array<double, 16> double_matrix(const ozz::math::Float4x4& value)
+{
+    std::array<float, 16> local;
+    store_matrix(value, local);
+    std::array<double, 16> result;
+    std::copy(local.begin(), local.end(), result.begin());
+    return result;
+}
+inline ozz::math::Float4x4 relative_matrix(std::span<const double, 16> value, const Vec3& origin)
+{
+    std::array<float, 16> local;
+    transform_math::relative(value.data(), origin, local.data());
+    return load_matrix(local);
 }
 inline bool invert_matrix(const ozz::math::Float4x4& value, ozz::math::Float4x4& output)
 {

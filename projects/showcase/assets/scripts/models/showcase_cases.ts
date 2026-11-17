@@ -5,6 +5,7 @@ import Courtyard from "../modules/courtyard.js";
 import FontGallery from "../modules/font-gallery.js";
 import Effects from "../modules/effects.js";
 import Terrain from "../modules/terrain.js";
+import TerrainWorld from "../modules/terrain-world.js";
 import Destruction from "../modules/destruction.js";
 import DestructionIntegration from "../modules/destruction-integration.js";
 import ShootingRange from "../modules/shooting-range.js";
@@ -13,6 +14,9 @@ import PhysicsInteractions from "../modules/physics-interactions.js";
 import PersistentUi from "../modules/persistent-ui.js";
 import EcsManyObjects from "../modules/ecs-many-objects.js";
 import RenderFeatures from "../modules/render-features.js";
+import MeshletCulling from "../modules/meshlet-culling.js";
+
+import VirtualShadows from "../modules/virtual-shadows.js";
 
 export type ShowcaseGame = Gameplay & { scene: Scene | null };
 
@@ -96,5 +100,21 @@ export const showcase_cases: readonly ShowcaseCase[] = [
         id: "render-features", button: "scene-render", title: "Rendering features and submission",
         goal: "Compare culling, instances, LOD, debug geometry, physical atmosphere and PBR Hex tiling.",
         scene: "scenes/render-features.scene", game: RenderFeatures,
+    },
+    {
+        id: "meshlet-culling", button: "scene-meshlet", title: "Meshlets and GPU culling",
+        goal: "Compare one scene switch, shared instances, LOD and conservative cluster visibility.",
+        scene: "scenes/meshlet-culling.scene", game: MeshletCulling,
+    },
+    {
+        id: "terrain-world", button: "scene-terrain-world", title: "Terrain world / 8 km",
+        goal: "Visit four distant regions; stream geometry and collision while keeping the current view.",
+        scene: "scenes/terrain-world.scene", game: TerrainWorld,
+    },
+
+    {
+        id: "virtual-shadows", button: "scene-vsm", title: "Virtual shadow maps",
+        goal: "Inspect stable cached shadows, thin casters, moving objects and ordinary shadow fallback.",
+        scene: "scenes/virtual-shadows.scene", game: VirtualShadows,
     },
 ];

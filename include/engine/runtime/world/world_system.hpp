@@ -8,6 +8,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string_view>
 #include <vector>
@@ -53,6 +54,8 @@ public:
     [[nodiscard]] SceneWorkState step_scope(SceneScopeId scope, const SceneWorkBudget& budget);
     [[nodiscard]] Scene* scope_candidate(SceneScopeId scope) const noexcept;
     [[nodiscard]] bool seal_scope(SceneScopeId scope);
+    [[nodiscard]] bool with_scope_write(SceneScopeId scope,
+                                        const std::function<bool(Scene&)>& callback);
     [[nodiscard]] bool scope_status(SceneScopeId scope, ScenePreparationSnapshot& output) const;
     [[nodiscard]] bool publish_scope(SceneScopeId scope);
     [[nodiscard]] bool activate_scope(SceneScopeId scope);
@@ -84,6 +87,11 @@ protected:
     void on_shutdown() noexcept override;
 
 private:
+    friend class GeometryUpdate;
+    friend class GameplaySession;
+    [[nodiscard]] bool freeze_scope(SceneScopeId scope);
+    bool scope_write_active_ = false;
+    std::vector<Component> geometry_notifications_;
     friend struct ecs_detail::ResourceBindingScope;
     std::vector<std::pair<Node, bool>> retirement_;
     struct Scope;

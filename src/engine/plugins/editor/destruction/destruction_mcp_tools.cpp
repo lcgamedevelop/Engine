@@ -57,13 +57,15 @@ bool register_destruction_mcp_tools(mcp::McpSystem& system, mcp::EditorMcpTools&
                Json::array({"center", "radius", "damage"})) &&
            mcp::tools::component_tool(
                system, editor, "destruction_refresh_support",
-               "Check multi-sample foundation coverage against one static collider after terrain "
+               "Check multi-sample foundation coverage against a set of static colliders after "
+               "terrain "
                "collision has been committed. Release unsupported world bonds via Blast. Undoable; "
                "does not reattach previously released anchors.",
-               {{"supportNodeId", {{"type", "string"}}},
+               {{"supportNodeIds",
+                 {{"type", "array"}, {"items", {{"type", "string"}}}, {"maxItems", 4096}}},
                 {"maxGap", {{"type", "number"}, {"minimum", 0}, {"maximum", 1000}}},
                 {"minCoverage", {{"type", "number"}, {"minimum", 0}, {"maximum", 1}}}},
-               Json::array({"supportNodeId", "maxGap", "minCoverage"})) &&
+               Json::array({"supportNodeIds", "maxGap", "minCoverage"})) &&
            mcp::tools::component_tool(
                system, editor, "destruction_apply_stress",
                "Run one official Blast gravity stress solve for anchored groups. Pressure limits "

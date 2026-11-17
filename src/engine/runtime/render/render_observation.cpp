@@ -5,6 +5,7 @@
 #include "runtime/render/renderer_callbacks.hpp"
 #include "runtime/render/scene_gpu_resources.hpp"
 #include "runtime/scene/ecs_scene.hpp"
+#include "runtime/scene/mesh_renderer.hpp"
 #include "runtime/scene/scene.hpp"
 #include "runtime/utils/path_utils.hpp"
 #include "runtime/world/world_system.hpp"
@@ -29,6 +30,55 @@ std::uint64_t render_time()
                                           .count());
 }
 } // namespace
+bool RenderSystem::can_publish_geometry(MeshRenderer prepared, MeshRenderer target) const
+{
+    if (!gpu_ready() || !scene_resources_ || !world_ || !prepared || !target ||
+        prepared.node().world() != world_ || target.node().world() != world_)
+    {
+        return false;
+    }
+    if (!prepared.active() || !prepared.visible_in_hierarchy())
+    {
+        return true;
+    }
+    const auto key = render_detail::RenderInstanceKey{world_->epoch(), prepared.node().id(),
+                                                      prepared.instance_id()};
+    const auto found = scene_resources_->mesh_index.find(key);
+    return found != scene_resources_->mesh_index.end() &&
+           found->second < scene_resources_->meshes.size() &&
+           scene_resources_->meshes[found->second].revision == prepared.mesh_revision() &&
+           !scene_resources_->meshes[found->second].materials.empty();
+}
+
+void RenderSystem::publish_geometry(MeshRenderer prepared, MeshRenderer target) noexcept
+{
+    if (prepared == target || !prepared.active() || !prepared.visible_in_hierarchy())
+    {
+        return;
+    }
+    auto& resources = *scene_resources_;
+    const render_detail::RenderInstanceKey from{world_->epoch(), prepared.node().id(),
+                                                prepared.instance_id()};
+    const render_detail::RenderInstanceKey to{world_->epoch(), target.node().id(),
+                                              target.instance_id()};
+    auto incoming = resources.mesh_index.extract(from);
+    auto outgoing = resources.mesh_index.extract(to);
+    auto& next = resources.meshes[incoming.mapped()];
+    next.node_id = target.node().id();
+    next.instance_id = target.instance_id();
+    next.revision = target.mesh_revision();
+    incoming.key() = to;
+    resources.mesh_index.insert(std::move(incoming));
+    if (!outgoing.empty())
+    {
+        auto& old = resources.meshes[outgoing.mapped()];
+        old.node_id = prepared.node().id();
+        old.instance_id = prepared.instance_id();
+        outgoing.key() = from;
+        resources.mesh_index.insert(std::move(outgoing));
+    }
+}
+
 SceneWorkState RenderSystem::prepare_scope(SceneScopeId id, const SceneWorkBudget& budget,
                                            Camera camera)
 {
@@ -233,6 +283,19 @@ RenderFrameSnapshot RenderSystem::submitted_frame(RenderFrameKind kind) const
             });
     }
     frame.ui_draws = render_detail::ui_draws;
+    frame.rvt_demand_revision = rvt_status_.demand_revision;
+    frame.rvt_cache_revision = rvt_status_.cache_revision;
+    frame.rvt_ready = kind == RenderFrameKind::scene && rvt_status_.effective &&
+                      rvt_status_.ready_pages == rvt_status_.required_pages;
+    frame.rvt_debug_revision = rvt_debug_revision_;
+    frame.rvt_debug_visible = rvt_debug_visible_;
+    frame.vsm_generation = vsm_status_.generation;
+    frame.vsm_view_revision = vsm_status_.view_revision;
+    frame.vsm_demand_revision = vsm_status_.demand_revision;
+    frame.vsm_cache_revision = vsm_status_.cache_revision;
+    frame.vsm_debug_revision = vsm_debug_revision_;
+    frame.vsm_debug_visible = vsm_debug_visible_;
+    frame.vsm_ready = kind == RenderFrameKind::scene && vsm_status_.state == VsmState::ready;
     if (scene_resources_ && kind == RenderFrameKind::scene)
     {
         for (const auto& view : scene_resources_->view_stats)

@@ -3,6 +3,7 @@
 
 #include "editor/asset_pipeline/importer_utils.hpp"
 #include "editor/mesh/mesh_lods.hpp"
+#include "editor/mesh/meshlets.hpp"
 #include "plugins/editor/modeling/editable_mesh.hpp"
 #include "runtime/resource/resource_system.hpp"
 #include "runtime/utils/path_utils.hpp"
@@ -136,6 +137,7 @@ bool ModelingMeshImporter::convert(const editor::asset_pipeline::ImportAsset& as
         return false;
     }
     return editor::generate_mesh_lods(mesh, asset.source, error) &&
+           editor::generate_meshlets(mesh, asset.source, error) &&
            write_mesh(context.output / asset.guid, mesh, error);
 }
 } // namespace engine::plugins::modeling

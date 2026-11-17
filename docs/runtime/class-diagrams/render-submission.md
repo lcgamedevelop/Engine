@@ -4,6 +4,8 @@
 
 状态：最小契约已获用户评审并接入实现。真实构建、像素和提交计数的验收结果集中在[测试文档](../../testing.md)。
 
+GPU 细粒度剔除与间接提交见 [Meshlet](meshlet-culling.md)；主视图的不透明批次在收集后准备一次，depth／surface／opaque 共用分组及间接区间。
+
 **2026-11-08：** [提交管线优化设计](#提交管线优化设计)已按确认契约实现，[对比测试记录](../../testing.md#渲染性能基线)集中维护实际结果。Shader / PSO 预热不在本批范围。
 
 不增加 VisibilitySystem、BatchManager 或独立渲染框架。复用现有 GPU 拥有者、ECS 查询、正式 Shader/Mesh 资源及上游 bgfx/bx。
@@ -37,9 +39,9 @@ classDiagram
         +culled_meshes uint32_t
         +visible_meshes uint32_t
         +draw_calls uint32_t
-        +instance_batches uint32_t
-        +submitted_instances uint32_t
-        +triangles uint64_t
+        +direct_instance_batches uint32_t
+        +direct_instances uint32_t
+        +direct_triangles uint64_t
     }
     class BgfxUniformFreq["bgfx::UniformFreq"]
     class BxBounds["bx bounds"]
@@ -96,7 +98,7 @@ SceneGpuResources、GpuMesh、GpuGeometry 与 GpuProgram 的方法只在[渲染�
 
 ## 提交统计和基准
 
-RenderViewStats 每帧清零并按 view_id 发布；frame_number 为该快照对应的实际 bgfx 提交帧号，不表示 GPU 已完成。候选/可见/剔除数是每观察者 MeshRenderer 数，draw_calls 是该 view 各实际子网格提交数，submitted_instances 为提交中累计的实例数，triangles 按真实选层和实例数量累计。多通道合计不等于独立对象数，UI、扩展和上游总 draw 不混入这些字段。
+RenderViewStats 每帧清零并按 view_id 发布；frame_number 为该快照对应的实际 bgfx 提交帧号，不表示 GPU 已完成。候选/可见/剔除数是每观察者 MeshRenderer 数，draw_calls 是该 view 的 CPU 提交调用数，含间接范围，direct_instances 为普通提交中累计的实例数，direct_triangles 按真实选层和普通实例数量累计。间接范围、候选上限及独立 GPU 快照见 [Meshlet 统计](meshlet-culling.md#观察错误与异步统计)。多通道合计不等于独立对象数，UI、扩展和上游总 draw 不混入这些字段。
 
 查询与 MCP 给出采样提交帧，并明确不代表 GPU 完成；不将 CPU 墙钟帧间隔当作 GPU 工作时间。既有 bgfx/Tracy 的 CPU/GPU 数值另标来源、单位与有效性。
 

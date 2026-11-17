@@ -6,8 +6,11 @@
 #include "runtime/gameplay/gameplay_session.hpp"
 #include "runtime/gameplay/project_script_request.hpp"
 #include "runtime/gameplay/script_status.hpp"
+#include "runtime/render/render_feature_names.hpp"
 #include "runtime/render/render_system.hpp"
 #include "runtime/utils/path_utils.hpp"
+#include <algorithm>
+#include <array>
 
 #include <SDL3/SDL.h>
 #include <charconv>
@@ -261,7 +264,240 @@ bool RuntimeMcpEndpoint::initialize(RuntimeHost& host, const McpEndpointConfig& 
         };
         return value->system.register_tool(std::move(tool));
     };
-    if (!register_command("execute_project_script",
+    if (!register_command(
+            "set_render_feature",
+            [value](const Json& args, Json& result, std::string&)
+            {
+                if (!value->host.renderer() || !args.is_object() || args.size() != 2 ||
+                    !args.contains("feature") || !args["feature"].is_string() ||
+                    !args.contains("enabled") || !args["enabled"].is_boolean())
+                {
+                    return false;
+                }
+                RenderFeature feature;
+                if (!render_detail::parse_feature(args["feature"].get<std::string>(), feature) ||
+                    !value->host.renderer()->set_debug_feature(feature,
+                                                               args["enabled"].get<bool>()))
+                {
+                    return false;
+                }
+                result = {{"accepted", true}};
+                return true;
+            }) ||
+        !register_command(
+            "get_vsm_status",
+            [value](const Json& args, Json& result, std::string&)
+            {
+                if (!value->host.renderer())
+                {
+                    return false;
+                }
+                auto& renderer = *value->host.renderer();
+                VsmStatus status;
+                if (!args.empty() || !renderer.vsm_status(status))
+                {
+                    return false;
+                }
+                constexpr std::array names{"disabled",       "warming",     "ready",
+                                           "budget_limited", "unsupported", "failed"};
+                result = {{"state", names[std::size_t(status.state)]},
+                          {"scope",
+                           {{"worldEpoch", std::to_string(status.scope.world_epoch)},
+                            {"value", std::to_string(status.scope.value)}}},
+                          {"errorCode", status.error_code},
+                          {"error", status.error},
+                          {"deviceGeneration", std::to_string(status.device_generation)},
+                          {"lightInstance", std::to_string(status.light_instance)},
+                          {"submissionId", std::to_string(status.submission_id)},
+                          {"generation", std::to_string(status.generation)},
+                          {"viewRevision", std::to_string(status.view_revision)},
+                          {"demandViewRevision", std::to_string(status.demand_view_revision)},
+                          {"demandRevision", std::to_string(status.demand_revision)},
+                          {"cacheRevision", std::to_string(status.cache_revision)},
+                          {"residentPages", status.resident_pages},
+                          {"demandedPages", status.demanded_pages},
+                          {"readyPages", status.ready_pages},
+                          {"dirtyPages", status.dirty_pages},
+                          {"redrawnPages", status.redrawn_pages},
+                          {"fallbackPages", status.fallback_pages},
+                          {"residentBytes", std::to_string(status.resident_bytes)}};
+                RenderFrameSnapshot frame;
+                const bool has_frame = renderer.frame_status(status.scope, frame);
+                result["frame"] = {{"available", has_frame},
+                                   {"submissionId", std::to_string(frame.submission_id)},
+                                   {"generation", std::to_string(frame.vsm_generation)},
+                                   {"viewRevision", std::to_string(frame.vsm_view_revision)},
+                                   {"demandRevision", std::to_string(frame.vsm_demand_revision)},
+                                   {"cacheRevision", std::to_string(frame.vsm_cache_revision)},
+                                   {"debugRevision", std::to_string(frame.vsm_debug_revision)},
+                                   {"debugVisible", frame.vsm_debug_visible},
+                                   {"ready", frame.vsm_ready}};
+                return true;
+            }) ||
+        !register_command(
+            "get_vsm_debug_options",
+            [value](const Json& args, Json& result, std::string&)
+            {
+                if (!value->host.renderer())
+                {
+                    return false;
+                }
+                auto& renderer = *value->host.renderer();
+                VsmDebugOptions options;
+                std::uint64_t revision = 0;
+                if (!args.empty() || !renderer.vsm_debug_options(options, revision))
+                {
+                    return false;
+                }
+                constexpr std::array modes{"overview",   "virtual_depth", "physical_atlas",
+                                           "page_table", "residency",     "invalidated"};
+                const auto feature = renderer.feature_state(RenderFeature::vsm_viewer);
+                VsmStatus status;
+                RenderFrameSnapshot frame;
+                if (renderer.vsm_status(status))
+                {
+                    (void)renderer.frame_status(status.scope, frame);
+                }
+                result = {{"mode", modes[std::size_t(options.mode)]},
+                          {"clipmapLevel", options.clipmap_level},
+                          {"revision", std::to_string(revision)},
+                          {"requested", feature.requested},
+                          {"effective", feature.effective},
+                          {"frameDebugRevision", std::to_string(frame.vsm_debug_revision)},
+                          {"frameDebugVisible", frame.vsm_debug_visible}};
+                return true;
+            }) ||
+        !register_command(
+            "set_vsm_debug_options",
+            [value](const Json& args, Json& result, std::string&)
+            {
+                if (!value->host.renderer())
+                {
+                    return false;
+                }
+                auto& renderer = *value->host.renderer();
+                if (!args.is_object() || args.size() != 2 || !args.contains("mode") ||
+                    !args["mode"].is_string() || !args.contains("clipmapLevel") ||
+                    !args["clipmapLevel"].is_number_integer() || args["clipmapLevel"] < -1 ||
+                    args["clipmapLevel"] > 15)
+                {
+                    return false;
+                }
+                constexpr std::array modes{"overview",   "virtual_depth", "physical_atlas",
+                                           "page_table", "residency",     "invalidated"};
+                const auto found =
+                    std::find(modes.begin(), modes.end(), args["mode"].get<std::string>());
+                if (found == modes.end())
+                {
+                    return false;
+                }
+                VsmDebugOptions options{static_cast<VsmDebugMode>(found - modes.begin()),
+                                        args["clipmapLevel"].get<std::int32_t>()};
+                std::uint64_t revision = 0;
+                if (!renderer.set_vsm_debug_options(options) ||
+                    !renderer.vsm_debug_options(options, revision))
+                {
+                    return false;
+                }
+                result = {{"accepted", true}, {"revision", std::to_string(revision)}};
+                return true;
+            }) ||
+        !register_command("get_rvt_status",
+                          [value](const Json& args, Json& result, std::string&)
+                          {
+                              RvtStatus status;
+                              if (!args.empty() || !value->host.renderer() ||
+                                  !value->host.renderer()->rvt_status(status))
+                              {
+                                  return false;
+                              }
+                              result = {
+                                  {"requested", status.requested},
+                                  {"supported", status.supported},
+                                  {"effective", status.effective},
+                                  {"reason", status.reason},
+                                  {"deviceGeneration", std::to_string(status.device_generation)},
+                                  {"demandRevision", std::to_string(status.demand_revision)},
+                                  {"cacheRevision", std::to_string(status.cache_revision)},
+                                  {"residentBytes", std::to_string(status.resident_bytes)},
+                                  {"readyPages", status.ready_pages},
+                                  {"requiredPages", status.required_pages}};
+                              return true;
+                          }) ||
+        !register_command("get_rvt_debug_options",
+                          [value](const Json& args, Json& result, std::string&)
+                          {
+                              RvtDebugOptions options;
+                              std::uint64_t revision = 0;
+                              if (!args.empty() || !value->host.renderer() ||
+                                  !value->host.renderer()->rvt_debug_options(options, revision))
+                              {
+                                  return false;
+                              }
+                              constexpr std::array modes{"overview", "virtual_texture",
+                                                         "physical_atlas", "page_table"};
+                              constexpr std::array channels{"base_color", "normal", "roughness",
+                                                            "metallic", "ao"};
+                              result = {{"mode", modes[unsigned(options.mode)]},
+                                        {"channel", channels[unsigned(options.channel)]},
+                                        {"mip", options.mip},
+                                        {"revision", std::to_string(revision)}};
+                              return true;
+                          }) ||
+        !register_command(
+            "set_rvt_debug_options",
+            [value](const Json& args, Json& result, std::string&)
+            {
+                RvtDebugOptions options;
+                std::uint64_t revision = 0;
+                if (!args.is_object() || args.empty() || !value->host.renderer() ||
+                    !value->host.renderer()->rvt_debug_options(options, revision))
+                {
+                    return false;
+                }
+                constexpr std::array modes{"overview", "virtual_texture", "physical_atlas",
+                                           "page_table"};
+                constexpr std::array channels{"base_color", "normal", "roughness", "metallic",
+                                              "ao"};
+                for (const auto& [key, item] : args.items())
+                {
+                    if (key == "mode" && item.is_string())
+                    {
+                        auto i = std::find(modes.begin(), modes.end(), item.get<std::string>());
+                        if (i == modes.end())
+                        {
+                            return false;
+                        }
+                        options.mode = RvtDebugMode(i - modes.begin());
+                    }
+                    else if (key == "channel" && item.is_string())
+                    {
+                        auto i =
+                            std::find(channels.begin(), channels.end(), item.get<std::string>());
+                        if (i == channels.end())
+                        {
+                            return false;
+                        }
+                        options.channel = RvtDebugChannel(i - channels.begin());
+                    }
+                    else if (key == "mip" && item.is_number_integer() && item >= -1 && item <= 8)
+                    {
+                        options.mip = item.get<std::int32_t>();
+                    }
+                    else
+                    {
+                        return false;
+                    }
+                }
+                if (!value->host.renderer()->set_rvt_debug_options(options) ||
+                    !value->host.renderer()->rvt_debug_options(options, revision))
+                {
+                    return false;
+                }
+                result = {{"revision", std::to_string(revision)}};
+                return true;
+            }) ||
+        !register_command("execute_project_script",
                           [value](const Json& args, Json& result, std::string& error)
                           { return value->execute_script(args, result, error); }) ||
         !register_command("capture_frame",

@@ -2,6 +2,7 @@
 
 #include <bgfx/bgfx.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 
@@ -11,12 +12,22 @@ namespace engine::render_detail
 {
 
 inline constexpr std::uint16_t output_clear_view = 108;
-inline constexpr std::uint16_t output_present_view = 201;
-inline constexpr std::uint16_t output_capture_view = 202;
+inline constexpr std::uint16_t rvt_debug_view = 201;
+inline constexpr std::uint16_t output_present_view = 202;
+inline constexpr std::uint16_t output_capture_view = 203;
+inline constexpr std::uint16_t rvt_page_view = 216;
+inline constexpr std::uint16_t maximum_rvt_views = 16;
+inline constexpr std::array<bgfx::ViewId, 16> vsm_page_views = {
+    192, 193, 194, 195, 196, 197, 198, 199, 204, 205, 206, 207, 208, 209, 210, 211};
+inline constexpr bgfx::ViewId vsm_feedback_clear_view = 212;
+inline constexpr bgfx::ViewId vsm_feedback_view = 213;
+inline constexpr bgfx::ViewId vsm_debug_view = 214;
 
 inline constexpr std::uint16_t skinning_view = 0;
 inline constexpr std::uint16_t atmosphere_transmittance_view = 1;
 inline constexpr std::uint16_t atmosphere_multiscatter_view = 2;
+inline constexpr std::uint16_t meshlet_clear_view = 3;
+inline constexpr std::uint16_t meshlet_cull_view = 4;
 inline constexpr std::uint16_t atmosphere_main_skyview = 109;
 inline constexpr std::uint16_t atmosphere_capture_skyview = 239;
 inline constexpr std::uint16_t shadow_view = 80;
@@ -28,6 +39,7 @@ inline constexpr std::uint16_t ssr_hiz_view = 114;
 inline constexpr std::uint16_t ssr_trace_view = 126;
 inline constexpr std::uint16_t ssr_composite_view = 127;
 inline constexpr std::uint16_t scene_copy_view = 128;
+inline constexpr std::uint16_t meshlet_color_view = 129;
 inline constexpr std::uint16_t transparent_view = 130;
 inline constexpr std::uint16_t extension_view = 133;
 inline constexpr std::uint16_t debug_view = 134;

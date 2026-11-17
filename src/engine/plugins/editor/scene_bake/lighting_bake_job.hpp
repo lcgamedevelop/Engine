@@ -41,7 +41,7 @@ struct LightingBakeSettings
 struct BakedMeshLighting
 {
     std::uint64_t node_id = 0;
-    std::array<float, 16> transform{};
+    std::array<double, 16> transform{};
     std::shared_ptr<schema::MeshDataT> mesh;
     std::shared_ptr<schema::TextureDataT> lightmap;
 };

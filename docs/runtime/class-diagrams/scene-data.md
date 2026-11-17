@@ -216,7 +216,10 @@ classDiagram
 
 ## 贴图
 
-**2026-11-07：以下格式 2 的大场景离线产物已实现。** 唯一字段定义在本页，导入和平台选择见[贴图导入](../../editor/class-diagrams/texture-importer.md#目标平台产物)。
+当前贴图格式为 3。唯一字段定义在本页，导入和平台选择见[贴图导入](../../editor/class-diagrams/texture-importer.md#目标平台产物)。
+`array_layers` 为 1 时是普通 2D 或 cube；大于 1 时是 native 2D 数组（最多 256 层），
+每个 `TextureSubresourceData.face` 指明数组层，层拥有完整相同尺寸的 mip 链。
+cube 不与数组组合，旧格式拒绝读取；源纹理由正常导入流程重新生成。
 
 ```mermaid
 classDiagram
@@ -231,6 +234,7 @@ classDiagram
         +TextureFormat format
         +vector~uint8_t~ data
         +bool cube_map
+        +uint32_t array_layers
         +vector~TextureSubresourceData~ subresources
     }
     class MaterialTextureT

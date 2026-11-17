@@ -372,6 +372,44 @@ bool generations_and_memory()
                   "reinitialization never revives a stale acquisition");
 }
 
+bool streamed_lifetime()
+{
+    Fixture f;
+    if (!f.initialize() || !f.add(1) || !f.add(2) || !f.add(3, {guid(2)}))
+    {
+        return false;
+    }
+    f.catalog.entries.back()->stream_dependencies = {guid(1)};
+    if (!f.publish())
+    {
+        return false;
+    }
+    CountingCodec::decodes = 0;
+    ResourceHandle owner, child, absent;
+    std::unique_ptr<ResourceLoad> request;
+    ResourceLoadProgress progress;
+    if (!f.graph.begin_load(guid(3), request) || !f.pump(*request) || !request->take(owner) ||
+        !expect(request->status(progress) == ResourceLoadStatus::delivered &&
+                    CountingCodec::decodes == 2 && !f.graph.acquire_loaded(guid(1), absent) &&
+                    !f.graph.retain_dependency(owner, guid(1), absent),
+                "stream references neither preload nor retain payloads") ||
+        !f.graph.load(guid(1), child) || !f.graph.release(child) ||
+        !expect(!f.graph.acquire_loaded(guid(1), absent),
+                "explicit stream acquisitions have independent lifetimes"))
+    {
+        return false;
+    }
+    std::error_code error;
+    std::filesystem::remove(f.root / "1", error);
+    if (error || !f.graph.release(owner) || !f.graph.load(guid(3), owner))
+    {
+        return false;
+    }
+    return expect(!f.graph.load(guid(1), child) && f.graph.error() == ResourceError::io_failed &&
+                      f.graph.release(owner),
+                  "missing stream payload fails only its explicit load");
+}
+
 bool ownership_and_budgets()
 {
     Fixture f;
@@ -446,6 +484,7 @@ int main()
     return expect(sync_lifetime(), "sync_lifetime") &&
                    expect(asynchronous_lifetime(), "asynchronous_lifetime") &&
                    expect(generations_and_memory(), "generations_and_memory") &&
+                   expect(streamed_lifetime(), "streamed_lifetime") &&
                    expect(ownership_and_budgets(), "ownership_and_budgets")
                ? 0
                : 1;

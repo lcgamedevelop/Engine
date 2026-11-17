@@ -6,6 +6,9 @@
 
 ResourceCatalog 只保存元数据和索引，不保存产物载荷。
 
+[流送资源引用](streamed-resources.md)定义当前目录的延迟依赖语义。
+目录只接受当前格式，不增加旧目录兼容读取。
+
 **2026-11-07 已实现：内部存储改为共享不可变快照，公开方法不变。** 用于[大场景准备](large-scene-preparation.md)，不为每个加载请求深拷贝完整目录。
 
 ```mermaid
@@ -40,12 +43,15 @@ classDiagram
 
 ## 序列化模型
 
-持久字段由 asset_catalog.fbs 和 resource_header.fbs 定义并由 FlatBuffers 生成。目录格式版本为 3，实体格式版本为 2。
+持久字段由 asset_catalog.fbs 和 resource_header.fbs 定义并由 FlatBuffers 生成。目录格式版本为 4，实体格式版本为 2。
+桌面、Android、iOS 与 Web 的公共交付工具消费同一模型，接受 terrain_block，并验证流送引用存在、无重复、
+不与必要引用冲突。只有必要引用参与运行期加载拓扑；流送引用只参与导出闭包，不要求其无环。
+交付回归的目录夹具通过当前 Schema 和已配置的宿主 flatc 生成，不再手写旧字段布局。
 
 | 模型 | 内容 |
 | --- | --- |
 | AssetCatalogData | 格式版本、目标平台、目录修订、资源条目和被引用的存储文件信息 |
-| AssetEntry | GUID、虚拟路径、类型、格式版本、内容哈希、实体头大小、存储定位、必要运行依赖；脚本保留模块名 |
+| AssetEntry | GUID、虚拟路径、类型、格式版本、内容哈希、实体头大小、存储定位、必要运行依赖及流送引用；脚本保留模块名 |
 | FileLocation | 挂载名称、相对文件路径、实体起始偏移、实体总长度；散文件起始为零，合并包为成员范围 |
 | ResourceHeaderData | GUID、类型、格式版本和载荷边界；独立校验实体，不携带全部载荷 |
 

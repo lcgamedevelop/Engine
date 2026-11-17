@@ -34,6 +34,7 @@ bool AssetImporter::scan_dependencies(ImportAsset& asset, const ImportContext&, 
 {
     asset.build_dependencies.clear();
     asset.runtime_dependencies.clear();
+    asset.stream_dependencies.clear();
     return true;
 }
 bool AssetImporter::prepare_batch(const ImportContext&, TaskDescription& task, std::string&) const

@@ -129,7 +129,7 @@ bool fixture(const fs::path& workspace, std::string_view revision,
     output.root = workspace / "versions" / engine::PathUtils::from_utf8(revision);
     output.mounts = {{"content", output.root}};
     engine::schema::AssetCatalogDataT data;
-    data.schema_version = 3;
+    data.schema_version = 6;
     data.revision = revision;
     data.target_platform = target_platform();
     const auto add = [&](std::string path, std::string module, engine::schema::AssetKind kind,
@@ -1237,7 +1237,7 @@ bool run_guid_cases(test_support::ResourceServices& services, const fs::path& wo
         return false;
     }
     engine::schema::SceneDataT data;
-    data.schema_version = 3;
+    data.schema_version = 6;
     if (!scene->build_data(data))
     {
         return false;
@@ -2559,7 +2559,7 @@ bool run_step_loading_cases(test_support::ResourceServices& services, const fs::
     }
     auto* prototype = world.create_scene("step-loaded-scene");
     engine::schema::SceneDataT data;
-    data.schema_version = 3;
+    data.schema_version = 6;
     if (!prototype || !prototype->create_node("Prepared node") || !prototype->build_data(data))
     {
         return false;

@@ -31,7 +31,7 @@ namespace fs = std::filesystem;
 
 bool source_meta(const fs::path& project, const Json& arguments, bool writing, fs::path& source,
                  fs::path& meta_path, toml::table& meta, MeshLodSettings& settings,
-                 std::string& error)
+                 std::string& error, bool meshlets = false)
 {
     if (!arguments.is_object() || !arguments.contains("path") || !arguments["path"].is_string())
     {
@@ -41,8 +41,10 @@ bool source_meta(const fs::path& project, const Json& arguments, bool writing, f
     for (const auto& [key, unused] : arguments.items())
     {
         (void)unused;
-        if (key != "path" && (!writing || (key != "enabled" && key != "triangleRatios" &&
-                                           key != "screenHeights" && key != "maxRelativeError")))
+        if (key != "path" &&
+            (!writing ||
+             (key != "enabled" && (meshlets || (key != "triangleRatios" && key != "screenHeights" &&
+                                                key != "maxRelativeError")))))
         {
             error = "Unknown mesh LOD import argument: " + key;
             return false;
@@ -95,11 +97,31 @@ bool source_meta(const fs::path& project, const Json& arguments, bool writing, f
         return false;
     }
     meta = std::move(parsed.table());
+    if (meshlets)
+    {
+        if (meta.contains("meshlets"))
+        {
+            const auto* table = meta["meshlets"].as_table();
+            if (!table || table->size() > 1 ||
+                (table->size() == 1 &&
+                 (!table->contains("enabled") || !(*table)["enabled"].is_boolean())))
+            {
+                error = "Meshlet import settings require only a boolean enabled field";
+                return false;
+            }
+            settings.enabled = (*table)["enabled"].value_or(false);
+        }
+        return true;
+    }
     return read_mesh_lod_settings(meta, settings, error);
 }
 
-Json settings_json(const MeshLodSettings& settings)
+Json settings_json(const MeshLodSettings& settings, bool meshlets = false)
 {
+    if (meshlets)
+    {
+        return {{"enabled", settings.enabled}};
+    }
     return {{"enabled", settings.enabled},
             {"triangleRatios", settings.triangle_ratios},
             {"screenHeights", settings.screen_heights},
@@ -107,7 +129,7 @@ Json settings_json(const MeshLodSettings& settings)
 }
 
 bool mesh_results(const fs::path& project, std::string_view path, const MeshLodSettings& settings,
-                  Json& meshes, std::string& error)
+                  Json& meshes, std::string& error, bool meshlets = false)
 {
     meshes = Json::array();
     ResourceCatalog catalog;
@@ -157,8 +179,18 @@ bool mesh_results(const fs::path& project, std::string_view path, const MeshLodS
                               {"triangleCount", mesh->lods[level]->indices.size() / 3},
                               {"screenHeight", mesh->lods[level]->screen_height}});
         }
+        if (meshlets)
+        {
+            levels[0]["meshletCount"] = mesh->meshlets ? mesh->meshlets->meshlets.size() : 0;
+            for (std::size_t i = 0; i < mesh->lods.size(); ++i)
+            {
+                const auto* payload = mesh->lods[i]->meshlets.get();
+                levels[i + 1]["meshletCount"] = payload ? payload->meshlets.size() : 0;
+            }
+        }
         const std::string reason = !mesh->skin.empty()  ? "skinned_mesh"
                                    : !settings.enabled  ? "generation_disabled"
+                                   : meshlets           ? (mesh->meshlets ? "" : "not_generated")
                                    : mesh->lods.empty() ? "topology_or_error_limit"
                                                         : "";
         meshes.push_back({{"path", entry->path},
@@ -169,29 +201,31 @@ bool mesh_results(const fs::path& project, std::string_view path, const MeshLodS
     return true;
 }
 
-bool read(const fs::path& project, const Json& arguments, Json& result, std::string& error)
+bool read(const fs::path& project, const Json& arguments, Json& result, std::string& error,
+          bool meshlets = false)
 {
     fs::path source, meta_path;
     toml::table meta;
     MeshLodSettings settings;
-    if (!source_meta(project, arguments, false, source, meta_path, meta, settings, error))
+    if (!source_meta(project, arguments, false, source, meta_path, meta, settings, error, meshlets))
     {
         return false;
     }
     Json meshes;
-    if (!mesh_results(project, arguments["path"].get<std::string>(), settings, meshes, error))
+    if (!mesh_results(project, arguments["path"].get<std::string>(), settings, meshes, error,
+                      meshlets))
     {
         return false;
     }
     result = {{"path", arguments["path"]},
               {"guid", meta["guid"].value_or(std::string{})},
-              {"settings", settings_json(settings)},
+              {"settings", settings_json(settings, meshlets)},
               {"meshes", std::move(meshes)}};
     return true;
 }
 
 bool write(AssetPipelineSystem& pipeline, const fs::path& project, const Json& arguments,
-           Json& result, std::string& error)
+           Json& result, std::string& error, bool meshlets = false)
 {
     bool changed = false;
     {
@@ -203,12 +237,14 @@ bool write(AssetPipelineSystem& pipeline, const fs::path& project, const Json& a
         fs::path source, meta_path;
         toml::table meta;
         MeshLodSettings previous;
-        if (!source_meta(project, arguments, true, source, meta_path, meta, previous, error))
+        if (!source_meta(project, arguments, true, source, meta_path, meta, previous, error,
+                         meshlets))
         {
             return false;
         }
+        const auto key = meshlets ? "meshlets" : "lod";
         toml::table options;
-        if (const auto* existing = meta["lod"].as_table())
+        if (const auto* existing = meta[key].as_table())
         {
             options = *existing;
         }
@@ -256,13 +292,17 @@ bool write(AssetPipelineSystem& pipeline, const fs::path& project, const Json& a
             options.insert_or_assign("max_relative_error",
                                      arguments["maxRelativeError"].get<double>());
         }
-        meta.insert_or_assign("lod", std::move(options));
+        meta.insert_or_assign(key, std::move(options));
         MeshLodSettings next;
-        if (!read_mesh_lod_settings(meta, next, error))
+        if (meshlets)
+        {
+            next.enabled = meta[key]["enabled"].value_or(false);
+        }
+        else if (!read_mesh_lod_settings(meta, next, error))
         {
             return false;
         }
-        changed = settings_json(previous) != settings_json(next);
+        changed = settings_json(previous, meshlets) != settings_json(next, meshlets);
         if (changed)
         {
             std::ostringstream formatted;
@@ -296,7 +336,7 @@ bool write(AssetPipelineSystem& pipeline, const fs::path& project, const Json& a
         error = pipeline.last_error();
         return false;
     }
-    if (!read(project, {{"path", arguments["path"]}}, result, error))
+    if (!read(project, {{"path", arguments["path"]}}, result, error, meshlets))
     {
         return false;
     }
@@ -315,7 +355,17 @@ bool write(AssetPipelineSystem& pipeline, const fs::path& project, const Json& a
 bool register_mesh_lod_commands(EditorCommands& commands, AssetPipelineSystem& pipeline,
                                 fs::path project_root)
 {
-    return commands.register_command("get_mesh_lod_import", false,
+    return commands.register_command(
+               "get_meshlet_import", false,
+               [project_root](const Json& arguments, Json& result, std::unique_ptr<EditorEdit>&,
+                              std::string& error)
+               { return read(project_root, arguments, result, error, true); }) &&
+           commands.register_command(
+               "set_meshlet_import", false,
+               [project_root, &pipeline](const Json& arguments, Json& result,
+                                         std::unique_ptr<EditorEdit>&, std::string& error)
+               { return write(pipeline, project_root, arguments, result, error, true); }) &&
+           commands.register_command("get_mesh_lod_import", false,
                                      [project_root](const Json& arguments, Json& result,
                                                     std::unique_ptr<EditorEdit>&,
                                                     std::string& error)

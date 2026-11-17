@@ -65,7 +65,7 @@ ResourceHandle LightProbeVolumeComponent::resource() const noexcept
     const auto* probes =
         runtime()->resource_ ? runtime()->resource_.data<LightProbeResource>() : nullptr;
     auto transform = node().get_component<Transform>();
-    std::array<float, 16> matrix{};
+    std::array<double, 16> matrix{};
     if (!probes || probes->baked_transform.size() != matrix.size() || !transform ||
         !transform.world_matrix(matrix.data()))
     {

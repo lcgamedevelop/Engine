@@ -361,7 +361,7 @@ bool render_component_tests()
     geometry.indices = {0, 2, 1};
     geometry.lightmap_texcoords = {{.1, .1}, {.9, .1}, {.1, .9}};
     schema::TextureDataT lightmap;
-    lightmap.schema_version = 2;
+    lightmap.schema_version = 3;
     lightmap.path = "lighting/test.texture";
     lightmap.width = lightmap.height = 1;
     lightmap.encoding = schema::TextureEncoding::native;
@@ -668,6 +668,36 @@ bool render_command_tests()
         !expect(execute("undo", identity) && test_support::read_settings(light).kind ==
                                                  engine::schema::LightKind::directional,
                 "spotlight undo"))
+    {
+        return false;
+    }
+    const auto ordinary_light = test_support::read_settings(light);
+    args = target(node);
+    args.update({{"shadowMethod", "virtual_shadow_map"},
+                 {"virtualShadow",
+                  {{"virtual_resolution", 8192}, {"first_clipmap_extent", 32}, {"lod_bias", 1}}}});
+    if (!expect(execute("set_light", args) &&
+                    test_support::read_settings(light).shadow_method ==
+                        engine::schema::ShadowMethod::virtual_shadow_map &&
+                    test_support::read_settings(light).virtual_shadow &&
+                    test_support::read_settings(light).virtual_shadow->virtual_resolution == 8192 &&
+                    execute("undo", identity) &&
+                    test_support::read_settings(light) == ordinary_light &&
+                    execute("redo", identity),
+                "VSM Light properties support exact undo and redo"))
+    {
+        return false;
+    }
+    auto outside_edit = test_support::read_settings(light);
+    outside_edit.virtual_shadow->lod_bias = 2;
+    if (!light.set_settings(outside_edit) ||
+        !expect(!execute("undo", identity) && test_support::read_settings(light) == outside_edit,
+                "VSM undo refuses to overwrite an external settings edit"))
+    {
+        return false;
+    }
+    outside_edit.virtual_shadow->lod_bias = 1;
+    if (!light.set_settings(outside_edit) || !execute("undo", identity))
     {
         return false;
     }

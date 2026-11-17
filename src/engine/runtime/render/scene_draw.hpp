@@ -1,9 +1,11 @@
 #pragma once
 #include "runtime/render/passes/shadow_frame.hpp"
+#include "runtime/render/vsm/vsm_types.hpp"
 #include "runtime/scene/camera.hpp"
 #include <array>
 #include <bgfx/bgfx.h>
 #include <cstdint>
+#include <vector>
 
 namespace engine
 {
@@ -13,6 +15,7 @@ struct SceneCaptureRequest;
 namespace render_detail
 {
 class ClusteredLightingPass;
+class RvtPass;
 enum class SceneDrawMode : std::uint8_t
 {
     depth,
@@ -26,6 +29,9 @@ enum class SceneDrawMode : std::uint8_t
 struct SceneDrawView
 {
     RenderSystem* renderer = nullptr;
+    Vec3 world_origin;
+    const RvtPass* rvt = nullptr;
+    VsmGpuBinding vsm;
     bgfx::ViewId id = 0;
     std::uint16_t width = 0, height = 0;
     const float* world = nullptr;
@@ -49,5 +55,11 @@ struct SceneDrawView
     std::array<bgfx::TextureHandle, 3> textures = {
         {BGFX_INVALID_HANDLE, BGFX_INVALID_HANDLE, BGFX_INVALID_HANDLE}};
 };
+struct RenderFrameData;
+struct ViewDrawList;
+struct DrawBatch;
+[[nodiscard]] bool prepare_draw_batches(const RenderFrameData& frame_data, const ViewDrawList& list,
+                                        const SceneDrawView& draw, SceneDrawMode mode,
+                                        std::vector<DrawBatch>& batches);
 } // namespace render_detail
 } // namespace engine

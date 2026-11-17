@@ -11,7 +11,7 @@ namespace engine
 {
 bool PrefabResourceCodec::validate(const schema::PrefabDataT& data)
 {
-    if (data.schema_version != 3 || data.root_id == 0 || data.nodes.empty())
+    if (data.schema_version != 6 || data.root_id == 0 || data.nodes.empty())
     {
         return false;
     }

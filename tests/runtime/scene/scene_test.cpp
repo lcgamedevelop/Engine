@@ -370,13 +370,25 @@ bool hierarchy_and_transforms(test_support::ResourceServices& services)
     {
         return false;
     }
-    std::array<float, 16> matrix{};
+    std::array<double, 16> matrix{};
     if (!expect(child.get_component<engine::Transform>().world_matrix(matrix.data()),
                 "compute world matrix") ||
         !expect(near(matrix[12], 1.0F) && near(matrix[13], 4.0F) && near(matrix[14], 3.0F),
                 "world translation applies parent rotation and nonuniform scale") ||
         !expect(near(matrix[0], 0.0F) && near(matrix[1], 2.0F) && near(matrix[4], -1.0F),
                 "matrix is column major and uses T R S order"))
+    {
+        return false;
+    }
+    const auto original_parent = parent_transform;
+    parent_transform.position = {4000.000013, -4000.000017, 4000.000019};
+    if (!expect(parent.get_component<engine::Transform>().set_settings(parent_transform) &&
+                    child.get_component<engine::Transform>().world_matrix(matrix.data()) &&
+                    std::abs(matrix[12] - 4000.000013) < 1e-10 &&
+                    std::abs(matrix[13] - (-3998.000017)) < 1e-10 &&
+                    std::abs(matrix[14] - 4000.000019) < 1e-10 &&
+                    parent.get_component<engine::Transform>().set_settings(original_parent),
+                "large world hierarchy preserves submillimeter translation"))
     {
         return false;
     }
@@ -407,10 +419,17 @@ bool hierarchy_and_transforms(test_support::ResourceServices& services)
     }
     invalid = child_transform;
     invalid.scale.mutate_x(std::numeric_limits<double>::max());
+    parent_transform.scale.mutate_x(2);
+    parent_transform.rotation = {};
+    if (!parent.get_component<engine::Transform>().set_settings(parent_transform) ||
+        !child.set_parent(parent))
+    {
+        return false;
+    }
     if (!expect(child.get_component<engine::Transform>().set_settings(invalid),
                 "finite transform may exceed GPU precision") ||
         !expect(!child.get_component<engine::Transform>().world_matrix(matrix.data()),
-                "reject float matrix overflow"))
+                "reject double hierarchy multiplication overflow"))
     {
         return false;
     }
@@ -520,7 +539,7 @@ bool indexed_scene_restore(test_support::ResourceServices& services)
     }
     auto camera = test_support::scene_nodes(*original)[0].add_component<Camera>();
     schema::SceneDataT source;
-    source.schema_version = 3;
+    source.schema_version = 6;
     if (!camera || !original->set_active_camera(camera) || !original->build_data(source))
     {
         return false;
@@ -751,7 +770,7 @@ bool incremental_scene_restore(test_support::ResourceServices& services)
     auto child = active ? active->create_node("Child") : engine::Node{};
     auto parent = active ? active->create_node("Parent") : engine::Node{};
     schema::SceneDataT data;
-    data.schema_version = 3;
+    data.schema_version = 6;
     if (!child || !parent || !child.set_parent(parent) ||
         !active->set_active_camera(child.add_component<Camera>()) || !active->build_data(data) ||
         !add_scene_resource(fixture, "staged.scene", data) ||
@@ -937,7 +956,7 @@ bool persistent_scene_loading(test_support::ResourceServices& services)
     auto* source = resources && world.initialize({}) ? world.create_scene("Source") : nullptr;
     auto node = source ? source->create_node("Resource owner") : engine::Node{};
     schema::SceneDataT data;
-    data.schema_version = 3;
+    data.schema_version = 6;
     if (!node || !source->build_data(data) ||
         !add_scene_resource(fixture, "persistent.scene", data))
     {
@@ -1678,7 +1697,7 @@ bool baked_lighting_bindings(test_support::ResourceServices& services)
     mesh_data.indices = {0, 2, 1};
     mesh_data.lightmap_texcoords = {{0.1, 0.1}, {0.9, 0.1}, {0.1, 0.9}};
     engine::schema::TextureDataT texture;
-    texture.schema_version = 2;
+    texture.schema_version = 3;
     texture.path = "lighting/test.texture";
     texture.width = 1;
     texture.height = 1;
@@ -1777,8 +1796,22 @@ bool scene_scope_publication(test_support::ResourceServices& services)
     const auto pose = node.get_component<Transform>();
     if (!expect(node && pose && !world.find_node(node.id()) && world.find_node(old_node.id()),
                 "candidate remains hidden while old scene is available") ||
+        !expect(!world.with_scope_write(scope, [&](Scene& leased)
+                                        { return leased.id() != candidate->id(); }) &&
+                    world.with_scope_write(scope,
+                                           [&](Scene& leased)
+                                           {
+                                               world.release_scope(scope);
+                                               world.destroy_scene();
+                                               return &leased == candidate &&
+                                                      world.scope_candidate(scope) == candidate &&
+                                                      world.find_node(old_node.id()) &&
+                                                      node.set_enabled(true);
+                                           }),
+                "failed callbacks restore the lease and borrowed scopes cannot be destroyed") ||
         !expect(world.seal_scope(scope) && !node.set_enabled(false) &&
-                    !candidate->create_node("Late"),
+                    !candidate->create_node("Late") &&
+                    !world.with_scope_write(scope, [](Scene&) { return true; }),
                 "sealed candidates reject writes"))
     {
         return false;
@@ -1808,6 +1841,14 @@ bool scene_scope_publication(test_support::ResourceServices& services)
                     world.step_scope(batch, {2, 1.0, 1024}) == SceneWorkState::ready &&
                     !destination->find_node(extra.id()) && world.find_node(node.id()),
                 "append mapping does not expose partial content"))
+    {
+        return false;
+    }
+    std::vector<Node> published_nodes;
+    if (!expect(destination->collect_nodes(published_nodes) &&
+                    std::none_of(published_nodes.begin(), published_nodes.end(),
+                                 [&](Node value) { return value == extra; }),
+                "scene snapshots remain available while an append batch is prepared"))
     {
         return false;
     }

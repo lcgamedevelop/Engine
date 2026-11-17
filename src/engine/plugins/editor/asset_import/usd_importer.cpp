@@ -3,6 +3,7 @@
 #include "editor/asset_pipeline/asset_io.hpp"
 #include "editor/asset_pipeline/importer_utils.hpp"
 #include "editor/mesh/mesh_lods.hpp"
+#include "editor/mesh/meshlets.hpp"
 #include "runtime/resource/codecs/mesh_resource_codec.hpp"
 #include "runtime/resource/codecs/model_resource_codec.hpp"
 #include "runtime/utils/path_utils.hpp"
@@ -213,7 +214,8 @@ bool UsdImporter::inspect_batch(const editor::asset_pipeline::ImportContext& con
     {
         return false;
     }
-    fingerprint += ":usd-static-3:" + std::to_string(PXR_VERSION) + editor::mesh_lod_fingerprint();
+    fingerprint += ":usd-static-3:" + std::to_string(PXR_VERSION) + editor::mesh_lod_fingerprint() +
+                   editor::meshlet_fingerprint();
     return true;
 }
 bool UsdImporter::discover(const editor::asset_pipeline::ImportAsset& source,
@@ -416,7 +418,8 @@ bool UsdImporter::convert(const editor::asset_pipeline::ImportAsset& asset,
             return false;
         }
         auto result = mesh->second;
-        if (!editor::generate_mesh_lods(result, asset.source, error))
+        if (!editor::generate_mesh_lods(result, asset.source, error) ||
+            !editor::generate_meshlets(result, asset.source, error))
         {
             return false;
         }

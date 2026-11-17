@@ -1,5 +1,7 @@
 #include "runtime/resource/builtin_resources.hpp"
+#include "runtime/resource/builtin_font.hpp"
 #include "runtime/resource/builtin_resource_candidate.hpp"
+#include "runtime/resource/types/font_resource.hpp"
 #include "runtime/resource/types/material_resource.hpp"
 #include "runtime/resource/types/mesh_resource.hpp"
 #include "runtime/resource/types/shader_resource.hpp"
@@ -13,11 +15,16 @@
 
 #include "fs_cube.bin.h"
 #include "fs_font.bin.h"
+#include "fs_rvt.bin.h"
 #include "fs_surface.bin.h"
+#include "fs_terrain_cube.bin.h"
+#include "fs_terrain_rvt.bin.h"
+#include "fs_terrain_surface.bin.h"
 #include "fs_water.bin.h"
 #include "vs_cube.bin.h"
 #include "vs_cube_instanced.bin.h"
 #include "vs_font.bin.h"
+#include "vs_terrain.bin.h"
 
 #include <flatbuffers/flatbuffers.h>
 
@@ -25,6 +32,7 @@
 #include <iterator>
 #include <memory>
 #include <string>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -37,8 +45,8 @@ const schema::AssetCatalogDataT& builtin_resource_catalog()
     static const schema::AssetCatalogDataT catalog = []
     {
         schema::AssetCatalogDataT result;
-        result.schema_version = 3;
-        result.revision = "builtin-4";
+        result.schema_version = 4;
+        result.revision = "builtin-6";
         const auto add = [&result](const char* guid, const char* path, schema::AssetKind kind,
                                    const char* dependency)
         {
@@ -78,6 +86,16 @@ const schema::AssetCatalogDataT& builtin_resource_catalog()
             schema::AssetKind::shader, nullptr);
         add("00000000-0000-4000-8000-00000000000d", "builtin://materials/default-water",
             schema::AssetKind::material, "00000000-0000-4000-8000-00000000000c");
+        add("00000000-0000-4000-8000-00000000000e", "builtin://fonts/diagnostic",
+            schema::AssetKind::font, nullptr);
+        add("00000000-0000-4000-8000-00000000000f", "builtin://textures/white-srgb-array",
+            schema::AssetKind::texture, nullptr);
+        add("00000000-0000-4000-8000-000000000010", "builtin://textures/flat-normal-array",
+            schema::AssetKind::texture, nullptr);
+        add("00000000-0000-4000-8000-000000000011", "builtin://textures/white-linear-array",
+            schema::AssetKind::texture, nullptr);
+        add("00000000-0000-4000-8000-000000000012", "builtin://shaders/terrain-pbr",
+            schema::AssetKind::shader, nullptr);
         for (auto& entry : result.entries)
         {
             if (entry->kind == schema::AssetKind::shader && entry->path != "builtin://shaders/font")
@@ -87,6 +105,9 @@ const schema::AssetCatalogDataT& builtin_resource_catalog()
                                        "00000000-0000-4000-8000-000000000008"};
             }
         }
+        result.entries.back()->dependencies = {
+            "00000000-0000-4000-8000-00000000000f", "00000000-0000-4000-8000-000000000010",
+            "00000000-0000-4000-8000-000000000011", "00000000-0000-4000-8000-000000000008"};
         return result;
     }();
     return catalog;
@@ -130,10 +151,15 @@ schema::ShaderDataT surface_shader(const char* shader_path, float lighting_mode)
     const bool unlit = lighting_mode == 1.0F;
     schema::ShaderDataT shader;
     shader.path = shader_path;
+    shader.meshlet_culling_compatible = true;
     shader.vertex_code.assign(std::begin(vs_cube), std::end(vs_cube));
     shader.instanced_vertex_code.assign(std::begin(vs_cube_instanced), std::end(vs_cube_instanced));
     shader.fragment_code.assign(std::begin(fs_cube), std::end(fs_cube));
     shader.surface_fragment_code.assign(std::begin(fs_surface), std::end(fs_surface));
+    if (lighting_mode == 0.0F)
+    {
+        shader.rvt_fragment_code.assign(std::begin(fs_rvt), std::end(fs_rvt));
+    }
     auto color = std::make_unique<schema::ShaderParameterT>();
     color->name = "baseColor";
     color->uniform_name = "u_base_color";
@@ -221,11 +247,60 @@ schema::ShaderDataT surface_shader(const char* shader_path, float lighting_mode)
     return shader;
 }
 
+schema::ShaderDataT terrain_shader()
+{
+    auto shader = surface_shader("builtin://shaders/terrain-pbr", 0.0F);
+    shader.meshlet_culling_compatible = false;
+    shader.instanced_vertex_code.clear();
+    shader.vertex_code.assign(std::begin(vs_terrain), std::end(vs_terrain));
+    shader.fragment_code.assign(std::begin(fs_terrain_cube), std::end(fs_terrain_cube));
+    shader.surface_fragment_code.assign(std::begin(fs_terrain_surface),
+                                        std::end(fs_terrain_surface));
+    shader.rvt_fragment_code.assign(std::begin(fs_terrain_rvt), std::end(fs_terrain_rvt));
+    std::erase_if(shader.parameters,
+                  [](const auto& p)
+                  {
+                      return p->name != "lightingMode" && p->name != "specularWorkflow" &&
+                             p->name != "specularHighlights" && p->name != "fogInfluence";
+                  });
+    for (auto& p : shader.parameters)
+    {
+        if (p->name == "specularWorkflow")
+        {
+            p->exposed = false;
+        }
+    }
+    auto origin = std::make_unique<schema::ShaderParameterT>();
+    origin->name = "surfaceOrigin";
+    origin->uniform_name = "u_surface_origin";
+    schema::Vec3ValueT vector;
+    origin->default_value.Set(vector);
+    shader.parameters.push_back(std::move(origin));
+    shader.samplers.clear();
+    std::uint8_t stage = 0;
+    for (auto [name, uniform, path] :
+         {std::tuple{"layerBaseColor", "s_layer_base", "builtin://textures/white-srgb-array"},
+          std::tuple{"layerNormal", "s_layer_normal", "builtin://textures/flat-normal-array"},
+          std::tuple{"layerOrm", "s_layer_orm", "builtin://textures/white-linear-array"},
+          std::tuple{"layerPalette", "s_layer_palette", "builtin://textures/white-linear"}})
+    {
+        auto sampler = std::make_unique<schema::ShaderSamplerT>();
+        sampler->name = name;
+        sampler->uniform_name = uniform;
+        sampler->stage = stage++;
+        sampler->default_texture = path;
+        shader.samplers.push_back(std::move(sampler));
+    }
+    return shader;
+}
+
 schema::ShaderDataT water_shader()
 {
     auto shader = surface_shader("builtin://shaders/water", 0.0F);
+    shader.meshlet_culling_compatible = false;
     shader.fragment_code.assign(std::begin(fs_water), std::end(fs_water));
     shader.surface_fragment_code.clear();
+    shader.rvt_fragment_code.clear();
     for (auto& parameter : shader.parameters)
     {
         if (parameter->name == "baseColor")
@@ -315,7 +390,7 @@ const BuiltinDefinitions& builtin_definitions()
             [&result](const char* path, bool srgb, std::vector<std::uint8_t> pixels)
         {
             schema::TextureDataT texture;
-            texture.schema_version = 2;
+            texture.schema_version = 3;
             texture.path = path;
             texture.width = 1;
             texture.height = 1;
@@ -329,6 +404,18 @@ const BuiltinDefinitions& builtin_definitions()
         add_texture("builtin://textures/white-srgb", true, {255, 255, 255, 255});
         add_texture("builtin://textures/flat-normal", false, {128, 128, 255, 255});
         add_texture("builtin://textures/white-linear", false, {255, 255, 255, 255});
+        for (auto [path, index] : {std::pair{"builtin://textures/white-srgb-array", 0U},
+                                   std::pair{"builtin://textures/flat-normal-array", 1U},
+                                   std::pair{"builtin://textures/white-linear-array", 2U}})
+        {
+            auto texture = result.textures[index];
+            texture.path = path;
+            texture.array_layers = 2;
+            const auto pixels = texture.data;
+            texture.data.insert(texture.data.end(), pixels.begin(), pixels.end());
+            texture.subresources.emplace_back(0, 1, pixels.size(), pixels.size());
+            result.textures.push_back(std::move(texture));
+        }
         schema::MeshDataT cube;
         cube.path = "builtin://meshes/cube";
         cube.vertices = {{-1, -1, 1, 0, 0, 1},   {1, -1, 1, 0, 0, 1},   {1, 1, 1, 0, 0, 1},
@@ -351,6 +438,7 @@ const BuiltinDefinitions& builtin_definitions()
         result.shaders.push_back(surface_shader("builtin://shaders/unlit", 1.0F));
         result.shaders.push_back(surface_shader("builtin://shaders/blinn-phong", 2.0F));
         result.shaders.push_back(water_shader());
+        result.shaders.push_back(terrain_shader());
         for (const auto& entry : builtin_resource_catalog().entries)
         {
             if (entry->kind != schema::AssetKind::material)
@@ -380,6 +468,11 @@ bool resource_detail::builtin_candidate(std::string_view guid, std::unique_ptr<R
     if (!entry || output)
     {
         return false;
+    }
+    if (entry->kind == schema::AssetKind::font)
+    {
+        output = std::make_unique<FontResource>(*entry, resource_detail::diagnostic_font());
+        return true;
     }
     const auto create = [&]<typename T>(const auto& definitions)
     {
@@ -443,8 +536,13 @@ bool builtin_resource_payload(std::string_view guid, ByteBuffer& output)
         return false;
     };
     const auto& definitions = builtin_definitions();
-    if (!serialize(definitions.shaders, "ESHD") && !serialize(definitions.materials, "EMAT") &&
-        !serialize(definitions.meshes, "EMSH") && !serialize(definitions.textures, "ETEX"))
+    if (entry->kind == schema::AssetKind::font)
+    {
+        schema::FinishFontDataBuffer(
+            builder, schema::FontData::Pack(builder, &resource_detail::diagnostic_font()));
+    }
+    else if (!serialize(definitions.shaders, "ESH3") && !serialize(definitions.materials, "EMAT") &&
+             !serialize(definitions.meshes, "EMS2") && !serialize(definitions.textures, "ETEX"))
     {
         return false;
     }

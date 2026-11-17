@@ -85,7 +85,7 @@ public:
     [[nodiscard]] bool draw(const ResourceHandle& font, const FontGeometry& geometry,
                             const FontDraw& settings);
     // The caller has already configured this view's camera and viewport.
-    [[nodiscard]] bool render_scene(const Scene& scene, std::uint16_t view_id,
+    [[nodiscard]] bool render_scene(const Scene& scene, const Vec3& origin, std::uint16_t view_id,
                                     bool linear_output = false);
     void release_scene() noexcept;
     [[nodiscard]] std::uint32_t gpu_resource_count() const noexcept;

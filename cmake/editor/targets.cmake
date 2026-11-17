@@ -18,7 +18,8 @@ if(ENGINE_ENABLE_ASSET_PIPELINE_DEPS OR "editor/modeling" IN_LIST ENGINE_SELECTE
 endif()
 
 if(ENGINE_ENABLE_ASSET_PIPELINE_DEPS)
-    target_sources(engine_editor_mesh PRIVATE src/engine/editor/mesh/mesh_lods.cpp)
+    target_sources(engine_editor_mesh PRIVATE src/engine/editor/mesh/mesh_lods.cpp
+                                              src/engine/editor/mesh/meshlets.cpp)
     target_link_libraries(engine_editor_mesh
                           PRIVATE meshoptimizer::meshoptimizer engine::resource)
     get_target_property(_mesh_lod_toml_includes tomlplusplus::tomlplusplus

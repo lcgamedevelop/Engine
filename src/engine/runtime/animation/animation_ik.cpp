@@ -46,7 +46,7 @@ bool fk(const CompiledSkeleton& skeleton, std::vector<ozz::math::SoaTransform>& 
 }
 } // namespace
 bool collect_ik_operations(Animator actor, const CompiledSkeleton& skeleton,
-                           const ozz::math::Float4x4& model_to_world,
+                           const ozz::math::Float4x4& model_to_world, const Vec3& origin,
                            std::vector<IkOperation>& output)
 {
     output.clear();
@@ -92,7 +92,7 @@ bool collect_ik_operations(Animator actor, const CompiledSkeleton& skeleton,
         }
         IkOperation operation;
         if (!resolve_target(actor, data, skeleton.readable_paths, resolved, index, target,
-                            world_to_model, operation))
+                            world_to_model, origin, operation))
         {
             return false;
         }

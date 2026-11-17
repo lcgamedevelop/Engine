@@ -5,6 +5,7 @@
 #include "editor/asset_pipeline/toml_helpers.hpp"
 #include "editor/mesh/mesh_lods.hpp"
 #include "editor/mesh/mesh_tangents.hpp"
+#include "editor/mesh/meshlets.hpp"
 #include "runtime/resource/resource_system.hpp"
 #include "runtime/schema/material_generated.h"
 #include "runtime/schema/mesh_generated.h"
@@ -47,8 +48,8 @@ bool MeshImporter::inspect_batch(const ImportContext&, std::string& fingerprint,
     {
         return false;
     }
-    fingerprint +=
-        ":mikktspace-3e895b49-angle-precision-1:mesh-importer-2" + mesh_lod_fingerprint();
+    fingerprint += ":mikktspace-3e895b49-angle-precision-1:mesh-importer-2" +
+                   mesh_lod_fingerprint() + meshlet_fingerprint();
     return true;
 }
 bool MeshImporter::convert(const ImportAsset& asset, const ImportContext& context,
@@ -221,7 +222,8 @@ bool MeshImporter::convert(const ImportAsset& asset, const ImportContext& contex
         }
         return false;
     }
-    if (!generate_mesh_lods(mesh, asset.source, error))
+    if (!generate_mesh_lods(mesh, asset.source, error) ||
+        !generate_meshlets(mesh, asset.source, error))
     {
         return false;
     }

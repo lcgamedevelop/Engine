@@ -20,7 +20,7 @@ public:
     [[nodiscard]] bool get_settings(Data& output) const noexcept;
     [[nodiscard]] bool set_settings(const TransformSettings& settings) noexcept;
     // 输出 16 个列主序 float；失败时非空输出保持单位矩阵。
-    [[nodiscard]] bool world_matrix(float* output) const noexcept;
+    [[nodiscard]] bool world_matrix(double* output) const noexcept;
 };
 
 } // namespace engine

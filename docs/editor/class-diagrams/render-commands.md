@@ -43,8 +43,68 @@ classDiagram
 
 宿主独占 RenderCommands，命令注册和撤销历史释放之后销毁它；渲染系统与世界的有效期覆盖命令对象。
 
+## RVT 实时调试
+
+复用 RenderCommands 与现有 MCP 渲染工具，不新增编辑器专用缓存或另一套 UI。
+原生设置、查看器与帧证据只在[RVT 类图](../../runtime/class-diagrams/runtime-virtual-texture.md#mcp-实时贴图查看器)定义。
+
+- 开启：set_render_feature 参数 {"feature":"rvt_viewer","enabled":true}；关闭用同一请求的 false。
+  继续路由 set_render_debug_feature，不需要 sceneId/nodeId，不写场景、项目设置或撤销历史。
+- 新增 set_rvt_debug_options，只接受 mode、channel、mip 的完整结构，原子调用原生设置接口。
+  默认 overview/base_color/-1，无需额外配置便能看到实时虚拟概览、物理图集和页表。
+- 新增 get_rvt_debug_options，返回临时 options、debug revision、rvt_viewer 的 feature 状态、
+  RvtStatus 和最近实际帧中的 debug revision/visible。协调线程只查询快照，不推进页更新或执行回读。
+- get_render_features 的诊断列表增加 rvt_viewer；页面表面诊断仍为 rvt_pages/rvt_residency/rvt_invalidated。
+  开关改变不会操作 EnvironmentComponent.rvt.enabled；两种用途必须清晰区分。
+- setter 受理不代表面板已经显示。自动化按 debug revision 与实际帧 visible 等待，再用
+  capture_frame/get_frame_capture 归档；关闭后同样等待不可见帧，不能截到上一帧面板。
+
+示例参数，工具名由上文指定，均为目标契约：
+
+```json
+{"feature":"rvt_viewer","enabled":true}
+```
+
+```json
+{"mode":"overview","channel":"base_color","mip":-1}
+```
+
+界面上任何通道/模式选择都使用相同临时设置接口，MCP 可完成全部切换，不依赖鼠标操作。
+测试运行的直接控制入口只在显式测试构建装配，不把编辑器命令类链接进正式运行时。
+
+## 现有场景渲染参数
+
+以下为当前接口；VSM 的组件设置与临时诊断在本页末尾说明。
+
 AO 字段 `aoEnabled`、`aoRadius`、`aoStrength`、`aoPower`、`aoFadeStart`、`aoFadeEnd` 属于后处理域，与曝光共用活动场景相机的 PostProcessComponent、快照和撤销记录。编辑器沿用已有后处理组件准备流程，缺少活动相机时拒绝；运行时核心不创建组件。AO 参数由同一场景保存链落盘，不添加独立编辑器覆盖状态。
 
 `hdrEnabled`、`bloomEnabled`、`bloomThreshold`、`bloomIntensity`、`bloomRadius` 同属后处理域。一次 `set_render_settings` 可原子提交 HDR/Bloom 的两个开关；最终状态必须满足 Bloom 依赖 HDR，不因参数遍历顺序不同产生部分修改，也不自动改变未提交开关。失败回滚本次新建组件，成功进入同一撤销、重做和保存链。
 
 级联阴影使用同一 `set_render_settings` / `get_render_settings`，字段为 `shadowCascades`、`shadowDistance`、`shadowSplitLambda`、`shadowCascadeBlend`。修改归方向灯域，实际变更要求已有启用方向灯，缺少时拒绝而不创建灯；阴影关闭且全部值未变化的空操作沿用原有成功语义。撤销和重做保存整份对应 Light 组件快照。级联数只接受 JSON 整数 1、2、4，其他数值遵循 Light 契约。
+
+## VSM 接口
+
+复用现有 RenderCommands、组件编辑命令和 MCP 适配，
+原生状态与帧证据的唯一契约见[VSM 类图](../../runtime/class-diagrams/virtual-shadow-maps.md)。
+不新增编辑器阴影缓存或 MCP 专用渲染器。
+
+| 命令 | 参数与行为 |
+| --- | --- |
+| `set_light` | 在已有 sceneId/nodeId 组件编辑上增加 shadowMethod 与 virtualShadow；后者按生成 JSON 契约使用 virtual_resolution、first_clipmap_extent、lod_bias 字段。校验同一 Light 值，失败不修改，成功进入既有撤销、重做与保存链 |
+| `set_render_feature` | `{"feature":"vsm_viewer","enabled":true}` 开启实时调试；false 关闭。只调用已有渲染诊断开关，不修改 Light |
+| `set_vsm_debug_options` | `{"mode":"overview","clipmapLevel":-1}` 原子修改临时视图，失败保留旧值；模式值与原生 VsmDebugMode 一致 |
+| `get_vsm_debug_options` | 返回 options、debug revision、vsm_viewer 的 feature 状态，以及实际帧中的 debug revision/visible |
+| `get_vsm_status` | 返回同一 RenderSystem::vsm_status 快照及最近实际帧对应的 VSM 身份、修订和 ready；不推进缓存或等待 GPU |
+
+shadowMethod 使用 shadow_map/virtual_shadow_map 两个值；castShadows 仍是总开关。
+生产配置只通过 Light 组件保存，不再为 VSM 增加全局 set_render_settings 覆盖入口。
+诊断命令不需要 sceneId/nodeId，不进入场景、项目设置或撤销记录；
+get_render_features 的临时诊断列表加入 vsm_viewer。
+
+自动化依次完成组件配置、等待准备、固定镜头、查询 VSM 状态、设置调试视图、
+等待同一 debug revision 的实际可见帧，然后复用 capture_frame/get_frame_capture。
+状态为 unsupported/failed 时报告原因；预算不足明确报告，不将 CSM 截图冒充 VSM 已就绪。
+关闭调试后也等待对应不可见帧，避免截到上一帧面板。
+
+测试运行端点仅在显式测试构建装配，直接适配上述普通运行时接口；
+它不依赖编辑器命令类，正式运行包不含 MCP 测试入口。

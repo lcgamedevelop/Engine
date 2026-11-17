@@ -47,7 +47,7 @@ engine::schema::TextureDataT color_texture(std::string path, std::uint32_t width
                                            std::uint32_t height, std::array<std::uint8_t, 4> color)
 {
     engine::schema::TextureDataT result;
-    result.schema_version = 2;
+    result.schema_version = 3;
     result.path = std::move(path);
     result.width = width;
     result.height = height;
@@ -192,7 +192,7 @@ bool exercise()
         }
     }
     engine::schema::TextureDataT irradiance;
-    irradiance.schema_version = 2;
+    irradiance.schema_version = 3;
     irradiance.path = "baked/irradiance";
     irradiance.width = irradiance.height = 16;
     irradiance.cube_map = true;

@@ -51,6 +51,8 @@ struct GpuProgram
     bgfx::ProgramHandle program = BGFX_INVALID_HANDLE;
     bgfx::ShaderHandle surface_shader = BGFX_INVALID_HANDLE;
     bgfx::ProgramHandle surface_program = BGFX_INVALID_HANDLE;
+    bgfx::ShaderHandle rvt_shader = BGFX_INVALID_HANDLE;
+    bgfx::ProgramHandle rvt_program = BGFX_INVALID_HANDLE;
     bgfx::ShaderHandle instanced_vertex_shader = BGFX_INVALID_HANDLE;
     bgfx::ProgramHandle instanced_program = BGFX_INVALID_HANDLE;
     bgfx::ProgramHandle instanced_surface_program = BGFX_INVALID_HANDLE;

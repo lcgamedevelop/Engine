@@ -1,0 +1,12 @@
+guid = "d584ff76-ced9-4cac-a70a-6346c60c0d17"
+importer = "mesh"
+meta_version = 1
+
+[lod]
+enabled = true
+triangle_ratios = [0.5, 0.25, 0.125]
+screen_heights = [0.15, 0.07, 0.03]
+max_relative_error = 0.02
+
+[meshlets]
+enabled = true

@@ -92,25 +92,31 @@ bool BoneAttachment::detach()
         return false;
     }
     auto transform = node().get_component<Transform>();
-    std::array<float, 16> world;
+    std::array<double, 16> world;
     if (!transform || !transform.world_matrix(world.data()))
     {
         return false;
     }
-    auto local = animation_detail::load_matrix(world);
+    auto local = world;
     if (const auto parent = node().parent())
     {
-        std::array<float, 16> parent_world;
-        ozz::math::Float4x4 inverse;
+        std::array<double, 16> parent_world;
+        std::array<double, 16> inverse;
         if (!parent.get_component<Transform>().world_matrix(parent_world.data()) ||
-            !animation_detail::invert_matrix(animation_detail::load_matrix(parent_world), inverse))
+            !transform_math::inverse(parent_world.data(), inverse.data()))
         {
             return false;
         }
-        local = inverse * local;
+        transform_math::multiply(inverse.data(), local.data(), local.data());
     }
     TransformSettings authored;
-    if (!animation_detail::decompose_authored(local, authored) || !transform.set_settings(authored))
+    if (!animation_detail::decompose_authored(
+            animation_detail::relative_matrix(local, {local[12], local[13], local[14]}), authored))
+    {
+        return false;
+    }
+    authored.position = {local[12], local[13], local[14]};
+    if (!transform.set_settings(authored))
     {
         return false;
     }

@@ -18,6 +18,7 @@ namespace engine::render_detail
 
 // One instance per camera submission. A later camera must not update buffers
 // already referenced by an earlier camera in the same bgfx frame.
+struct VsmPageBatch;
 class ClusteredLightingPass final
 {
 public:
@@ -27,13 +28,13 @@ public:
     ClusteredLightingPass& operator=(const ClusteredLightingPass&) = delete;
 
     [[nodiscard]] bool prepare(const RenderConfig& config, std::uint16_t width,
-                               std::uint16_t height);
+                               std::uint16_t height, std::uint32_t vsm_vectors);
     [[nodiscard]] bool cull(bgfx::ViewId view, const CameraSettings& camera,
                             const float* view_matrix, const float* projection,
                             std::span<const ClusterLight> lights,
-                            std::span<const ShadowRecord> shadows);
+                            std::span<const ShadowRecord> shadows, const VsmPageBatch* vsm);
     void bind_view(bgfx::ViewId view) const;
-    void bind() const;
+    void bind(bool virtual_shadow) const;
     void release() noexcept;
     [[nodiscard]] std::uint32_t resource_count() const noexcept;
 
@@ -56,6 +57,9 @@ private:
     std::uint32_t maximum_lights_ = 0;
     std::uint16_t maximum_cluster_lights_ = 0;
     std::uint16_t maximum_shadow_faces_ = 0;
+    std::uint32_t vsm_vectors_ = 0;
+    bgfx::UniformHandle vsm_layout_ = BGFX_INVALID_HANDLE;
+    std::array<float, 4> vsm_parameters_{};
     bool ready_ = false;
 };
 

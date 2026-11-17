@@ -1,5 +1,8 @@
 # 建筑破坏：Blast 计算与 Jolt 提交
 
+支撑参数使用 Collider 集合；DestructionSystem 参与共同的候选场景准备。
+跨区覆盖与存档边界见[地形与建筑](terrain-world-state.md)，准备顺序见[核心契约](../../../runtime/class-diagrams/scene-domain-preparation.md)。
+
 步骤 2 使用官方 Blast Authoring 预破碎、ExtDamageShaders 径向损伤及 low-level 拆分。
 不另写 Voronoi、连接连通性或应力求解器。运行插件只借用核心世界和物理；
 Authoring 与 MCP 属于编辑器插件。核心增加的凸包复合碰撞、瞬态节点均不识别 Blast。
@@ -27,7 +30,7 @@ class DestructionComponent {
 +set_settings(const DestructionDataT& settings) bool
 +restore_data(const ComponentDataT& data) bool
 +damage_sphere(const Vec3& center, float radius, float damage, float impulse) bool
-+refresh_support(const Collider& support, float max_gap, float min_coverage) bool
++refresh_support(span~const Collider~ supports, float max_gap, float min_coverage) bool
 +apply_stress(const Vec3& gravity, float elastic_limit, float fatal_limit, uint32_t iterations, uint32_t& broken_bonds) bool
 +owns_fragment(uint64_t node_id) bool
 +retire_fragments(uint32_t max_count, double max_age_seconds, uint32_t& retired_count) bool
@@ -50,18 +53,25 @@ class DestructionSystem {
 +rebuild(DestructionComponent component, DestructionGraph candidate, bool preserve) bool
 +damage(DestructionComponent component, const Vec3& center, float radius, float damage, float impulse) bool
 +request_damage(DestructionComponent component, const Vec3& center, float radius, float damage, float impulse, function~void(bool)~ completed) bool
-+refresh_support(DestructionComponent component, Collider support, float max_gap, float min_coverage) bool
++refresh_support(DestructionComponent component, span~const Collider~ supports, float max_gap, float min_coverage) bool
 +apply_stress(DestructionComponent component, const Vec3& gravity, float elastic_limit, float fatal_limit, uint32_t iterations, uint32_t& broken_bonds) bool
 +owns_fragment(DestructionComponent component, uint64_t node_id) bool
 +retire_fragments(DestructionComponent component, uint32_t max_count, double max_age_seconds, uint32_t& retired_count) bool
 +reset(DestructionComponent component) bool
 +snapshot(DestructionComponent component, DestructionStateDataT& output) bool
 +restore(DestructionComponent component, const DestructionStateDataT& state) bool
++prepare_scope(SceneScopeId scope, const SceneWorkBudget& budget) SceneWorkState
++scope_status(SceneScopeId scope, ScenePreparationSnapshot& output) bool
++release_scope(SceneScopeId scope) void
 #on_initialize(const EngineConfig& config) bool
 #on_tick(double delta_time) bool
 #on_shutdown() void
 }
 System <|-- DestructionSystem
+ScenePreparation <|-- DestructionSystem
+DestructionSystem ..> SceneScopeId
+DestructionSystem ..> SceneWorkBudget
+DestructionSystem ..> ScenePreparationSnapshot
 Component <|-- DestructionComponent
 DestructionComponentRuntime *-- DestructionGraph : independent damage state
 DestructionComponentRuntime o-- Resource : shared immutable source
@@ -116,6 +126,14 @@ Reset、完整状态恢复与资源/组件配置变更仍走显式完整重建�
 系统在物理前由父系统驱动；编辑器预览调用 synchronize，不直接 tick 子系统。
 承重应力使用下述显式步骤 4 接口；异步 damage 完成后，调用方按依赖顺序刷新支撑与导航。
 
+候选场景通过 `prepare_scope` 按建筑数量和时间预算展开初始组，
+生成节点使用 `WorldSystem::with_scope_write`，在场景封存前完成。
+候选只保存网格与碰撞描述，Jolt 刚体由后续公共 Physics 准备阶段创建；
+普通 tick 不修改尚未激活的候选，也不回收其已经准备的组。
+`scope_status` 只读取 `destruction/initial_groups` 进度与错误；
+`release_scope` 释放准备记录，取消候选的节点由 WorldSystem 统一回收，
+已转交活动场景的组继续由破坏组件持有。单个建筑的初始组提交不做时间抢占。
+
 编辑器单对象事务调用 `synchronize(Node)`，只发布或回收该节点的输出；
 每帧全局同步仍负责扫描和调度，不在编辑某一个对象时顺带发布其他待处理对象。
 
@@ -123,7 +141,7 @@ Reset、完整状态恢复与资源/组件配置变更仍走显式完整重建�
 
 调用方先成功提交支撑碰撞的修改，再调用 `refresh_support`。破坏插件仅依赖
 核心 `PhysicsSystem::cast_ray`，不依赖地形插件，也不自动扫描或订阅地形修改。
-首版每次指定一个 Collider，沿世界负 Y 检查现有锚点的实际底面；底面三角形
+目标每次指定完整静态 Collider 集合，沿世界负 Y 检查现有锚点的实际底面；底面三角形
 采用多个内部采样点并按投影面积加权，`max_gap` 为允许的离地距离，
 `min_coverage` 为最低覆盖比例，取值 `(0, 1]`。该覆盖近似不代表承重或应力求解。
 针对当前切片/Voronoi 盒体的平面底面；没有可测平面底面的锚点返回失败，
@@ -131,7 +149,8 @@ Reset、完整状态恢复与资源/组件配置变更仍走显式完整重建�
 
 组件和自身变换必须启用并属于当前世界。允许同一已发布世界中不同 Scene 的明确支撑体；拒绝 trigger、动态支撑及
 该破坏组件自己生成的碎块作为地基；禁用或已清空的合法支撑碰撞按无覆盖处理。
-射线只查询明确指定的支撑体，其他建筑、碎块和角色不会遮挡它。
+射线只查询明确指定的支撑集合，其他建筑、碎块和角色不会遮挡它。多支撑体的覆盖去重合并；
+已知完整范围的空集合代表无地基，未知区域不得用空集合代替。任一成员失效使整次失败。
 全部锚点查询成功后，候选图只断失效 world bonds，并通过已有 `rebuild(..., true)`
 一次发布；保留其他连接健康值、组姿态与速度。无变化不重建、不增加 revision。
 填回支撑不会自动重新锚定，恢复仍使用 reset 或完整状态快照。

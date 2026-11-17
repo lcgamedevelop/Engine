@@ -114,6 +114,26 @@ bool codec_tests()
     mesh.path = "cube.mesh";
     schema::TextureDataT texture(*builtin_texture);
     texture.path = "white.png";
+    auto array_texture = texture;
+    array_texture.array_layers = 2;
+    if (!expect(!TextureResourceCodec::validate(array_texture),
+                "arrays require every layer payload"))
+    {
+        return false;
+    }
+    array_texture.subresources.emplace_back(0, 1, array_texture.data.size(), texture.data.size());
+    array_texture.data.insert(array_texture.data.end(), texture.data.begin(), texture.data.end());
+    if (!expect(TextureResourceCodec::validate(array_texture),
+                "native array layers share a complete mip layout"))
+    {
+        return false;
+    }
+    array_texture.cube_map = true;
+    if (!expect(!TextureResourceCodec::validate(array_texture),
+                "cube arrays are explicitly unsupported"))
+    {
+        return false;
+    }
     schema::ShaderDataT shader(*builtin_shader);
     shader.path = "lit.shader";
     schema::MaterialDataT material(*builtin_material);
@@ -147,7 +167,7 @@ bool codec_tests()
         return false;
     }
     schema::SceneDataT scene;
-    scene.schema_version = 3;
+    scene.schema_version = 6;
     scene.info = std::make_unique<schema::SceneInfoT>();
     auto node = std::make_unique<schema::NodeDataT>();
     node->info = test_support::node_info();
@@ -339,7 +359,7 @@ bool codec_tests()
     if (!expect(resource_detail::data<MeshResource>(mesh_resource.get()) &&
                     resource_detail::data<MeshResource>(mesh_resource.get())->path == "cube.mesh" &&
                     mesh_resource->generation() < resources.generation() &&
-                    resource_detail::data<SceneResource>(scene_resource.get())->schema_version == 3,
+                    resource_detail::data<SceneResource>(scene_resource.get())->schema_version == 6,
                 "failed new-generation decoding never mutates old live models"))
     {
         return false;

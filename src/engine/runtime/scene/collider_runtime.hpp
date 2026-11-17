@@ -12,5 +12,6 @@ struct ColliderRuntime
     ResourceReference mesh_;
     std::shared_ptr<const schema::MeshDataT> transient_mesh_;
     std::shared_ptr<const MeshCollisionData> mesh_parts_;
+    bool geometry_removed_ = false;
 };
 } // namespace engine

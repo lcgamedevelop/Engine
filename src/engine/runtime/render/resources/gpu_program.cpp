@@ -35,6 +35,8 @@ GpuProgram::GpuProgram(GpuProgram&& other) noexcept
       surface_shader(std::exchange(other.surface_shader, bgfx::ShaderHandle{bgfx::kInvalidHandle})),
       surface_program(
           std::exchange(other.surface_program, bgfx::ProgramHandle{bgfx::kInvalidHandle})),
+      rvt_shader(std::exchange(other.rvt_shader, bgfx::ShaderHandle{bgfx::kInvalidHandle})),
+      rvt_program(std::exchange(other.rvt_program, bgfx::ProgramHandle{bgfx::kInvalidHandle})),
       instanced_vertex_shader(
           std::exchange(other.instanced_vertex_shader, bgfx::ShaderHandle{bgfx::kInvalidHandle})),
       instanced_program(
@@ -62,6 +64,8 @@ GpuProgram& GpuProgram::operator=(GpuProgram&& other) noexcept
             std::exchange(other.surface_shader, bgfx::ShaderHandle{bgfx::kInvalidHandle});
         surface_program =
             std::exchange(other.surface_program, bgfx::ProgramHandle{bgfx::kInvalidHandle});
+        rvt_shader = std::exchange(other.rvt_shader, bgfx::ShaderHandle{bgfx::kInvalidHandle});
+        rvt_program = std::exchange(other.rvt_program, bgfx::ProgramHandle{bgfx::kInvalidHandle});
         instanced_vertex_shader =
             std::exchange(other.instanced_vertex_shader, bgfx::ShaderHandle{bgfx::kInvalidHandle});
         instanced_program =
@@ -110,6 +114,21 @@ bool GpuProgram::create(const schema::ShaderDataT& shader)
             return false;
         }
     }
+    if (!shader.rvt_fragment_code.empty())
+    {
+        rvt_shader = bgfx::createShader(
+            bgfx::copy(shader.rvt_fragment_code.data(),
+                       static_cast<std::uint32_t>(shader.rvt_fragment_code.size())));
+        if (!bgfx::isValid(rvt_shader))
+        {
+            return false;
+        }
+        rvt_program = bgfx::createProgram(vertex_shader, rvt_shader);
+        if (!bgfx::isValid(rvt_program))
+        {
+            return false;
+        }
+    }
     if (!shader.instanced_vertex_code.empty())
     {
         instanced_vertex_shader = bgfx::createShader(
@@ -136,7 +155,8 @@ bool GpuProgram::create(const schema::ShaderDataT& shader)
     }
     // 反射与定义双向匹配，避免遗漏参数继承上一对象的 uniform 值。
     std::vector<bgfx::UniformInfo> reflected;
-    for (auto stage : {vertex_shader, fragment_shader, surface_shader, instanced_vertex_shader})
+    for (auto stage :
+         {vertex_shader, fragment_shader, surface_shader, instanced_vertex_shader, rvt_shader})
     {
         if (!bgfx::isValid(stage))
         {
@@ -157,21 +177,26 @@ bool GpuProgram::create(const schema::ShaderDataT& shader)
                 name == "u_fog_color" || name == "u_fog_range" || name == "u_shadow_matrices" ||
                 name == "u_shadow_rects" || name == "u_shadow_splits" ||
                 name == "u_shadow_params" || name == "u_shadow_settings" ||
-                name == "u_shadow_depth" || name == "s_shadow_map" || name == "u_ibl_params" ||
-                name == "s_ibl_irradiance" || name == "s_ibl_prefilter" || name == "s_ibl_lut" ||
-                name == "s_ambient_occlusion" || name == "u_ambient_occlusion" ||
-                name == "u_cluster_grid" || name == "u_cluster_camera" ||
-                name == "u_cluster_counts" || name == "u_cluster_viewport" ||
-                name == "u_frame_inputs" || name == "u_frame_time" || name == "u_frame_valid" ||
+                name == "u_shadow_depth" || name == "u_vsm_layout" || name == "s_virtual_shadow" ||
+                name == "s_shadow_map" || name == "u_ibl_params" || name == "s_ibl_irradiance" ||
+                name == "s_ibl_prefilter" || name == "s_ibl_lut" || name == "s_ambient_occlusion" ||
+                name == "u_ambient_occlusion" || name == "u_cluster_grid" ||
+                name == "u_cluster_camera" || name == "u_cluster_counts" ||
+                name == "u_cluster_viewport" || name == "u_frame_inputs" ||
+                name == "u_frame_time" || name == "u_frame_valid" ||
                 name == "u_planar_projection" || name == "u_lighting_params" ||
-                name == "u_probe_sh" || name == "s_lightmap" || name == "u_capture_mode")
+                name == "u_probe_sh" || name == "s_lightmap" || name == "u_capture_mode" ||
+                name == "u_rvt_bounds" || name == "u_rvt_layout" || name == "u_rvt_parameters" ||
+                name == "u_rvt_height" || name == "s_rvt_atlas" || name == "s_rvt_table")
             {
                 const auto type = name == "u_normal_transform" || name == "u_shadow_matrices" ||
                                           name == "u_planar_projection"
                                       ? bgfx::UniformType::Mat4
-                                  : name == "s_shadow_map" || name == "s_ibl_irradiance" ||
-                                          name == "s_ibl_prefilter" || name == "s_ibl_lut" ||
-                                          name == "s_ambient_occlusion" || name == "s_lightmap"
+                                  : name == "s_virtual_shadow" || name == "s_shadow_map" ||
+                                          name == "s_ibl_irradiance" || name == "s_ibl_prefilter" ||
+                                          name == "s_ibl_lut" || name == "s_ambient_occlusion" ||
+                                          name == "s_lightmap" || name == "s_rvt_atlas" ||
+                                          name == "s_rvt_table"
                                       ? bgfx::UniformType::Sampler
                                       : bgfx::UniformType::Vec4;
                 const auto expected_count =
@@ -267,6 +292,16 @@ bool GpuProgram::create(const schema::ShaderDataT& shader)
 void GpuProgram::release() noexcept
 {
     resource.reset();
+    if (bgfx::isValid(rvt_program))
+    {
+        bgfx::destroy(rvt_program);
+    }
+    if (bgfx::isValid(rvt_shader))
+    {
+        bgfx::destroy(rvt_shader);
+    }
+    rvt_program = BGFX_INVALID_HANDLE;
+    rvt_shader = BGFX_INVALID_HANDLE;
     for (auto handle : {instanced_program, instanced_surface_program})
     {
         if (bgfx::isValid(handle))

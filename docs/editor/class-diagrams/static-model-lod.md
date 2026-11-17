@@ -4,6 +4,8 @@
 
 [导入参数与使用](../static-model-lod.md) · [现有模型资源](../../runtime/class-diagrams/model-resources.md)
 
+LOD 完成后生成各级 Meshlet 见 [Meshlet 离线生成](meshlet-import.md)。
+
 本次不新增系统或 Manager。运行时持久数据由 Mesh Schema 生成；
 生成只在编辑器离线阶段调用现有 meshoptimizer。MeshRenderer 通过组件属性选择是否使用 LOD；Model 与资源图不增加逐级加载接口。
 

@@ -1,4 +1,5 @@
 #include "editor/mesh/mesh_lods.hpp"
+#include "editor/mesh/meshlets.hpp"
 #include "runtime/resource/codecs/mesh_resource_codec.hpp"
 
 #include <algorithm>
@@ -207,9 +208,85 @@ bool tests()
                   "disabling generation removes only optional topology");
 }
 
+bool meshlet_tests()
+{
+    auto mesh = grid();
+    const auto half = static_cast<std::uint32_t>(mesh.indices.size() / 2);
+    mesh.submeshes = {{0, half, 2}, {half, half, 5}};
+    const auto source = mesh;
+    std::string error;
+    auto options = toml::parse("[lod]\nenabled=true\ntriangle_ratios=[0.5]\n"
+                               "screen_heights=[0.3]\nmax_relative_error=0.01\n"
+                               "[meshlets]\nenabled=true\n");
+    if (!expect(options && engine::editor::generate_mesh_lods(mesh, options.table(), error) &&
+                    engine::editor::generate_meshlets(mesh, options.table(), error),
+                "generate static LODs and meshlets together") ||
+        !expect(mesh.meshlets && mesh.meshlets->meshlets.size() > 2 &&
+                    mesh.meshlets->submeshes.size() == 2 && mesh.indices == source.indices &&
+                    mesh.vertices == source.vertices && mesh.meshlets->indices == source.indices &&
+                    engine::MeshResourceCodec::validate(mesh),
+                "meshlet payload preserves ordinary topology and material boundaries"))
+    {
+        std::fprintf(stderr, "%s\n", error.c_str());
+        return false;
+    }
+    for (const auto& lod : mesh.lods)
+    {
+        if (!expect(lod->meshlets && lod->meshlets->submeshes.size() == 2 &&
+                        lod->meshlets->indices == lod->indices,
+                    "each static LOD owns complete meshlet topology"))
+        {
+            return false;
+        }
+    }
+    if (!mesh.lods.empty())
+    {
+        auto partial = mesh;
+        partial.lods.front()->meshlets.reset();
+        if (!expect(!engine::MeshResourceCodec::validate(partial),
+                    "meshlet generation covers all LODs or none"))
+        {
+            return false;
+        }
+    }
+    auto duplicate = mesh;
+    duplicate.indices.insert(duplicate.indices.end(), duplicate.indices.begin(),
+                             duplicate.indices.begin() + 3);
+    duplicate.submeshes.clear();
+    duplicate.meshlets.reset();
+    duplicate.lods.clear();
+    if (!expect(engine::editor::generate_meshlets(duplicate, options.table(), error) &&
+                    engine::MeshResourceCodec::validate(duplicate),
+                "repeated triangles keep their multiplicity"))
+    {
+        return false;
+    }
+    auto broken = mesh;
+    std::swap(broken.meshlets->indices[0], broken.meshlets->indices[1]);
+    if (!expect(!engine::MeshResourceCodec::validate(broken),
+                "meshlet winding and provoking vertices must match source triangles"))
+    {
+        return false;
+    }
+    auto invalid = toml::parse("[meshlets]\nenabled=1");
+    const auto before = mesh.meshlets->indices;
+    if (!expect(!engine::editor::generate_meshlets(mesh, invalid.table(), error) &&
+                    mesh.meshlets->indices == before,
+                "invalid import options cannot publish partial meshlets"))
+    {
+        return false;
+    }
+    const auto disabled = toml::parse("[meshlets]\nenabled=false");
+    return expect(engine::editor::generate_meshlets(mesh, disabled.table(), error) &&
+                      !mesh.meshlets && mesh.indices == source.indices &&
+                      std::all_of(mesh.lods.begin(), mesh.lods.end(),
+                                  [](const auto& lod) { return !lod->meshlets; }),
+                  "disabling generation clears only auxiliary topology at every LOD");
+}
+
 } // namespace
 
 int main()
 {
-    return tests() ? 0 : 1;
+    return tests() && meshlet_tests() ? 0 : 1;
 }

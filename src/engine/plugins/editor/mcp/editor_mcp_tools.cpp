@@ -2,6 +2,7 @@
 #include "editor/file_text.hpp"
 #include "plugins/editor/mcp/component_mcp_tools.hpp"
 #include "plugins/editor/mcp/editor_tool_registration.hpp"
+#include "runtime/schema/control_json_generated.hpp"
 
 #include "editor/asset_pipeline/project_lock.hpp"
 #include "plugins/editor/mcp/project_script_mcp_tools.hpp"
@@ -208,6 +209,9 @@ bool EditorMcpTools::register_tools(McpSystem& system)
     light["intensity"] = {{"type", "number"}};
     light["kind"] = {{"type", "string"}, {"enum", {"directional", "point", "spot"}}};
     light["castShadows"] = {{"type", "boolean"}};
+    light["shadowMethod"] = {{"type", "string"}, {"enum", {"shadow_map", "virtual_shadow_map"}}};
+    light["virtualShadow"] =
+        schema::control_json::describe(static_cast<const schema::VsmSettingsT*>(nullptr));
     light["shadowResolution"] = {{"type", "integer"}, {"minimum", 128}, {"maximum", 8192}};
     light["shadowBias"] = {{"type", "number"}, {"minimum", 0}, {"maximum", .1}};
     for (const char* name : {"range", "innerAngle", "outerAngle"})

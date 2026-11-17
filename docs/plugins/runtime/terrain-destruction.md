@@ -1,5 +1,7 @@
 # 地形与建筑破坏联动
 
+本页维护地形与建筑插件的协作边界；领域能力见[地形与 RVT](terrain-world-design.md)。
+
 本页维护跨插件协作和正确性边界。单模块用法分别见[体积地形](terrain.md)、[建筑破坏](destruction.md)，资源制作见[地形与破坏制作](../editor/terrain-destruction-authoring.md)。历史选型、固定来源和独立探针保留在[技术研究](terrain-destruction-feasibility.md)，实际验证结果和平台限制见[测试文档](../../testing.md)。
 
 ## 职责与依赖
@@ -19,11 +21,10 @@
 
 ## 候选准备与发布
 
-同步接口保留即时完成语义。异步球形笔刷和建筑损伤复用共享 oneTBB 任务域，后台只准备独占候选，不修改活动场景、GPU 或 Jolt 世界；协调线程校验组件身份与版本后有界发布。队列、并发与提交预算见[运行并行](../../runtime/parallelism.md)。
-
-候选全部成功后才替换匹配版本的显示与碰撞；失败保留旧有效状态。组件移除、场景卸载、Reset 或同步修改使旧候选失效；常驻源节点仍按原身份管理。首次生成、Reset、连通塌方、应力及编辑器快照事务仍有同步路径，不能把异步球形操作等同于所有破坏工作已经后台化。
-
-地形球形修改复用 CPU 粗块缓存，只重建脏块及法线梯度邻域；碰撞按 4³ 单元叶与连续 64 槽组树复用。MCP 事务、restore、Load 和 Reset 仍全块准备；渲染合并为完整 Mesh 后上传。核心只接收单网格或不可变分段列表，不包含体素策略，细节见[地形碰撞](terrain-collision.md)。
+地形统一使用带身份的异步请求，后台准备稀疏块、网格、连通结果与存档，协调线程经 GeometryUpdate 发布匹配的显示/碰撞。
+建筑沿用现有异步损伤与明确应力调用。两个插件都不在 worker 修改活动 ECS、GPU 或 Jolt 世界。
+失败保留旧状态，取消、所有者失效或版本冲突不能发布过期结果。地形初始准备通过已有 GameplaySession 的扩展契约组织。
+具体边界见[地形碰撞](terrain-collision.md)和[操作类图](class-diagrams/terrain-operations.md)。
 
 ## 地基、撞击与导航
 
@@ -34,21 +35,22 @@
 5. 合并地形/静态结构的新旧变化范围，通过现有导航接口局部重建瓦片；失败失效相关旧瓦片。移动碎块不自动加入导航，不按每帧位置变化请求重建。
 6. 成功的破坏结果再驱动已有特效与音频组件，表现不是地形或 Blast 求解的依赖。
 
-`RefreshSupport` 使用指定静态 Collider 向下射线及三点面积加权底面采样，当前适用于平面底部试件；它近似地基覆盖，不是完整承重分析。`ApplyStress` 处理当前连接图、重力载荷和明确材料阈值。核心已有 DetourCrowd 路径跟随与避让，导航代理由独立插件封装；它不提供残骸自动导航或 Jolt 动态击退融合。
+`RefreshSupport` 使用指定完整静态 Collider 集合向下射线及三点面积加权底面采样，当前适用于平面底部试件；它近似地基覆盖，不是完整承重分析。`ApplyStress` 处理当前连接图、重力载荷和明确材料阈值。核心已有 DetourCrowd 路径跟随与避让，导航代理由独立插件封装；它不提供残骸自动导航或 Jolt 动态击退融合。
 
 ## 碎块、快照与恢复
 
-`TerrainComponent` 与 `DestructionComponent` 的 `RetireFragments(maxCount, maxAgeSeconds)` 显式按数量/模拟寿命回收脱离碎块；年龄随世界模拟推进，暂停不累计。`maxAgeSeconds = 0` 关闭年龄条件，数量约束仍有效；建筑锚定组不参与回收。继续损伤不得复活已回收片块，建筑快照保存 retired chunk 身份；Reset 明确恢复初始资源。契约见[碎块回收类图](class-diagrams/fragment-retirement.md)。
+地形 `RequestRetire` 与建筑 `RetireFragments(maxCount, maxAgeSeconds)` 显式按数量/模拟寿命回收脱离碎块；年龄随世界模拟推进，暂停不累计。`maxAgeSeconds = 0` 关闭年龄条件，数量约束仍有效；建筑锚定组不参与回收。继续损伤不得复活已回收片块，建筑快照保存 retired chunk 身份；Reset 明确恢复初始资源。契约见[碎块回收类图](class-diagrams/fragment-retirement.md)。
 
 初始体积、破坏描述及其网格通过正式 GUID 与依赖目录使用。`.terrain` / `.destruction` 均为 TOML 源描述；运行时只加载编译资源，不保存 Blast 内存镜像。生成节点与显示/碰撞组件标记瞬态，场景只保存源组件和配置。
 
-地形 `TerrainStateData` 保存完整静态体积与基础 GUID/hash；加载校验基础身份，不覆盖源资源。曾提取动态土石后，静态快照无法表达完整世界，snapshot/save/restore/load 明确拒绝直到 Reset 或换源；即使土石已回收也不自动解除此限制。编辑器状态位于 `cache/terrain-states/`，脚本存档位于 App 持久目录的命名槽。
+地形 TerrainCheckpointData 保存源 GUID/hash、完整修改索引、动态土石载荷/姿态/速度/睡眠和 retired 身份，
+通过 App 持久目录中不可变块与清单原子发布。运行修改不覆盖制作源，基础版本不符明确拒绝。
 
 建筑快照保存基础 GUID/hash、连接血量、组姿态、速度与回收身份，服务编辑器撤销/重做；自然物理运动不使损伤 revision 过期，外部显式损伤会阻止旧记录覆盖。独立建筑游戏存档槽及跨地形/建筑/业务的综合世界存档尚未实现；单模块快照和 Reset 不等于完整游戏存档。
 
 ## 适用范围
 
-- 地形当前为浮点密度，每轴最多 256 格、总样本最多 4M；源支持参数平面、正弦起伏及球形洞穴，没有高度图导入、逐样本材质层、FastNoise2 或 LOD transition。
+- 地形使用稀疏三维索引、独立块、LOD transition 和区域需求；制作与材质限制统一见[地形](terrain.md)。
 - 建筑制作当前为最多 256 片的参数盒体，支持切片/Voronoi 和实际接触连接；任意 FBX、空心多层建筑、层级碎裂及运行时重新切割尚未提供。
 - 动态土石和建筑根节点要求正等比缩放；动态碰撞使用凸形/compound，静态地形继续使用分段三角网格。
 - 静态保存与动态碎块生命周期、离线 GI 失效、通行及导航更新分别处理，不以重置成功推断这些边界已经验收。

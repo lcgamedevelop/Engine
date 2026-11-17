@@ -372,6 +372,8 @@ bool collect(const ResourceCatalog& catalog, std::string_view guid, std::set<Gui
             resources.insert(entry->guid);
         }
         pending.insert(pending.end(), entry->dependencies.begin(), entry->dependencies.end());
+        pending.insert(pending.end(), entry->stream_dependencies.begin(),
+                       entry->stream_dependencies.end());
     }
     return true;
 }
@@ -703,12 +705,12 @@ bool AssetBuildSystem::build(const std::filesystem::path& project_root,
         return false;
     }
     schema::AssetCatalogDataT data;
-    data.schema_version = 3;
+    data.schema_version = 4;
     data.target_platform = source.data().target_platform;
     ResourceBuildStats stats;
     stats.output_path = output;
     std::map<std::string, std::set<Guid>> files;
-    std::string fingerprint = "engine-resource-build-2:" + data.target_platform;
+    std::string fingerprint = "engine-resource-build-3:" + data.target_platform;
     for (const auto& item : manifest.items)
     {
         std::string key =
@@ -728,7 +730,11 @@ bool AssetBuildSystem::build(const std::filesystem::path& project_root,
             fingerprint += ":" + entry->path + ":" + entry->module_path;
             for (const auto& dependency : entry->dependencies)
             {
-                fingerprint += ":" + dependency;
+                fingerprint += ":required:" + dependency;
+            }
+            for (const auto& dependency : entry->stream_dependencies)
+            {
+                fingerprint += ":stream:" + dependency;
             }
             entry->location->path = item.package ? package_path : "gen/" + guid;
             entry->location->offset = item.package ? offset : 0;

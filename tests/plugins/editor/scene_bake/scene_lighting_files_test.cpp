@@ -78,7 +78,7 @@ bool exercise()
     const auto mesh_guid = fixture.catalog.entries.front()->guid;
     constexpr const char* scene_guid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     schema::SceneDataT scene;
-    scene.schema_version = 3;
+    scene.schema_version = 6;
     scene.info = std::make_unique<schema::SceneInfoT>();
     scene.info->name = "Lighting test";
     auto node = std::make_unique<schema::NodeDataT>();
@@ -168,7 +168,7 @@ bool exercise()
     fixed.mesh = std::make_shared<schema::MeshDataT>(mesh);
     fixed.transform = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
     fixed.lightmap = std::make_shared<schema::TextureDataT>();
-    fixed.lightmap->schema_version = 2;
+    fixed.lightmap->schema_version = 3;
     fixed.lightmap->path = "baked/lightmap";
     fixed.lightmap->width = fixed.lightmap->height = 1;
     fixed.lightmap->srgb = false;

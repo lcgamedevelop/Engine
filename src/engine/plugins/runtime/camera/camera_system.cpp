@@ -219,7 +219,7 @@ bool CameraSystem::update(CameraController controller, double dt)
         {
             return fail(CameraRunState::error, "cyclic target dependency");
         }
-        float m[16];
+        double m[16];
         auto t = node.get_component<Transform>();
         if (!t.active() || !t.world_matrix(m))
         {
@@ -240,7 +240,9 @@ bool CameraSystem::update(CameraController controller, double dt)
                 m[col * 4 + row] = float(m[col * 4 + row] / n);
             }
         }
-        targets[i].rotation_xyzw = detail::from_matrix(m);
+        float orientation[16];
+        std::transform(m, m + 16, orientation, [](double v) { return float(v); });
+        targets[i].rotation_xyzw = detail::from_matrix(orientation);
     }
     context.targets = targets;
     const auto outgoing = r.outgoing.find(r.machine.state_id);

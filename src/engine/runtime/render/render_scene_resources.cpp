@@ -1,10 +1,16 @@
+#include "runtime/render/render_system.hpp"
+#include "runtime/render/vsm/virtual_shadow_pass.hpp"
+#include "runtime/render/vsm/vsm_types.hpp"
+
 #include "runtime/font/font_system.hpp"
 #include "runtime/performance/profiling.hpp"
+#include "runtime/render/passes/meshlet_cull_pass.hpp"
 #include "runtime/render/render_surface.hpp"
-#include "runtime/render/render_system.hpp"
 #include "runtime/render/scene_gpu_resources.hpp"
 #include "runtime/render/scene_render_query.hpp"
+#include "runtime/render/scene_render_settings.hpp"
 #include "runtime/resource/resource.hpp"
+#include "runtime/resource/types/mesh_resource.hpp"
 #include "runtime/scene/camera_math.hpp"
 #include "runtime/scene/ecs_scene.hpp"
 #include "runtime/scene/ecs_storage.hpp"
@@ -16,6 +22,7 @@
 #include "runtime/scene/transform.hpp"
 #include "runtime/task/task_system.hpp"
 #include "runtime/ui/ui_system.hpp"
+#include "runtime/utils/transform_math.hpp"
 #include "runtime/world/world_system.hpp"
 #include <algorithm>
 #include <bit>
@@ -200,7 +207,7 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
         }
     }
     auto& resources = *scene_resources_;
-    const auto* target_scene = scope_preparing_scene_ ? scope_preparing_scene_ : world_->scene();
+    auto* target_scene = scope_preparing_scene_ ? scope_preparing_scene_ : world_->scene();
     const auto target_id = target_scene ? render_detail::target_scope(*target_scene) : 0;
     resources.select_targets(target_id);
     auto& targets = resources.targets();
@@ -482,7 +489,8 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
             }
             resources.retained_meshes.emplace(id, std::move(*mesh));
         }
-        const bool visible = renderer && renderer.active() && renderer.visible_in_hierarchy();
+        const bool visible = renderer && renderer.active() && renderer.visible_in_hierarchy() &&
+                             !ecs_detail::component_runtime(renderer)->geometry_removed_;
         if (!visible)
         {
             if (const auto retained = resources.retained_meshes.find(id);
@@ -858,7 +866,7 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
             if (render_detail::texture_region_bytes(work.part, work.byte_offset, SIZE_MAX) == 0)
             {
                 work.byte_offset = 0;
-                if (++work.face == (work.part.data->cube_map ? 6U : 1U))
+                if (++work.face == (work.part.data->cube_map ? 6U : work.part.data->array_layers))
                 {
                     work.face = 0;
                     ++work.mip;
@@ -983,6 +991,104 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
     {
         return fail("Cannot resolve render target settings");
     }
+    render_detail::SceneRenderComponents components;
+    LightSettings light;
+    if (target_scene && render_detail::scene_render_components(*target_scene, components) &&
+        components.shadow_light.get_settings(light) && light.cast_shadows &&
+        light.shadow_method == schema::ShadowMethod::virtual_shadow_map)
+    {
+        const schema::VsmSettingsT defaults;
+        if (!render_detail::vsm_supported(light.virtual_shadow ? *light.virtual_shadow : defaults,
+                                          config_.vsm_physical_pages))
+        {
+            return fail("Virtual shadow maps are unsupported by the render device or page budget");
+        }
+    }
+    bool meshlet_demand = rendering.meshlet_culling_enabled;
+    if (!meshlet_demand)
+    {
+        // Published active environment and preparing scopes share immutable geometry uploads.
+        const auto inspect = [&](Scene* scene)
+        {
+            render_detail::SceneRenderComponents components;
+            EnvironmentSettings environment;
+            return scene && render_detail::scene_render_components(*scene, components) &&
+                   components.environment.get_settings(environment) &&
+                   environment.meshlet_culling_enabled;
+        };
+        meshlet_demand = inspect(world_->scene());
+        for (const auto& [scope, record] : scope_preparations_)
+        {
+            (void)record;
+            meshlet_demand = meshlet_demand || inspect(world_->scope_candidate(scope));
+        }
+    }
+    meshlet_demand = meshlet_demand && render_detail::meshlet_supported();
+    if (meshlet_demand)
+    {
+        if (!meshlet_culling_)
+        {
+            meshlet_culling_ = std::make_unique<render_detail::MeshletCullPass>();
+        }
+        if (!meshlet_culling_->prepare(config_))
+        {
+            return fail("Cannot prepare meshlet GPU work buffers");
+        }
+    }
+    else if (meshlet_culling_)
+    {
+        meshlet_culling_->reset_scene();
+    }
+    const bool meshlet_geometry_demand =
+        meshlet_demand ||
+        (debug_requests_[static_cast<std::size_t>(RenderFeature::meshlet_colors)] &&
+         render_detail::DebugDrawPass::supports_meshlet_colors());
+    for (auto& [source, weak] : resources.geometries)
+    {
+        (void)source;
+        if (auto geometry = weak.lock())
+        {
+            if (!meshlet_geometry_demand)
+            {
+                geometry->release_meshlets();
+                continue;
+            }
+            const auto* mesh = geometry->resource.data<MeshResource>();
+            if (!mesh || !mesh->meshlets || bgfx::isValid(geometry->meshlet_indices(0)))
+            {
+                continue;
+            }
+            std::uint64_t bytes = 0;
+            const auto count_bytes = [&bytes](const schema::MeshletDataT& data)
+            {
+                bytes += data.indices.size() * sizeof(std::uint32_t) +
+                         data.meshlets.size() * 3 * 4 * sizeof(float);
+            };
+            count_bytes(*mesh->meshlets);
+            for (const auto& lod : mesh->lods)
+            {
+                if (lod->meshlets)
+                {
+                    count_bytes(*lod->meshlets);
+                }
+            }
+            // Geometry creation is atomic. One oversized item can advance an otherwise
+            // empty step; subsequent items wait for the next existing upload budget.
+            if (!budget() || (uploaded != 0 && (uploaded >= config_.upload_bytes_per_step ||
+                                                bytes > config_.upload_bytes_per_step - uploaded)))
+            {
+                state.status = RenderPrepareStatus::preparing;
+                output = state.progress;
+                return state.status;
+            }
+            if (!geometry->prepare_meshlets())
+            {
+                return fail("Cannot prepare meshlet geometry buffers");
+            }
+            uploaded += bytes;
+            ++items;
+        }
+    }
     const bool drawable = render_detail::drawable_scene(*world_, camera, !extensions_.empty(),
                                                         scope_preparing_scene_);
     if (!drawable && hdr_capture_status_ == SceneCaptureStatus::pending &&
@@ -1003,19 +1109,25 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
         std::bit_cast<std::uint32_t>(rendering.ssr_resolution_scale)};
     if (drawable)
     {
+        double absolute_camera[16]{};
         float camera_world[16]{}, camera_view[16]{}, projection[16]{};
         CameraSettings lens;
         const auto transform = selected_camera.node().get_component<Transform>();
-        if (!transform || !transform.world_matrix(camera_world) ||
-            !selected_camera.get_settings(lens) ||
-            !camera_detail::view_matrix(camera_world, camera_view) ||
+        if (!transform || !transform.world_matrix(absolute_camera) ||
+            !selected_camera.get_settings(lens))
+        {
+            return fail("Cannot read render target observer");
+        }
+        const Vec3 origin{absolute_camera[12], absolute_camera[13], absolute_camera[14]};
+        transform_math::relative(absolute_camera, origin, camera_world);
+        if (!camera_detail::view_matrix(camera_world, camera_view) ||
             !camera_detail::projection_matrix(lens, static_cast<float>(width_) / height_,
                                               bgfx::getCaps()->homogeneousDepth, projection))
         {
             return fail("Cannot read render target observer");
         }
         bx::mtxInverse(camera_world, camera_view);
-        std::vector<std::pair<float, Node>> planes;
+        std::vector<std::pair<double, Node>> planes;
         auto query = flecs::world(world_->native_world())
                          .query_builder<
                              const ecs_detail::ComponentStorage<PlanarReflectionComponent::Data>>()
@@ -1027,15 +1139,14 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
                 const auto plane = node.get_component<PlanarReflectionComponent>();
                 const auto mesh = node.get_component<MeshRenderer>();
                 const auto pose = node.get_component<Transform>();
-                float matrix[16]{};
+                double matrix[16]{};
                 if (plane && plane.active() && plane.visible_in_hierarchy() && mesh &&
                     mesh.active() && mesh.visible_in_hierarchy() &&
                     selected_camera.mesh_visible(mesh.instance_id()) && pose &&
                     pose.world_matrix(matrix))
                 {
-                    planes.emplace_back(std::hypot(matrix[12] - camera_world[12],
-                                                   matrix[13] - camera_world[13],
-                                                   matrix[14] - camera_world[14]),
+                    planes.emplace_back(std::hypot(matrix[12] - origin.x(), matrix[13] - origin.y(),
+                                                   matrix[14] - origin.z()),
                                         node);
                 }
             });
@@ -1053,11 +1164,13 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
                 {
                     return fail("Cannot read reflection target settings");
                 }
+                double absolute_plane[16]{};
                 float plane_world[16]{};
-                if (!plane_nodes[index].get_component<Transform>().world_matrix(plane_world))
+                if (!plane_nodes[index].get_component<Transform>().world_matrix(absolute_plane))
                 {
                     return fail("Cannot read reflection transform");
                 }
+                transform_math::relative(absolute_plane, origin, plane_world);
                 if (!resources.targets().planar[index].mirror(plane_world, camera_world, projection,
                                                               options.clip_bias))
                 {
@@ -1120,7 +1233,7 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
             ready = !drawable || resources.targets().reflections.prepare(width, height, rendering);
             break;
         case 5:
-            ready = !drawable || resources.targets().clusters[2].prepare(config_, width, height);
+            ready = !drawable || resources.targets().clusters[2].prepare(config_, width, height, 0);
             break;
         case 6:
         case 7:
@@ -1132,7 +1245,7 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
                 ready = target.prepare(plane_widths[index], plane_heights[index],
                                        config_.msaa_samples) &&
                         resources.targets().clusters[index].prepare(config_, plane_widths[index],
-                                                                    plane_heights[index]);
+                                                                    plane_heights[index], 0);
                 target.node_id = plane_nodes[index].id();
             }
             else
@@ -1146,7 +1259,7 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
             ready = !capture_active ||
                     (resources.targets().shadow.prepare(config_.shadow_atlas_size) &&
                      resources.targets().clusters[3].prepare(config_, capture_request_.width,
-                                                             capture_request_.height) &&
+                                                             capture_request_.height, 0) &&
                      (resources.capture_pending || resources.prepare_capture(capture_request_)));
             break;
         case 9:
@@ -1303,7 +1416,13 @@ void RenderSystem::collect_preparation(bool wait) noexcept
 
 void RenderSystem::release_scene() noexcept
 {
+    release_rvt();
+    release_vsm();
     scope_frames_.clear();
+    if (meshlet_culling_)
+    {
+        meshlet_culling_->reset_scene();
+    }
     for (auto& [id, record] : scope_preparations_)
     {
         (void)id;
@@ -1379,6 +1498,8 @@ void RenderSystem::release_draw_resources() noexcept
 
 std::uint32_t RenderSystem::gpu_resource_count() const noexcept
 {
-    return scene_resources_ ? scene_resources_->resource_count() : 0;
+    return (scene_resources_ ? scene_resources_->resource_count() : 0) +
+           (meshlet_culling_ ? meshlet_culling_->resource_count() : 0) +
+           (vsm_pass_ ? vsm_pass_->resource_count() : 0);
 }
 } // namespace engine
