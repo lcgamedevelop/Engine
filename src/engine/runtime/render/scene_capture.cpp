@@ -428,7 +428,7 @@ bool RenderSystem::draw_diffuse_capture(const RenderSettings& rendering)
         render_detail::ShadowFrame capture_shadow;
         if (!resources.prepare_lighting(resources.frame_data, rendering, config_, draw, lens,
                                         capture_shadow, 3, render_detail::capture_shadow_view,
-                                        &request))
+                                        &request, nullptr))
         {
             return fail();
         }

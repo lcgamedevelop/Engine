@@ -1,4 +1,6 @@
 #include "runtime/render/render_system.hpp"
+#include "runtime/render/vsm/virtual_shadow_pass.hpp"
+#include "runtime/render/vsm/vsm_types.hpp"
 
 #include "runtime/font/font_system.hpp"
 #include "runtime/performance/profiling.hpp"
@@ -205,7 +207,7 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
         }
     }
     auto& resources = *scene_resources_;
-    const auto* target_scene = scope_preparing_scene_ ? scope_preparing_scene_ : world_->scene();
+    auto* target_scene = scope_preparing_scene_ ? scope_preparing_scene_ : world_->scene();
     const auto target_id = target_scene ? render_detail::target_scope(*target_scene) : 0;
     resources.select_targets(target_id);
     auto& targets = resources.targets();
@@ -989,6 +991,19 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
     {
         return fail("Cannot resolve render target settings");
     }
+    render_detail::SceneRenderComponents components;
+    LightSettings light;
+    if (target_scene && render_detail::scene_render_components(*target_scene, components) &&
+        components.shadow_light.get_settings(light) && light.cast_shadows &&
+        light.shadow_method == schema::ShadowMethod::virtual_shadow_map)
+    {
+        const schema::VsmSettingsT defaults;
+        if (!render_detail::vsm_supported(light.virtual_shadow ? *light.virtual_shadow : defaults,
+                                          config_.vsm_physical_pages))
+        {
+            return fail("Virtual shadow maps are unsupported by the render device or page budget");
+        }
+    }
     bool meshlet_demand = rendering.meshlet_culling_enabled;
     if (!meshlet_demand)
     {
@@ -1218,7 +1233,7 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
             ready = !drawable || resources.targets().reflections.prepare(width, height, rendering);
             break;
         case 5:
-            ready = !drawable || resources.targets().clusters[2].prepare(config_, width, height);
+            ready = !drawable || resources.targets().clusters[2].prepare(config_, width, height, 0);
             break;
         case 6:
         case 7:
@@ -1230,7 +1245,7 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
                 ready = target.prepare(plane_widths[index], plane_heights[index],
                                        config_.msaa_samples) &&
                         resources.targets().clusters[index].prepare(config_, plane_widths[index],
-                                                                    plane_heights[index]);
+                                                                    plane_heights[index], 0);
                 target.node_id = plane_nodes[index].id();
             }
             else
@@ -1244,7 +1259,7 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
             ready = !capture_active ||
                     (resources.targets().shadow.prepare(config_.shadow_atlas_size) &&
                      resources.targets().clusters[3].prepare(config_, capture_request_.width,
-                                                             capture_request_.height) &&
+                                                             capture_request_.height, 0) &&
                      (resources.capture_pending || resources.prepare_capture(capture_request_)));
             break;
         case 9:
@@ -1402,6 +1417,7 @@ void RenderSystem::collect_preparation(bool wait) noexcept
 void RenderSystem::release_scene() noexcept
 {
     release_rvt();
+    release_vsm();
     scope_frames_.clear();
     if (meshlet_culling_)
     {
@@ -1483,6 +1499,7 @@ void RenderSystem::release_draw_resources() noexcept
 std::uint32_t RenderSystem::gpu_resource_count() const noexcept
 {
     return (scene_resources_ ? scene_resources_->resource_count() : 0) +
-           (meshlet_culling_ ? meshlet_culling_->resource_count() : 0);
+           (meshlet_culling_ ? meshlet_culling_->resource_count() : 0) +
+           (vsm_pass_ ? vsm_pass_->resource_count() : 0);
 }
 } // namespace engine

@@ -1,4 +1,5 @@
 #include "runtime/render/passes/shadow_pass.hpp"
+#include "runtime/render/vsm/vsm_types.hpp"
 
 #include "runtime/performance/profiling.hpp"
 #include "runtime/render/render_math.hpp"
@@ -267,121 +268,6 @@ bool ShadowPass::draw(const RenderFrameData& frame_data, const RenderSettings& s
                           0.5F,
                           caps->homogeneousDepth ? 0.5F : 0.0F,
                           1.0F};
-    const float depth_scale[] = {caps->homogeneousDepth ? 0.5F : 1.0F,
-                                 caps->homogeneousDepth ? 0.5F : 0.0F, 0.0F, 0.0F};
-    struct Item
-    {
-        const Caster* caster = nullptr;
-        const MaterialBinding* material = nullptr;
-    };
-    std::vector<Item> items;
-    std::vector<DrawBatch> batches;
-    std::map<DrawBatchKey, std::size_t> batch_index;
-    const auto collect_caster = [&](const Caster& caster)
-    {
-        const auto& mesh = *caster.mesh;
-        const auto* data = caster.source->data;
-        const auto collect = [&](std::uint32_t first, std::uint32_t count, std::size_t slot)
-        {
-            if (slot >= mesh.materials.size())
-            {
-                return false;
-            }
-            const auto& material = mesh.materials[slot];
-            if (material.blend != schema::BlendMode::opaque)
-            {
-                return true;
-            }
-            if (!material.shadow_valid)
-            {
-                return false;
-            }
-            DrawBatchKey key;
-            key.geometry = reinterpret_cast<std::uintptr_t>(mesh.geometry.get());
-            key.program = instanced_program_.idx;
-            key.state = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_WRITE_Z |
-                        BGFX_STATE_DEPTH_TEST_LESS | cull_state(material.cull, caster.model.data());
-            key.first = first;
-            key.count = count;
-            key.shadow_alpha = material.shadow_alpha;
-            key.shadow_uv = material.shadow_uv;
-            key.shadow_texture = material.shadow_texture.idx;
-            const auto item = items.size();
-            items.push_back({&caster, &material});
-            if (!caster_ids && caster.source->instancing && caster.source->instance_eligible &&
-                bgfx::isValid(instanced_program_))
-            {
-                auto [found, inserted] = batch_index.try_emplace(key, batches.size());
-                if (inserted)
-                {
-                    batches.push_back({key, {}, 0, {}});
-                }
-                batches[found->second].items.push_back(item);
-            }
-            else
-            {
-                batches.push_back({key, {item}, 0, {}});
-            }
-            return true;
-        };
-        if (data->submeshes.empty() &&
-            !collect(0, static_cast<std::uint32_t>(data->indices.size()), 0))
-        {
-            return false;
-        }
-        for (const auto& submesh : data->submeshes)
-        {
-            if (!collect(submesh.first_index(), submesh.index_count(), submesh.material_slot()))
-            {
-                return false;
-            }
-        }
-        return true;
-    };
-    const auto submit_batches = [&](bgfx::ViewId view)
-    {
-        for (auto& batch : batches)
-        {
-            while (batch.cursor < batch.items.size())
-            {
-                const auto& item = items[batch.items[batch.cursor]];
-                const auto& caster = *item.caster;
-                if (!bind_material(*item.material, fallback))
-                {
-                    return false;
-                }
-                constexpr std::uint16_t stride = 16 * sizeof(float);
-                const auto remaining =
-                    static_cast<std::uint32_t>(batch.items.size() - batch.cursor);
-                const auto available =
-                    remaining > 1 ? bgfx::getAvailInstanceDataBuffer(remaining, stride) : 0;
-                const auto count = available >= 2 ? available : 1U;
-                if (count > 1)
-                {
-                    bgfx::InstanceDataBuffer buffer;
-                    bgfx::allocInstanceDataBuffer(&buffer, count, stride);
-                    for (std::uint32_t index = 0; index < count; ++index)
-                    {
-                        const auto* instance = items[batch.items[batch.cursor + index]].caster;
-                        std::memcpy(buffer.data + index * stride, instance->model.data(), stride);
-                    }
-                    bgfx::setInstanceDataBuffer(&buffer);
-                }
-                batch.cursor += count;
-                bgfx::setTransform(caster.model.data());
-                bgfx::setUniform(depth_uniform, depth_scale);
-                caster.mesh->bind_vertices();
-                bgfx::setIndexBuffer(caster.mesh->geometry->indices, batch.key.first,
-                                     batch.key.count);
-                bgfx::setState(batch.key.state);
-                bgfx::submit(view, count > 1 ? instanced_program_ : program_);
-            }
-        }
-        items.clear();
-        batches.clear();
-        batch_index.clear();
-        return true;
-    };
     for (std::uint16_t index = 0; index < cascade_count; ++index)
     {
         auto bounds = frame.bounds[index];
@@ -418,28 +304,21 @@ bool ShadowPass::draw(const RenderFrameData& frame_data, const RenderSettings& s
                                        ? 1.0F - static_cast<float>(tile_y) / resolution_ - scale
                                        : static_cast<float>(tile_y) / resolution_,
                                    scale, scale};
-        bgfx::setViewFrameBuffer(view, framebuffer_);
-        bgfx::setViewRect(view, tile_x, tile_y, frame.tile_size, frame.tile_size);
-        bgfx::setViewClear(view, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0xffffffff, 1.0F, 0);
-        bgfx::setViewTransform(view, frame.view.data(), projection);
-        bgfx::touch(view);
-        if (std::find(attached_views_.begin(), attached_views_.end(), view) ==
-            attached_views_.end())
+        VsmPageDraw page;
+        page.view_id = view;
+        page.x = tile_x;
+        page.y = tile_y;
+        page.size = frame.tile_size;
+        page.view = frame.view;
+        std::copy_n(projection, 16, page.projection.begin());
+        VsmPageTarget target{framebuffer_, fallback, depth_uniform, nullptr};
+        std::vector<std::uint64_t> selected;
+        if (caster_ids)
         {
-            attached_views_.push_back(view);
+            selected.assign(caster_ids->begin(), caster_ids->end());
+            target.caster_ids = &selected;
         }
-        for (const auto& caster : casters)
-        {
-            if (!bounds.overlaps_xy(caster.bounds))
-            {
-                continue;
-            }
-            if (!collect_caster(caster))
-            {
-                return false;
-            }
-        }
-        if (!submit_batches(view))
+        if (!draw_pages(frame_data, std::span{&page, 1}, target))
         {
             return false;
         }
@@ -555,67 +434,21 @@ bool ShadowPass::draw(const RenderFrameData& frame_data, const RenderSettings& s
                                  far_plane};
             const auto view =
                 static_cast<bgfx::ViewId>(base_view + cascade_count + first_record + face);
-            bgfx::setViewName(view, point ? "Point shadow face" : "Spot shadow");
-            bgfx::setViewFrameBuffer(view, framebuffer_);
-            bgfx::setViewRect(view, tile[0], tile[1], size, size);
-            bgfx::setViewClear(view, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0xffffffff, 1.0F, 0);
-            bgfx::setViewTransform(view, view_matrix, projection);
-            bgfx::touch(view);
-            if (std::find(attached_views_.begin(), attached_views_.end(), view) ==
-                attached_views_.end())
+            VsmPageDraw page;
+            page.view_id = view;
+            page.x = tile[0];
+            page.y = tile[1];
+            page.size = size;
+            std::copy_n(view_matrix, 16, page.view.begin());
+            std::copy_n(projection, 16, page.projection.begin());
+            VsmPageTarget target{framebuffer_, fallback, depth_uniform, nullptr};
+            std::vector<std::uint64_t> selected;
+            if (caster_ids)
             {
-                attached_views_.push_back(view);
+                selected.assign(caster_ids->begin(), caster_ids->end());
+                target.caster_ids = &selected;
             }
-            float view_projection[16]{};
-            bx::mtxMul(view_projection, view_matrix, projection);
-            for (const auto& caster : casters)
-            {
-                // Reject only when all eight world-AABB corners are beyond one clip
-                // plane. This also includes off-camera shadow casters.
-                std::uint32_t outside = 63;
-                for (const auto& corner : caster.world_points)
-                {
-                    float clip[4]{};
-                    for (std::size_t row = 0; row < 4; ++row)
-                    {
-                        clip[row] = view_projection[row] * corner[0] +
-                                    view_projection[4 + row] * corner[1] +
-                                    view_projection[8 + row] * corner[2] +
-                                    view_projection[12 + row];
-                    }
-                    std::uint32_t mask = 0;
-                    if (clip[0] < -clip[3])
-                    {
-                        mask |= 1;
-                    }
-                    if (clip[0] > clip[3])
-                    {
-                        mask |= 2;
-                    }
-                    if (clip[1] < -clip[3])
-                    {
-                        mask |= 4;
-                    }
-                    if (clip[1] > clip[3])
-                    {
-                        mask |= 8;
-                    }
-                    if (clip[2] < (caps->homogeneousDepth ? -clip[3] : 0.0F))
-                    {
-                        mask |= 16;
-                    }
-                    if (clip[2] > clip[3])
-                    {
-                        mask |= 32;
-                    }
-                    outside &= mask;
-                }
-                if (outside == 0 && !collect_caster(caster))
-                {
-                    return false;
-                }
-            }
-            if (!submit_batches(view))
+            if (!draw_pages(frame_data, std::span{&page, 1}, target))
             {
                 return false;
             }
@@ -633,6 +466,216 @@ bool ShadowPass::draw(const RenderFrameData& frame_data, const RenderSettings& s
                         frame.skipped_local_lights);
         }
         last_skipped_lights_ = frame.skipped_local_lights;
+    }
+    return true;
+}
+
+bool ShadowPass::draw_pages(const RenderFrameData& frame_data, std::span<const VsmPageDraw> pages,
+                            const VsmPageTarget& target)
+{
+    if (!bgfx::isValid(target.framebuffer) || !bgfx::isValid(program_) ||
+        !bgfx::isValid(target.depth_uniform) || !bgfx::isValid(target.fallback))
+    {
+        return false;
+    }
+    const auto* caps = bgfx::getCaps();
+    const float depth_scale[]{caps->homogeneousDepth ? .5F : 1.F,
+                              caps->homogeneousDepth ? .5F : 0.F, 0, 0};
+    struct Caster
+    {
+        const GpuMesh* mesh = nullptr;
+        const RenderFrameData::Mesh* source = nullptr;
+        std::array<float, 16> model{};
+        std::array<std::array<float, 3>, 8> world_points{};
+    };
+    std::vector<Caster> casters;
+    for (const auto& source : frame_data.meshes)
+    {
+        if (!source.cast_shadows || !source.gpu ||
+            (target.caster_ids && std::find(target.caster_ids->begin(), target.caster_ids->end(),
+                                            source.gpu->node_id) == target.caster_ids->end()))
+        {
+            continue;
+        }
+        Caster caster;
+        caster.mesh = source.gpu;
+        caster.source = &source;
+        caster.model = source.model;
+        for (unsigned corner = 0; corner < 8; ++corner)
+        {
+            std::array<float, 3> point{};
+            for (unsigned axis = 0; axis < 3; ++axis)
+            {
+                point[axis] =
+                    corner & (1U << axis) ? source.gpu->maximum[axis] : source.gpu->minimum[axis];
+            }
+            caster.world_points[corner] = transform_point(source.model.data(), point);
+        }
+        casters.push_back(caster);
+    }
+    struct Item
+    {
+        const Caster* caster = nullptr;
+        const MaterialBinding* material = nullptr;
+    };
+    std::vector<Item> items;
+    std::vector<DrawBatch> batches;
+    std::map<DrawBatchKey, std::size_t> batch_index;
+    const auto collect_caster = [&](const Caster& caster)
+    {
+        const auto& mesh = *caster.mesh;
+        const auto* data = caster.source->data;
+        const auto collect = [&](std::uint32_t first, std::uint32_t count, std::size_t slot)
+        {
+            if (slot >= mesh.materials.size())
+            {
+                return false;
+            }
+            const auto& material = mesh.materials[slot];
+            if (material.blend != schema::BlendMode::opaque)
+            {
+                return true;
+            }
+            if (!material.shadow_valid)
+            {
+                return false;
+            }
+            DrawBatchKey key;
+            key.geometry = reinterpret_cast<std::uintptr_t>(mesh.geometry.get());
+            key.program = instanced_program_.idx;
+            key.state = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_WRITE_Z |
+                        BGFX_STATE_DEPTH_TEST_LESS | cull_state(material.cull, caster.model.data());
+            key.first = first;
+            key.count = count;
+            key.shadow_alpha = material.shadow_alpha;
+            key.shadow_uv = material.shadow_uv;
+            key.shadow_texture = material.shadow_texture.idx;
+            const auto item = items.size();
+            items.push_back({&caster, &material});
+            if (!target.caster_ids && caster.source->instancing &&
+                caster.source->instance_eligible && bgfx::isValid(instanced_program_))
+            {
+                auto [found, inserted] = batch_index.try_emplace(key, batches.size());
+                if (inserted)
+                {
+                    batches.push_back({key, {}, 0, {}});
+                }
+                batches[found->second].items.push_back(item);
+            }
+            else
+            {
+                batches.push_back({key, {item}, 0, {}});
+            }
+            return true;
+        };
+        if (data->submeshes.empty() &&
+            !collect(0, static_cast<std::uint32_t>(data->indices.size()), 0))
+        {
+            return false;
+        }
+        for (const auto& submesh : data->submeshes)
+        {
+            if (!collect(submesh.first_index(), submesh.index_count(), submesh.material_slot()))
+            {
+                return false;
+            }
+        }
+        return true;
+    };
+    const auto submit_batches = [&](bgfx::ViewId view)
+    {
+        for (auto& batch : batches)
+        {
+            while (batch.cursor < batch.items.size())
+            {
+                const auto& item = items[batch.items[batch.cursor]];
+                const auto& caster = *item.caster;
+                if (!bind_material(*item.material, target.fallback))
+                {
+                    return false;
+                }
+                constexpr std::uint16_t stride = 16 * sizeof(float);
+                const auto remaining =
+                    static_cast<std::uint32_t>(batch.items.size() - batch.cursor);
+                const auto available =
+                    remaining > 1 ? bgfx::getAvailInstanceDataBuffer(remaining, stride) : 0;
+                const auto count = available >= 2 ? available : 1U;
+                if (count > 1)
+                {
+                    bgfx::InstanceDataBuffer buffer;
+                    bgfx::allocInstanceDataBuffer(&buffer, count, stride);
+                    for (std::uint32_t index = 0; index < count; ++index)
+                    {
+                        const auto* instance = items[batch.items[batch.cursor + index]].caster;
+                        std::memcpy(buffer.data + index * stride, instance->model.data(), stride);
+                    }
+                    bgfx::setInstanceDataBuffer(&buffer);
+                }
+                batch.cursor += count;
+                bgfx::setTransform(caster.model.data());
+                bgfx::setUniform(target.depth_uniform, depth_scale);
+                caster.mesh->bind_vertices();
+                bgfx::setIndexBuffer(caster.mesh->geometry->indices, batch.key.first,
+                                     batch.key.count);
+                bgfx::setState(batch.key.state);
+                bgfx::submit(view, count > 1 ? instanced_program_ : program_);
+            }
+        }
+        items.clear();
+        batches.clear();
+        batch_index.clear();
+        return true;
+    };
+
+    for (const auto& page : pages)
+    {
+        if (!page.size || page.view_id >= caps->limits.maxViews ||
+            !finite_matrix(page.view.data()) || !finite_matrix(page.projection.data()))
+        {
+            return false;
+        }
+        bgfx::setViewName(page.view_id, "Shadow page");
+        bgfx::setViewFrameBuffer(page.view_id, target.framebuffer);
+        bgfx::setViewRect(page.view_id, page.x, page.y, page.size, page.size);
+        bgfx::setViewClear(page.view_id, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0xffffffff, 1.F, 0);
+        bgfx::setViewTransform(page.view_id, page.view.data(), page.projection.data());
+        bgfx::touch(page.view_id);
+        if (target.framebuffer.idx == framebuffer_.idx &&
+            std::find(attached_views_.begin(), attached_views_.end(), page.view_id) ==
+                attached_views_.end())
+        {
+            attached_views_.push_back(page.view_id);
+        }
+        float view_projection[16];
+        bx::mtxMul(view_projection, page.view.data(), page.projection.data());
+        for (const auto& caster : casters)
+        {
+            std::uint32_t outside = 63;
+            for (const auto& corner : caster.world_points)
+            {
+                float clip[4]{};
+                for (unsigned row = 0; row < 4; ++row)
+                {
+                    clip[row] = view_projection[row] * corner[0] +
+                                view_projection[4 + row] * corner[1] +
+                                view_projection[8 + row] * corner[2] + view_projection[12 + row];
+                }
+                const std::uint32_t mask =
+                    (clip[0] < -clip[3] ? 1U : 0U) | (clip[0] > clip[3] ? 2U : 0U) |
+                    (clip[1] < -clip[3] ? 4U : 0U) | (clip[1] > clip[3] ? 8U : 0U) |
+                    (clip[2] < (caps->homogeneousDepth ? -clip[3] : 0.F) ? 16U : 0U) |
+                    (clip[2] > clip[3] ? 32U : 0U);
+                outside &= mask;
+            }
+            if (!outside && !collect_caster(caster))
+            {
+                return false;
+            }
+        }
+        if (!submit_batches(page.view_id))
+        {
+            return false;
+        }
     }
     return true;
 }

@@ -22,6 +22,9 @@ struct RenderFrameSnapshot
     std::uint32_t ui_draws = 0;
     std::uint64_t rvt_demand_revision = 0, rvt_cache_revision = 0, rvt_debug_revision = 0;
     bool rvt_ready = false, rvt_debug_visible = false;
+    std::uint64_t vsm_generation = 0, vsm_view_revision = 0, vsm_demand_revision = 0;
+    std::uint64_t vsm_cache_revision = 0, vsm_debug_revision = 0;
+    bool vsm_ready = false, vsm_debug_visible = false;
 };
 enum class ScreenshotSelection
 {

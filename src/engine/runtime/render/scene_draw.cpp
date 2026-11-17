@@ -132,7 +132,7 @@ bool RenderSystem::SceneGpuResources::prepare_lighting(
     const render_detail::RenderFrameData& frame_data, const RenderSettings& rendering,
     const RenderConfig& config, render_detail::SceneDrawView& draw, const CameraSettings& lens,
     render_detail::ShadowFrame& frame, std::size_t cluster_index, bgfx::ViewId base,
-    const SceneCaptureRequest* capture)
+    const SceneCaptureRequest* capture, const render_detail::VsmPageBatch* vsm)
 {
     std::vector<render_detail::ClusterLight> lights;
     std::vector<render_detail::LocalShadowLight> local_lights;
@@ -248,8 +248,13 @@ bool RenderSystem::SceneGpuResources::prepare_lighting(
         return false;
     }
     auto& cluster = targets().clusters[cluster_index];
+    if (!cluster.prepare(config, draw.width, draw.height,
+                         vsm ? static_cast<std::uint32_t>(vsm->gpu_data.size()) : 0))
+    {
+        return false;
+    }
     if (!cluster.cull(static_cast<bgfx::ViewId>(base + 28), lens, draw.view, draw.projection,
-                      lights, frame.local_records))
+                      lights, frame.local_records, vsm))
     {
         return false;
     }
@@ -478,7 +483,13 @@ bool RenderSystem::SceneGpuResources::draw_meshes(const render_detail::RenderFra
                 }
             }
             cursor += submitted_count;
-            draw.cluster->bind();
+            draw.cluster->bind(mode == SceneDrawMode::opaque && !draw.reflection &&
+                               !material.frame_textures && bgfx::isValid(draw.vsm.atlas));
+            if (mode == SceneDrawMode::opaque && !draw.reflection && !material.frame_textures &&
+                bgfx::isValid(draw.vsm.atlas))
+            {
+                bgfx::setTexture(10, draw.vsm.sampler, draw.vsm.atlas);
+            }
             bgfx::setTransform(mesh.model.data());
             if (item.geometry == mesh.gpu->geometry.get())
             {

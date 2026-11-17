@@ -539,7 +539,7 @@ bool indexed_scene_restore(test_support::ResourceServices& services)
     }
     auto camera = test_support::scene_nodes(*original)[0].add_component<Camera>();
     schema::SceneDataT source;
-    source.schema_version = 5;
+    source.schema_version = 6;
     if (!camera || !original->set_active_camera(camera) || !original->build_data(source))
     {
         return false;
@@ -770,7 +770,7 @@ bool incremental_scene_restore(test_support::ResourceServices& services)
     auto child = active ? active->create_node("Child") : engine::Node{};
     auto parent = active ? active->create_node("Parent") : engine::Node{};
     schema::SceneDataT data;
-    data.schema_version = 5;
+    data.schema_version = 6;
     if (!child || !parent || !child.set_parent(parent) ||
         !active->set_active_camera(child.add_component<Camera>()) || !active->build_data(data) ||
         !add_scene_resource(fixture, "staged.scene", data) ||
@@ -956,7 +956,7 @@ bool persistent_scene_loading(test_support::ResourceServices& services)
     auto* source = resources && world.initialize({}) ? world.create_scene("Source") : nullptr;
     auto node = source ? source->create_node("Resource owner") : engine::Node{};
     schema::SceneDataT data;
-    data.schema_version = 5;
+    data.schema_version = 6;
     if (!node || !source->build_data(data) ||
         !add_scene_resource(fixture, "persistent.scene", data))
     {

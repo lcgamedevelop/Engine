@@ -5,6 +5,7 @@
 ## 功能范例
 
 - [Meshlet 标准测试场景](meshlet-culling.md)
+- [方向光 VSM 标准测试场景](virtual-shadows.md)
 - [角色控制与第一／第三人称镜头](character-control.md)
 - [地形、建筑与火箭综合联动](destruction-integration.md)
 - [大世界地形与 RVT 实时查看器](terrain-world.md)

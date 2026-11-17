@@ -126,6 +126,8 @@ bool reserved_uniform(std::string_view name)
                                      "u_shadow_settings",
                                      "u_shadow_depth",
                                      "s_shadow_map",
+                                     "u_vsm_layout",
+                                     "s_virtual_shadow",
                                      "u_ibl_params",
                                      "u_ambient_occlusion",
                                      "s_ambient_occlusion",

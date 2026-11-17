@@ -664,6 +664,10 @@ declare module "engine" {
         SetColor(r: number, g: number, b: number): boolean;
         SetIntensity(intensity: number): boolean;
         SetDirectional(): boolean;
+        readonly shadowMethod: ControlData.ShadowMethod;
+        SetShadowMethod(method: ControlData.ShadowMethod): boolean;
+        GetVirtualShadowSettings(): ControlData.VsmSettingsT | null;
+        SetVirtualShadowSettings(settings: ControlData.VsmSettingsT): boolean;
         /** Directional, point and spot shadows; resolution defaults to 2048, bias to 0.001. */
         SetShadows(enabled: boolean, resolution?: number, bias?: number): boolean;
         /** Count: 1/2/4; distance: (0, 100000]. Preserves the shadow enabled state. */
@@ -1391,6 +1395,8 @@ declare module "engine" {
         export type CharacterCameraSource = 0 | 1 | 2 | 3 | 4 | 5;
         /** 0=body, 1=head, 2=first_person */
         export type CharacterVisualKind = 0 | 1 | 2;
+        /** 0=shadow_map, 1=virtual_shadow_map */
+        export type ShadowMethod = 0 | 1;
         /** 0=none, 1=writer, 2=reader, 3=writer_reader */
         export type RvtRole = 0 | 1 | 2 | 3;
         export interface CameraDataT {
@@ -1693,6 +1699,11 @@ declare module "engine" {
             collisionBytes: bigint;
             uploadBytesPerFrame: bigint;
             publicationsPerFrame: number;
+        }
+        export interface VsmSettingsT {
+            virtualResolution: number;
+            firstClipmapExtent: number;
+            lodBias: number;
         }
         export interface RvtSettingsT {
             enabled: boolean;

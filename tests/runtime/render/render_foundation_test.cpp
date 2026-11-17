@@ -9,7 +9,9 @@
 #endif
 
 #include "runtime/engine_config.hpp"
+#include "runtime/render/render_submission.hpp"
 #include "runtime/render/render_system.hpp"
+#include "runtime/render/vsm/virtual_shadow_cache.hpp"
 #include "runtime/scene/camera.hpp"
 #include "runtime/scene/environment_component.hpp"
 #include "runtime/scene/light.hpp"
@@ -81,6 +83,115 @@ bool check_tangent_aliasing()
                   "failed in-place tangent generation clears output");
 }
 
+bool check_virtual_shadow_cache()
+{
+    using namespace engine;
+    using namespace engine::render_detail;
+    VirtualShadowCache cache;
+    schema::VsmSettingsT settings;
+    settings.virtual_resolution = 4096;
+    RenderConfig config;
+    config.vsm_physical_pages = 2;
+    VsmView view;
+    view.generation = view.device_generation = view.observer = view.light_instance = 1;
+    view.scope = {1, 1};
+    view.width = view.height = 256;
+    view.shadow_distance = 16;
+    view.axes = {{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}};
+    GpuMesh gpu;
+    gpu.node_id = gpu.instance_id = gpu.revision = 1;
+    gpu.minimum = {.2F, .2F, .2F};
+    gpu.maximum = {.4F, .4F, .4F};
+    RenderFrameData frame;
+    auto& mesh = frame.meshes.emplace_back();
+    mesh.gpu = &gpu;
+    mesh.cast_shadows = mesh.any_opaque = true;
+    mesh.world[0] = mesh.world[5] = mesh.world[10] = mesh.world[15] = 1;
+    VsmPageBatch batch;
+    VsmStatus status;
+    if (!cache.configure(settings, config, 1) || !cache.begin_frame(view, frame) ||
+        !cache.plan(1, batch))
+    {
+        return false;
+    }
+    VsmPageDemand demand{batch.view, 1, {{0, 0, 0}, {0, 3, 0}}};
+    cache.cancel_batch();
+    if (!cache.request(demand) || !cache.plan(1, batch) ||
+        !expect(batch.pages.size() == 1, "VSM honors the per-frame page budget") ||
+        !cache.publish(batch, 1) || !cache.status(status) ||
+        !expect(status.fallback_pages == 1 && status.state == VsmState::warming,
+                "unrendered pages stay on complete ordinary shadows") ||
+        !cache.begin_frame(view, frame) || !cache.plan(1, batch) || !cache.publish(batch, 2) ||
+        !cache.status(status) ||
+        !expect(status.state == VsmState::ready, "all current receiver pages become ready"))
+    {
+        return false;
+    }
+    if (!cache.begin_frame(view, frame) || !cache.plan(1, batch) ||
+        !expect(batch.pages.empty() && !batch.page_table.empty(),
+                "cached pages retain the full page table without redraw") ||
+        !cache.publish(batch, 3))
+    {
+        return false;
+    }
+    const auto previous_revision = status.cache_revision;
+    mesh.world[12] = 3;
+    if (!cache.begin_frame(view, frame) || !cache.status(status) ||
+        !expect(status.dirty_pages == 2 && status.cache_revision > previous_revision,
+                "caster movement invalidates old and new bounds") ||
+        !cache.plan(1, batch))
+    {
+        return false;
+    }
+    cache.cancel_batch();
+    if (!cache.status(status) ||
+        !expect(status.ready_pages == 0, "cancelled draws cannot publish valid pages") ||
+        !cache.plan(1, batch) || !cache.publish(batch, 4) || !cache.begin_frame(view, frame) ||
+        !cache.plan(1, batch) || !cache.publish(batch, 5))
+    {
+        return false;
+    }
+    view.origin[0] = .1;
+    if (!cache.begin_frame(view, frame) || !cache.plan(1, batch) ||
+        !expect(batch.pages.empty(), "small observer movement reuses absolute page keys"))
+    {
+        return false;
+    }
+    demand.view = batch.view;
+    demand.submission_id = 6;
+    if (!cache.publish(batch, 6) || !cache.request(demand) || !cache.status(status) ||
+        !expect(status.state == VsmState::ready, "fresh observer feedback completes readiness"))
+    {
+        return false;
+    }
+    auto stale = demand;
+    ++stale.view.generation;
+    if (!expect(!cache.request(stale), "stale cache generations cannot reuse page slots"))
+    {
+        return false;
+    }
+    demand.pages.push_back({0, 7, 0});
+    ++demand.submission_id;
+    if (!cache.request(demand) || !cache.plan(1, batch) || !cache.publish(batch, 7) ||
+        !cache.status(status) ||
+        !expect(status.state == VsmState::budget_limited && status.fallback_pages == 1 &&
+                    status.resident_pages == 2,
+                "capacity pressure preserves resident pages and reports fallback"))
+    {
+        return false;
+    }
+    frame.meshes.clear();
+    if (!cache.begin_frame(view, frame) || !cache.status(status) ||
+        !expect(status.dirty_pages == 1, "caster removal invalidates its last shadow bounds"))
+    {
+        return false;
+    }
+    cache.reset_scene();
+    return cache.status(status) && expect(status.state == VsmState::disabled &&
+                                              !status.resident_pages && !cache.request(demand),
+                                          "scene reset rejects delayed feedback");
+}
+
 bool check_camera_and_light(engine::Scene& scene)
 {
     auto camera_node = scene.create_node("Camera");
@@ -138,6 +249,29 @@ bool check_camera_and_light(engine::Scene& scene)
     invalid_light.inner_angle = invalid_light.outer_angle + 1;
     if (!expect(!light.set_settings(invalid_light), "reject inverted spotlight cone") ||
         !expect(scene.set_active_camera(camera), "set active orthographic camera"))
+    {
+        return false;
+    }
+    auto virtual_light = light_settings;
+    virtual_light.kind = engine::schema::LightKind::directional;
+    virtual_light.shadow_method = engine::schema::ShadowMethod::virtual_shadow_map;
+    virtual_light.virtual_shadow = std::make_unique<engine::schema::VsmSettingsT>();
+    if (!expect(light.set_settings(virtual_light), "enable directional virtual shadows"))
+    {
+        return false;
+    }
+    auto invalid_virtual = virtual_light;
+    invalid_virtual.kind = engine::schema::LightKind::point;
+    if (!expect(!light.set_settings(invalid_virtual), "reject virtual shadows on local lights"))
+    {
+        return false;
+    }
+    invalid_virtual = virtual_light;
+    invalid_virtual.virtual_shadow->virtual_resolution = 5000;
+    if (!expect(!light.set_settings(invalid_virtual) &&
+                    test_support::read_settings(light) == virtual_light,
+                "invalid VSM settings atomically preserve the previous Light state") ||
+        !light.set_settings(light_settings))
     {
         return false;
     }
@@ -919,8 +1053,8 @@ int main()
     }
     auto* scene = world.create_scene("Render foundation");
     if (!expect(scene != nullptr, "create scene") || !check_tangent_aliasing() ||
-        !check_camera_and_light(*scene) || !check_ecs_handle_lifetime(*scene) ||
-        !check_mesh(*scene) || !check_deformation(*scene) ||
+        !check_virtual_shadow_cache() || !check_camera_and_light(*scene) ||
+        !check_ecs_handle_lifetime(*scene) || !check_mesh(*scene) || !check_deformation(*scene) ||
         !check_skinning_palette(services, *scene) || !check_textures(services, *scene))
     {
         return 1;

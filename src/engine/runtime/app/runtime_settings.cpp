@@ -198,7 +198,8 @@ bool apply_parallel(const Json& value, RuntimeParallelConfig& output, std::strin
                    "prepare_seconds_per_step", "upload_bytes_per_step", "cluster_tile_size",
                    "cluster_depth_slices", "maximum_lights", "maximum_cluster_lights",
                    "maximum_meshlet_candidates", "shadow_atlas_size", "local_shadow_tile_size",
-                   "maximum_local_shadow_faces", "maximum_planar_reflections"},
+                   "maximum_local_shadow_faces", "maximum_planar_reflections", "vsm_physical_pages",
+                   "vsm_pages_per_frame"},
                   error) ||
             !integer(render, "texture_batch_size", config.texture_batch_size, 1, 64, error) ||
             !integer(render, "texture_staging_bytes", config.texture_staging_bytes, 1,
@@ -220,6 +221,8 @@ bool apply_parallel(const Json& value, RuntimeParallelConfig& output, std::strin
                      error) ||
             !integer(render, "maximum_local_shadow_faces", config.maximum_local_shadow_faces, 0, 24,
                      error) ||
+            !integer(render, "vsm_physical_pages", config.vsm_physical_pages, 1, 4096, error) ||
+            !integer(render, "vsm_pages_per_frame", config.vsm_pages_per_frame, 1, 16, error) ||
             !integer(render, "maximum_planar_reflections", config.maximum_planar_reflections, 0, 2,
                      error))
         {

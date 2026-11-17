@@ -2,6 +2,8 @@
 name = "game"
 storage = "package"
 roots = [
+    "scripts/modules/virtual-shadows.ts",
+    "scenes/virtual-shadows.scene",
     "scripts/modules/terrain-world.ts",
     "scenes/terrain-world.scene",
     "ui/terrain-world.rml",

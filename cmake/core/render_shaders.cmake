@@ -167,6 +167,8 @@ function(engine_embed_render_shaders target)
                         "${_source}/material_helpers.sh"
                         "${_source}/shadow_helpers.sh"
                         "${_source}/csm_helpers.sh"
+                        "${_source}/vsm/vsm_fragment.sh"
+                        "${_source}/vsm/vsm_address.sh"
                         "${_source}/hex_tiling.sh"
                         "${_source}/pbr_surface.sh"
                         "${_source}/pbr_surface_types.sh"
@@ -384,6 +386,24 @@ function(engine_embed_upstream_feature_shaders target)
                 -i "${ENGINE_BGFX_SHADER_INCLUDE_DIR};${_source}" --bin2c "${_name}" ${_args}
             DEPENDS ${_includes} "${ENGINE_SHADERC_EXECUTABLE}"
                 "${ENGINE_BGFX_SHADER_INCLUDE_DIR}/bgfx_shader.sh"
+            VERBATIM)
+        target_sources(${target} PRIVATE "${_header}")
+    endforeach()
+endfunction()
+
+function(engine_embed_vsm_shaders target)
+    engine_render_shader_profile(_platform _profile)
+    set(_source "${PROJECT_SOURCE_DIR}/src/engine/runtime/render/shaders/vsm")
+    set(_output "${CMAKE_CURRENT_BINARY_DIR}/generated/render")
+    foreach(_name cs_vsm_clear cs_vsm_feedback)
+        set(_header "${_output}/${_name}.bin.h")
+        add_custom_command(OUTPUT "${_header}"
+            COMMAND "${CMAKE_COMMAND}" -E make_directory "${_output}"
+            COMMAND "${ENGINE_SHADERC_EXECUTABLE}" -f "${_source}/${_name}.sc"
+                -o "${_header}" --type compute --platform "${_platform}" --profile "${_profile}"
+                -i "${ENGINE_BGFX_SHADER_INCLUDE_DIR}" --bin2c "${_name}"
+            DEPENDS "${_source}/${_name}.sc" "${_source}/vsm_address.sh"
+                "${ENGINE_BGFX_SHADER_INCLUDE_DIR}/bgfx_compute.sh" "${ENGINE_SHADERC_EXECUTABLE}"
             VERBATIM)
         target_sources(${target} PRIVATE "${_header}")
     endforeach()

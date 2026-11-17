@@ -1,5 +1,7 @@
 #include "runtime/render/render_system.hpp"
 #include "runtime/render/rvt/rvt_pass.hpp"
+#include "runtime/render/vsm/virtual_shadow_cache.hpp"
+#include "runtime/render/vsm/virtual_shadow_pass.hpp"
 
 #include "runtime/font/font_system.hpp"
 #include "runtime/performance/profiling.hpp"
@@ -56,6 +58,7 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
     if (!scene || !scene_resources_ ||
         !render_detail::drawable_scene(*world_, view_camera, !extensions_.empty()))
     {
+        release_vsm();
         scene_collected_ = scene != nullptr && !render_detail::drawable_scene(*world_, view_camera,
                                                                               !extensions_.empty());
         return true;
@@ -128,7 +131,7 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
         draw.max_anisotropy = config_.max_anisotropy;
         render_detail::ShadowFrame shadow;
         if (!resources.prepare_lighting(resources.frame_data, rendering, config_, draw, settings,
-                                        shadow, index, base, nullptr))
+                                        shadow, index, base, nullptr, nullptr))
         {
             return false;
         }
@@ -158,11 +161,36 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
     draw.frustum_culling_enabled = settings.frustum_culling_enabled;
     draw.lod_observer = {camera.instance_id(), world_->scene() ? world_->scene()->id() : 0};
     draw.max_anisotropy = config_.max_anisotropy;
-    render_detail::ShadowFrame shadow;
-    if (!resources.prepare_lighting(resources.frame_data, rendering, config_, draw, settings,
-                                    shadow, 2, render_detail::shadow_view, nullptr))
+    render_detail::VsmPageBatch vsm_batch;
+    if (!prepare_vsm(resources.frame_data, draw, settings, vsm_batch))
     {
         return false;
+    }
+    render_detail::ShadowFrame shadow;
+    if (!resources.prepare_lighting(resources.frame_data, rendering, config_, draw, settings,
+                                    shadow, 2, render_detail::shadow_view, nullptr,
+                                    vsm_batch.generation ? &vsm_batch : nullptr))
+    {
+        if (vsm_cache_)
+        {
+            vsm_cache_->cancel_batch();
+        }
+        if (vsm_batch.generation)
+        {
+            vsm_status_.state = VsmState::failed;
+            vsm_status_.error_code = "vsm_lighting_failed";
+            vsm_status_.error = "Cannot upload the virtual shadow page table";
+        }
+        return false;
+    }
+    if (vsm_batch.generation)
+    {
+        if (!vsm_cache_->publish(vsm_batch, submission_sequence_ + 1))
+        {
+            return false;
+        }
+        (void)vsm_cache_->status(vsm_status_);
+        vsm_status_.resident_bytes = draw.vsm.resident_bytes + vsm_batch.gpu_data.size() * 16;
     }
     if (!resources.collect_view(resources.frame_data, draw, resources.draw_lists[2]))
     {
@@ -193,6 +221,12 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
     draw.id = render_detail::surface_view;
     if (!resources.draw_meshes(resources.frame_data, resources.draw_lists[2], rendering, draw,
                                render_detail::SceneDrawMode::surface))
+    {
+        return false;
+    }
+    if (vsm_batch.generation &&
+        !vsm_pass_->submit_feedback(vsm_batch.view, resources.targets().surface_pass.depth(),
+                                    submission_sequence_ + 1))
     {
         return false;
     }

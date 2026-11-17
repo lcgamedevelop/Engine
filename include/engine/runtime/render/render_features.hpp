@@ -25,6 +25,7 @@ enum class RenderFeature : std::uint8_t
     rvt_pages,
     rvt_residency,
     rvt_invalidated,
+    vsm_viewer,
     stats,
     count
 };

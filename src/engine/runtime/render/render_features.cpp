@@ -67,6 +67,10 @@ bool RenderSystem::set_debug_feature(RenderFeature feature, bool enabled)
     {
         ++rvt_debug_revision_;
     }
+    if (feature == RenderFeature::vsm_viewer && debug_requests_[index] != enabled)
+    {
+        ++vsm_debug_revision_;
+    }
     debug_requests_[index] = enabled;
     if (feature == RenderFeature::stats && renderer_initialized_)
     {
@@ -142,7 +146,7 @@ RenderFeatureState RenderSystem::feature_state(RenderFeature feature) const noex
         return result;
     }
     if (feature != RenderFeature::stats && feature != RenderFeature::rvt_viewer &&
-        (world_ == nullptr || world_->scene() == nullptr))
+        feature != RenderFeature::vsm_viewer && (world_ == nullptr || world_->scene() == nullptr))
     {
         result.effective = false;
         result.reason = RenderFeatureReason::no_scene;
@@ -207,6 +211,7 @@ void RenderSystem::publish_features() noexcept
     feature_applied_[static_cast<std::size_t>(RenderFeature::stats)] =
         debug_requests_[static_cast<std::size_t>(RenderFeature::stats)];
     feature_applied_[static_cast<std::size_t>(RenderFeature::rvt_viewer)] = rvt_debug_visible_;
+    feature_applied_[static_cast<std::size_t>(RenderFeature::vsm_viewer)] = vsm_debug_visible_;
     for (auto feature :
          {RenderFeature::rvt_pages, RenderFeature::rvt_residency, RenderFeature::rvt_invalidated})
     {

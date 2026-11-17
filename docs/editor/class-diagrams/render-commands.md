@@ -74,8 +74,37 @@ classDiagram
 
 ## 现有场景渲染参数
 
+以下为当前接口；VSM 的组件设置与临时诊断在本页末尾说明。
+
 AO 字段 `aoEnabled`、`aoRadius`、`aoStrength`、`aoPower`、`aoFadeStart`、`aoFadeEnd` 属于后处理域，与曝光共用活动场景相机的 PostProcessComponent、快照和撤销记录。编辑器沿用已有后处理组件准备流程，缺少活动相机时拒绝；运行时核心不创建组件。AO 参数由同一场景保存链落盘，不添加独立编辑器覆盖状态。
 
 `hdrEnabled`、`bloomEnabled`、`bloomThreshold`、`bloomIntensity`、`bloomRadius` 同属后处理域。一次 `set_render_settings` 可原子提交 HDR/Bloom 的两个开关；最终状态必须满足 Bloom 依赖 HDR，不因参数遍历顺序不同产生部分修改，也不自动改变未提交开关。失败回滚本次新建组件，成功进入同一撤销、重做和保存链。
 
 级联阴影使用同一 `set_render_settings` / `get_render_settings`，字段为 `shadowCascades`、`shadowDistance`、`shadowSplitLambda`、`shadowCascadeBlend`。修改归方向灯域，实际变更要求已有启用方向灯，缺少时拒绝而不创建灯；阴影关闭且全部值未变化的空操作沿用原有成功语义。撤销和重做保存整份对应 Light 组件快照。级联数只接受 JSON 整数 1、2、4，其他数值遵循 Light 契约。
+
+## VSM 接口
+
+复用现有 RenderCommands、组件编辑命令和 MCP 适配，
+原生状态与帧证据的唯一契约见[VSM 类图](../../runtime/class-diagrams/virtual-shadow-maps.md)。
+不新增编辑器阴影缓存或 MCP 专用渲染器。
+
+| 命令 | 参数与行为 |
+| --- | --- |
+| `set_light` | 在已有 sceneId/nodeId 组件编辑上增加 shadowMethod 与 virtualShadow；后者按生成 JSON 契约使用 virtual_resolution、first_clipmap_extent、lod_bias 字段。校验同一 Light 值，失败不修改，成功进入既有撤销、重做与保存链 |
+| `set_render_feature` | `{"feature":"vsm_viewer","enabled":true}` 开启实时调试；false 关闭。只调用已有渲染诊断开关，不修改 Light |
+| `set_vsm_debug_options` | `{"mode":"overview","clipmapLevel":-1}` 原子修改临时视图，失败保留旧值；模式值与原生 VsmDebugMode 一致 |
+| `get_vsm_debug_options` | 返回 options、debug revision、vsm_viewer 的 feature 状态，以及实际帧中的 debug revision/visible |
+| `get_vsm_status` | 返回同一 RenderSystem::vsm_status 快照及最近实际帧对应的 VSM 身份、修订和 ready；不推进缓存或等待 GPU |
+
+shadowMethod 使用 shadow_map/virtual_shadow_map 两个值；castShadows 仍是总开关。
+生产配置只通过 Light 组件保存，不再为 VSM 增加全局 set_render_settings 覆盖入口。
+诊断命令不需要 sceneId/nodeId，不进入场景、项目设置或撤销记录；
+get_render_features 的临时诊断列表加入 vsm_viewer。
+
+自动化依次完成组件配置、等待准备、固定镜头、查询 VSM 状态、设置调试视图、
+等待同一 debug revision 的实际可见帧，然后复用 capture_frame/get_frame_capture。
+状态为 unsupported/failed 时报告原因；预算不足明确报告，不将 CSM 截图冒充 VSM 已就绪。
+关闭调试后也等待对应不可见帧，避免截到上一帧面板。
+
+测试运行端点仅在显式测试构建装配，直接适配上述普通运行时接口；
+它不依赖编辑器命令类，正式运行包不含 MCP 测试入口。

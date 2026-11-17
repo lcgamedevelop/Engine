@@ -852,6 +852,75 @@ int test()
     {
         return 1;
     }
+    shadow_settings.shadow_method = schema::ShadowMethod::virtual_shadow_map;
+    shadow_settings.virtual_shadow = std::make_unique<schema::VsmSettingsT>();
+    shadow_settings.virtual_shadow->virtual_resolution = 4096;
+    VsmStatus vsm;
+    const auto settle_vsm = [&]()
+    {
+        for (unsigned attempt = 0; attempt < 160; ++attempt)
+        {
+            if (!frames(window, renderer, 1) || !renderer.vsm_status(vsm))
+            {
+                return false;
+            }
+            if (vsm.state == VsmState::failed || vsm.state == VsmState::unsupported)
+            {
+                break;
+            }
+            if (vsm.state == VsmState::ready && vsm.demanded_pages && !vsm.redrawn_pages)
+            {
+                return true;
+            }
+        }
+        std::fprintf(stderr, "VSM state=%u demand=%u ready=%u fallback=%u error=%s\n",
+                     unsigned(vsm.state), vsm.demanded_pages, vsm.ready_pages, vsm.fallback_pages,
+                     vsm.error.c_str());
+        return false;
+    };
+    SceneCaptureImage virtual_image, cached_image, moved_image, shadow_restored;
+    if (!light.set_settings(shadow_settings) ||
+        !expect(settle_vsm(), "GPU receiver feedback warms virtual pages without blocking") ||
+        !capture(window, renderer, virtual_image, shadow_stats) ||
+        !capture(window, renderer, cached_image, shadow_stats) ||
+        !pixels(virtual_image, cached_image, "static cached virtual shadows keep identical pixels"))
+    {
+        return 1;
+    }
+    const auto original_generation = vsm.generation;
+    if (!camera.set_enabled(false) || !frames(window, renderer, 2) || !renderer.vsm_status(vsm) ||
+        !expect(vsm.state == VsmState::disabled && !vsm.resident_pages && !vsm.resident_bytes,
+                "a scene without a drawable camera retires virtual shadow state") ||
+        !camera.set_enabled(true) || !expect(settle_vsm() && vsm.generation > original_generation,
+                                            "restoring the camera warms a new VSM generation") ||
+        !capture(window, renderer, cached_image, shadow_stats) ||
+        !pixels(virtual_image, cached_image, "restoring the camera reconstructs virtual shadows"))
+    {
+        return 1;
+    }
+    const auto old_cache = vsm.cache_revision;
+    auto moved_pose = test_support::read_settings(visible[0].node().get_component<Transform>());
+    const auto original_pose = moved_pose;
+    moved_pose.position.mutate_x(moved_pose.position.x() + .4);
+    if (!visible[0].node().get_component<Transform>().set_settings(moved_pose) ||
+        !expect(settle_vsm() && vsm.cache_revision > old_cache,
+                "moving a caster refreshes cached virtual shadows") ||
+        !capture(window, renderer, moved_image, shadow_stats) ||
+        !expect(moved_image.rgba != cached_image.rgba, "moving caster changes rendered pixels") ||
+        !visible[0].node().get_component<Transform>().set_settings(original_pose))
+    {
+        return 1;
+    }
+    shadow_settings.shadow_method = schema::ShadowMethod::shadow_map;
+    if (!light.set_settings(shadow_settings) ||
+        !capture(window, renderer, shadow_restored, shadow_stats) ||
+        !pixels(shadow_instanced, shadow_restored, "disabling VSM restores ordinary shadows") ||
+        !renderer.vsm_status(vsm) ||
+        !expect(vsm.state == VsmState::disabled && !vsm.resident_pages && !vsm.resident_bytes,
+                "disabling VSM releases its resident state"))
+    {
+        return 1;
+    }
     std::printf("render submission: draws %u -> %u -> %u; LOD triangles %llu -> %llu\n",
                 all_stats.draw_calls, cull_stats.draw_calls, instance_stats.draw_calls,
                 static_cast<unsigned long long>(cull_stats.direct_triangles),

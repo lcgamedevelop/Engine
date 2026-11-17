@@ -539,7 +539,7 @@ bool test_scene_publication_order(const EngineConfig& config, const RuntimeParal
 {
     test_support::ResourceFixture fixture;
     schema::SceneDataT replacement;
-    replacement.schema_version = 5;
+    replacement.schema_version = 6;
     replacement.info = std::make_unique<schema::SceneInfoT>();
     replacement.info->name = "Replacement";
     test_support::ResourceServices services;

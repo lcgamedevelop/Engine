@@ -16,6 +16,8 @@ import EcsManyObjects from "../modules/ecs-many-objects.js";
 import RenderFeatures from "../modules/render-features.js";
 import MeshletCulling from "../modules/meshlet-culling.js";
 
+import VirtualShadows from "../modules/virtual-shadows.js";
+
 export type ShowcaseGame = Gameplay & { scene: Scene | null };
 
 export interface ShowcaseCase {
@@ -110,4 +112,9 @@ export const showcase_cases: readonly ShowcaseCase[] = [
         scene: "scenes/terrain-world.scene", game: TerrainWorld,
     },
 
+    {
+        id: "virtual-shadows", button: "scene-vsm", title: "Virtual shadow maps",
+        goal: "Inspect stable cached shadows, thin casters, moving objects and ordinary shadow fallback.",
+        scene: "scenes/virtual-shadows.scene", game: VirtualShadows,
+    },
 ];

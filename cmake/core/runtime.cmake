@@ -52,6 +52,10 @@ if(ENGINE_ENABLE_RUNTIME_DEPS)
                 src/engine/runtime/render/render_extension.cpp
                 src/engine/runtime/render/render_math.cpp
                 src/engine/runtime/render/render_settings.cpp
+                src/engine/runtime/render/render_vsm.cpp
+                src/engine/runtime/render/vsm/virtual_shadow_cache.cpp
+                src/engine/runtime/render/vsm/virtual_shadow_pass.cpp
+                src/engine/runtime/render/vsm/vsm_debug_view.cpp
                 src/engine/runtime/render/render_rvt.cpp
                 src/engine/runtime/render/rvt/virtual_texture_cache.cpp
                 src/engine/runtime/render/rvt/rvt_pass.cpp
@@ -95,13 +99,14 @@ if(ENGINE_ENABLE_RUNTIME_DEPS)
                 bgfx::bx
                 basisu::basisu_encoder)
     include(${PROJECT_SOURCE_DIR}/cmake/core/render_shaders.cmake)
-    engine_embed_render_shaders(engine_render shadow shadow_instanced movie rvt_debug)
+    engine_embed_render_shaders(engine_render shadow shadow_instanced movie rvt_debug vsm_debug)
     engine_embed_upstream_feature_shaders(engine_render)
     engine_embed_assao_shaders(engine_render)
     engine_embed_skinning_shader(engine_render)
     engine_embed_meshlet_shaders(engine_render)
     engine_embed_hdr_shaders(engine_render)
     engine_embed_clustered_shader(engine_render)
+    engine_embed_vsm_shaders(engine_render)
     engine_embed_ssr_shaders(engine_render)
     engine_configure_platform_graphics()
 

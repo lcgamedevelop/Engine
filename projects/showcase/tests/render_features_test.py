@@ -450,25 +450,100 @@ export default function(_args: unknown, gameplay: unknown) {
     print("PASS Meshlet GPU visibility, scene toggle, LOD/material fallbacks, debug isolation, pixels and cleanup", flush=True)
 
 
+def vsm_check(session, results, output):
+    status = get_status(session)
+    require(status.get("editorAlive"), "Start the imported showcase editor first")
+    if not status.get("running"):
+        status = lifecycle(session, "start_project", "running")
+    run = status["runId"]
+    source = """
+import { Light, Transform } from "engine";
+import VirtualShadows from "./modules/virtual-shadows.js";
+export default function(args: { method?: 0 | 1; move?: boolean }, gameplay: unknown) {
+    const menu = gameplay as {active: VirtualShadows | null; model: {selected: {id: string} | null; error: string | null}};
+    const lab = menu.active instanceof VirtualShadows ? menu.active : null;
+    const light = lab?.scene?.FindNode("Sun")?.GetComponent(Light);
+    let accepted = true;
+    if (args?.method !== undefined) accepted = !!light?.SetShadowMethod(args.method);
+    if (args?.move !== undefined) accepted = !!lab?.scene?.FindNode("Moving caster")?.GetComponent(Transform)?.SetPosition(args.move ? 4 : 0, 1.5, 5);
+    return {selected: menu.model.selected?.id ?? null, error: menu.model.error, accepted, rendering: lab?.Inspect() ?? null};
+}
+"""
+    def control(arguments=None):
+        result = execute(session, run, source, arguments or {}, "mcp-virtual-shadows.ts")
+        require(result["error"] is None and result["accepted"], f"VSM scene operation failed: {result}")
+        return result
+
+    require(control()["selected"] is None, "Return to the menu before VSM checks")
+    click(session, "scene-vsm")
+    wait_for("VSM scene", control, lambda row: row["rendering"] is not None, session.timeout)
+
+    def ready(after=0):
+        def read():
+            row = session.call("get_vsm_status")
+            require(row["state"] not in {"failed", "unsupported"}, f"VSM failed: {row}")
+            return row
+        return wait_for("resident VSM receiver pages", read,
+            lambda row: row["state"] == "ready" and row["demandedPages"] > 0 and
+                row["fallbackPages"] == 0 and row["redrawnPages"] == 0 and
+                int(row["submissionId"]) > after and row["frame"]["ready"], session.timeout)
+
+    results["initial"] = ready()
+    capture_for_review(session, results, output, "virtual-shadows")
+    results["cached"] = ready(int(results["initial"]["submissionId"]))
+    require(results["cached"]["cacheRevision"] == results["initial"]["cacheRevision"],
+            "Static VSM pages were unnecessarily invalidated")
+    control({"move": True})
+    results["moved"] = ready(int(results["cached"]["submissionId"]))
+    require(int(results["moved"]["cacheRevision"]) > int(results["cached"]["cacheRevision"]),
+            "Moving caster did not invalidate the shadow cache")
+    capture_for_review(session, results, output, "moved-caster")
+    session.call("set_render_feature", {"feature": "vsm_viewer", "enabled": True})
+    for mode in ("overview", "virtual_depth", "physical_atlas", "page_table", "residency", "invalidated"):
+        receipt = session.call("set_vsm_debug_options", {"mode": mode, "clipmapLevel": -1})
+        wait_for("rendered VSM diagnostics", lambda: session.call("get_vsm_debug_options"),
+            lambda row: row["frameDebugVisible"] and row["effective"] and
+                row["frameDebugRevision"] == receipt["revision"], session.timeout)
+        capture_for_review(session, results, output, mode)
+    expect_failure(session, "set_vsm_debug_options", {"mode": "overview", "clipmapLevel": 16})
+    expect_failure(session, "set_vsm_debug_options", {"mode": "overview", "clipmapLevel": 15})
+    session.call("set_render_feature", {"feature": "vsm_viewer", "enabled": False})
+    wait_feature(session, "vsm_viewer", False)
+    control({"method": 0})
+    results["disabled"] = wait_for("VSM release", lambda: session.call("get_vsm_status"),
+        lambda row: row["state"] == "disabled" and row["residentBytes"] == "0", session.timeout)
+    capture_for_review(session, results, output, "ordinary-shadows")
+    control({"method": 1})
+    results["reenabled"] = ready()
+    require(results["reenabled"]["generation"] != results["initial"]["generation"],
+            "Re-enabling VSM accepted a retired cache generation")
+    capture_for_review(session, results, output, "reenabled")
+    click(session, "back-menu")
+    wait_for("VSM scene cleanup", control, lambda row: row["selected"] is None, session.timeout)
+    wait_for("VSM cleanup", lambda: session.call("get_vsm_status"),
+        lambda row: row["state"] == "disabled" and row["residentPages"] == 0, session.timeout)
+    print("PASS VSM cache reuse, dynamic invalidation, MCP diagnostics, toggle and cleanup", flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--server", required=True, type=Path)
     parser.add_argument("--runtime-dir", required=True, type=Path)
     parser.add_argument("--timeout", type=float, default=180)
-    parser.add_argument("--case", choices=("rendering", "meshlets"), default="rendering")
+    parser.add_argument("--case", choices=("rendering", "meshlets", "vsm"), default="rendering")
     args = parser.parse_args()
     if args.timeout <= 0:
         parser.error("--timeout must be positive")
     label = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8]
-    output = (PROJECT / "cache" / "visual-tests" / "meshlet-culling" / label if args.case == "meshlets"
-              else PROJECT / "cache" / "render-features" / label)
+    directory = {"rendering": "render-features", "meshlets": "meshlet-culling", "vsm": "virtual-shadows"}[args.case]
+    output = PROJECT / "cache" / "visual-tests" / directory / label
     output.mkdir(parents=True, exist_ok=False)
-    results = {"passed": False, "objects": 29 if args.case == "meshlets" else 384,
+    results = {"passed": False, "case": args.case,
                "timingsCollected": False}
     try:
         with EditorMcpSession(args.server, PROJECT, args.runtime_dir, output / "receipts.jsonl",
                               timeout=args.timeout) as session:
-            (meshlet_check if args.case == "meshlets" else check)(session, results, output)
+            {"meshlets": meshlet_check, "vsm": vsm_check, "rendering": check}[args.case](session, results, output)
         results["functionalChecksPassed"] = True
         require(not results.get("invalidCaptures"),
                 f"Screenshots are black or could not be inspected: {results.get('invalidCaptures')}")

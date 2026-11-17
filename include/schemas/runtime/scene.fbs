@@ -12,6 +12,13 @@ table TransformData {
 }
 
 enum LightKind:ubyte { directional, point, spot }
+enum ShadowMethod:ubyte { shadow_map, virtual_shadow_map }
+
+table VsmSettings {
+    virtual_resolution:uint = 16384;
+    first_clipmap_extent:double = 16;
+    lod_bias:float = 0;
+}
 
 table LightData {
     color:Color (required, native_inline, native_default: "Color(1.0f, 1.0f, 1.0f, 1.0f)");
@@ -27,6 +34,8 @@ table LightData {
     shadow_distance:float = 150;
     shadow_split_lambda:float = 0.6;
     shadow_cascade_blend:float = 0.1;
+    shadow_method:ShadowMethod = shadow_map;
+    virtual_shadow:VsmSettings;
 }
 
 table MeshRendererData {

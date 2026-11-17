@@ -52,7 +52,7 @@ bool register_render_tools(McpSystem& system, EditorMcpTools& editor)
          {"frustum_culling", "static_instancing", "static_lod", "wireframe", "debug_draw",
           "mesh_bounds", "camera_frusta", "stats", "atmosphere", "hex_tiling", "meshlet_culling",
           "meshlet_bounds", "meshlet_colors", "meshlet_statistics", "rvt_viewer", "rvt_pages",
-          "rvt_residency", "rvt_invalidated"}}};
+          "rvt_residency", "rvt_invalidated", "vsm_viewer"}}};
     feature["enabled"] = {{"type", "boolean"}};
     const auto vector =
         Json{{"type", "array"}, {"items", {{"type", "number"}}}, {"minItems", 3}, {"maxItems", 3}};
@@ -147,6 +147,21 @@ bool register_render_tools(McpSystem& system, EditorMcpTools& editor)
     lod_set["screenHeights"] = lod_set["triangleRatios"];
     lod_set["maxRelativeError"] = {{"type", "number"}, {"minimum", 0}, {"maximum", 1}};
     return feature_set &&
+           add("get_vsm_status", "Read virtual shadow residency and actual frame evidence.",
+               object_schema(Json::object(), Json::array())) &&
+           add("get_vsm_debug_options",
+               "Read temporary virtual shadow viewer settings and frame revision.",
+               object_schema(Json::object(), Json::array())) &&
+           add("set_vsm_debug_options",
+               "Select live virtual shadow depth, atlas and page table views.",
+               object_schema(
+                   {{"mode",
+                     {{"type", "string"},
+                      {"enum",
+                       {"overview", "virtual_depth", "physical_atlas", "page_table", "residency",
+                        "invalidated"}}}},
+                    {"clipmapLevel", {{"type", "integer"}, {"minimum", -1}, {"maximum", 15}}}},
+                   Json::array({"mode", "clipmapLevel"}))) &&
            add("get_rvt_status", "Read actual RVT residency, versions and fallback reason.",
                object_schema(Json::object(), Json::array())) &&
            add("get_rvt_debug_options", "Read temporary live texture viewer options and revision.",

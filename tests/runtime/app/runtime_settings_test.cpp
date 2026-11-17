@@ -44,7 +44,9 @@ int main(int argc, char* argv[])
                     settings.parallel.threads.worker_limit == 2 &&
                     settings.parallel.file.max_concurrency == 4 &&
                     settings.parallel.resources.max_in_flight == 3 &&
-                    settings.parallel.rendering.texture_batch_size == 2,
+                    settings.parallel.rendering.texture_batch_size == 2 &&
+                    settings.parallel.rendering.vsm_physical_pages == 512 &&
+                    settings.parallel.rendering.vsm_pages_per_frame == 16,
                 "complete grouped settings supply the game, engine and runtime budgets"))
     {
         return 1;
@@ -93,6 +95,8 @@ int main(int argc, char* argv[])
         R"({"parallel":{"completion_budget_seconds":2}})",
         R"({"parallel":{"navigation_tile_threshold":1025}})",
         R"({"parallel":{"rendering":{"texture_batch_size":65}}})",
+        R"({"parallel":{"rendering":{"vsm_physical_pages":0}}})",
+        R"({"parallel":{"rendering":{"vsm_pages_per_frame":17}}})",
         R"({"parallel":{"rendering":{"prepare_items_per_step":0}}})",
         R"({"parallel":{"rendering":{"prepare_seconds_per_step":0}}})",
         R"({"parallel":{"rendering":{"upload_bytes_per_step":0}}})",

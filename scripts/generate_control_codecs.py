@@ -17,10 +17,10 @@ enums = {}
 tables = {}
 for schema_name, text in texts:
     for name, body in re.findall(r'enum\s+(\w+)\s*:\w+\s*\{([^}]+)\}', text):
-        if schema_name in ('terrain', 'scene', 'common') and name != 'RvtRole': continue
+        if schema_name in ('terrain', 'scene', 'common') and name not in ('RvtRole', 'ShadowMethod'): continue
         enums[name] = [v.strip().split('=')[0].strip() for v in body.split(',') if v.strip()]
     for name, body in re.findall(r'table\s+(\w+)\s*\{([^}]+)\}', text):
-        if schema_name in ('terrain', 'scene', 'common') and name not in ('TerrainData', 'TerrainViewData', 'TerrainBudgetData', 'RvtSettings'): continue
+        if schema_name in ('terrain', 'scene', 'common') and name not in ('TerrainData', 'TerrainViewData', 'TerrainBudgetData', 'RvtSettings', 'VsmSettings'): continue
         fields = []
         for item in body.split(';'):
             if not item.strip(): continue
@@ -147,7 +147,7 @@ def describe(ty):
         raise ValueError(f'Unsupported control schema type: {ty}')
     return {'type': {'string': 'string', 'bool': 'boolean'}.get(ty, 'number')}
 
-for root in ('CameraControllerData', 'CharacterControllerData', 'CharacterCameraData', 'TerrainData', 'RvtSettings'):
+for root in ('CameraControllerData', 'CharacterControllerData', 'CharacterCameraData', 'TerrainData', 'RvtSettings', 'VsmSettings'):
     encoded = json.dumps(describe(root), separators=(',', ':'))
     out += [f'inline Json describe(const {root}T*){{return Json::parse(R"schema({encoded})schema",nullptr,false);}}']
 out += ['} // namespace engine::schema::control_json']

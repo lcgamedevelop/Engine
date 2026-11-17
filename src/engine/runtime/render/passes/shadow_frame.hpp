@@ -38,6 +38,7 @@ struct LocalShadowLight
     std::uint32_t light_index = 0;
     LightSettings settings{};
     std::array<float, 16> world{};
+    std::uint64_t instance_id = 0;
 };
 
 struct ShadowBounds

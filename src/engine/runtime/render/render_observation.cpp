@@ -289,6 +289,13 @@ RenderFrameSnapshot RenderSystem::submitted_frame(RenderFrameKind kind) const
         rvt_status_.effective && rvt_status_.ready_pages == rvt_status_.required_pages;
     frame.rvt_debug_revision = rvt_debug_revision_;
     frame.rvt_debug_visible = rvt_debug_visible_;
+    frame.vsm_generation = vsm_status_.generation;
+    frame.vsm_view_revision = vsm_status_.view_revision;
+    frame.vsm_demand_revision = vsm_status_.demand_revision;
+    frame.vsm_cache_revision = vsm_status_.cache_revision;
+    frame.vsm_debug_revision = vsm_debug_revision_;
+    frame.vsm_debug_visible = vsm_debug_visible_;
+    frame.vsm_ready = vsm_status_.state == VsmState::ready;
     if (scene_resources_ && kind == RenderFrameKind::scene)
     {
         for (const auto& view : scene_resources_->view_stats)

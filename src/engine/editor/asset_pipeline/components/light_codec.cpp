@@ -1,4 +1,6 @@
 #include "editor/asset_pipeline/components/light_codec.hpp"
+#include "editor/asset_pipeline/control_toml.hpp"
+#include "runtime/schema/control_json_generated.hpp"
 
 #include "runtime/scene/scene_settings_validation.hpp"
 
@@ -39,6 +41,26 @@ bool LightCodec::read(const toml::table& table, schema::ComponentDataT& componen
 {
 
     schema::LightDataT value;
+    if (const auto* source = table.get("shadow_method"))
+    {
+        auto name = source->value<std::string>();
+        if (!name || !schema::control_json::read(nlohmann::json(*name), value.shadow_method, error,
+                                                 false, "shadow_method"))
+        {
+            return false;
+        }
+    }
+    if (const auto* source = table.get("virtual_shadow"))
+    {
+        const auto* data = source->as_table();
+        nlohmann::json json;
+        value.virtual_shadow = std::make_unique<schema::VsmSettingsT>();
+        if (!data || !control_toml::read_table(*data, json, error) ||
+            !schema::control_json::read(json, *value.virtual_shadow, error))
+        {
+            return false;
+        }
+    }
     std::array<double, 4> color{1, 1, 1, 1};
     if ((table.contains("color") && !numbers(table.get("color"), color)) ||
         (table.contains("intensity") && !float_number(table.get("intensity"), value.intensity)) ||
@@ -136,6 +158,13 @@ void LightCodec::write(const schema::ComponentDataT& component, toml::table& val
     value.insert("shadow_distance", light->shadow_distance);
     value.insert("shadow_split_lambda", light->shadow_split_lambda);
     value.insert("shadow_cascade_blend", light->shadow_cascade_blend);
+    value.insert("shadow_method", schema::EnumNameShadowMethod(light->shadow_method));
+    if (light->virtual_shadow)
+    {
+        toml::table settings;
+        control_toml::write_table(schema::control_json::write(*light->virtual_shadow), settings);
+        value.insert("virtual_shadow", std::move(settings));
+    }
 }
 
 } // namespace engine::editor::asset_pipeline

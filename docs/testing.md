@@ -157,7 +157,19 @@ macOS arm64 已通过受影响目标的 Debug / Release 构建；Release 的上�
 
 私有真实资源沿同一导入和渲染链路检查。等待普通画面连续稳定后，普通／Meshlet／关闭后恢复三张完整截图逐像素一致，最大通道差值为 0。独立色块视图也完成稳定帧截图，关闭后完整 PBR 截图逐像素恢复；色块启停没有改变场景剔除开关。该镜头未开启视锥剔除，因此本次只证明真实资源的路径与画面一致性，不将其用于视锥剔除效果或性能结论；公开用例另有透视、正交视锥覆盖。私有资产、源 meta、回执及截图全部留在私有项目自身的忽略目录。
 
-公开结果与完整回执保存在项目 `cache/visual-tests/meshlet-culling/<run-id>/`，私有结果在自身 `cache/meshlet-validation/`；使用同目录自包含 `review.html` 查看截图。操作入口和夹具说明统一见[项目文档](../projects/showcase/docs/meshlet-culling.md)。上述结果仅覆盖本机 Metal，不包含 Windows、Android、iOS、WebGPU 或性能测量，也不代表所有场景的视觉质量验收。格式为 Mesh `EMS2`／版本 2、Shader `ESH2`／版本 2、Scene／Prefab 版本 4；旧缓存与运行包须从源资源重新生成。
+公开结果与完整回执保存在项目 `cache/visual-tests/meshlet-culling/<run-id>/`，私有结果在自身 `cache/meshlet-validation/`；使用同目录自包含 `review.html` 查看截图。操作入口和夹具说明统一见[项目文档](../projects/showcase/docs/meshlet-culling.md)。上述结果仅覆盖本机 Metal，不包含 Windows、Android、iOS、WebGPU 或性能测量，也不代表所有场景的视觉质量验收。资源只接受当前格式，旧缓存与运行包须从源资源重新生成。
+
+## 方向光虚拟阴影
+
+macOS arm64 / Metal / QuickJS，使用根预设派生的 Ninja、ccache 配置。受影响目标的 Debug、Release 编译和链接通过，Debug 未运行测试。Release 的 11 项相关检查通过：`editor.commands`、`engine.render_foundation`、`engine.scene_data`、`engine.scene_schema_cross_language`、`editor.scene_persistence`、`engine.architecture_boundaries`、`engine.architecture_rules`、`resource.codecs`、`engine.runtime_settings`、`editor.runtime_settings`、`engine.render_submission`。没有重跑全量用例。
+
+CPU 检查覆盖固定页预算、未发布批次取消、过期反馈拒绝、镜头移动复用、投影物旧/新范围失效和代次隔离；组件与编辑检查覆盖方向光限制、参数原子校验、序列化及精确撤销/重做。Metal 用例验证 GPU 需求反馈、静态缓存的严格 HDR 像素一致性、物体移动后的更新，以及关闭后恢复原 CSM 画面和释放缓存。镜头禁用时的缓存清理回归在修复前复现失败、修复后通过；恢复镜头建立新代次，重建的阴影画面逐像素一致。Scene／Prefab 使用版本 6；旧二进制不兼容读取，项目源资源经现有导入链重新生成。
+
+公开标准场景通过实际菜单进入，并用同一运行实例的 MCP 检查静态零重绘、移动箱体、六种调试模式、非法级别拒绝、关闭/重开和返回菜单清理。归档 10 张 PNG，包含普通画面、移动后画面、虚拟深度/图集/页表等诊断及关闭/恢复对照。固定镜头最终 425 个需求页全部就绪，缺页为 0。真实资源本机验证另归档 3 张截图，覆盖 VSM、实时诊断及 VSM/RVT 同时显示；三张回执均包含实际场景帧的 `vsmReady=true`，RVT 同时开启时也为 ready。私有资源、脚本和截图只保存在私有项目忽略目录。
+
+公开结果在 `projects/showcase/cache/visual-tests/virtual-shadows/<run-id>/`；`result.json` 和 `receipts.jsonl` 保留实际提交帧及 VSM 修订。调用方式见[公开 VSM 场景](../projects/showcase/docs/virtual-shadows.md)，运行契约见[VSM 类图](runtime/class-diagrams/virtual-shadow-maps.md)。CPU 状态 ready 不能替代截图帧证据；镜头还在移动时允许继续预热，不把缺页的 CSM 底图算作已就绪的 VSM。
+
+6 个受影响 Shader 另通过 SPIR-V 与 WGSL 编译；这不是 Windows／Android／iOS／浏览器的实际运行验收。设备恢复及全部蒙皮、地形变形、破坏组合尚未逐项实机验证。首版限主视图的一盏方向光，透明、反射、烘焙和缺页沿用 CSM；未实现 SMRT、局部灯 VSM 或静动双缓存，也未测量性能收益。
 
 ## 镜头与角色模块验证
 

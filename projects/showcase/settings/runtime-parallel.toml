@@ -92,6 +92,8 @@ maximum_cluster_lights = 64
 shadow_atlas_size = 4096
 local_shadow_tile_size = 512
 maximum_local_shadow_faces = 24
+vsm_physical_pages = 512
+vsm_pages_per_frame = 16
 maximum_planar_reflections = 2
 
 [platform.android]
@@ -160,6 +162,8 @@ maximum_lights = 128
 maximum_cluster_lights = 32
 local_shadow_tile_size = 256
 maximum_local_shadow_faces = 12
+vsm_physical_pages = 128
+vsm_pages_per_frame = 8
 maximum_planar_reflections = 1
 
 [platform.ios]
@@ -228,6 +232,8 @@ maximum_lights = 128
 maximum_cluster_lights = 32
 local_shadow_tile_size = 256
 maximum_local_shadow_faces = 12
+vsm_physical_pages = 128
+vsm_pages_per_frame = 8
 maximum_planar_reflections = 1
 
 # 浏览器与原生共用任务系统，只调整同一进程的并行预算。

@@ -17,6 +17,8 @@
 #include "pbr_helpers.sh"
 #include "material_helpers.sh"
 #include "shadow_helpers.sh"
+#define ENGINE_VSM 1
+SAMPLER2D(s_virtual_shadow, 10);
 #include "csm_helpers.sh"
 
 #if defined(ENGINE_TERRAIN_SURFACE)
@@ -27,6 +29,7 @@
 #include "rvt_surface.sh"
 #include "cluster/lighting.sh"
 #include "local_shadow_helpers.sh"
+#include "vsm/vsm_fragment.sh"
 SAMPLER2D(s_lightmap, 6);
 SAMPLER2D(s_ambient_occlusion, 11);
 SAMPLERCUBE(s_ibl_irradiance, 12);
@@ -213,6 +216,7 @@ void main()
     }
     float output_alpha = u_surface.y > 0.5 ? surface.base_color.a : (unlit ? 0.0 : 1.0);
     if (u_surface.y > 1.5) color *= output_alpha;
+    color = vsm_debug_surface(color, v_world_position);
     gl_FragData[0] = vec4(clamp(color, vec3_splat(0.0), vec3_splat(65504.0)), output_alpha);
     gl_FragData[1] = vec4(environment_specular, reflection_attenuation);
 }

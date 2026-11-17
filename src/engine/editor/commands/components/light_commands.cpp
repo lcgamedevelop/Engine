@@ -1,6 +1,7 @@
 #include "editor/commands/components/component_edit.hpp"
 
 #include "runtime/scene/light.hpp"
+#include "runtime/schema/control_json_generated.hpp"
 
 #include <algorithm>
 
@@ -17,6 +18,15 @@ constexpr std::uint64_t outer_angle_field = std::uint64_t{1} << 5;
 constexpr std::uint64_t cast_shadows_field = std::uint64_t{1} << 6;
 constexpr std::uint64_t shadow_resolution_field = std::uint64_t{1} << 7;
 constexpr std::uint64_t shadow_bias_field = std::uint64_t{1} << 8;
+constexpr std::uint64_t shadow_method_field = std::uint64_t{1} << 9;
+constexpr std::uint64_t virtual_shadow_field = std::uint64_t{1} << 10;
+
+bool same_vsm(const LightSettings& a, const LightSettings& b)
+{
+    const schema::VsmSettingsT defaults;
+    return (a.virtual_shadow ? *a.virtual_shadow : defaults) ==
+           (b.virtual_shadow ? *b.virtual_shadow : defaults);
+}
 
 [[nodiscard]] bool change_light(const Target& target, const LightSettings& expected,
                                 const LightSettings& replacement, std::uint64_t selected,
@@ -44,7 +54,9 @@ constexpr std::uint64_t shadow_bias_field = std::uint64_t{1} << 8;
         ((selected & cast_shadows_field) && current.cast_shadows != expected.cast_shadows) ||
         ((selected & shadow_resolution_field) &&
          current.shadow_resolution != expected.shadow_resolution) ||
-        ((selected & shadow_bias_field) && current.shadow_bias != expected.shadow_bias))
+        ((selected & shadow_bias_field) && current.shadow_bias != expected.shadow_bias) ||
+        ((selected & shadow_method_field) && current.shadow_method != expected.shadow_method) ||
+        ((selected & virtual_shadow_field) && !same_vsm(current, expected)))
     {
         error = "Light changed outside this edit; undo or redo is stale";
         return false;
@@ -85,6 +97,17 @@ constexpr std::uint64_t shadow_bias_field = std::uint64_t{1} << 8;
     {
         current.shadow_bias = replacement.shadow_bias;
     }
+    if (selected & shadow_method_field)
+    {
+        current.shadow_method = replacement.shadow_method;
+    }
+    if (selected & virtual_shadow_field)
+    {
+        current.virtual_shadow =
+            replacement.virtual_shadow
+                ? std::make_unique<schema::VsmSettingsT>(*replacement.virtual_shadow)
+                : nullptr;
+    }
     if (!component.set_settings(current))
     {
         error = "Invalid light values";
@@ -99,9 +122,9 @@ bool prepare_light(WorldSystem& world, NodeAliases& aliases, const Json& argumen
                    std::unique_ptr<EditorEdit>& output, std::string& error)
 {
     Target target(world, &aliases);
-    if (!fields(arguments,
-                {"sceneId", "nodeId", "color", "intensity", "kind", "range", "innerAngle",
-                 "outerAngle", "castShadows", "shadowResolution", "shadowBias"}) ||
+    if (!fields(arguments, {"sceneId", "nodeId", "color", "intensity", "kind", "range",
+                            "innerAngle", "outerAngle", "castShadows", "shadowResolution",
+                            "shadowBias", "shadowMethod", "virtualShadow"}) ||
         arguments.size() <= 2 || !target.read(arguments, error))
     {
         if (error.empty())
@@ -236,6 +259,24 @@ bool prepare_light(WorldSystem& world, NodeAliases& aliases, const Json& argumen
             selected |= outer_angle_field;
             after.outer_angle = static_cast<float>(value);
         }
+    }
+    if (arguments.contains("shadowMethod"))
+    {
+        if (!schema::control_json::read(arguments["shadowMethod"], after.shadow_method, error,
+                                        false, "shadowMethod"))
+        {
+            return false;
+        }
+        selected |= shadow_method_field;
+    }
+    if (arguments.contains("virtualShadow"))
+    {
+        after.virtual_shadow = std::make_unique<schema::VsmSettingsT>();
+        if (!schema::control_json::read(arguments["virtualShadow"], *after.virtual_shadow, error))
+        {
+            return false;
+        }
+        selected |= virtual_shadow_field;
     }
     result = {{"sceneId", std::to_string(target.scene_id)}};
     output = std::make_unique<PropertyEdit<schema::LightDataT>>(

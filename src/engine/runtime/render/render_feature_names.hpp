@@ -8,10 +8,23 @@
 namespace engine::render_detail
 {
 inline constexpr std::array<std::string_view, static_cast<std::size_t>(RenderFeature::count)>
-    feature_names{"frustum_culling", "static_instancing", "static_lod",         "meshlet_culling",
-                  "wireframe",       "debug_draw",        "mesh_bounds",        "camera_frusta",
-                  "meshlet_bounds",  "meshlet_colors",    "meshlet_statistics", "rvt_viewer",
-                  "rvt_pages",       "rvt_residency",     "rvt_invalidated",    "stats"};
+    feature_names{"frustum_culling",
+                  "static_instancing",
+                  "static_lod",
+                  "meshlet_culling",
+                  "wireframe",
+                  "debug_draw",
+                  "mesh_bounds",
+                  "camera_frusta",
+                  "meshlet_bounds",
+                  "meshlet_colors",
+                  "meshlet_statistics",
+                  "rvt_viewer",
+                  "rvt_pages",
+                  "rvt_residency",
+                  "rvt_invalidated",
+                  "vsm_viewer",
+                  "stats"};
 
 inline bool parse_feature(std::string_view name, RenderFeature& output) noexcept
 {

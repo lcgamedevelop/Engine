@@ -2,6 +2,7 @@
 
 #include <bgfx/bgfx.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 
@@ -16,6 +17,11 @@ inline constexpr std::uint16_t output_present_view = 202;
 inline constexpr std::uint16_t output_capture_view = 203;
 inline constexpr std::uint16_t rvt_page_view = 216;
 inline constexpr std::uint16_t maximum_rvt_views = 16;
+inline constexpr std::array<bgfx::ViewId, 16> vsm_page_views = {
+    192, 193, 194, 195, 196, 197, 198, 199, 204, 205, 206, 207, 208, 209, 210, 211};
+inline constexpr bgfx::ViewId vsm_feedback_clear_view = 212;
+inline constexpr bgfx::ViewId vsm_feedback_view = 213;
+inline constexpr bgfx::ViewId vsm_debug_view = 214;
 
 inline constexpr std::uint16_t skinning_view = 0;
 inline constexpr std::uint16_t atmosphere_transmittance_view = 1;

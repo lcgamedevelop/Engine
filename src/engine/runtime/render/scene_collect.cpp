@@ -317,6 +317,7 @@ bool RenderSystem::SceneGpuResources::collect_frame(WorldSystem& world, const Ve
             }
             render_detail::LocalShadowLight value;
             value.node_id = entity.id();
+            value.instance_id = stored.state.instance_id;
             value.settings = stored.data;
             const auto transform = node.get_component<Transform>();
             double matrix[16];

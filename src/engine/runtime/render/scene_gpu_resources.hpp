@@ -208,13 +208,11 @@ struct RenderSystem::SceneGpuResources
     [[nodiscard]] bool collect_view(const render_detail::RenderFrameData& frame,
                                     const render_detail::SceneDrawView& view,
                                     render_detail::ViewDrawList& output);
-    [[nodiscard]] bool prepare_lighting(const render_detail::RenderFrameData& frame_data,
-                                        const RenderSettings& settings, const RenderConfig& config,
-                                        render_detail::SceneDrawView& draw,
-                                        const CameraSettings& lens,
-                                        render_detail::ShadowFrame& frame,
-                                        std::size_t cluster_index, bgfx::ViewId base,
-                                        const SceneCaptureRequest* capture);
+    [[nodiscard]] bool prepare_lighting(
+        const render_detail::RenderFrameData& frame_data, const RenderSettings& settings,
+        const RenderConfig& config, render_detail::SceneDrawView& draw, const CameraSettings& lens,
+        render_detail::ShadowFrame& frame, std::size_t cluster_index, bgfx::ViewId base,
+        const SceneCaptureRequest* capture, const render_detail::VsmPageBatch* vsm);
     [[nodiscard]] bool draw_meshes(const render_detail::RenderFrameData& frame,
                                    render_detail::ViewDrawList& list,
                                    const RenderSettings& settings,

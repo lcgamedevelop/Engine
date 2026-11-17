@@ -72,7 +72,9 @@
       "shadow_atlas_size": 4096,
       "local_shadow_tile_size": 512,
       "maximum_local_shadow_faces": 24,
-      "maximum_planar_reflections": 2
+      "maximum_planar_reflections": 2,
+      "vsm_physical_pages": 512,
+      "vsm_pages_per_frame": 16
     },
     "file": {
       "max_concurrency": 4,

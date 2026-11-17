@@ -104,6 +104,20 @@ namespace engine::scene_detail
 
 [[nodiscard]] inline bool valid_light(const LightSettings& settings) noexcept
 {
+    const schema::VsmSettingsT defaults;
+    const auto& vsm = settings.virtual_shadow ? *settings.virtual_shadow : defaults;
+    if (settings.shadow_method < schema::ShadowMethod::MIN ||
+        settings.shadow_method > schema::ShadowMethod::MAX ||
+        (settings.shadow_method == schema::ShadowMethod::virtual_shadow_map &&
+         settings.kind != schema::LightKind::directional) ||
+        vsm.virtual_resolution < 4096 || vsm.virtual_resolution > 32768 ||
+        (vsm.virtual_resolution & (vsm.virtual_resolution - 1)) != 0 ||
+        !std::isfinite(vsm.first_clipmap_extent) || vsm.first_clipmap_extent <= 0 ||
+        !std::isfinite(vsm.lod_bias) || vsm.lod_bias < -2 || vsm.lod_bias > 4 ||
+        std::ldexp(vsm.first_clipmap_extent, 15) < settings.shadow_distance)
+    {
+        return false;
+    }
     return valid_color(settings.color) && std::isfinite(settings.intensity) &&
            settings.intensity >= 0.0F && settings.kind >= schema::LightKind::MIN &&
            settings.kind <= schema::LightKind::MAX && std::isfinite(settings.range) &&

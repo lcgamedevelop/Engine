@@ -177,12 +177,13 @@ bool GpuProgram::create(const schema::ShaderDataT& shader)
                 name == "u_fog_color" || name == "u_fog_range" || name == "u_shadow_matrices" ||
                 name == "u_shadow_rects" || name == "u_shadow_splits" ||
                 name == "u_shadow_params" || name == "u_shadow_settings" ||
-                name == "u_shadow_depth" || name == "s_shadow_map" || name == "u_ibl_params" ||
-                name == "s_ibl_irradiance" || name == "s_ibl_prefilter" || name == "s_ibl_lut" ||
-                name == "s_ambient_occlusion" || name == "u_ambient_occlusion" ||
-                name == "u_cluster_grid" || name == "u_cluster_camera" ||
-                name == "u_cluster_counts" || name == "u_cluster_viewport" ||
-                name == "u_frame_inputs" || name == "u_frame_time" || name == "u_frame_valid" ||
+                name == "u_shadow_depth" || name == "u_vsm_layout" || name == "s_virtual_shadow" ||
+                name == "s_shadow_map" || name == "u_ibl_params" || name == "s_ibl_irradiance" ||
+                name == "s_ibl_prefilter" || name == "s_ibl_lut" || name == "s_ambient_occlusion" ||
+                name == "u_ambient_occlusion" || name == "u_cluster_grid" ||
+                name == "u_cluster_camera" || name == "u_cluster_counts" ||
+                name == "u_cluster_viewport" || name == "u_frame_inputs" ||
+                name == "u_frame_time" || name == "u_frame_valid" ||
                 name == "u_planar_projection" || name == "u_lighting_params" ||
                 name == "u_probe_sh" || name == "s_lightmap" || name == "u_capture_mode" ||
                 name == "u_rvt_bounds" || name == "u_rvt_layout" || name == "u_rvt_parameters" ||
@@ -191,10 +192,11 @@ bool GpuProgram::create(const schema::ShaderDataT& shader)
                 const auto type = name == "u_normal_transform" || name == "u_shadow_matrices" ||
                                           name == "u_planar_projection"
                                       ? bgfx::UniformType::Mat4
-                                  : name == "s_shadow_map" || name == "s_ibl_irradiance" ||
-                                          name == "s_ibl_prefilter" || name == "s_ibl_lut" ||
-                                          name == "s_ambient_occlusion" || name == "s_lightmap" ||
-                                          name == "s_rvt_atlas" || name == "s_rvt_table"
+                                  : name == "s_virtual_shadow" || name == "s_shadow_map" ||
+                                          name == "s_ibl_irradiance" || name == "s_ibl_prefilter" ||
+                                          name == "s_ibl_lut" || name == "s_ambient_occlusion" ||
+                                          name == "s_lightmap" || name == "s_rvt_atlas" ||
+                                          name == "s_rvt_table"
                                       ? bgfx::UniformType::Sampler
                                       : bgfx::UniformType::Vec4;
                 const auto expected_count =

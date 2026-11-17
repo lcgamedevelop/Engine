@@ -167,7 +167,7 @@ bool codec_tests()
         return false;
     }
     schema::SceneDataT scene;
-    scene.schema_version = 5;
+    scene.schema_version = 6;
     scene.info = std::make_unique<schema::SceneInfoT>();
     auto node = std::make_unique<schema::NodeDataT>();
     node->info = test_support::node_info();
@@ -359,7 +359,7 @@ bool codec_tests()
     if (!expect(resource_detail::data<MeshResource>(mesh_resource.get()) &&
                     resource_detail::data<MeshResource>(mesh_resource.get())->path == "cube.mesh" &&
                     mesh_resource->generation() < resources.generation() &&
-                    resource_detail::data<SceneResource>(scene_resource.get())->schema_version == 5,
+                    resource_detail::data<SceneResource>(scene_resource.get())->schema_version == 6,
                 "failed new-generation decoding never mutates old live models"))
     {
         return false;
