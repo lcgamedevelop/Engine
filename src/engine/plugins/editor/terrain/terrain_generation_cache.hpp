@@ -4,8 +4,8 @@
 
 namespace engine::plugins::terrain
 {
-// The revision covers the selected generator and the canonical local recipe contract.
-inline constexpr auto terrain_generation_revision = "generator-6";
+// Canonical local recipe/cache format; the selected generator supplies its own identity.
+inline constexpr auto terrain_generation_revision = "blocks-7";
 [[nodiscard]] bool generate_terrain_block(const TerrainGenerationInput& input,
                                           const TerrainGenerator& generator,
                                           const std::filesystem::path& cache,

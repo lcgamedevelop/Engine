@@ -154,6 +154,11 @@ double evaluate(const schema::TerrainGenerationSpecT& spec, const FastNoise::Gen
 class NoiseTerrainGenerator final : public TerrainGenerator
 {
 public:
+    std::string_view fingerprint() const noexcept override
+    {
+        return "fastnoise2-" FASTNOISE2_VERSION ":terrain-7";
+    }
+
     bool generate(const TerrainGenerationInput& input, schema::TerrainBlockDataT& output,
                   std::string& error) const override
     {

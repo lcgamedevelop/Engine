@@ -1,6 +1,7 @@
 #pragma once
 
 #include "editor/asset_pipeline/asset_importer.hpp"
+#include "plugins/editor/terrain/terrain_generator.hpp"
 
 namespace engine::plugins::terrain
 {
@@ -8,6 +9,7 @@ namespace engine::plugins::terrain
 class TerrainImporter final : public editor::asset_pipeline::AssetImporter
 {
 public:
+    explicit TerrainImporter(std::unique_ptr<TerrainGenerator> generator) noexcept;
     [[nodiscard]] std::string_view id() const noexcept override;
     [[nodiscard]] schema::AssetKind kind() const noexcept override;
     [[nodiscard]] bool matches(const std::filesystem::path& source) const override;
@@ -25,6 +27,9 @@ public:
     [[nodiscard]] bool finalize_dependencies(editor::asset_pipeline::ImportAsset& asset,
                                              const editor::asset_pipeline::ImportContext& context,
                                              std::string& error) const override;
+
+private:
+    std::unique_ptr<TerrainGenerator> generator_;
 };
 
 } // namespace engine::plugins::terrain

@@ -198,7 +198,8 @@ bool prepare_job(TerrainAuthoringJob& job, const TerrainGenerator& generator,
     // immutable, content-addressed blocks; publication itself never generates volume data.
     const auto artifact_root =
         job.project / "cache/terrain-authoring/generated" /
-        (std::string(terrain_generation_revision) + "-" + job.snapshot.content_hash);
+        (std::string(terrain_generation_revision) + "-" +
+         io::hash_text(std::string(generator.fingerprint())) + "-" + job.snapshot.content_hash);
     std::string journal_text, complete;
     if (editor::file_detail::read_text(job.workspace / "prepared.json", journal_text) &&
         editor::file_detail::read_text(artifact_root / "complete", complete) &&
@@ -214,6 +215,8 @@ bool prepare_job(TerrainAuthoringJob& job, const TerrainGenerator& generator,
             saved.value("before", std::string{}) == job.before &&
             saved.value("after", std::string{}) == job.after &&
             saved.value("existed", !job.existed) == job.existed && saved.contains("meta") &&
+            saved.contains("generator") && saved["generator"].is_string() &&
+            saved.value("generator", std::string{}) == generator.fingerprint() &&
             saved["meta"].is_string() && saved.contains("guid") && saved["guid"].is_string())
         {
             const auto guid = saved["guid"].get<std::string>();
@@ -301,14 +304,12 @@ bool prepare_job(TerrainAuthoringJob& job, const TerrainGenerator& generator,
     {
         return false;
     }
-    const nlohmann::json journal = {{"version", 1},
-                                    {"path", job.spec.path},
-                                    {"guid", job.snapshot.guid},
-                                    {"before", job.before},
-                                    {"after", job.after},
-                                    {"meta", job.metadata},
-                                    {"sourceHash", job.snapshot.content_hash},
-                                    {"existed", job.existed}};
+    const nlohmann::json journal = {
+        {"version", 1},          {"generator", std::string(generator.fingerprint())},
+        {"path", job.spec.path}, {"guid", job.snapshot.guid},
+        {"before", job.before},  {"after", job.after},
+        {"meta", job.metadata},  {"sourceHash", job.snapshot.content_hash},
+        {"existed", job.existed}};
     if (!atomic_text(job.workspace / "prepared.json", journal.dump(), error))
     {
         return false;
@@ -461,7 +462,8 @@ TerrainAuthoringSystem::~TerrainAuthoringSystem() noexcept
 }
 bool TerrainAuthoringSystem::on_initialize(const EngineConfig&)
 {
-    if (!environment_.is_initialized() || !tasks_.is_initialized() || !generator_ || !mesher_)
+    if (!environment_.is_initialized() || !tasks_.is_initialized() || !generator_ || !mesher_ ||
+        generator_->fingerprint().empty())
     {
         return false;
     }

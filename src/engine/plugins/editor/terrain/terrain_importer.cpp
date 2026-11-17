@@ -64,6 +64,11 @@ bool identities(const ImportAsset& asset, const ImportContext& context,
     return true;
 }
 } // namespace
+TerrainImporter::TerrainImporter(std::unique_ptr<TerrainGenerator> generator) noexcept
+    : generator_(std::move(generator))
+{
+}
+
 std::string_view TerrainImporter::id() const noexcept
 {
     return "terrain";
@@ -104,13 +109,18 @@ bool TerrainImporter::discover(const ImportAsset& asset, std::vector<ImportSubre
 bool TerrainImporter::inspect_batch(const ImportContext&, std::string& fingerprint,
                                     std::string& error)
 {
+    if (!generator_ || generator_->fingerprint().empty())
+    {
+        error = "Terrain import requires an injected generator with a fingerprint";
+        return false;
+    }
     if (!schema_fingerprint(
             {"runtime/terrain.fbs", "runtime/terrain_block.fbs", "editor/terrain_authoring.fbs"},
             fingerprint, error))
     {
         return false;
     }
-    fingerprint += ":sparse-terrain-6";
+    fingerprint += ":sparse-terrain-7:" + std::string(generator_->fingerprint());
     return true;
 }
 bool TerrainImporter::scan_dependencies(ImportAsset& asset, const ImportContext& context,
@@ -210,11 +220,10 @@ bool TerrainImporter::convert(const ImportAsset& asset, const ImportContext& con
             error = "Invalid terrain subresource key";
             return false;
         }
-        auto generator = create_terrain_generator(error);
         schema::TerrainBlockDataT block;
-        if (!generator || !generate_terrain_block(
-                              input, *generator, context.project / "cache/terrain-authoring/blocks",
-                              block, error))
+        if (!generator_ || !generate_terrain_block(
+                               input, *generator_,
+                               context.project / "cache/terrain-authoring/blocks", block, error))
         {
             return false;
         }

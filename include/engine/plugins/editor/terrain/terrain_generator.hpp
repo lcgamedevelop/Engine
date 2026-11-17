@@ -2,6 +2,7 @@
 #include "editor/schema/terrain_authoring_generated.h"
 #include "plugins/runtime/terrain/terrain_volume.hpp"
 #include <memory>
+#include <string_view>
 
 namespace engine::plugins::terrain
 {
@@ -15,6 +16,7 @@ class TerrainGenerator
 {
 public:
     virtual ~TerrainGenerator() noexcept = default;
+    [[nodiscard]] virtual std::string_view fingerprint() const noexcept = 0;
     [[nodiscard]] virtual bool generate(const TerrainGenerationInput& input,
                                         schema::TerrainBlockDataT& output,
                                         std::string& error) const = 0;

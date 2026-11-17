@@ -181,8 +181,16 @@ int main(int argc, char** argv)
     }
 #endif
 #if ENGINE_HAS_TERRAIN_EDITOR
+    std::string terrain_generator_error;
+    auto terrain_generator =
+        engine::plugins::terrain::create_terrain_generator(terrain_generator_error);
+    if (!terrain_generator)
+    {
+        std::fputs("Cannot create terrain generator\n", stderr);
+        return 1;
+    }
     std::unique_ptr<engine::editor::asset_pipeline::AssetImporter> terrain_importer =
-        std::make_unique<engine::plugins::terrain::TerrainImporter>();
+        std::make_unique<engine::plugins::terrain::TerrainImporter>(std::move(terrain_generator));
     if (!engine::plugins::terrain::register_terrain_codec() ||
         !pipeline.add_importer(terrain_importer))
     {

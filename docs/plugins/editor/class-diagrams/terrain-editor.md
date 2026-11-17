@@ -9,6 +9,7 @@
 classDiagram
     class TerrainGenerator {
         <<interface>>
+        +fingerprint() string_view
         +~TerrainGenerator()
         +generate(const TerrainGenerationInput& input, TerrainBlockDataT& output, string& error) bool
     }
@@ -29,6 +30,10 @@ classDiagram
         #on_tick(double delta_time) bool
         #on_shutdown() void
     }
+    class TerrainImporter {
+        +TerrainImporter(unique_ptr~TerrainGenerator~ generator)
+    }
+    class AssetImporter
     class TerrainAuthoringJob {
         <<private>>
     }
@@ -44,6 +49,8 @@ classDiagram
     class TerrainAuthoringId
     class TerrainAuthoringSnapshot
     class EditorEdit
+    AssetImporter <|-- TerrainImporter
+    TerrainImporter *-- TerrainGenerator : 独占宿主注入实现
     System <|-- TerrainAuthoringSystem
     TerrainAuthoringSystem --> EditorEnvironment : 借用至关闭
     TerrainAuthoringSystem --> TaskSystem : 编辑器任务域
@@ -63,6 +70,9 @@ classDiagram
 
 生成器只做输入到体积块的纯计算，具体噪声库不出现在公共类型中；
 默认实现可组合 FastNoise2、heightmap、stamp 和道路控制折线，固定种子/坐标/输入指纹。
+fingerprint() 是实例生命周期内稳定、非空的实现/算法版本标识；generate 为可并发调用的 const 纯计算。
+宿主分别向 TerrainImporter 和 TerrainAuthoringSystem 转移所选生成器的独立实例，导入器不创建默认实现。
+导入指纹、局部块缓存、作业恢复记录均包含该指纹；算法变更时源 GUID 不变，旧算法结果不得复用。
 编辑器和运行时算法对象分别拥有 scratch，不能并发借用不安全的全局实例。
 新增依赖只进所属制作目标，不将噪声图编辑器或 Godot 运行时引入正式核心。
 

@@ -20,6 +20,8 @@
 #include <flatbuffers/verifier.h>
 #include <toml++/toml.hpp>
 
+#include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
@@ -126,8 +128,10 @@ bool run(Project& project)
     engine::ThreadSystem threads;
     engine::TaskSystem tasks(threads, {"Editor", 4, engine::TaskPriority::low});
     editor::AssetPipelineSystem pipeline(tasks);
+    std::string generator_error;
     std::unique_ptr<editor::asset_pipeline::AssetImporter> importer =
-        std::make_unique<plugins::terrain::TerrainImporter>();
+        std::make_unique<plugins::terrain::TerrainImporter>(
+            plugins::terrain::create_terrain_generator(generator_error));
     if (!expect(plugins::terrain::register_terrain_codec() && threads.initialize({}) &&
                     tasks.initialize({}) && pipeline.initialize({}) &&
                     pipeline.add_importer(importer),
@@ -349,8 +353,10 @@ bool layered_surface(Project& project)
     ThreadSystem threads;
     TaskSystem tasks(threads);
     editor::AssetPipelineSystem pipeline(tasks);
+    std::string generator_error;
     std::unique_ptr<editor::asset_pipeline::AssetImporter> importer =
-        std::make_unique<plugins::terrain::TerrainImporter>();
+        std::make_unique<plugins::terrain::TerrainImporter>(
+            plugins::terrain::create_terrain_generator(generator_error));
     if (!threads.initialize({}) || !tasks.initialize({}) || !pipeline.initialize({}) ||
         !pipeline.add_importer(importer) ||
         !expect(pipeline.build_assets(project.root), pipeline.last_error()))
@@ -385,6 +391,41 @@ bool layered_surface(Project& project)
                       texture->srgb,
                   "layer compiler produces complete PBR array layers and mips");
 }
+
+class OffsetGenerator final : public plugins::terrain::TerrainGenerator
+{
+public:
+    OffsetGenerator(std::string_view identity, float offset,
+                    std::unique_ptr<plugins::terrain::TerrainGenerator> base)
+        : identity_(identity), offset_(offset), base_(std::move(base))
+    {
+    }
+    std::string_view fingerprint() const noexcept override
+    {
+        return identity_;
+    }
+    bool generate(const plugins::terrain::TerrainGenerationInput& input,
+                  schema::TerrainBlockDataT& output, std::string& error) const override
+    {
+        ++calls;
+        if (!base_ || !base_->generate(input, output, error))
+        {
+            return false;
+        }
+        for (auto& value : output.density)
+        {
+            value = std::clamp(value + offset_, -float(input.recipe.voxel_size),
+                               float(input.recipe.voxel_size));
+        }
+        return true;
+    }
+    mutable std::atomic<std::uint32_t> calls = 0;
+
+private:
+    std::string_view identity_;
+    float offset_ = 0;
+    std::unique_ptr<plugins::terrain::TerrainGenerator> base_;
+};
 
 bool local_generation(Project& project)
 {
@@ -430,10 +471,59 @@ bool local_generation(Project& project)
         return false;
     }
     input.recipe.stamps.front()->center = {2, 0, 2};
-    return generate_terrain_block(input, *generator, cache, near, error) &&
-           generator->generate(input, reference, error) &&
-           expect(near != original && near == reference && count() == initial_files + 1,
-                  "nearby edits prepare a new immutable block without replacing the previous one");
+    if (!generate_terrain_block(input, *generator, cache, near, error) ||
+        !generator->generate(input, reference, error) ||
+        !expect(near != original && near == reference && count() == initial_files + 1,
+                "nearby edits prepare a new immutable block without replacing the previous one"))
+    {
+        return false;
+    }
+    OffsetGenerator alternate("test-offset-1", .25F, create_terrain_generator(error));
+    schema::TerrainBlockDataT changed, reused;
+    return generate_terrain_block(input, alternate, cache, changed, error) &&
+           generate_terrain_block(input, alternate, cache, reused, error) &&
+           expect(changed != near && reused == changed && alternate.calls == 1,
+                  "different generators isolate cached blocks and reuse their own output");
+}
+
+bool generator_injection(Project& project)
+{
+    using namespace plugins::terrain;
+    std::string error;
+    if (!write(project.root / "assets/test.terrain", terrain_source(2)))
+    {
+        return false;
+    }
+    ThreadSystem threads;
+    TaskSystem tasks(threads);
+    editor::AssetPipelineSystem pipeline(tasks);
+    auto implementation =
+        std::make_unique<OffsetGenerator>("test-import-a", .25F, create_terrain_generator(error));
+    auto* selected = implementation.get();
+    std::unique_ptr<editor::asset_pipeline::AssetImporter> importer =
+        std::make_unique<TerrainImporter>(std::move(implementation));
+    ByteBuffer before, after;
+    if (!threads.initialize({}) || !tasks.initialize({}) || !pipeline.initialize({}) ||
+        !pipeline.add_importer(importer) || !pipeline.build_assets(project.root) ||
+        !expect(selected->calls > 0, "the importer uses its injected generator") ||
+        !VirtualFileSystem::read_file(project.root / "cache/catalog.bin", before))
+    {
+        return false;
+    }
+    const auto calls = selected->calls.load();
+    if (!pipeline.build_assets(project.root) ||
+        !expect(selected->calls == calls, "unchanged imports reuse selected generator artifacts"))
+    {
+        return false;
+    }
+    implementation =
+        std::make_unique<OffsetGenerator>("test-import-b", -.25F, create_terrain_generator(error));
+    selected = implementation.get();
+    importer = std::make_unique<TerrainImporter>(std::move(implementation));
+    return pipeline.set_importer(importer) && pipeline.build_assets(project.root) &&
+           VirtualFileSystem::read_file(project.root / "cache/catalog.bin", after) &&
+           expect(selected->calls > 0 && before != after,
+                  "changing generator fingerprints rebuilds unchanged sources with new output");
 }
 
 bool authoring(Project& project)
@@ -507,7 +597,7 @@ bool authoring(Project& project)
     }
     editor::AssetPipelineSystem pipeline(tasks);
     std::unique_ptr<editor::asset_pipeline::AssetImporter> importer =
-        std::make_unique<TerrainImporter>();
+        std::make_unique<TerrainImporter>(create_terrain_generator(error));
     // The prior invalid-source regression intentionally leaves test.terrain invalid.
     if (!write(project.root / "assets/test.terrain", terrain_source(2)) ||
         !pipeline.initialize({}) || !pipeline.add_importer(importer) ||
@@ -587,8 +677,8 @@ int main()
     Project project;
     return generation_inputs() &&
                    expect(project.initialize(), "create temporary terrain project") &&
-                   local_generation(project) && run(project) && authoring(project) &&
-                   layered_surface(project)
+                   local_generation(project) && run(project) && generator_injection(project) &&
+                   authoring(project) && layered_surface(project)
                ? 0
                : 1;
 }

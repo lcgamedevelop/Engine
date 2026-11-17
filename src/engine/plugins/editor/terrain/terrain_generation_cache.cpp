@@ -17,6 +17,11 @@ bool generate_terrain_block(const TerrainGenerationInput& input, const TerrainGe
     namespace io = editor::asset_pipeline;
     namespace fs = std::filesystem;
     output = {};
+    if (generator.fingerprint().empty())
+    {
+        error = "Terrain generation requires an implementation fingerprint";
+        return false;
+    }
     if (std::any_of(input.recipe.stamps.begin(), input.recipe.stamps.end(),
                     [](const auto& brush) { return !brush; }) ||
         std::any_of(input.recipe.roads.begin(), input.recipe.roads.end(),
@@ -72,7 +77,9 @@ bool generate_terrain_block(const TerrainGenerationInput& input, const TerrainGe
     fingerprint.Finish(schema::TerrainGenerationSpec::Pack(fingerprint, &recipe));
     const auto digest = io::hash_bytes(
         std::as_bytes(std::span(fingerprint.GetBufferPointer(), fingerprint.GetSize())));
-    const auto path = cache / terrain_generation_revision / digest / terrain_region_name(input.key);
+    const auto path = cache / terrain_generation_revision /
+                      io::hash_text(std::string(generator.fingerprint())) / digest /
+                      terrain_region_name(input.key);
     std::vector<std::byte> bytes;
     std::error_code ec;
     if (fs::exists(path, ec))
