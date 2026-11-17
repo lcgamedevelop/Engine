@@ -6,11 +6,15 @@
 
 #define ENGINE_PROFILE_ZONE(name) ZoneScopedN(name)
 #define ENGINE_PROFILE_FRAME() FrameMark
+#define ENGINE_PROFILE_FRAME_NAMED(name) FrameMarkNamed(name)
+#define ENGINE_PROFILE_CONNECTED() TracyIsConnected
 #define ENGINE_PROFILE_PLOT(name, value) TracyPlot(name, value)
 #define ENGINE_PROFILE_MESSAGE(text, size) TracyMessage(text, size)
 #else
 #define ENGINE_PROFILE_ZONE(name) static_cast<void>(0)
 #define ENGINE_PROFILE_FRAME() static_cast<void>(0)
+#define ENGINE_PROFILE_FRAME_NAMED(name) static_cast<void>(0)
+#define ENGINE_PROFILE_CONNECTED() false
 #define ENGINE_PROFILE_PLOT(name, value) static_cast<void>(0)
 #define ENGINE_PROFILE_MESSAGE(text, size) static_cast<void>(0)
 #endif

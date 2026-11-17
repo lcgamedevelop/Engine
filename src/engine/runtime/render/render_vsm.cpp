@@ -1,5 +1,7 @@
 #include "runtime/render/render_system.hpp"
 
+#include "runtime/performance/profiling.hpp"
+
 #include "runtime/render/scene_gpu_resources.hpp"
 #include "runtime/render/scene_render_query.hpp"
 #include "runtime/render/vsm/virtual_shadow_cache.hpp"
@@ -69,6 +71,7 @@ bool RenderSystem::prepare_vsm(const render_detail::RenderFrameData& frame,
                                render_detail::SceneDrawView& draw, const CameraSettings& camera,
                                render_detail::VsmPageBatch& output)
 {
+    ENGINE_PROFILE_ZONE("Render.prepareVsm");
     output = {};
     const render_detail::LocalShadowLight* light = nullptr;
     for (const auto& item : frame.lights)

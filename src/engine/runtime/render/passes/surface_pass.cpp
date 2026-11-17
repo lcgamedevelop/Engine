@@ -12,9 +12,10 @@ SurfacePass::~SurfacePass() noexcept
     release();
 }
 
-bool SurfacePass::prepare(std::uint16_t width, std::uint16_t height)
+bool SurfacePass::prepare(std::uint16_t width, std::uint16_t height, bool material_surface)
 {
-    if (bgfx::isValid(framebuffer_) && width == width_ && height == height_)
+    if (bgfx::isValid(framebuffer_) && width == width_ && height == height_ &&
+        material_surface == material_surface_)
     {
         return true;
     }
@@ -22,25 +23,30 @@ bool SurfacePass::prepare(std::uint16_t width, std::uint16_t height)
     const auto* caps = bgfx::getCaps();
     constexpr auto flags =
         BGFX_TEXTURE_RT | BGFX_SAMPLER_UVW_CLAMP | BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT;
-    if (width == 0 || height == 0 || caps->limits.maxFBAttachments < 3 ||
+    if (width == 0 || height == 0 || caps->limits.maxFBAttachments < (material_surface ? 3 : 1) ||
         width > caps->limits.maxTextureSize || height > caps->limits.maxTextureSize ||
-        !bgfx::isTextureValid(0, false, 1, bgfx::TextureFormat::RGBA16F, flags) ||
+        (material_surface &&
+         !bgfx::isTextureValid(0, false, 1, bgfx::TextureFormat::RGBA16F, flags)) ||
         !bgfx::isTextureValid(0, false, 1, bgfx::TextureFormat::D32F, flags))
     {
         return false;
     }
-    targets_[0] =
-        bgfx::createTexture2D(width, height, false, 1, bgfx::TextureFormat::RGBA16F, flags);
-    targets_[1] =
-        bgfx::createTexture2D(width, height, false, 1, bgfx::TextureFormat::RGBA16F, flags);
+    if (material_surface)
+    {
+        targets_[0] =
+            bgfx::createTexture2D(width, height, false, 1, bgfx::TextureFormat::RGBA16F, flags);
+        targets_[1] =
+            bgfx::createTexture2D(width, height, false, 1, bgfx::TextureFormat::RGBA16F, flags);
+    }
     targets_[2] = bgfx::createTexture2D(width, height, false, 1, bgfx::TextureFormat::D32F, flags);
-    if (!std::all_of(targets_.begin(), targets_.end(), [](auto h) { return bgfx::isValid(h); }))
+    const auto first = material_surface ? targets_.begin() : targets_.begin() + 2;
+    if (!std::all_of(first, targets_.end(), [](auto h) { return bgfx::isValid(h); }))
     {
         release();
         return false;
     }
-    framebuffer_ =
-        bgfx::createFrameBuffer(static_cast<std::uint8_t>(targets_.size()), targets_.data(), false);
+    framebuffer_ = bgfx::createFrameBuffer(
+        material_surface ? 3 : 1, material_surface ? targets_.data() : targets_.data() + 2, false);
     if (!bgfx::isValid(framebuffer_))
     {
         release();
@@ -48,6 +54,7 @@ bool SurfacePass::prepare(std::uint16_t width, std::uint16_t height)
     }
     width_ = width;
     height_ = height;
+    material_surface_ = material_surface;
     return true;
 }
 
@@ -55,14 +62,20 @@ void SurfacePass::begin(const float* view, const float* projection)
 {
     for (auto id : {ambient_occlusion_depth_view, surface_view})
     {
+        if (id == surface_view && !material_surface_)
+        {
+            continue;
+        }
         bgfx::setViewName(id, id == surface_view ? "Material surface" : "Scene depth");
         bgfx::setViewFrameBuffer(id, framebuffer_);
         bgfx::setViewRect(id, 0, 0, width_, height_);
         bgfx::setViewTransform(id, view, projection);
         bgfx::setViewMode(id, bgfx::ViewMode::Sequential);
-        bgfx::setViewClear(
-            id, id == surface_view ? BGFX_CLEAR_NONE : BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0, 1.0F,
-            0);
+        bgfx::setViewClear(id,
+                           id == surface_view
+                               ? BGFX_CLEAR_NONE
+                               : BGFX_CLEAR_DEPTH | (material_surface_ ? BGFX_CLEAR_COLOR : 0),
+                           0, 1.0F, 0);
         bgfx::touch(id);
     }
 }
@@ -109,6 +122,7 @@ void SurfacePass::release() noexcept
         }
     }
     width_ = height_ = 0;
+    material_surface_ = false;
 }
 
 } // namespace engine::render_detail

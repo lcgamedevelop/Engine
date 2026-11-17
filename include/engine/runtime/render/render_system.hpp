@@ -165,6 +165,7 @@ protected:
     void on_shutdown() noexcept override;
 
 private:
+    void apply_debug_state();
     friend class GeometryUpdate;
     [[nodiscard]] bool can_publish_geometry(MeshRenderer prepared, MeshRenderer target) const;
     void publish_geometry(MeshRenderer prepared, MeshRenderer target) noexcept;

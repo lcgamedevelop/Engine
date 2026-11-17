@@ -1,0 +1,11 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -89,6 +89,7 @@ endfunction()
+ # Forwarded separately because it is combined with BGFX_CONFIG_MULTITHREADED.
+ set(BGFX_CONFIG_DEFAULT_MAX_ENCODERS "" CACHE STRING "Specify default maximum encoder count (multithreaded only)")
+ 
++bgfx_config_option(BGFX_CONFIG_PROFILER "Enable internal profiler callbacks")
+ bgfx_config_option(BGFX_CONFIG_MAX_DRAW_CALLS "Specify maximum draw calls")
+ bgfx_config_option(BGFX_CONFIG_DRAW_CALL_BLOCK "Specify draw call allocation granularity")
+ bgfx_config_option(BGFX_CONFIG_MAX_VIEWS "Specify maximum view count (should be a power of two)")

@@ -297,6 +297,12 @@ bool MeshletCullPass::dispatch(const RenderFrameData& frame, const SceneDrawView
         counters.meshlet_candidate_triangles += static_cast<std::uint64_t>(item.count / 3) * count;
         counters.meshlet_instanced_batches += count > 1;
     }
+    ENGINE_PROFILE_PLOT("Meshlet.candidatePairs", static_cast<double>(used_pairs));
+    ENGINE_PROFILE_PLOT("Meshlet.indirectCommandSlots", static_cast<double>(used_commands));
+    ENGINE_PROFILE_PLOT("Meshlet.computeBatches", static_cast<double>(work.size()));
+    ENGINE_PROFILE_PLOT("Meshlet.budgetFallbacks",
+                        static_cast<double>(counters.meshlet_budget_fallbacks));
+    ENGINE_PROFILE_PLOT("Meshlet.capacityPairs", static_cast<double>(capacity_));
     if (!inputs.empty())
     {
         bgfx::update(inputs_, 0,

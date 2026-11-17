@@ -29,8 +29,10 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <filesystem>
 #include <new>
+#include <string>
 #include <system_error>
 
 namespace engine
@@ -42,8 +44,108 @@ namespace
 RenderSystem* active_renderer = nullptr;
 
 #if defined(ENGINE_ENABLE_TRACY)
+std::size_t profile_view_group(bgfx::ViewId id)
+{
+    using namespace render_detail;
+    if (id >= 3 && id <= 72)
+    {
+        return 0;
+    }
+    if ((id >= shadow_view && id < output_clear_view) ||
+        std::find(vsm_page_views.begin(), vsm_page_views.end(), id) != vsm_page_views.end())
+    {
+        return 1;
+    }
+    if (id == ambient_occlusion_depth_view)
+    {
+        return 2;
+    }
+    if (id == surface_view)
+    {
+        return 3;
+    }
+    if (id == main_view)
+    {
+        return 4;
+    }
+    if (id == ambient_occlusion_compute_view)
+    {
+        return 5;
+    }
+    if (id >= ssr_hiz_view && id <= ssr_composite_view)
+    {
+        return 6;
+    }
+    if (id == transparent_view)
+    {
+        return 7;
+    }
+    if (id >= hdr_bright_view && id <= hdr_resolve_view)
+    {
+        return 8;
+    }
+    if (id == output_present_view)
+    {
+        return 9;
+    }
+    if (id == meshlet_clear_view || id == meshlet_cull_view)
+    {
+        return 10;
+    }
+    if (id >= rvt_page_view - 1 && id < rvt_page_view + maximum_rvt_views)
+    {
+        return 11;
+    }
+    if (id == vsm_feedback_clear_view || id == vsm_feedback_view)
+    {
+        return 12;
+    }
+    return 13;
+}
+
+void profile_view_record(const char* kind, std::uint16_t id, const char* name, std::int64_t frame,
+                         std::int64_t begin, std::int64_t end, std::int64_t frequency)
+{
+    std::string escaped;
+    for (const unsigned char value : std::string_view(name))
+    {
+        if (value == '"' || value == '\\')
+        {
+            escaped.push_back('\\');
+        }
+        if (value < 0x20)
+        {
+            constexpr char hex[] = "0123456789abcdef";
+            escaped += "\\u00";
+            escaped.push_back(hex[value >> 4]);
+            escaped.push_back(hex[value & 15]);
+        }
+        else
+        {
+            escaped.push_back(static_cast<char>(value));
+        }
+    }
+    std::array<char, 2048> message{};
+    const auto count =
+        std::snprintf(message.data(), message.size(),
+                      "%s {\"viewId\":%u,\"name\":\"%s\",\"group\":%zu,\"sourceFrame\":%lld,"
+                      "\"begin\":%lld,\"end\":%lld,\"frequency\":%lld}",
+                      kind, static_cast<unsigned int>(id), escaped.c_str(), profile_view_group(id),
+                      static_cast<long long>(frame), static_cast<long long>(begin),
+                      static_cast<long long>(end), static_cast<long long>(frequency));
+    if (count > 0 && static_cast<std::size_t>(count) < message.size())
+    {
+        ENGINE_PROFILE_MESSAGE(message.data(), static_cast<std::size_t>(count));
+    }
+}
+
 void profile_renderer_stats()
 {
+    ENGINE_PROFILE_ZONE("Render.profileStats");
+    if (!ENGINE_PROFILE_CONNECTED())
+    {
+        return;
+    }
     const auto* stats = bgfx::getStats();
     if (stats == nullptr)
     {
@@ -76,10 +178,82 @@ void profile_renderer_stats()
     if (stats->gpuTimerFreq > 0 && stats->gpuTimeBegin > 0 &&
         stats->gpuTimeEnd >= stats->gpuTimeBegin)
     {
+        static thread_local std::int64_t last_gpu_begin = 0;
         const double milliseconds = 1000.0 / static_cast<double>(stats->gpuTimerFreq);
         ENGINE_PROFILE_PLOT("Bgfx.gpuFrameMs",
                             (stats->gpuTimeEnd - stats->gpuTimeBegin) * milliseconds);
         ENGINE_PROFILE_PLOT("Bgfx.gpuFrameNumber", static_cast<std::int64_t>(stats->gpuFrameNum));
+        if (last_gpu_begin != stats->gpuTimeBegin)
+        {
+            last_gpu_begin = stats->gpuTimeBegin;
+            profile_view_record("Render.gpuFrame", UINT16_MAX, "GPU command buffer",
+                                stats->gpuFrameNum, stats->gpuTimeBegin, stats->gpuTimeEnd,
+                                stats->gpuTimerFreq);
+        }
+    }
+    constexpr std::array cpu_names{
+        "Bgfx.cpuPlanarMs",      "Bgfx.cpuShadowMs",  "Bgfx.cpuDepthMs",   "Bgfx.cpuSurfaceMs",
+        "Bgfx.cpuOpaqueMs",      "Bgfx.cpuAoMs",      "Bgfx.cpuSsrMs",     "Bgfx.cpuTransparentMs",
+        "Bgfx.cpuPostMs",        "Bgfx.cpuPresentMs", "Bgfx.cpuMeshletMs", "Bgfx.cpuRvtMs",
+        "Bgfx.cpuVsmFeedbackMs", "Bgfx.cpuOtherMs"};
+    constexpr std::array gpu_names{
+        "Bgfx.gpuPlanarMs",      "Bgfx.gpuShadowMs",  "Bgfx.gpuDepthMs",   "Bgfx.gpuSurfaceMs",
+        "Bgfx.gpuOpaqueMs",      "Bgfx.gpuAoMs",      "Bgfx.gpuSsrMs",     "Bgfx.gpuTransparentMs",
+        "Bgfx.gpuPostMs",        "Bgfx.gpuPresentMs", "Bgfx.gpuMeshletMs", "Bgfx.gpuRvtMs",
+        "Bgfx.gpuVsmFeedbackMs", "Bgfx.gpuOtherMs"};
+    std::array<double, cpu_names.size()> cpu{}, gpu{};
+    std::array<bool, cpu_names.size()> cpu_valid{}, gpu_valid{};
+    static thread_local std::array<std::int64_t, 256> cpu_begin{}, gpu_begin{};
+    static thread_local std::array<std::uint32_t, 256> gpu_frame{};
+    for (std::uint16_t index = 0; stats->viewStats && index < stats->numViews; ++index)
+    {
+        const auto& view = stats->viewStats[index];
+        if (view.view >= cpu_begin.size())
+        {
+            continue;
+        }
+        const auto group = profile_view_group(view.view);
+        if (stats->cpuTimerFreq > 0 && view.cpuTimeBegin > 0 &&
+            view.cpuTimeEnd >= view.cpuTimeBegin)
+        {
+            cpu[group] += (view.cpuTimeEnd - view.cpuTimeBegin) *
+                          (1000.0 / static_cast<double>(stats->cpuTimerFreq));
+            cpu_valid[group] = true;
+            if (cpu_begin[view.view] != view.cpuTimeBegin)
+            {
+                cpu_begin[view.view] = view.cpuTimeBegin;
+                profile_view_record("Render.cpuView", view.view, view.name, -1, view.cpuTimeBegin,
+                                    view.cpuTimeEnd, stats->cpuTimerFreq);
+            }
+        }
+        if (stats->gpuTimerFreq > 0 && view.gpuTimeBegin > 0 &&
+            view.gpuTimeEnd >= view.gpuTimeBegin &&
+            (gpu_begin[view.view] != view.gpuTimeBegin || gpu_frame[view.view] != view.gpuFrameNum))
+        {
+            gpu_begin[view.view] = view.gpuTimeBegin;
+            gpu_frame[view.view] = view.gpuFrameNum;
+            profile_view_record("Render.gpuView", view.view, view.name, view.gpuFrameNum,
+                                view.gpuTimeBegin, view.gpuTimeEnd, stats->gpuTimerFreq);
+            // Grouped plots still describe one completed GPU frame only; raw records retain
+            // independently delayed views for the offline per-source-frame analysis.
+            if (view.gpuFrameNum == stats->gpuFrameNum)
+            {
+                gpu[group] += (view.gpuTimeEnd - view.gpuTimeBegin) *
+                              (1000.0 / static_cast<double>(stats->gpuTimerFreq));
+                gpu_valid[group] = true;
+            }
+        }
+    }
+    for (std::size_t group = 0; group < cpu.size(); ++group)
+    {
+        if (cpu_valid[group])
+        {
+            ENGINE_PROFILE_PLOT(cpu_names[group], cpu[group]);
+        }
+        if (gpu_valid[group])
+        {
+            ENGINE_PROFILE_PLOT(gpu_names[group], gpu[group]);
+        }
     }
     ENGINE_PROFILE_PLOT("Bgfx.drawCalls", static_cast<std::int64_t>(stats->numDraw));
     ENGINE_PROFILE_PLOT("Bgfx.computeCalls", static_cast<std::int64_t>(stats->numCompute));
@@ -333,7 +507,7 @@ bool RenderSystem::initialize_renderer()
     }
     bgfx::setViewClear(render_detail::main_view, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
                        idle_clear_color_, 1.0F, 0);
-    bgfx::setDebug(stats_visible() ? BGFX_DEBUG_STATS : BGFX_DEBUG_NONE);
+    apply_debug_state();
     SDL_Log("Renderer initialized: %s (%u x %u)", bgfx::getRendererName(bgfx::getRendererType()),
             width_, height_);
     return true;
@@ -358,6 +532,16 @@ bool RenderSystem::viewport_size(Vec2& output) const noexcept
     }
     output = {static_cast<double>(width_), static_cast<double>(height_)};
     return true;
+}
+
+void RenderSystem::apply_debug_state()
+{
+    std::uint32_t flags = stats_visible() ? BGFX_DEBUG_STATS : BGFX_DEBUG_NONE;
+#if defined(ENGINE_ENABLE_TRACY)
+    // Per-view timestamps are part of explicit profiling builds; no stats HUD is required.
+    flags |= BGFX_DEBUG_PROFILER;
+#endif
+    bgfx::setDebug(flags);
 }
 
 void RenderSystem::set_stats_visible(bool visible)
@@ -661,13 +845,19 @@ RenderSubmitStatus RenderSystem::render(Camera camera)
     }
     {
         ENGINE_PROFILE_ZONE("Render.frameSubmit");
-        frame_output_->present(current_settings.clear_color, false);
+        {
+            ENGINE_PROFILE_ZONE("Render.outputPresentSubmit");
+            frame_output_->present(current_settings.clear_color, false);
+        }
         if (drawn)
         {
             submit_screenshot(world_ && world_->scene() ? RenderFrameKind::scene
                                                         : RenderFrameKind::clear);
         }
-        frame_number_ = bgfx::frame();
+        {
+            ENGINE_PROFILE_ZONE("Render.bgfxFrame");
+            frame_number_ = bgfx::frame();
+        }
         if (meshlet_culling_)
         {
             meshlet_culling_->poll(frame_number_);
@@ -692,7 +882,7 @@ RenderSubmitStatus RenderSystem::render(Camera camera)
         poll_hdr_capture();
         collect_preparation(false);
     }
-    ENGINE_PROFILE_FRAME();
+    ENGINE_PROFILE_FRAME_NAMED("Render");
 #if defined(ENGINE_ENABLE_TRACY)
     profile_renderer_stats();
 #endif
@@ -737,7 +927,7 @@ RenderSubmitStatus RenderSystem::present_movie_frame(const MovieFrame& frame)
     }
     record_frame(RenderFrameKind::movie);
     collect_preparation(false);
-    ENGINE_PROFILE_FRAME();
+    ENGINE_PROFILE_FRAME_NAMED("Render");
     return RenderSubmitStatus::submitted;
 }
 
@@ -758,7 +948,10 @@ void RenderSystem::shutdown_renderer(bool drain_screenshots) noexcept
     {
         for (int attempt = 0; attempt < 16 && active_screenshot_; ++attempt)
         {
-            frame_number_ = bgfx::frame();
+            {
+                ENGINE_PROFILE_ZONE("Render.bgfxFrame");
+                frame_number_ = bgfx::frame();
+            }
             if (meshlet_culling_)
             {
                 meshlet_culling_->poll(frame_number_);

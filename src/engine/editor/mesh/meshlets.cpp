@@ -5,6 +5,7 @@
 #include <meshoptimizer.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <fstream>
 #include <limits>
@@ -47,9 +48,41 @@ bool build(const std::vector<schema::MeshVertex>& vertices,
         for (std::size_t i = 0; i < count; ++i)
         {
             const auto& cluster = clusters[i];
-            const auto bounds = meshopt_computeMeshletBounds(
+            auto bounds = meshopt_computeMeshletBounds(
                 remap.data() + cluster.vertex_offset, triangles.data() + cluster.triangle_offset,
                 cluster.triangle_count, positions, vertices.size(), sizeof(schema::MeshVertex));
+            if (bounds.cone_cutoff == 0 &&
+                std::all_of(std::begin(bounds.cone_axis), std::end(bounds.cone_axis),
+                            [](float value) { return value == 0; }))
+            {
+                // meshoptimizer returns zero bounds when every triangle is degenerate.
+                // Preserve those source indices and bound their points without a normal cone.
+                std::array<std::array<float, 3>, maximum_vertices> points{};
+                for (std::size_t vertex = 0; vertex < cluster.vertex_count; ++vertex)
+                {
+                    const auto& point = vertices[remap[cluster.vertex_offset + vertex]];
+                    points[vertex] = {point.x(), point.y(), point.z()};
+                }
+                bounds = meshopt_computeSphereBounds(points.front().data(), cluster.vertex_count,
+                                                     sizeof(points.front()), nullptr, 0);
+                bounds.cone_cutoff = 1;
+            }
+            // Recheck against the stored float center: large source coordinates can
+            // round the upstream sphere inward. Expand the radius, never the tolerance.
+            double radius = bounds.radius;
+            for (std::size_t vertex = 0; vertex < cluster.vertex_count; ++vertex)
+            {
+                const auto& point = vertices[remap[cluster.vertex_offset + vertex]];
+                radius = std::max(radius, std::hypot(double(point.x()) - bounds.center[0],
+                                                     double(point.y()) - bounds.center[1],
+                                                     double(point.z()) - bounds.center[2]));
+            }
+            bounds.radius = static_cast<float>(radius);
+            if (static_cast<double>(bounds.radius) < radius)
+            {
+                bounds.radius =
+                    std::nextafter(bounds.radius, std::numeric_limits<float>::infinity());
+            }
             result->meshlets.emplace_back(
                 static_cast<std::uint32_t>(result->indices.size()), cluster.triangle_count * 3,
                 schema::Vec3(bounds.center[0], bounds.center[1], bounds.center[2]), bounds.radius,
@@ -169,7 +202,7 @@ bool generate_meshlets(schema::MeshDataT& mesh, const std::filesystem::path& sou
 
 std::string meshlet_fingerprint()
 {
-    return ":meshoptimizer-" + std::to_string(MESHOPTIMIZER_VERSION) + ":meshlets-scan-64-124-2";
+    return ":meshoptimizer-" + std::to_string(MESHOPTIMIZER_VERSION) + ":meshlets-scan-64-124-4";
 }
 
 } // namespace engine::editor

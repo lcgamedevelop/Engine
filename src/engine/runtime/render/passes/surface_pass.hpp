@@ -17,7 +17,7 @@ public:
     SurfacePass(const SurfacePass&) = delete;
     SurfacePass& operator=(const SurfacePass&) = delete;
 
-    [[nodiscard]] bool prepare(std::uint16_t width, std::uint16_t height);
+    [[nodiscard]] bool prepare(std::uint16_t width, std::uint16_t height, bool material_surface);
     void begin(const float* view, const float* projection);
     [[nodiscard]] bgfx::TextureHandle depth() const noexcept;
     [[nodiscard]] bgfx::TextureHandle normal_roughness() const noexcept;
@@ -31,6 +31,7 @@ private:
     bgfx::FrameBufferHandle framebuffer_ = BGFX_INVALID_HANDLE;
     std::uint16_t width_ = 0;
     std::uint16_t height_ = 0;
+    bool material_surface_ = false;
 };
 
 } // namespace engine::render_detail

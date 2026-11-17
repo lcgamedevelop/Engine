@@ -1,4 +1,6 @@
 #include "runtime/resource/resource_system.hpp"
+
+#include "runtime/performance/profiling.hpp"
 #include "runtime/utils/hash_utils.hpp"
 
 #include "runtime/resource/resource_read_state.hpp"
@@ -482,6 +484,7 @@ bool ResourceSystem::validate_dependencies(const Resource& resource, ResourceVie
 
 void ResourceSystem::poll_reads()
 {
+    ENGINE_PROFILE_ZONE("Resource.pollReads");
     const auto state = reads_;
     if (!state)
     {
@@ -633,6 +636,7 @@ bool ResourceSystem::on_initialize(const EngineConfig&)
 
 bool ResourceSystem::on_tick(double)
 {
+    ENGINE_PROFILE_ZONE("Resource.tick");
     if (reads_)
     {
         (void)files_.poll_async(reads_->config.completion_budget);

@@ -634,7 +634,7 @@ classDiagram
 - 拥有 bgfx 创建的资源，使用对应 API 释放；不拥有窗口系统，也不拥有第三方库本身。初始化、清理和复制移动限制遵守[系统约定](engine-system.md)。
 
 - 使用 SDL3 提供原生窗口句柄，macOS / iOS 选择 Metal、Windows 选择 Direct3D12、Android / Linux 选择 Vulkan；拒绝 Noop 和回退到其他图形后端。默认待机清屏，无调试文字。窗口像素尺寸变化时重置交换链并更新相机宽高比。
-- `set_stats_visible()` 在主线程控制 bgfx 自带的 `BGFX_DEBUG_STATS` 面板，默认关闭，`stats_visible()` 返回保存的开关。开关独立于场景与渲染效果配置，适用于待机、预览及玩法；切换场景、释放场景资源和临时重建图形设备均保留设置，设备恢复后重新应用。该面板只显示上游可提供的统计，不另外启用 `BGFX_DEBUG_PROFILER`。
+- `set_stats_visible()` 在主线程控制 bgfx 自带的 `BGFX_DEBUG_STATS` 面板，默认关闭，`stats_visible()` 返回保存的开关。开关独立于场景与渲染效果配置，适用于待机、预览及玩法；切换场景、释放场景资源和临时重建图形设备均保留设置，设备恢复后重新应用。只有 Tracy 构建独立保留 `BGFX_DEBUG_PROFILER` 采集视图时间戳；面板关闭不禁用采样，普通构建不启用该标志。
 - 默认内置 Mesh 为 24 顶点、36 索引方块；项目 Mesh 来自独立缓存定义，可提供其他顶点和 uint32 索引。内置 PBR/无光照 Shader 的程序数据由固定版本 bgfx `shaderc` 编译并交给 ResourceSystem 注册。材质按 `builtin://...` 或 assets 相对路径取得资源，渲染器通过 `Material::shader_data()` 借用该材质实际持有的 ShaderData，不经过全局缓存查询或按材质路径分支选择效果。
 - 每个在用 Shader 路径拥有一套 Program 和参数 Uniform；多个组件可使用不同 Shader。按生成数据中的 uniform 名称、偏移及数值类型映射参数，上传实例值和隐藏默认值。反射双向核对全部非引擎 Uniform，缺失声明或不存在的声明均拒绝，失败清理本次场景 GPU 资源。
 - 材质变更 Shader 或 Mesh 后释放已无人使用的程序或网格缓冲。显式停止项目时，GameplaySession 协调释放场景、脚本资源引用和 GPU 句柄，CPU 资源随最后一个使用者释放。热重载由 GameplaySession 通过 ScriptRuntime 契约停止旧运行，再提交新目录并启动；RenderSystem 在下一次 prepare_scope 按世界中仍存活的节点和材质增量更新 GPU 资源，不因活动场景 ID 改变销毁常驻对象的缓存。GPU 通过 bgfx::copy 持有独立字节，不借用已替换的 CPU 定义；builtin 定义保留至资源系统关闭。编译后的 Shader 必须符合当前渲染后端、顶点和内置引擎 Uniform 契约；不提供 Shader 源码运行时编译。

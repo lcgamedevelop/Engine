@@ -355,6 +355,7 @@ bool WorldSystem::on_initialize(const EngineConfig&)
 
 bool WorldSystem::on_tick(double delta_time)
 {
+    ENGINE_PROFILE_ZONE("World.tick");
     if (!can_modify() || !std::isfinite(delta_time) || delta_time < 0.0)
     {
         return false;
@@ -423,6 +424,7 @@ bool WorldSystem::on_tick(double delta_time)
 
 bool WorldSystem::refresh_scene_state()
 {
+    ENGINE_PROFILE_ZONE("World.refreshSceneState");
     if (!world_ || !state_query_)
     {
         return false;

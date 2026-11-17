@@ -6,8 +6,29 @@
 
 - `ENGINE_ENABLE_TRACY` 默认 OFF；开启时目标私有链接同版本 Tracy on-demand 客户端，公开核心接口不依赖 Tracy。
 - 埋点位于模块实现，私有宏见 `src/engine/runtime/performance/profiling.hpp`。关闭时不查找、编译或链接 Tracy。
-- Render.frame 包含提交与等待；GPU 工作时间和完成帧另取 bgfx Stats。CPU future 完成、CPU 帧末与 GPU 完成不是同一状态。
+- 主 FrameMark 位于编辑器／运行宿主的帧循环，包含系统、玩法、渲染、编辑工具和帧末等待；`Render` 是独立的命名帧序列。`Host.frame`、`Render.frame` 是 CPU 区间，后者包含提交与等待，不能当作完整宿主帧。
+- Tracy 依赖特性同时启用 bgfx 的 `profiler` 特性。配置检查实际导入库是否公开 `BGFX_CONFIG_PROFILER=1`，不能只给引擎头文件补宏冒充后端已启用。现有 `RendererCallbacks` 将内部 begin/end 回调桥接到 Tracy，复制临时视图名称，并保持按线程配对；Engine／System 基础框架仍不依赖 Tracy。
 - bgfx 状态面板由已有 MCP 开关控制，与 Tracy 构建开关独立，默认关闭。
+- Tracy 构建另启用 bgfx 视图时间戳采样，不显示统计面板。`Bgfx.cpu/gpu*Ms` 按反射、阴影、深度、材质表面、不透明、AO、SSR、透明、后处理、呈现、Meshlet、RVT 和 VSM 反馈分组。GPU 分组图只描述对应已完成帧的有效记录；原始 `Render.cpuView`、`Render.gpuView` 和 `Render.gpuFrame` 消息分别保留计数器、频率和 GPU 源帧号，离线去重，不丢弃独立延迟返回的视图。
+
+## 分段与内存
+
+宿主标记分别覆盖事件、任务完成派发、系统更新、音频、玩法、影片、场景准备；编辑器工具和资源服务另列。场景资源准备拆分脏网格、资源集合、程序、贴图任务、材质绑定、Meshlet、通道目标及进度统计，绘制按收集、光照／阴影、深度、表面、AO、不透明、SSR、透明、扩展与呈现划分。`Render.outputPresentSubmit` 与 `Render.bgfxFrame` 分开，避免将后端换帧等待全部归为呈现绘制。
+
+bgfx 内部标记覆盖线程交接、排序及后端提交；Metal 补丁另标记获取 drawable、帧延迟等待、命令提交／完成、GPU 时间戳解析和渲染 PSO 创建。其名称保留在原始 trace，中文报告提供对应说明。窗口未经过的阶段不宣称已验证；启动和 PSO 首次创建需要另取对应窗口。
+
+连接采集器时，渲染报告增加以下观测；未连接不遍历资源计算这些统计，关闭 Tracy 时不编译该路径：
+
+| 指标 | 口径 |
+| --- | --- |
+| `Render.meshCpuArrayBytes` / `Render.meshletCpuArrayBytes` | 渲染持有的唯一源网格数组容量，基础数据与 Meshlet 专用数组分列 |
+| `Render.textureCpuArrayBytes` | 唯一贴图资源的像素与子资源数组容量 |
+| `Render.sharedGeometryGpuEstimatedBytes` | 已创建共享静态几何缓冲估算，不含实例、蒙皮和 Meshlet 工作缓冲 |
+| `Render.textureStagingBytes` / `Render.preparePending*` | 准备暂存字节与待完成纹理、材质、程序数 |
+| `Meshlet.candidatePairs` / `indirectCommandSlots` / `computeBatches` / `budgetFallbacks` | 实际候选、提交命令槽、计算批次和预算回退；槽数不等于可见命令数 |
+| `ResourceGraph.records` / `acquisitions` / `requests` | 资源图持有规模与请求数量 |
+
+`Render.profileMemory` 和 `Render.profileStats` 单独记录统计本身的开销。CPU 数组统计不覆盖全部分配，GPU 缓冲估算不等于驱动驻留，二者都不能与 RSS 加减求“剩余内存”。CPU future 完成、CPU 帧末与 GPU 完成不是同一状态。
 
 ## 固定操作步骤
 
@@ -72,14 +93,25 @@ python3 scripts/performance/summarize_trace.py \
   --complete-field complete --frame-zone Host.frame
 ```
 
-空闲场景省略消息参数，使用所有完整 FrameMark 间隔；其他业务可传自己的 JSON 消息前缀与完成字段，或者 `--start-ns`/`--end-ns`。一个 trace 只放一轮负载，避免把多次运行误合并。输出包含官方逐事件导出、帧间隔和 `summary.json`；原始输入与分析配置必须一同保留。`task_queue` 按域、任务和优先级汇总单行注释中的 `queued_ns`，分别输出排队与执行耗时、执行线程及缺失/无效注释数量；旧 trace 缺注释时不虚构排队数据。
+空闲场景省略消息参数，使用所有完整 FrameMark 间隔；其他业务可传自己的 JSON 消息前缀与完成字段，或者 `--start-ns`/`--end-ns`。一个 trace 只放一轮负载，避免把多次运行误合并。输出包含官方逐事件导出、帧间隔、`summary.json` 和自包含中文 `report.html`；原始输入与分析配置必须一同保留。`task_queue` 按域、任务和优先级汇总单行注释中的 `queued_ns`，分别输出排队与执行耗时、执行线程及缺失/无效注释数量；缺注释时不虚构排队数据。
+
+中文报告由 `trace_report.py` 从摘要与邻接 `capture.json` 生成，语言文案独立放在 `locales/zh-cn.json`，原始标记、源码、线程和版本指纹保留。报告提供主线程耗时树、各线程自身热点、等待、逐 GPU 源帧的视图观测、任务排队及内存／工作量；父子和跨线程区间不重复相加。可合并同条件的一对摘要，无需重新采集或导出：
+
+```sh
+python3 scripts/performance/trace_report.py \
+  --analysis build/performance/before-6/analysis/summary.json \
+  --analysis build/performance/after-6/analysis/summary.json \
+  --output build/performance/comparison.html
+```
+
+完整宿主帧、关键阶段、实际 bgfx 回调和原生视图记录应由具体测试流程按目标检查，不能仅以 trace 文件存在判定采集完成。分析器拒绝交叉的 CPU 区间、缺失的自身时间、倒序的原生时间戳及回调失配；失败保留原始输入。根帧的直接阶段覆盖率只说明顶层区间包住了多少时间，不表示所有函数已细分；线程覆盖与等待都是墙钟观测，不是 CPU 利用率。
 
 ## 统计口径
 
 - 帧报告均值、P50/P95/P99/max、样本数及实际吞吐；说明分位数算法，保持两版一致。
 - CPU 区间区分自身工作、子区间与等待，父子 inclusive 不相加；CPU/GPU 异步数据不能直接相减定位热点。
 - RenderViewStats 是场景网格统计；阴影、后处理等总提交另取 bgfx Stats。合批可以减少 draw，不能减少应绘制实例或三角形。
-- GPU 时间保留有效性与 `gpuFrameNum`；没有可用时间时写“不可用”，不以 CPU 墙钟替代。
+- GPU 时间保留有效性与每条记录的 `gpuFrameNum`；没有可用时间时写“不可用”，不填零或以 CPU 墙钟替代。Metal 等后端的视图区间可能共享编码器、相互重叠，命令缓冲区间也可能跨流水帧重叠，不能相加成独占 Shader 工作时间或代替实际吞吐。
 - 进程 RSS、CPU 暂存、纹理与 RenderTarget 估算分别报告，不能混称显存或内存收益；未测的项明确留空。
 - 图像、功能与生命周期先满足契约；不能以降画质、少绘制、少算物理步或放宽容差换取性能结论。
 - 场景和参数不同只能分别报告，不能算严格加速比例。短样本不代表持续热负载、完整首帧或移动设备性能。

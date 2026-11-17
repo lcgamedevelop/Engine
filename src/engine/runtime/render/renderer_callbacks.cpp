@@ -1,6 +1,10 @@
 #include "runtime/render/renderer_callbacks.hpp"
 
 #include "runtime/performance/profiling.hpp"
+
+#if defined(ENGINE_ENABLE_TRACY)
+#include <tracy/TracyC.h>
+#endif
 #include "runtime/task/task_system.hpp"
 #include "runtime/utils/path_utils.hpp"
 
@@ -11,6 +15,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <system_error>
 #include <vector>
@@ -19,6 +24,27 @@ namespace engine
 {
 namespace
 {
+
+#if defined(ENGINE_ENABLE_TRACY)
+thread_local std::vector<TracyCZoneCtx> bgfx_profile_stack;
+
+void begin_bgfx_profile(const char* name, std::uint32_t color, const char* file, std::uint16_t line)
+{
+    TracyCZoneCtx context{};
+    if (TracyCIsConnected)
+    {
+        const auto* label = name ? name : "bgfx/unnamed";
+        const auto* source = file ? file : "bgfx";
+        const auto rgb = ((color & 0xff) << 16) | (color & 0xff00) | ((color >> 16) & 0xff);
+        // The allocated source location copies names, including transient view labels.
+        const auto location = ___tracy_alloc_srcloc_name(line, source, std::strlen(source), "", 0,
+                                                         label, std::strlen(label), rgb);
+        context = ___tracy_emit_zone_begin_alloc(location, 1);
+    }
+    // Keep inactive entries too: connecting during an enclosing scope must not unbalance ends.
+    bgfx_profile_stack.push_back(context);
+}
+#endif
 
 struct ImageWriter final : bx::WriterI
 {
@@ -157,18 +183,37 @@ void RenderSystem::RendererCallbacks::traceVargs(const char*, std::uint16_t, con
     SDL_LogMessageV(SDL_LOG_CATEGORY_RENDER, SDL_LOG_PRIORITY_DEBUG, format, arguments);
 }
 
-void RenderSystem::RendererCallbacks::profilerBegin(const char*, std::uint32_t, const char*,
-                                                    std::uint16_t)
+void RenderSystem::RendererCallbacks::profilerBegin(const char* name, std::uint32_t color,
+                                                    const char* file, std::uint16_t line)
 {
+#if defined(ENGINE_ENABLE_TRACY)
+    begin_bgfx_profile(name, color, file, line);
+#else
+    (void)name;
+    (void)color;
+    (void)file;
+    (void)line;
+#endif
 }
 
-void RenderSystem::RendererCallbacks::profilerBeginLiteral(const char*, std::uint32_t, const char*,
-                                                           std::uint16_t)
+void RenderSystem::RendererCallbacks::profilerBeginLiteral(const char* name, std::uint32_t color,
+                                                           const char* file, std::uint16_t line)
 {
+    profilerBegin(name, color, file, line);
 }
 
 void RenderSystem::RendererCallbacks::profilerEnd()
 {
+#if defined(ENGINE_ENABLE_TRACY)
+    if (bgfx_profile_stack.empty())
+    {
+        constexpr char message[] = "Bgfx.profilerStackImbalance";
+        ENGINE_PROFILE_MESSAGE(message, sizeof(message) - 1);
+        return;
+    }
+    ___tracy_emit_zone_end(bgfx_profile_stack.back());
+    bgfx_profile_stack.pop_back();
+#endif
 }
 
 std::uint32_t RenderSystem::RendererCallbacks::cacheReadSize(std::uint64_t)

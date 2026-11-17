@@ -27,6 +27,9 @@ public:
     [[nodiscard]] bool scan_dependencies(editor::asset_pipeline::ImportAsset& asset,
                                          const editor::asset_pipeline::ImportContext& context,
                                          std::string& error) const override;
+    [[nodiscard]] bool finalize_dependencies(editor::asset_pipeline::ImportAsset& asset,
+                                             const editor::asset_pipeline::ImportContext& context,
+                                             std::string& error) const override;
     [[nodiscard]] bool convert(const editor::asset_pipeline::ImportAsset& asset,
                                const editor::asset_pipeline::ImportContext& context,
                                std::string& error) const override;

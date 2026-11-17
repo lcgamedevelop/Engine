@@ -1,0 +1,67 @@
+--- a/bgfx/src/renderer_mtl.cpp
++++ b/bgfx/src/renderer_mtl.cpp
+@@ -3497,7 +3497,10 @@
+ 
+ 				{
+ 					MTL::RenderPipelineReflection* reflection = NULL;
++					{
++						BGFX_PROFILER_SCOPE("bgfx/Metal create render pipeline", kColorFrame);
+ 					pso->m_rps = newRenderPipelineStateWithDescriptor(m_device, pd, MTL::PipelineOptionBufferTypeInfo, &reflection);
++					}
+ 
+ 					BGFX_FATAL(NULL != pso->m_rps, Fatal::InvalidShader, "Failed to create graphics PSO: %s", s_lastPipelineError);
+ 
+@@ -5513,7 +5516,10 @@
+ 		{
+ 			const bool occluded = isWindowOccluded(m_nwh);
+ 
++			{
++				BGFX_PROFILER_SCOPE("bgfx/Metal acquire drawable", kColorFrame);
+ 			m_drawable = occluded ? NULL : m_metalLayer->nextDrawable();
++			}
+ 
+ 			if (m_drawable != NULL)
+ 			{
+@@ -5789,6 +5795,7 @@
+ 
+ 	void CommandQueueMtl::kick(bool _endFrame, bool _waitForFinish)
+ 	{
++		BGFX_PROFILER_SCOPE("bgfx/Metal commit commands", kColorFrame);
+ 		if (m_activeCommandBuffer)
+ 		{
+ 			if (_endFrame)
+@@ -5803,7 +5810,10 @@
+ 
+ 			if (_waitForFinish)
+ 			{
++				{
++					BGFX_PROFILER_SCOPE("bgfx/Metal wait command completion", kColorFrame);
+ 				m_activeCommandBuffer->waitUntilCompleted();
++				}
+ 			}
+ 
+ 			{
+@@ -5845,6 +5855,7 @@
+ 
+ 	void CommandQueueMtl::consume()
+ 	{
++		BGFX_PROFILER_SCOPE("bgfx/Metal frame latency wait", kColorFrame);
+ 		m_framesSemaphore.wait();
+ 
+ 		const uint32_t completedFrames = bx::atomicLoad(&m_completedFrames);
+@@ -6021,6 +6032,7 @@
+ 
+ 	void TimerQueryMtl::resolve(uint32_t _samplingIdx)
+ 	{
++		BGFX_PROFILER_SCOPE("bgfx/Metal resolve GPU timestamps", kColorFrame);
+ 		Sampling& sampling = m_sampling[_samplingIdx];
+ 
+ 		if (NULL == sampling.m_sampleBuffer
+@@ -6431,6 +6443,7 @@
+ 
+ 	void RendererContextMtl::submit(Frame* _render, const ClearQuad& _clearQuad, const MipGen& /*_mipGen*/, TextVideoMemBlitter& _textVideoMemBlitter)
+ 	{
++		BGFX_PROFILER_SCOPE("bgfx/Metal submit", kColorFrame);
+ 		m_indexBuffers.freeUnused();
+ 		m_vertexBuffers.freeUnused();
+ 		m_shaders.freeUnused();

@@ -26,8 +26,9 @@ inline constexpr bgfx::ViewId vsm_debug_view = 214;
 inline constexpr std::uint16_t skinning_view = 0;
 inline constexpr std::uint16_t atmosphere_transmittance_view = 1;
 inline constexpr std::uint16_t atmosphere_multiscatter_view = 2;
-inline constexpr std::uint16_t meshlet_clear_view = 3;
-inline constexpr std::uint16_t meshlet_cull_view = 4;
+// Planar reflections occupy 3..72; main-view meshlet work must not share their views.
+inline constexpr std::uint16_t meshlet_clear_view = 76;
+inline constexpr std::uint16_t meshlet_cull_view = 77;
 inline constexpr std::uint16_t atmosphere_main_skyview = 109;
 inline constexpr std::uint16_t atmosphere_capture_skyview = 239;
 inline constexpr std::uint16_t shadow_view = 80;

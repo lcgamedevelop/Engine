@@ -28,6 +28,7 @@ classDiagram
         +inspect_batch(const ImportContext& context, string& fingerprint, string& error) bool
         +scan_dependencies(ImportAsset& asset, const ImportContext& context, string& error) bool
         +convert(const ImportAsset& asset, const ImportContext& context, string& error) bool
+        +finalize_dependencies(ImportAsset& asset, const ImportContext& context, string& error) bool
         -state_: unique_ptr~State~
     }
     class AssetPipelineSystem
@@ -52,6 +53,7 @@ classDiagram
 - 插件 id 为 `fbx`，主产物为 `model`；子资源逻辑路径是源路径加 `meshes/<节点层级>`、`skeleton`、`animations/<动画名称>`。源 meta 保存主 GUID 和所有子 GUID，复制/冲突遵循基础管线规则。
 - 源文件与 meta 中的 `[[subresources]]` 构成编辑器虚拟对象包。运行时 Model v2 仅保存可实例化层级以及节点引用的 Mesh/Material；Mesh 与 Animation 分别引用所需 Skeleton，Model 不持有同源动画列表。打包按选中根及实际依赖裁剪，同源分组不形成运行时依赖。
 - `discover` 解析每个源一次；后续并行转换只读本批解析结果。骨架与动画使用生成 Schema，未建立另一份持久化模型。
+- `finalize_dependencies` 沿用基础导入器的全批转换完成契约，释放本批 FBX 解析树及材质映射快照；后续封装与发布只消费生成产物。全量复用缓存的批次同样执行，不将大模型的离线解析内存保留到编辑器关闭。
 - `.meta` 中 `sample_rate` 默认 30，只接受 1–240 的有限数值；`skeleton` 必须是字符串，空值使用本源骨架。非空时只允许不带网格的动画 FBX 引用同批导入中另一个 FBX 自身生成的 `skeleton` 子资源；不能转引骨架，也不能用此配置替换带网格 FBX 的骨架。显式参数类型错误返回失败，不回退默认值。
 - 外部动画按完整节点路径对应关节；源文件缺少目标加权骨骼或其祖先时失败，缺少非必需节点时不生成其轨道，并不限于末端。已有节点即使未打键也仍采样源局部 TRS，不自动使用目标默认姿态，不做语义或参考姿态补偿。运行时缺整条轨道的处理见[动画模块](../../../runtime/animation.md)，不能与导入时缺节点混为一谈。
 - 动画固定间隔采样始终保留源片段精确末帧；若倒数采样点与末帧编码为相同 float 时间，仅去除倒数点。其他无法严格递增的时间仍失败，避免重复关键帧或丢失末端姿态。

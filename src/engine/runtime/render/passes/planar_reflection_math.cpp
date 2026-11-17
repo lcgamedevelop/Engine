@@ -110,6 +110,14 @@ bool prepare_planar_reflection(const float* plane_world, const float* camera_wor
         projection[col * 4 + 2] =
             camera_plane[col] * factor - (homogeneous ? projection[col * 4 + 3] : 0.0F);
     }
+    // An orthographic observer parallel to the mirror produces a singular
+    // oblique volume. It has no usable reflection rays; the caller keeps its IBL path.
+    float inverse_projection[16]{};
+    bx::mtxInverse(inverse_projection, projection.data());
+    if (!finite_matrix(inverse_projection))
+    {
+        return false;
+    }
     bx::mtxMul(view_projection.data(), view.data(), projection.data());
     return finite_matrix(projection.data()) && finite_matrix(view_projection.data());
 }

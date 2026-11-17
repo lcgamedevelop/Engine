@@ -13,6 +13,7 @@
 #include "runtime/scene/light.hpp"
 #include "runtime/scene/light_probe_volume_component.hpp"
 #include "runtime/scene/mesh_renderer.hpp"
+#include "runtime/scene/planar_reflection_component.hpp"
 #include "runtime/scene/post_process_component.hpp"
 #include "runtime/scene/scene.hpp"
 #include "runtime/scene/transform.hpp"
@@ -644,6 +645,32 @@ int test()
     {
         return 1;
     }
+    const auto has_surface_view = [&]()
+    {
+        const auto views = renderer.submission_stats();
+        return std::any_of(views.begin(), views.end(),
+                           [](const auto& view) { return view.view_id == 111; });
+    };
+    auto screen_effects = test_support::read_settings(post);
+    SceneCaptureImage ssr_image, ssr_restored;
+    RenderViewStats ssr_stats;
+    if (!expect(!has_surface_view(), "SSR off does not submit a material surface pass"))
+    {
+        return 1;
+    }
+    screen_effects.ssr_enabled = true;
+    if (!post.set_settings(screen_effects) || !capture(window, renderer, ssr_image, ssr_stats) ||
+        !expect(has_surface_view(), "SSR on prepares and submits its material surface pass"))
+    {
+        return 1;
+    }
+    screen_effects.ssr_enabled = false;
+    if (!post.set_settings(screen_effects) || !capture(window, renderer, ssr_restored, ssr_stats) ||
+        !expect(!has_surface_view(), "disabling SSR removes its material surface pass") ||
+        !pixels(instanced, ssr_restored, "disabling SSR restores the exact HDR image"))
+    {
+        return 1;
+    }
     constexpr auto meshlet_caps = BGFX_CAPS_COMPUTE | BGFX_CAPS_DRAW_INDIRECT;
     const bool meshlet_supported = (bgfx::getCaps()->supported & meshlet_caps) == meshlet_caps &&
                                    bgfx::getCaps()->limits.maxInstanceData >= 7 &&
@@ -891,8 +918,9 @@ int test()
     if (!camera.set_enabled(false) || !frames(window, renderer, 2) || !renderer.vsm_status(vsm) ||
         !expect(vsm.state == VsmState::disabled && !vsm.resident_pages && !vsm.resident_bytes,
                 "a scene without a drawable camera retires virtual shadow state") ||
-        !camera.set_enabled(true) || !expect(settle_vsm() && vsm.generation > original_generation,
-                                            "restoring the camera warms a new VSM generation") ||
+        !camera.set_enabled(true) ||
+        !expect(settle_vsm() && vsm.generation > original_generation,
+                "restoring the camera warms a new VSM generation") ||
         !capture(window, renderer, cached_image, shadow_stats) ||
         !pixels(virtual_image, cached_image, "restoring the camera reconstructs virtual shadows"))
     {
@@ -918,6 +946,47 @@ int test()
         !renderer.vsm_status(vsm) ||
         !expect(vsm.state == VsmState::disabled && !vsm.resident_pages && !vsm.resident_bytes,
                 "disabling VSM releases its resident state"))
+    {
+        return 1;
+    }
+    // Both reflection shadow ranges remain live while main-view meshlet commands run.
+    for (unsigned index = 0; index < 2; ++index)
+    {
+        auto node = scene->create_node("Reflection and meshlet composition");
+        auto mesh = node.add_component<MeshRenderer>();
+        auto reflection = node.add_component<PlanarReflectionComponent>();
+        TransformSettings pose;
+        pose.position = {0, -2.0 - index, 0};
+        pose.scale = {6, .025, 6};
+        if (!mesh || !reflection || !mesh.set_mesh("builtin://meshes/cube") ||
+            !node.get_component<Transform>().set_settings(pose) ||
+            !mesh.material().set_type("builtin://materials/default-pbr") ||
+            !mesh.material().set_float("metallic", 1) ||
+            !mesh.material().set_float("roughness", .1F))
+        {
+            return 1;
+        }
+    }
+    SceneCaptureImage reflected_reference;
+    if (!capture(window, renderer, reflected_reference, shadow_stats))
+    {
+        return 1;
+    }
+    camera_pose.position = {0, 3, 8};
+    camera_pose.rotation = {-20, 0, 0};
+    if (!camera_node.get_component<Transform>().set_settings(camera_pose) ||
+        !capture(window, renderer, reflected_reference, shadow_stats))
+    {
+        return 1;
+    }
+    const auto reflected_views = renderer.submission_stats();
+    if (!expect(std::any_of(reflected_views.begin(), reflected_views.end(),
+                            [](const auto& value) { return value.view_id == 33; }) &&
+                    std::any_of(reflected_views.begin(), reflected_views.end(),
+                                [](const auto& value) { return value.view_id == 72; }),
+                "both nondegenerate planar captures submit actual geometry") ||
+        !meshlet_pixels(reflected_reference,
+                        "Meshlet culling with two planar captures and CSM preserves every pixel"))
     {
         return 1;
     }

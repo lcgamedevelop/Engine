@@ -1,4 +1,6 @@
 #include "runtime/render/passes/frame_output.hpp"
+
+#include "runtime/performance/profiling.hpp"
 #include "runtime/render/render_system.hpp"
 #include "runtime/render/rvt/rvt_debug_view.hpp"
 #include "runtime/render/rvt/rvt_pass.hpp"
@@ -55,6 +57,7 @@ void RenderSystem::prepare_rvt(const RenderSettings& settings,
                                const render_detail::RenderFrameData& frame,
                                const render_detail::SceneDrawView& draw)
 {
+    ENGINE_PROFILE_ZONE("Render.prepareRvt");
     if (!settings.atmosphere.rvt || !settings.atmosphere.rvt->enabled)
     {
         return;

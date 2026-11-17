@@ -213,16 +213,25 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
     }
     resources.targets().surface_pass.begin(view, projection);
     draw.id = render_detail::ambient_occlusion_depth_view;
-    if (!resources.draw_meshes(resources.frame_data, resources.draw_lists[2], rendering, draw,
-                               render_detail::SceneDrawMode::depth))
     {
-        return false;
+        ENGINE_PROFILE_ZONE("Render.depthSubmit");
+        if (!resources.draw_meshes(resources.frame_data, resources.draw_lists[2], rendering, draw,
+                                   render_detail::SceneDrawMode::depth))
+        {
+            return false;
+        }
     }
-    draw.id = render_detail::surface_view;
-    if (!resources.draw_meshes(resources.frame_data, resources.draw_lists[2], rendering, draw,
-                               render_detail::SceneDrawMode::surface))
     {
-        return false;
+        ENGINE_PROFILE_ZONE("Render.surfaceSubmit");
+        if (rendering.ssr_enabled)
+        {
+            draw.id = render_detail::surface_view;
+            if (!resources.draw_meshes(resources.frame_data, resources.draw_lists[2], rendering,
+                                       draw, render_detail::SceneDrawMode::surface))
+            {
+                return false;
+            }
+        }
     }
     if (vsm_batch.generation &&
         !vsm_pass_->submit_feedback(vsm_batch.view, resources.targets().surface_pass.depth(),
@@ -230,11 +239,14 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
     {
         return false;
     }
-    if (rendering.ao_enabled &&
-        !resources.targets().ambient_occlusion.compute(settings, rendering, projection,
-                                                       resources.targets().surface_pass.depth()))
     {
-        return false;
+        ENGINE_PROFILE_ZONE("Render.aoSubmit");
+        if (rendering.ao_enabled &&
+            !resources.targets().ambient_occlusion.compute(
+                settings, rendering, projection, resources.targets().surface_pass.depth()))
+        {
+            return false;
+        }
     }
     draw.id = render_detail::main_view;
     draw.multisampling = config_.msaa_samples > 1;
@@ -246,39 +258,48 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
     {
         return false;
     }
-    if (!resources.draw_meshes(resources.frame_data, resources.draw_lists[2], rendering, draw,
-                               render_detail::SceneDrawMode::opaque))
     {
-        return false;
-    }
-    auto frozen_scene = resources.targets().hdr_post_process.opaque_color();
-    if (rendering.ssr_enabled)
-    {
-        // Match the main PBR pass: disabling IBL selects the analytical DFG
-        // fallback even when an earlier bake has left its LUT loaded.
-        const bgfx::TextureHandle reflection_lut =
-            rendering.ibl_enabled && resources.targets().ibl_textures[2]
-                ? resources.targets().ibl_textures[2]->handle
-                : bgfx::TextureHandle{bgfx::kInvalidHandle};
-        if (!resources.targets().reflections.render(
-                view, projection, frozen_scene,
-                resources.targets().hdr_post_process.opaque_specular(),
-                resources.targets().surface_pass.depth(),
-                resources.targets().surface_pass.normal_roughness(),
-                resources.targets().surface_pass.specular(), reflection_lut, rendering))
+        ENGINE_PROFILE_ZONE("Render.opaqueSubmit");
+        if (!resources.draw_meshes(resources.frame_data, resources.draw_lists[2], rendering, draw,
+                                   render_detail::SceneDrawMode::opaque))
         {
             return false;
         }
-        frozen_scene = resources.targets().reflections.texture();
+    }
+    auto frozen_scene = resources.targets().hdr_post_process.opaque_color();
+    {
+        ENGINE_PROFILE_ZONE("Render.ssrSubmit");
+        if (rendering.ssr_enabled)
+        {
+            // Match the main PBR pass: disabling IBL selects the analytical DFG
+            // fallback even when an earlier bake has left its LUT loaded.
+            const bgfx::TextureHandle reflection_lut =
+                rendering.ibl_enabled && resources.targets().ibl_textures[2]
+                    ? resources.targets().ibl_textures[2]->handle
+                    : bgfx::TextureHandle{bgfx::kInvalidHandle};
+            if (!resources.targets().reflections.render(
+                    view, projection, frozen_scene,
+                    resources.targets().hdr_post_process.opaque_specular(),
+                    resources.targets().surface_pass.depth(),
+                    resources.targets().surface_pass.normal_roughness(),
+                    resources.targets().surface_pass.specular(), reflection_lut, rendering))
+            {
+                return false;
+            }
+            frozen_scene = resources.targets().reflections.texture();
+        }
     }
     resources.targets().hdr_post_process.begin_transparency(frozen_scene, view, projection);
     draw.id = render_detail::transparent_view;
     draw.textures[0] = frozen_scene;
     draw.textures[1] = resources.targets().surface_pass.depth();
-    if (!resources.draw_meshes(resources.frame_data, resources.draw_lists[2], rendering, draw,
-                               render_detail::SceneDrawMode::transparent))
     {
-        return false;
+        ENGINE_PROFILE_ZONE("Render.transparentSubmit");
+        if (!resources.draw_meshes(resources.frame_data, resources.draw_lists[2], rendering, draw,
+                                   render_detail::SceneDrawMode::transparent))
+        {
+            return false;
+        }
     }
     if (fonts_)
     {
@@ -292,6 +313,7 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
     }
     if (!extensions_.empty())
     {
+        ENGINE_PROFILE_ZONE("Render.extensionsSubmit");
         RenderContext context{*scene};
         context.world_origin = origin;
         std::copy_n(view, context.view.size(), context.view.begin());

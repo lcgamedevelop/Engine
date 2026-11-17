@@ -1675,3 +1675,10 @@ foreach(_target engine_guid_map_test engine_app_log_test engine_key_value_store_
         target_include_directories(${_target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/support")
     endif()
 endforeach()
+
+if(Python3_Interpreter_FOUND)
+    add_test(NAME engine.performance_analysis
+             COMMAND "${Python3_EXECUTABLE}"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/runtime/performance/analysis_test.py")
+    set_tests_properties(engine.performance_analysis PROPERTIES LABELS "tools;profiling" TIMEOUT 30)
+endif()

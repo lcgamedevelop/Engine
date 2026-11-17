@@ -645,6 +645,7 @@ int run_editor(const fs::path& project_root, engine::editor::EditorEnvironment& 
         auto previous_time = std::chrono::steady_clock::now();
         for (;;)
         {
+            ENGINE_PROFILE_FRAME();
             ENGINE_PROFILE_ZONE("Host.frame");
 #if defined(ENGINE_ENABLE_TRACY)
             const auto profile_frame_begin = std::chrono::steady_clock::now();
@@ -656,36 +657,51 @@ int run_editor(const fs::path& project_root, engine::editor::EditorEnvironment& 
             const double delta_time = std::min(elapsed_time, 0.1);
             previous_time = current_time;
 #if ENGINE_HAS_ASSET_PIPELINE
-            (void)tasks.dispatch_completions(parallel.completions_per_frame,
-                                             parallel.completion_budget_seconds);
-#endif
-            if (!editor->tick(delta_time))
             {
-                LogSystem::write(LogLevel::error, "Editor control frame failed");
-                return 1;
+                ENGINE_PROFILE_ZONE("Editor.dispatchCompletions");
+                (void)tasks.dispatch_completions(parallel.completions_per_frame,
+                                                 parallel.completion_budget_seconds);
+            }
+#endif
+            {
+                ENGINE_PROFILE_ZONE("Editor.controlTick");
+                if (!editor->tick(delta_time))
+                {
+                    LogSystem::write(LogLevel::error, "Editor control frame failed");
+                    return 1;
+                }
             }
 #if ENGINE_HAS_UI_EDITOR
-            const auto* script_status = runtime.gameplay()->script_status();
-            const auto run_id = script_status == nullptr ? 0 : script_status->run_id;
-            if (run_id != ui_run_id)
             {
-                ui_editor->cancel_pending_input();
-                ui_run_id = run_id;
+                ENGINE_PROFILE_ZONE("Editor.uiTools");
+                const auto* script_status = runtime.gameplay()->script_status();
+                const auto run_id = script_status == nullptr ? 0 : script_status->run_id;
+                if (run_id != ui_run_id)
+                {
+                    ui_editor->cancel_pending_input();
+                    ui_run_id = run_id;
+                }
+                ui_editor->tick(delta_time);
             }
-            ui_editor->tick(delta_time);
 #endif
 #if ENGINE_HAS_TERRAIN_EDITOR
-            if (!terrain_authoring->tick(delta_time))
             {
-                LogSystem::write(LogLevel::error, "Terrain authoring frame failed");
-                return 1;
+                ENGINE_PROFILE_ZONE("Editor.terrainTools");
+                if (!terrain_authoring->tick(delta_time))
+                {
+                    LogSystem::write(LogLevel::error, "Terrain authoring frame failed");
+                    return 1;
+                }
             }
 #endif
 #if ENGINE_HAS_SCENE_BAKE
-            if (!scene_bake->tick(delta_time))
             {
-                LogSystem::write(LogLevel::error, "Scene baking plugin frame failed");
-                return 1;
+                ENGINE_PROFILE_ZONE("Editor.bakeTools");
+                if (!scene_bake->tick(delta_time))
+                {
+                    LogSystem::write(LogLevel::error, "Scene baking plugin frame failed");
+                    return 1;
+                }
             }
 #endif
 #if ENGINE_HAS_MODELING_PLUGIN
@@ -696,10 +712,13 @@ int run_editor(const fs::path& project_root, engine::editor::EditorEnvironment& 
             }
 #endif
 #if ENGINE_HAS_RESOURCE_GRAPH_PLUGIN
-            if (!resources.tick(delta_time) || !resource_graph->tick(delta_time))
             {
-                LogSystem::write(LogLevel::error, "Resource service update failed");
-                return 1;
+                ENGINE_PROFILE_ZONE("Editor.resourceServices");
+                if (!resources.tick(delta_time) || !resource_graph->tick(delta_time))
+                {
+                    LogSystem::write(LogLevel::error, "Resource service update failed");
+                    return 1;
+                }
             }
 #endif
             const auto render_preview = [&](engine::Camera camera = {})
@@ -808,9 +827,12 @@ int run_editor(const fs::path& project_root, engine::editor::EditorEnvironment& 
                 status = runtime.tick(elapsed_time);
             }
 #if ENGINE_HAS_MCP_ENDPOINT
-            if (!mcp_endpoint.poll())
             {
-                LogSystem::write(LogLevel::error, mcp_endpoint.last_error());
+                ENGINE_PROFILE_ZONE("Editor.mcpPoll");
+                if (!mcp_endpoint.poll())
+                {
+                    LogSystem::write(LogLevel::error, mcp_endpoint.last_error());
+                }
             }
 #endif
 #if ENGINE_HAS_MODELING_PLUGIN

@@ -14,6 +14,8 @@ import statistics
 import subprocess
 import sys
 
+from analysis_views import frame_breakdown, native_view_timings
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -257,8 +259,20 @@ def analyze(args) -> Path:
                         "plot statistics are sample-weighted; bgfx samples may be delayed",
                         "percentiles use linear interpolation with no outlier removal",
                         "host-work percentages across multiple threads can exceed 100%"]}
+    result["cpu_frames"] = frame_breakdown(selected, own, args.frame_zone, end - start)
+    result["renderer_views"] = native_view_timings(messages, start, end, statistics_of)
+    result["coverage"] = {
+        "observed_zone_names": sorted({row["name"] for row in selected}),
+        "bgfx_callback_events": sum(row["name"].startswith("bgfx/") for row in selected),
+        "gpu_time_is_exclusive_work": False,
+    }
+    result["frame_intervals"] = [{"index": int(row["index"]),
+        "start_ns": int(row["start_ns"]), "duration_ms": int(row["duration_ns"]) / 1e6}
+        for row in frames if int(row["start_ns"]) >= start and int(row["end_ns"]) <= end]
     path = output / "summary.json"
     path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    from trace_report import write_reports
+    write_reports([path], output / "report.html")
     return path
 
 

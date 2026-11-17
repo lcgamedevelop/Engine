@@ -390,6 +390,14 @@ bool FbxImporter::scan_dependencies(ImportAsset& asset, const ImportContext& con
     asset.build_dependencies = asset.runtime_dependencies;
     return true;
 }
+bool FbxImporter::finalize_dependencies(ImportAsset&, const ImportContext&, std::string&) const
+{
+    // 所有转换均已完成；后续封装与发布不再借用 FBX 解析树。
+    state_->documents.clear();
+    state_->material_remaps.clear();
+    return true;
+}
+
 bool FbxImporter::convert(const ImportAsset& asset, const ImportContext& context,
                           std::string& error) const
 {

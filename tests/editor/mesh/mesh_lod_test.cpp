@@ -3,6 +3,7 @@
 #include "runtime/resource/codecs/mesh_resource_codec.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -267,6 +268,67 @@ bool meshlet_tests()
                 "meshlet winding and provoking vertices must match source triangles"))
     {
         return false;
+    }
+    engine::schema::MeshDataT degenerate;
+    degenerate.path = "models/degenerate-cluster.mesh";
+    degenerate.vertices = {
+        {100, 200, 300, 0, 0, 1}, {101, 200, 300, 0, 0, 1}, {102, 200, 300, 0, 0, 1}};
+    degenerate.indices = {0, 1, 2};
+    if (!expect(engine::MeshResourceCodec::validate(degenerate) &&
+                    engine::editor::generate_meshlets(degenerate, options.table(), error) &&
+                    engine::MeshResourceCodec::validate(degenerate) &&
+                    degenerate.meshlets->indices == degenerate.indices &&
+                    degenerate.meshlets->meshlets.front().cone_cutoff() == 1,
+                "collinear clusters retain topology and conservative bounds without a cone"))
+    {
+        return false;
+    }
+    auto mixed = degenerate;
+    mixed.meshlets.reset();
+    mixed.vertices.insert(mixed.vertices.end(),
+                          {{0, 0, 0, 0, 0, 1}, {1, 0, 0, 0, 0, 1}, {0, 1, 0, 0, 0, 1}});
+    mixed.indices.insert(mixed.indices.end(), {3, 4, 5});
+    if (!expect(engine::editor::generate_meshlets(mixed, options.table(), error) &&
+                    engine::MeshResourceCodec::validate(mixed) &&
+                    mixed.meshlets->indices == mixed.indices,
+                "cluster sphere includes distant degenerate vertices as well as visible faces"))
+    {
+        return false;
+    }
+    auto translated = source;
+    translated.submeshes.clear();
+    for (auto& vertex : translated.vertices)
+    {
+        vertex = {10000.0F + vertex.x() * 0.001F,
+                  20000.0F + vertex.y() * 0.001F,
+                  30000.0F,
+                  vertex.nx(),
+                  vertex.ny(),
+                  vertex.nz()};
+    }
+    if (!expect(engine::editor::generate_meshlets(translated, options.table(), error) &&
+                    engine::MeshResourceCodec::validate(translated) &&
+                    translated.meshlets->indices == translated.indices,
+                "small clusters at large coordinates have outward-rounded conservative spheres"))
+    {
+        return false;
+    }
+    for (const auto& cluster : translated.meshlets->meshlets)
+    {
+        const auto& center = cluster.center();
+        for (std::size_t i = cluster.first_index();
+             i < cluster.first_index() + cluster.index_count(); ++i)
+        {
+            const auto& point = translated.vertices[translated.meshlets->indices[i]];
+            const auto distance =
+                std::hypot(double(point.x()) - center.x(), double(point.y()) - center.y(),
+                           double(point.z()) - center.z());
+            if (!expect(distance <= cluster.radius(),
+                        "every stored sphere contains its vertices without a validation margin"))
+            {
+                return false;
+            }
+        }
     }
     auto invalid = toml::parse("[meshlets]\nenabled=1");
     const auto before = mesh.meshlets->indices;
