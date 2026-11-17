@@ -136,7 +136,7 @@ def catalog_entries(source, target_platform="android"):
 
 def parse_catalog(snapshot, target_platform="android"):
     data = FlatBuffer(snapshot, b"EASC")
-    if data.value(data.root, 0, "<I", 1) != 3:
+    if data.value(data.root, 0, "<I", 1) != 4:
         raise ValueError("Unsupported GUID catalog version; rebuild current runtime resources")
     if not data.string(data.root, 1):
         raise ValueError("GUID catalog is missing its revision")
@@ -152,10 +152,11 @@ def parse_catalog(snapshot, target_platform="android"):
         kind = data.value(asset, 2, "<B")
         checksum = data.string(asset, 3)
         size = data.value(asset, 4, "<Q")
-        module = data.string(asset, 6, False)
-        version = data.value(asset, 7, "<I", 2)
-        header_size = data.value(asset, 8, "<I")
-        location = data.pointer(data.field(asset, 9))
+        stream_dependencies = [data.string_at(item) for item in data.vector(asset, 6, False)]
+        module = data.string(asset, 7, False)
+        version = data.value(asset, 8, "<I", 2)
+        header_size = data.value(asset, 9, "<I")
+        location = data.pointer(data.field(asset, 10))
         mount = data.string(location, 0)
         relative = safe_relative(data.string(location, 1))
         offset = data.value(location, 2, "<Q")
@@ -166,7 +167,7 @@ def parse_catalog(snapshot, target_platform="android"):
             or guid == "00000000-0000-0000-0000-000000000000"
             or guid in identities
             or logical in paths
-            or kind > 19  # AssetKind in asset_catalog.fbs ends with movie=19.
+            or kind > 20  # AssetKind in the current schema ends with terrain_block=20.
             or version != 2
             or not re.fullmatch(r"[0-9a-f]{16}", checksum)
             or mount != "content"
@@ -178,8 +179,9 @@ def parse_catalog(snapshot, target_platform="android"):
             or offset + length > (1 << 63) - 1
         ):
             raise ValueError("Invalid GUID catalog identity, path, location or entity header")
-        if len(dependencies) != len(set(dependencies)) or any(
-            not re.fullmatch(guid_pattern, dep) for dep in dependencies
+        references = dependencies + stream_dependencies
+        if len(references) != len(set(references)) or any(
+            dep == guid or not re.fullmatch(guid_pattern, dep) for dep in references
         ):
             raise ValueError("Invalid GUID catalog dependency identity")
         if kind == 1:
@@ -206,10 +208,14 @@ def parse_catalog(snapshot, target_platform="android"):
                 "size": size,
                 "hash": checksum,
                 "dependencies": dependencies,
+                "stream_dependencies": stream_dependencies,
             }
         )
     # 运行包包含引擎内置实体，所有必要依赖都必须在本目录中，不借用旧包或宿主定义。
     edges = {item["guid"]: item["dependencies"] for item in entries}
+    for item in entries:
+        if any(dependency not in edges for dependency in item["stream_dependencies"]):
+            raise ValueError("GUID catalog stream dependency is missing")
     done, visiting = set(), set()
     for guid in edges:
         pending = [(guid, False)]

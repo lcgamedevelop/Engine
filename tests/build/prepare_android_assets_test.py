@@ -1,7 +1,8 @@
-"""Validate Android asset snapshots, catalogs and rollback with the standard library and no dependency installation."""
+"""Validate delivery with the standard library and the configured host FlatBuffers compiler."""
 
 import importlib.util
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -98,42 +99,32 @@ def resource_entry(payload, number=1, kind=1, path="scripts/game.ts", module="sc
 
 
 def catalog_fixture(entries, target="android"):
-    builder = BufferBuilder(b"EASC")
-    fields, root = builder.table(4)
-    builder.number(0, root)
-    builder.number(fields[0], 3)
-    builder.text(fields[1], "fixture-guid-catalog")
-    builder.text(fields[2], target)
-    builder.align(4)
-    vector = len(builder.data)
-    builder.data.extend(struct.pack("<I", len(entries)) + bytes(len(entries) * 4))
-    builder.pointer(fields[3], vector)
-    for index, entry in enumerate(entries):
-        asset, table = builder.table(10)
-        builder.pointer(vector + 4 + index * 4, table)
-        builder.text(asset[0], entry["guid"])
-        builder.text(asset[1], entry["logical"])
-        builder.number(asset[2], entry["kind"], "<B")
-        builder.text(asset[3], checksum(entry["entity"]))
-        builder.number(asset[4], len(entry["entity"]), "<Q")
-        builder.align(4)
-        deps = len(builder.data)
-        builder.data.extend(
-            struct.pack("<I", len(entry["dependencies"])) + bytes(len(entry["dependencies"]) * 4)
-        )
-        builder.pointer(asset[5], deps)
-        for dep_index, dependency in enumerate(entry["dependencies"]):
-            builder.text(deps + 4 + dep_index * 4, dependency)
-        builder.text(asset[6], entry["module"])
-        builder.number(asset[7], 2)
-        builder.number(asset[8], entry["header_size"])
-        location, table = builder.table(4)
-        builder.pointer(asset[9], table)
-        builder.text(location[0], "content")
-        builder.text(location[1], entry["path"])
-        builder.number(location[2], entry["offset"], "<Q")
-        builder.number(location[3], len(entry["entity"]), "<Q")
-    return bytes(builder.data)
+    flatc = os.environ.get("ENGINE_FLATC_EXECUTABLE") or shutil.which("flatc")
+    if not flatc:
+        raise RuntimeError("Delivery tests require the configured host ENGINE_FLATC_EXECUTABLE")
+    document = {
+        "schema_version": 4,
+        "revision": "fixture-guid-catalog",
+        "target_platform": target,
+        "entries": [{
+            "guid": entry["guid"], "path": entry["logical"], "kind": entry["kind"],
+            "content_hash": checksum(entry["entity"]), "content_size": len(entry["entity"]),
+            "dependencies": entry["dependencies"],
+            "stream_dependencies": entry.get("stream_dependencies", []),
+            "module_path": entry["module"], "format_version": 2,
+            "header_size": entry["header_size"],
+            "location": {"mount": "content", "path": entry["path"],
+                         "offset": entry["offset"], "length": len(entry["entity"])}
+        } for entry in entries]
+    }
+    with tempfile.TemporaryDirectory(prefix="engine-catalog-schema-") as directory:
+        root = Path(directory)
+        source = root / "catalog.json"
+        source.write_text(json.dumps(document), encoding="utf-8")
+        subprocess.check_call([flatc, "--binary", "--strict-json", "-o", str(root),
+                               str(ROOT / "include/schemas/runtime/asset_catalog.fbs"), str(source)],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return (root / "catalog.bin").read_bytes()
 
 
 class AndroidBuildArgumentTest(unittest.TestCase):
@@ -381,12 +372,33 @@ class PrepareAndroidAssetsTest(unittest.TestCase):
     def test_unknown_resource_kind_preserves_previous_output(self):
         self.prepare()
         previous = self.snapshot()
-        for kind in (20, 255):
+        for kind in (21, 255):
             with self.subTest(kind=kind):
                 self.entries = [
                     self.entries[0],
                     resource_entry(b"unsupported resource", 2, kind, "future.bin", ""),
                 ]
+                self.write_resources()
+                with self.assertRaises(ValueError):
+                    self.prepare()
+                self.assertEqual(self.snapshot(), previous)
+                self.assert_clean()
+
+    def test_terrain_blocks_and_stream_dependencies_use_the_current_schema(self):
+        block = resource_entry(b"terrain block", 2, 20, "terrain/region", "")
+        self.entries.append(block)
+        self.entries[0]["stream_dependencies"] = [block["guid"]]
+        self.write_resources()
+        self.prepare()
+        parsed = catalog_entries(self.output)
+        self.assertEqual(parsed[0]["stream_dependencies"], [block["guid"]])
+        self.assertEqual(parsed[0]["dependencies"], [])
+        self.assertEqual(parsed[1]["kind"], 20)
+        previous = self.snapshot()
+        for references in (["90000000-0000-4000-8000-000000000099"],
+                           [block["guid"], block["guid"]], [self.entries[0]["guid"]]):
+            with self.subTest(references=references):
+                self.entries[0]["stream_dependencies"] = references
                 self.write_resources()
                 with self.assertRaises(ValueError):
                     self.prepare()
@@ -399,12 +411,14 @@ class PrepareAndroidAssetsTest(unittest.TestCase):
         path = self.source / "catalog.bin"
         data = bytearray(path.read_bytes())
         view = catalog.FlatBuffer(data, b"EASC")
-        struct.pack_into("<I", data, view.field(view.root, 0), 2)
-        path.write_bytes(data)
-        with self.assertRaises(ValueError):
-            self.prepare()
-        self.assertEqual(self.snapshot(), previous)
-        self.assert_clean()
+        for version in (2, 3):
+            with self.subTest(catalog_version=version):
+                struct.pack_into("<I", data, view.field(view.root, 0), version)
+                path.write_bytes(data)
+                with self.assertRaises(ValueError):
+                    self.prepare()
+                self.assertEqual(self.snapshot(), previous)
+                self.assert_clean()
 
         entry = self.entries[0]
         original = entry["entity"]
@@ -516,7 +530,8 @@ class PrepareAndroidAssetsTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "android"):
             self.prepare()
         catalog = catalog_fixture(self.entries)
-        for length in (0, 8, 24, len(catalog) - 1):
+        # flatc may leave trailing alignment padding; truncate required content instead.
+        for length in (0, 8, 24, len(catalog) // 2):
             (self.source / "catalog.bin").write_bytes(catalog[:length])
             with self.assertRaises(ValueError):
                 self.prepare()

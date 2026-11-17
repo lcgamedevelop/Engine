@@ -206,6 +206,8 @@ if(TARGET mcp_app)
     add_test(NAME engine.desktop_export
              COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/build/desktop_export_test.py")
     set_tests_properties(engine.desktop_export PROPERTIES TIMEOUT 60)
+    set_tests_properties(engine.android_asset_packaging engine.desktop_export PROPERTIES
+        ENVIRONMENT "ENGINE_FLATC_EXECUTABLE=${ENGINE_FLATC_EXECUTABLE}")
     add_test(NAME engine.android_mcp
              COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/plugins/editor/mcp/android_mcp_test.py"
                      --mcp "$<TARGET_FILE:mcp_app>" --root "${PROJECT_SOURCE_DIR}")
