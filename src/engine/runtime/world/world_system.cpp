@@ -99,12 +99,13 @@ void WorldSystem::destroy_scene() noexcept
         return;
     }
     retirement_.clear();
-    scopes_.clear();
+    // Component cleanup can query/release scopes. Remove owners from lookup first;
+    // unique_ptr/container destruction must not expose a partially retired scene.
+    auto retiring_scopes = std::exchange(scopes_, {});
+    auto retiring_scenes = std::exchange(scenes_, {});
     scene_ = nullptr;
-    while (!scenes_.empty())
-    {
-        scenes_.pop_back();
-    }
+    retiring_scopes.clear();
+    retiring_scenes.clear();
     paused_ = false;
 }
 

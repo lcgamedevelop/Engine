@@ -5,6 +5,8 @@
 #include "editor/asset_pipeline/asset_io.hpp"
 #include "editor/asset_pipeline/editor_tools.hpp"
 #include "runtime/resource/resource_system.hpp"
+#include "runtime/resource/virtual_file_system.hpp"
+#include "runtime/utils/hash_utils.hpp"
 #include "runtime/utils/path_utils.hpp"
 
 #include <algorithm>
@@ -146,12 +148,15 @@ bool valid_parameter(const schema::ShaderParameterT& definition,
 
 bool file_hash(const std::filesystem::path& path, std::string& hash, std::string& error)
 {
-    std::vector<std::byte> bytes;
-    if (!read_bytes(path, bytes, error))
+    hash.clear();
+    std::uint64_t value = 0, size = 0;
+    if (!VirtualFileSystem::hash_file(path, value, size))
     {
+        error = "Cannot hash file: " + PathUtils::to_utf8(path);
         return false;
     }
-    hash = hash_bytes(bytes);
+    hash = engine::hash::hex(value);
+    error.clear();
     return true;
 }
 

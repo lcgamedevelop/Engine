@@ -1,4 +1,5 @@
 #include "editor/asset_pipeline/asset_pipeline_system.hpp"
+#include "editor/asset_pipeline/scene_importer.hpp"
 #include "file_text.hpp"
 #include "plugins/editor/effects/effect_codec.hpp"
 #include "plugins/editor/effects/effect_importer.hpp"
@@ -396,7 +397,30 @@ int main(int argc, char** argv)
     if (!expect(plugins::effects::register_effect_codec() && threads.initialize({}) &&
                     tasks.initialize({}) && pipeline.initialize({}) &&
                     pipeline.add_importer(importer),
-                "initialize optional effect importer and codec") ||
+                "initialize optional effect importer and codec"))
+    {
+        return 1;
+    }
+    schema::SceneDataT saved_scene;
+    std::string codec_error;
+    if (!expect(editor::SceneImporter::read(project.root / "assets/test.scene", saved_scene,
+                                            codec_error),
+                "read the authored effect scene: " + codec_error))
+    {
+        return 1;
+    }
+    auto& saved_effect = *saved_scene.nodes.front()->components.back();
+    saved_effect.flags->enabled = false;
+    saved_effect.flags->visible = false;
+    schema::SceneDataT restored_scene;
+    if (!expect(editor::SceneImporter::write(project.root / "assets/test.scene", saved_scene,
+                                             codec_error) &&
+                    editor::SceneImporter::read(project.root / "assets/test.scene", restored_scene,
+                                                codec_error) &&
+                    !restored_scene.nodes.front()->components.back()->flags->enabled &&
+                    !restored_scene.nodes.front()->components.back()->flags->visible,
+                "effect scene save and reload preserve shared enabled and visible flags: " +
+                    codec_error) ||
         !expect(pipeline.build_assets(project.root), pipeline.last_error()))
     {
         return 1;

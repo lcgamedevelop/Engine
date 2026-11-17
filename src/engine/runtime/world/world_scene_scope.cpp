@@ -253,7 +253,7 @@ Scene* WorldSystem::scope_candidate(SceneScopeId id) const noexcept
     {
         for (const auto& scene : scenes_)
         {
-            if (scene->id() == id.value)
+            if (scene && scene->id() == id.value)
             {
                 return scene->allocation_target_ ? scene->allocation_target_ : scene.get();
             }
@@ -267,7 +267,7 @@ Scene* WorldSystem::scope_candidate(SceneScopeId id) const noexcept
     }
     for (const auto& scene : scenes_)
     {
-        if (scene.get() == scope.published_scene)
+        if (scene && scene.get() == scope.published_scene)
         {
             return scope.kind == SceneLoadKind::append_batch
                        ? (scene_ && scene_->id() == scope.destination ? scene_ : nullptr)

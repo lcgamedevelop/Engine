@@ -23,6 +23,8 @@ namespace
 {
 using namespace editor::asset_pipeline;
 
+constexpr std::uint64_t maximum_fbx_source_bytes = 2ULL * 1024ULL * 1024ULL * 1024ULL;
+
 bool finite_float(double value)
 {
     return std::isfinite(value) && std::abs(value) <= std::numeric_limits<float>::max();
@@ -396,9 +398,9 @@ bool load_document(const std::filesystem::path& path, FbxDocument& document, std
         return false;
     }
     std::vector<std::byte> bytes;
-    if (!VirtualFileSystem::read_file(path, bytes))
+    if (!VirtualFileSystem::read_file(path, bytes, &error, maximum_fbx_source_bytes))
     {
-        error = "Cannot read FBX source: " + PathUtils::to_utf8(path);
+        error = "Cannot read FBX source: " + PathUtils::to_utf8(path) + ": " + error;
         return false;
     }
     document.source_hash = hash_bytes(bytes);

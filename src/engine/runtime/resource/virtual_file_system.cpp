@@ -26,7 +26,6 @@ namespace engine
 namespace
 {
 
-constexpr std::uint64_t maximum_read_size = 64U * 1024U * 1024U;
 using Stream = std::unique_ptr<SDL_IOStream, decltype(&SDL_CloseIO)>;
 
 bool valid_relative_path(std::string_view path)
@@ -627,7 +626,7 @@ bool VirtualFileSystem::read(const schema::FileLocationT& location, std::uint64_
 }
 
 bool VirtualFileSystem::read_file(const std::filesystem::path& path, ByteBuffer& output,
-                                  std::string* error)
+                                  std::string* error, std::uint64_t maximum_bytes)
 {
     output.clear();
     if (error)
@@ -648,9 +647,18 @@ bool VirtualFileSystem::read_file(const std::filesystem::path& path, ByteBuffer&
         return failed("Cannot open file for reading");
     }
     const Sint64 size = SDL_GetIOSize(stream.get());
-    if (size < 0 || static_cast<std::uint64_t>(size) > maximum_read_size)
+    if (size < 0)
     {
-        return failed("Cannot determine file size or file exceeds 64 MiB");
+        return failed("Cannot determine file size");
+    }
+    if (static_cast<std::uint64_t>(size) > maximum_bytes)
+    {
+        return failed("File exceeds read byte limit: " + std::to_string(size) + " > " +
+                      std::to_string(maximum_bytes));
+    }
+    if (static_cast<std::uint64_t>(size) > output.max_size())
+    {
+        return failed("File exceeds addressable buffer size");
     }
     output.resize(static_cast<std::size_t>(size));
     bool success = read_exact(stream.get(), output);

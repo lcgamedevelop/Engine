@@ -134,6 +134,11 @@ bool RenderSystem::SceneGpuResources::prepare_lighting(
     render_detail::ShadowFrame& frame, std::size_t cluster_index, bgfx::ViewId base,
     const SceneCaptureRequest* capture, const render_detail::VsmPageBatch* vsm)
 {
+    const auto fail = [](const char* message)
+    {
+        SDL_LogError(SDL_LOG_CATEGORY_RENDER, "Lighting preparation failed: %s", message);
+        return false;
+    };
     std::vector<render_detail::ClusterLight> lights;
     std::vector<render_detail::LocalShadowLight> local_lights;
     std::uint32_t shadow_light = UINT32_MAX;
@@ -148,13 +153,13 @@ bool RenderSystem::SceneGpuResources::prepare_lighting(
         }
         if (lights.size() >= config.maximum_lights)
         {
-            return false;
+            return fail("Light count exceeds the configured limit");
         }
         const auto& matrix = source.world;
         const float length = std::hypot(matrix[8], matrix[9], matrix[10]);
         if (!(length > 0))
         {
-            return false;
+            return fail("Light direction is degenerate");
         }
         const auto& lighting = source.settings;
         constexpr float radians = 0.01745329251994329577F;
@@ -174,7 +179,7 @@ bool RenderSystem::SceneGpuResources::prepare_lighting(
             {
                 if (shadow_light != UINT32_MAX)
                 {
-                    return false;
+                    return fail("More than one directional light requests shadows");
                 }
                 shadow_light = index;
                 light_settings.directional_shadows = true;
@@ -209,7 +214,7 @@ bool RenderSystem::SceneGpuResources::prepare_lighting(
                              [&](const auto& mesh) { return mesh.gpu->node_id == id; });
             if (found == frame_data.meshes.end())
             {
-                return false;
+                return fail("A capture mesh is absent from the prepared scene");
             }
             const auto* mesh = found->gpu;
             const auto& model = found->model;
@@ -234,7 +239,7 @@ bool RenderSystem::SceneGpuResources::prepare_lighting(
                    lens, light_settings, static_cast<float>(draw.width) / draw.height, draw.world,
                    draw.view, lights[shadow_light].direction_outer, frame))
     {
-        return false;
+        return fail("Cannot construct directional shadow cascades");
     }
     std::span<const std::uint64_t> caster_ids;
     if (capture)
@@ -245,18 +250,18 @@ bool RenderSystem::SceneGpuResources::prepare_lighting(
                                config, local_lights, lights, draw.world, base,
                                capture ? &caster_ids : nullptr))
     {
-        return false;
+        return fail("Cannot submit the shadow atlas");
     }
     auto& cluster = targets().clusters[cluster_index];
     if (!cluster.prepare(config, draw.width, draw.height,
                          vsm ? static_cast<std::uint32_t>(vsm->gpu_data.size()) : 0))
     {
-        return false;
+        return fail("Cannot prepare clustered lighting buffers");
     }
     if (!cluster.cull(static_cast<bgfx::ViewId>(base + 28), lens, draw.view, draw.projection,
                       lights, frame.local_records, vsm))
     {
-        return false;
+        return fail("Cannot submit clustered light culling");
     }
     draw.cluster = &cluster;
     draw.shadow = &frame;

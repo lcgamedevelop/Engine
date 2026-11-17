@@ -666,6 +666,13 @@ int main()
             return 1;
         }
     }
+    // 同一真实源贯穿发现、完整快照校验、转换、增量与发布；不只测试底层读取。
+    fs::resize_file(project.root / "assets/models/skeleton.fbx", 64ULL * 1024ULL * 1024ULL + 1ULL,
+                    code);
+    if (!expect(!code, "prepare a valid FBX source larger than the default file read budget"))
+    {
+        return 1;
+    }
     const auto skeleton_meta = project.root / "assets/models/skeleton.fbx.meta";
     const auto locomotion_meta = project.root / "assets/models/locomotions.fbx.meta";
     if (!write(skeleton_meta, "guid = \"b0ba0001-0000-4000-8000-000000000001\"\nimporter = "

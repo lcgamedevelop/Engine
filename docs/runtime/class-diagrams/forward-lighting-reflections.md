@@ -296,7 +296,11 @@ classDiagram
 
 `request` 成功复制描述并持有中间纹理和可选 UV2 网格的只读共享引用；网格覆盖仅供捕获使用，使 xatlas 生成的接缝/UV2 在发布前即可参与反弹，不能修改活动场景。跨帧不保存 Node 指针；场景身份或输入版本变化时取消，在途读回结束后转 cancelled。内部由 `render()` 推进 GPU 提交和读回。`take` 只在 complete 时移动线性 RGBA float 输出并回到 idle；失败清空 output。取消停止新提交，已在途 readback 缓冲等 GPU 完成后才释放并转 cancelled，不能立即销毁内存；场景释放自动取消，设备关闭先排空 GPU 再销毁 CPU 读回缓冲。状态查询为 `const noexcept`，取消为 `noexcept`，所有可能失败返回值为 `[[nodiscard]]`。
 
+请求接受与捕获准备是两个阶段。每个新请求使当前捕获准备失效，调用方继续通过 `prepare_scope` 推进；`SceneGpuResources` 重新准备本次目标、间接光输入及 CPU 读回缓冲后才允许提交。尺寸相同不代表下一次请求已准备，上一结果移出后也必须重建目标缓冲。等待期间正常场景帧继续提交，不能把空缓冲传给图形后端。Lightmap 与探针制作共用这一契约，不另建烘焙专用渲染循环。
+
 ## 脚本、资源与验证边界
+
+运行时重绑 Lightmap 后，CPU 资源就绪不等于 GPU 纹理完成上传。渲染准备仍按既有预算分步推进；收集遇到尚未发布的纹理时将当前场景帧标记为不完整并延后该网格，不把合法的准备过渡当作渲染失败。正常帧继续提交，准备失败仍通过现有状态报告；截图验收等待完成后的真实绘制。
 
 公开组件加入既有逐类型注册、TOML 编解码、FlatBuffers 生成、TS 绑定和编辑命令；不增加项目专用类型。TS 采用 `PostProcessComponent.SetScreenSpaceReflections(...)`、`Material.SetBlendMode(...)`、`PlanarReflectionComponent.SetSettings(...)`、`MeshRenderer.SetBakeStatic(...) / SetLightmap(...)`、`LightProbeVolumeComponent.SetResource(path)`，统一返回 bool；仍可通过 `Node.AddComponent(Type)` 组合。设置读取保持相同字段含义，声明只随对应实现落地。
 

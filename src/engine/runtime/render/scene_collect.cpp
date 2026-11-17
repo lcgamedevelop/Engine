@@ -278,7 +278,8 @@ bool RenderSystem::SceneGpuResources::collect_frame(WorldSystem& world, const Ve
                     const auto* texture = render_detail::find_texture(textures, source);
                     if (!texture)
                     {
-                        valid = false;
+                        // A new binding can be CPU-loaded before its staged GPU upload completes.
+                        frame_complete = false;
                         return;
                     }
                     mesh.lightmap = texture->handle;

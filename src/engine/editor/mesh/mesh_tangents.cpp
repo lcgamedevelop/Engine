@@ -21,8 +21,7 @@ bool generate_mesh_tangents(schema::MeshDataT& mesh, std::string& error)
         return true;
     }
     // Upstream MakeIndex packs face/corner as (face << 2) | corner in a signed int.
-    if (mesh.indices.size() / 3 >
-        static_cast<std::size_t>(std::numeric_limits<int>::max() / 4))
+    if (mesh.indices.size() / 3 > static_cast<std::size_t>(std::numeric_limits<int>::max() / 4))
     {
         error = "mesh has too many faces for MikkTSpace";
         return false;
@@ -42,7 +41,8 @@ bool generate_mesh_tangents(schema::MeshDataT& mesh, std::string& error)
     api.m_getPosition = [](const SMikkTSpaceContext* context, float out[], int face, int corner)
     {
         const auto& d = *static_cast<Context*>(context->m_pUserData);
-        const auto& v = d.mesh->vertices[d.mesh->indices[static_cast<std::size_t>(face) * 3 + corner]];
+        const auto& v =
+            d.mesh->vertices[d.mesh->indices[static_cast<std::size_t>(face) * 3 + corner]];
         out[0] = v.x();
         out[1] = v.y();
         out[2] = v.z();
@@ -50,7 +50,8 @@ bool generate_mesh_tangents(schema::MeshDataT& mesh, std::string& error)
     api.m_getNormal = [](const SMikkTSpaceContext* context, float out[], int face, int corner)
     {
         const auto& d = *static_cast<Context*>(context->m_pUserData);
-        const auto& v = d.mesh->vertices[d.mesh->indices[static_cast<std::size_t>(face) * 3 + corner]];
+        const auto& v =
+            d.mesh->vertices[d.mesh->indices[static_cast<std::size_t>(face) * 3 + corner]];
         const double length = std::hypot(v.nx(), v.ny(), v.nz());
         out[0] = static_cast<float>(v.nx() / length);
         out[1] = static_cast<float>(v.ny() / length);
@@ -59,16 +60,61 @@ bool generate_mesh_tangents(schema::MeshDataT& mesh, std::string& error)
     api.m_getTexCoord = [](const SMikkTSpaceContext* context, float out[], int face, int corner)
     {
         const auto& d = *static_cast<Context*>(context->m_pUserData);
-        const auto& uv = d.mesh->texcoords[d.mesh->indices[static_cast<std::size_t>(face) * 3 + corner]];
+        const auto& uv =
+            d.mesh->texcoords[d.mesh->indices[static_cast<std::size_t>(face) * 3 + corner]];
         out[0] = uv.x();
         out[1] = uv.y();
     };
-    api.m_setTSpaceBasic = [](const SMikkTSpaceContext* context, const float tangent[], float sign,
-                              int face, int corner)
+    api.m_setTSpace = [](const SMikkTSpaceContext* context, const float tangent[],
+                         const float bitangent[], float, float, tbool preserving, int face,
+                         int corner)
     {
         auto& d = *static_cast<Context*>(context->m_pUserData);
-        d.corners[static_cast<std::size_t>(face) * 3 + corner] =
-            schema::Vec4(tangent[0], tangent[1], tangent[2], sign);
+        const auto index = static_cast<std::size_t>(face) * 3 + corner;
+        const auto& vertex = d.mesh->vertices[d.mesh->indices[index]];
+        const double sign = preserving ? 1.0 : -1.0;
+        std::array<double, 3> result{tangent[0], tangent[1], tangent[2]};
+        const double normal_length = std::hypot(vertex.nx(), vertex.ny(), vertex.nz());
+        if (std::isfinite(normal_length) && normal_length > 1e-12 && std::isfinite(result[0]) &&
+            std::isfinite(result[1]) && std::isfinite(result[2]))
+        {
+            const std::array<double, 3> normal{vertex.nx() / normal_length,
+                                               vertex.ny() / normal_length,
+                                               vertex.nz() / normal_length};
+            const double dot =
+                result[0] * normal[0] + result[1] * normal[1] + result[2] * normal[2];
+            const double projected_length =
+                std::hypot(result[0] - dot * normal[0], result[1] - dot * normal[1],
+                           result[2] - dot * normal[2]);
+            if (projected_length < 1e-12 && std::isfinite(bitangent[0]) &&
+                std::isfinite(bitangent[1]) && std::isfinite(bitangent[2]))
+            {
+                // Preserve the upstream UV orientation when only its tangent collapses.
+                result = {sign * (bitangent[1] * normal[2] - bitangent[2] * normal[1]),
+                          sign * (bitangent[2] * normal[0] - bitangent[0] * normal[2]),
+                          sign * (bitangent[0] * normal[1] - bitangent[1] * normal[0])};
+                double length = std::hypot(result[0], result[1], result[2]);
+                if (length < 1e-12)
+                {
+                    std::array<double, 3> axis{};
+                    const auto component = std::abs(normal[0]) <= std::abs(normal[1]) &&
+                                                   std::abs(normal[0]) <= std::abs(normal[2])
+                                               ? 0U
+                                           : std::abs(normal[1]) <= std::abs(normal[2]) ? 1U
+                                                                                        : 2U;
+                    axis[component] = 1.0;
+                    result = {axis[1] * normal[2] - axis[2] * normal[1],
+                              axis[2] * normal[0] - axis[0] * normal[2],
+                              axis[0] * normal[1] - axis[1] * normal[0]};
+                    length = std::hypot(result[0], result[1], result[2]);
+                }
+                for (auto& value : result)
+                {
+                    value /= length;
+                }
+            }
+        }
+        d.corners[index] = schema::Vec4(result[0], result[1], result[2], sign);
     };
     const SMikkTSpaceContext context{&api, &data};
     if (!genTangSpaceDefault(&context))
@@ -85,14 +131,14 @@ bool generate_mesh_tangents(schema::MeshDataT& mesh, std::string& error)
         const auto source = mesh.indices[i];
         const auto& tangent = data.corners[i];
         if (!std::isfinite(tangent.x()) || !std::isfinite(tangent.y()) ||
-            !std::isfinite(tangent.z()) || std::hypot(tangent.x(), tangent.y(), tangent.z()) < 1e-12 ||
+            !std::isfinite(tangent.z()) ||
+            std::hypot(tangent.x(), tangent.y(), tangent.z()) < 1e-12 ||
             (tangent.w() != 1.0F && tangent.w() != -1.0F))
         {
             error = "MikkTSpace returned an invalid tangent frame at triangle " +
-                    std::to_string(i / 3) + ", corner " + std::to_string(i % 3) +
-                    ": (" + std::to_string(tangent.x()) + ", " +
-                    std::to_string(tangent.y()) + ", " + std::to_string(tangent.z()) +
-                    ", " + std::to_string(tangent.w()) + ")";
+                    std::to_string(i / 3) + ", corner " + std::to_string(i % 3) + ": (" +
+                    std::to_string(tangent.x()) + ", " + std::to_string(tangent.y()) + ", " +
+                    std::to_string(tangent.z()) + ", " + std::to_string(tangent.w()) + ")";
             for (std::size_t corner = 0; corner < 3; ++corner)
             {
                 const auto vertex = mesh.indices[(i / 3) * 3 + corner];
@@ -100,8 +146,8 @@ bool generate_mesh_tangents(schema::MeshDataT& mesh, std::string& error)
                 const auto& uv = mesh.texcoords[vertex];
                 error += " [p=" + std::to_string(v.x()) + "," + std::to_string(v.y()) + "," +
                          std::to_string(v.z()) + " n=" + std::to_string(v.nx()) + "," +
-                         std::to_string(v.ny()) + "," + std::to_string(v.nz()) + " uv=" +
-                         std::to_string(uv.x()) + "," + std::to_string(uv.y()) + "]";
+                         std::to_string(v.ny()) + "," + std::to_string(v.nz()) +
+                         " uv=" + std::to_string(uv.x()) + "," + std::to_string(uv.y()) + "]";
             }
             return false;
         }

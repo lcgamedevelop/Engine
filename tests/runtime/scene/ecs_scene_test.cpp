@@ -32,6 +32,57 @@ bool expect(bool value, const char* message)
     return value;
 }
 
+struct SceneRetirementProbe
+{
+    SceneScopeId scope;
+};
+
+bool scene_cleanup_scope_queries()
+{
+    for (bool destroy_all : {false, true})
+    {
+        bool called = false, safe = true;
+        WorldSystem world;
+        if (!world.initialize({}))
+        {
+            return false;
+        }
+        auto* scene = world.create_scene("Reentrant scene cleanup");
+        auto node = scene ? scene->create_node("Cleanup scope query") : Node{};
+        if (!node)
+        {
+            return false;
+        }
+        const auto id = scene->id();
+        flecs::world ecs(world.native_world());
+        ecs.observer<SceneRetirementProbe>()
+            .event(flecs::OnRemove)
+            .each(
+                [&](const SceneRetirementProbe& probe)
+                {
+                    called = true;
+                    safe = safe && world.scene() == nullptr &&
+                           world.scope_candidate(probe.scope) == nullptr;
+                });
+        ecs.entity(node.id()).set(SceneRetirementProbe{{world.epoch(), id}});
+        if (destroy_all)
+        {
+            world.destroy_scene();
+        }
+        else if (!world.destroy_scene(id))
+        {
+            return false;
+        }
+        if (!expect(called && safe && !node,
+                    "component removal observes an unavailable retired scene scope"))
+        {
+            return false;
+        }
+        world.shutdown();
+    }
+    return true;
+}
+
 bool light_drive_valid(Node owner, std::uint64_t instance) noexcept
 {
     const auto light = owner.get_component<Light>();
@@ -346,7 +397,8 @@ bool check()
 
 int main()
 {
-    if (!check() || !scene_lifetime_phases() || !producer_transform_drive())
+    if (!check() || !scene_lifetime_phases() || !producer_transform_drive() ||
+        !scene_cleanup_scope_queries())
     {
         return 1;
     }

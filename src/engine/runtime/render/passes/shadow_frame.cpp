@@ -2,6 +2,7 @@
 
 #include "runtime/render/render_math.hpp"
 
+#include <SDL3/SDL.h>
 #include <bx/math.h>
 
 #include <cmath>
@@ -103,6 +104,12 @@ bool prepare_shadow_frame(const CameraSettings& camera, const RenderSettings& se
             if (!std::isfinite(bounds.minimum[axis]) || !std::isfinite(bounds.maximum[axis]) ||
                 bounds.maximum[axis] <= bounds.minimum[axis])
             {
+                SDL_LogError(SDL_LOG_CATEGORY_RENDER,
+                             "Invalid shadow bounds: cascade=%u axis=%u min=%g max=%g "
+                             "near=%g far=%g fov=%g tile=%u",
+                             static_cast<unsigned>(index), static_cast<unsigned>(axis),
+                             bounds.minimum[axis], bounds.maximum[axis], near_clip, far_clip,
+                             camera.fov_degrees, static_cast<unsigned>(frame.tile_size));
                 return false;
             }
         }

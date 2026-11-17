@@ -1,4 +1,6 @@
 #include "plugins/editor/asset_import/fbx_document.hpp"
+#include "runtime/resource/virtual_file_system.hpp"
+#include "runtime/utils/hash_utils.hpp"
 
 #include <algorithm>
 #include <array>
@@ -291,6 +293,49 @@ bool write_meta(const std::filesystem::path& source, const std::string& paramete
     stream << "sample_rate = 4\n" << parameters;
     stream.close();
     return static_cast<bool>(stream);
+}
+
+bool large_source_snapshot()
+{
+    namespace fs = std::filesystem;
+    using namespace engine::plugins::asset_import;
+    std::error_code error_code;
+    TemporarySources files;
+    files.root = fs::temp_directory_path(error_code) /
+                 ("engine-fbx-large-" +
+                  std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    if (error_code || !fs::create_directories(files.root, error_code) || error_code)
+    {
+        return false;
+    }
+    const auto source = files.root / "large.fbx";
+    fs::copy_file(fs::path(ENGINE_FBX_TEST_DATA_DIR) / "skeleton.fbx", source, error_code);
+    if (error_code || !write_meta(source, {}))
+    {
+        return false;
+    }
+    constexpr std::uint64_t size = 64ULL * 1024ULL * 1024ULL + 1ULL;
+    fs::resize_file(source, size, error_code);
+    FbxDocument document;
+    std::string error;
+    std::uint64_t hash = 0, actual_size = 0;
+    if (error_code ||
+        !expect(load_document(source, document, error) && document.scene &&
+                    !document.meshes.empty(),
+                "FBX larger than 64 MiB uses the native importer budget: " + error) ||
+        !expect(engine::VirtualFileSystem::hash_file(source, hash, actual_size) &&
+                    actual_size == size && document.source_hash == engine::hash::hex(hash),
+                "large FBX hash covers the same complete source snapshot"))
+    {
+        return false;
+    }
+    fs::resize_file(source, 2ULL * 1024ULL * 1024ULL * 1024ULL + 1ULL, error_code);
+    FbxDocument rejected;
+    return !error_code &&
+           expect(!load_document(source, rejected, error) && !rejected.scene &&
+                      rejected.source_hash.empty() &&
+                      error.find("read byte limit") != std::string::npos,
+                  "FBX exceeding its own budget fails before parsing with a useful error");
 }
 
 ufbx_matrix matrix(const std::vector<float>& values)
@@ -911,6 +956,30 @@ bool generated_tangent_frames()
     {
         return false;
     }
+    mesh.vertex_uv.exists = true;
+    uv = {vec2(0, 0), vec2(1, 0), vec2(1, 1), vec2(0, 1), vec2(0, 0), vec2(1, 0), vec2(0, 1)};
+    normals.fill(vec3(1, 0, 0));
+    engine::schema::MeshDataT bent_normals;
+    if (!expect(convert_mesh(document, node, bent_normals, error),
+                "bent authored normals with a degenerate tangent projection import: " + error))
+    {
+        return false;
+    }
+    for (std::size_t i = 0; i < bent_normals.vertices.size(); ++i)
+    {
+        const auto& vertex = bent_normals.vertices[i];
+        const auto& tangent = bent_normals.tangents[i];
+        if (!expect(
+                vertex.nx() == 1 && vertex.ny() == 0 && vertex.nz() == 0 &&
+                    std::abs(tangent.x()) < 1e-6 &&
+                    std::abs(std::hypot(tangent.x(), tangent.y(), tangent.z()) - 1.0) < 1e-6 &&
+                    (tangent.w() == 1 || tangent.w() == -1),
+                "degenerate tangent fallback is unit length, orthogonal and keeps source normals"))
+        {
+            return false;
+        }
+    }
+    normals.fill(vec3(0, 0, 1));
     normals.back() = vec3(0, 0, 0);
     error.clear();
     return expect(!convert_mesh(document, node, output, error) && !error.empty() &&
@@ -922,7 +991,7 @@ bool generated_tangent_frames()
 
 int main()
 {
-    return unit_independent_bind_comparison() && coordinate_settings() &&
+    return large_source_snapshot() && unit_independent_bind_comparison() && coordinate_settings() &&
                    imported_tangent_frames() && generated_tangent_frames() &&
                    motion_track_validation() && motion_rotation_axes()
                ? 0

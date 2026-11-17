@@ -84,6 +84,7 @@ tick 返回现有 BakeProgress，错误写入 error；不能用异常或日志�
 completed/total 为 const、noexcept；outputs 返回 const 引用，仅 complete 后可读，借用至任务重置。
 cancel/shutdown 为 noexcept 且支持重复调用；shutdown 停止提交，但不提前销毁在途 GPU 读回内存。
 LightingBakeOutputs 是普通聚合结构，保存节点到输出的对应关系及生成数据，不另造持久数据模型。
+lightmapper 在整个几何采样周期借用变换矩阵、顶点、索引和 UV。变换矩阵与转换后的 UV 由任务 State 独占，几何由本次输出持有；这些缓冲必须覆盖连续多次 tick，不能传入函数局部数组。销毁 lightmapper 上下文后才能修改或释放它借用的数据。
 
 ## 数据与资源契约
 

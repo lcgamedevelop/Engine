@@ -119,11 +119,30 @@ macOS arm64 已通过受影响目标的 Debug / Release 构建；Release 的上�
 
 公开范例的资源与脚本升级结果见 [showcase 验证入口](../projects/showcase/docs/index.md#验证)；私有项目的调用方、meta、测试与构建记录留在其本地项目目录。
 
+## 大体积 FBX 导入
+
+原生 FBX 使用显式 2 GiB 输入预算，同一字节快照用于哈希和 ufbx 解析；普通整文件读取仍默认限制为
+64 MiB。源文件校验使用分块哈希，发布前对每个源及 meta 各读取一次，再逐项核对所有子资源的快照。
+共用 MikkTSpace 生成器保留有效逐角结果，退化切线从副切线恢复；完全退化时生成确定的正交基，
+不覆盖源法线、UV 或材质。契约见 [FBX 导入类图](plugins/editor/class-diagrams/fbx-importer.md)和
+[资源管线](editor/class-diagrams/asset-pipeline-system.md)。
+
+macOS arm64 的受影响 Debug / Release 目标编译通过；Release 的 `engine.resource_read`、
+`editor.fbx_bind_pose`、`editor.fbx_pipeline`、`editor.asset_pipeline` 通过。覆盖默认预算拒绝与显式
+预算读取、超过 2 GiB 提前失败、大于 64 MiB 的有效 FBX 完整发现/转换/增量/发布，以及退化切线的
+单位正交性和源法线保留。输入损坏、非法法线及源/meta 变化仍拒绝发布。
+
+本机 Metal 编辑器已用 Bistro 原始外景（119,845,216 字节）及室内模型完成导入，并在同一运行实例中
+切换场景、设置相机和捕获真实场景帧。该验证仅覆盖几何与截图流程，不代表原包贴图、玻璃、全部渲染
+技术或其他平台已通过；本地测试项目、源包和归档保持忽略。
+
 ## 手动集成与 GPU 验证
 
 - `engine.render_submission`：剔除、实例化、材质/Probe 分组、LOD、瞬态缓冲不足和阴影像素回归。
 - `engine.scene_hdr_capture` / `engine.scene_hdr_transparency` / `engine.hdr_extension_capture`：按实际修改选择对应捕获或透明链路。
 - `engine.window_render`：窗口、GPU 资源、多效果与生命周期集成，耗时较长，不作为所有渲染修改的默认补充项。
+- `editor.scene_bake_core_loader`：实际 GPU IBL、纹理捕获、多面立方体 UV2 与跨帧照明积分；连续取走结果后不重新准备就渲染时必须延后读回，准备完成后再返回独立、非空的像素结果，覆盖编辑器逐面烘焙的调用顺序和 lightmapper 借用输入的生命周期。同一用例还以单工作项和 256 字节上传预算重绑新的 Lightmap，验证 GPU 上传未完成时帧继续提交、最终就绪并可清除。
+- `editor.effects_pipeline`：正式粒子资源及依赖导入、增量和失败原子性；场景经通用保存器写出后须能重新导入，并保留特效组件的启用、可见性状态。
 - `tests/plugins/editor/scene_bake/` 的独立 Python GPU 脚本：仅在修改相应烘焙算法时选取，不全部执行。
 - `engine.plugin_selection`、架构规则、平台打包、V8 缓存与工具链检查：仅在对应构建/装配修改时运行；V8 检查仅登记于 V8 配置。
 
@@ -149,7 +168,7 @@ macOS arm64 已通过受影响目标的 Debug / Release 构建；Release 的上�
 
 正式 Release 配置未创建 MCP 或编辑器目标，解析后的源码及链接图不含 MCP；最终程序没有临时脚本执行、运行端点或命令通道符号，独立测试产物包含对应符号。以上只证明本机配置及所列行为，不包含 Windows、Android、iOS、V8、较旧 macOS、所有私有项目场景或完整冷启动性能。私有项目的 5 项脚本检查及白模、动画实验室连续进入、截图、暂停和恢复已通过，项目结果保存在其忽略的缓存目录。
 
-预算是工作项之间的软上限，第三方调用与 GPU 管线创建仍可能形成长帧，不能据此承诺任意场景零卡顿。私有项目编辑器启动仍观察到约 58–60 秒的源资源校验，采样位于 AssetPipelineSystem 的 verify_sources/file_hash；发生在玩法启动前，属于编辑器资源管线，本轮只记录，不扩大为导入性能优化。
+预算是工作项之间的软上限，第三方调用与 GPU 管线创建仍可能形成长帧，不能据此承诺任意场景零卡顿。编辑器发布前的源文件校验契约及大体积模型回归见上文；该阶段发生在玩法启动前。
 
 ## 公开范例
 

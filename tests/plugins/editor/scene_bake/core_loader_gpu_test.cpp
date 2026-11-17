@@ -8,8 +8,10 @@
 #include "runtime/engine_config.hpp"
 #include "runtime/render/render_system.hpp"
 #include "runtime/resource/codecs/texture_resource_codec.hpp"
+#include "runtime/resource/types/mesh_resource.hpp"
 #include "runtime/scene/camera.hpp"
 #include "runtime/scene/environment_component.hpp"
+#include "runtime/scene/light.hpp"
 #include "runtime/scene/mesh_renderer.hpp"
 #include "runtime/scene/scene.hpp"
 #include "runtime/scene/transform.hpp"
@@ -145,13 +147,18 @@ bool exercise()
     }
     const auto panorama = color_texture("textures/white-panorama", 16, 8, {255, 255, 255, 255});
     const auto tint = color_texture("textures/red-albedo", 2, 2, {230, 20, 10, 255});
-    engine::schema::MeshDataT geometry;
-    geometry.path = "meshes/bake-quad";
-    geometry.vertices = {
-        {-1, -1, 0, 0, 0, 1}, {1, -1, 0, 0, 0, 1}, {1, 1, 0, 0, 0, 1}, {-1, 1, 0, 0, 0, 1}};
-    geometry.indices = {0, 1, 2, 0, 2, 3};
-    geometry.texcoords = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
-    geometry.tangents.assign(4, {1, 0, 0, 1});
+    engine::ResourceReference builtin_cube;
+    if (!expect(services.load("builtin://meshes/cube", builtin_cube) &&
+                    builtin_cube.data<engine::MeshResource>(),
+                "load the standard multi-face cube fixture"))
+    {
+        return false;
+    }
+    engine::schema::MeshDataT geometry = *builtin_cube.data<engine::MeshResource>();
+    geometry.path = "meshes/bake-cube";
+    geometry.lightmap_texcoords = geometry.texcoords;
+    const auto rebound_lightmap =
+        color_texture("textures/rebinding-lightmap", 32, 32, {96, 96, 96, 255});
     engine::schema::MaterialDataT material;
     material.type_path = "materials/textured-bake";
     material.shader_path = "builtin://shaders/pbr";
@@ -160,7 +167,7 @@ bool exercise()
     albedo->texture_path = tint.path;
     material.textures.push_back(std::move(albedo));
     if (!expect(fixture.add(panorama) && fixture.add(tint) && fixture.add(geometry) &&
-                    fixture.add(material) &&
+                    fixture.add(rebound_lightmap) && fixture.add(material) &&
                     services.publish_and_load(fixture.catalog, {{"content", fixture.root}}),
                 "publish formal GUID resources and a filesystem mount",
                 std::string(resources.last_error())))
@@ -226,7 +233,7 @@ bool exercise()
     auto camera = camera_node.add_component<engine::Camera>();
     auto environment =
         scene->create_node("Environment").add_component<engine::EnvironmentComponent>();
-    auto mesh_node = scene->create_node("Static textured quad");
+    auto mesh_node = scene->create_node("Static textured cube");
     auto mesh = mesh_node.add_component<engine::MeshRenderer>();
     engine::TransformSettings eye;
     eye.position = {0, 0, 3};
@@ -239,6 +246,33 @@ bool exercise()
                     mesh.material().set_type(material.type_path) && mesh.set_bake_static(true) &&
                     mesh.material().texture("baseColorTexture").id != 0 && frame(windows, renderer),
                 "components retain mesh, material, shader and texture using single-item loads"))
+    {
+        return false;
+    }
+    if (!expect(mesh.set_lightmap(rebound_lightmap.path),
+                "accept a CPU-loaded lightmap that has no GPU texture yet"))
+    {
+        return false;
+    }
+    engine::SceneWorkBudget budget;
+    budget.items = 1;
+    budget.upload_bytes = 256;
+    bool saw_pending = false, rebind_ready = false;
+    for (unsigned step = 0; step < 256 && !rebind_ready; ++step)
+    {
+        const auto preparation = renderer.prepare_scope({}, budget);
+        if (!expect(preparation != engine::SceneWorkState::failed && windows.tick(1.0 / 60.0) &&
+                        renderer.render() == engine::RenderSubmitStatus::submitted,
+                    "pending lightmap GPU upload does not fail the scene frame"))
+        {
+            return false;
+        }
+        saw_pending = saw_pending || preparation == engine::SceneWorkState::working;
+        rebind_ready = preparation == engine::SceneWorkState::ready;
+    }
+    if (!expect(saw_pending && rebind_ready && mesh.lightmap_resource().id != 0 &&
+                    mesh.set_lightmap("") && frame(windows, renderer),
+                "lightmap upload reaches ready and can be removed through normal preparation"))
     {
         return false;
     }
@@ -274,13 +308,77 @@ bool exercise()
     {
         return false;
     }
+    for (unsigned repeat = 0; repeat < 3; ++repeat)
+    {
+        // Match the editor job order: take pixels, accept another request, render once,
+        // then advance preparation. Cached target dimensions must not imply a live CPU buffer.
+        if (!expect(renderer.request_diffuse_capture(request) && windows.tick(1.0 / 60.0) &&
+                        renderer.render() == engine::RenderSubmitStatus::submitted &&
+                        renderer.diffuse_capture_status() == engine::SceneCaptureStatus::pending,
+                    "unprepared consecutive capture defers readback without discarding the frame"))
+        {
+            return false;
+        }
+        for (unsigned index = 0;
+             index < 24 && renderer.diffuse_capture_status() == engine::SceneCaptureStatus::pending;
+             ++index)
+        {
+            if (!frame(windows, renderer))
+            {
+                return false;
+            }
+        }
+        if (!expect(renderer.take_diffuse_capture(captured) && captured.width == request.width &&
+                        captured.height == request.height &&
+                        captured.rgba.size() == std::size_t{request.width} * request.height * 4 &&
+                        captured.rgba[center] > captured.rgba[center + 1] * 3 &&
+                        captured.rgba[center] > 0.01F,
+                    "each consecutive capture owns a prepared nonempty readback destination"))
+        {
+            return false;
+        }
+    }
     engine::schema::SceneDataT saved;
+    auto sun_node = scene->create_node("Capture shadow sun");
+    auto sun = sun_node.add_component<engine::Light>();
+    auto sunlight = test_support::read_settings(sun);
+    // Exercise real cascades without changing the white-furnace irradiance expectation.
+    sunlight.intensity = 0;
+    sunlight.cast_shadows = true;
+    sunlight.shadow_resolution = 512;
+    sunlight.shadow_cascades = 4;
+    auto sun_pose = test_support::read_settings(sun_node.get_component<engine::Transform>());
+    sun_pose.rotation = {-48, -25, 0};
+    auto mesh_pose = test_support::read_settings(mesh_node.get_component<engine::Transform>());
+    mesh_pose.position = {45, 0.01, 40};
+    mesh_pose.scale = {6, 0.05, 6};
+    if (!expect(sun.set_settings(sunlight) &&
+                    sun_node.get_component<engine::Transform>().set_settings(sun_pose) &&
+                    mesh_node.get_component<engine::Transform>().set_settings(mesh_pose) &&
+                    scene->build_data(saved),
+                "retain nonidentity multi-face geometry and capture shadow light"))
+    {
+        return false;
+    }
     bake::LightingBakeSettings settings;
-    settings.lightmap_resolution = settings.hemisphere_resolution = 16;
+    settings.lightmap_resolution = 32;
+    settings.hemisphere_resolution = 16;
     settings.bounce_count = 1;
     settings.interpolation_passes = 4;
     settings.source_fingerprint = "core-loader-fixture";
-    if (!expect(scene->build_data(saved) && lighting.start(saved, *scene, settings, error),
+    const auto saved_sun =
+        std::find_if(saved.nodes.begin(), saved.nodes.end(),
+                     [](const auto& n)
+                     {
+                         return n && n->info && n->info->properties &&
+                                n->info->properties->name == "Capture shadow sun";
+                     });
+    if (!expect(saved_sun != saved.nodes.end(), "resolve the saved shadow light identity"))
+    {
+        return false;
+    }
+    settings.light_node_ids.push_back((*saved_sun)->info->properties->id);
+    if (!expect(lighting.start(saved, *scene, settings, error),
                 "start lighting bake from saved identities with the core loader", error))
     {
         return false;
@@ -315,9 +413,8 @@ bool exercise()
     {
         return false;
     }
-    std::printf(
-        "core-loader bake: graph=absent IBL=%.6f lightmap=%.6f expected=pi captures=complete\n",
-        ibl_mean, lighting_mean);
+    std::printf("scene bake: IBL=%.6f lightmap=%.6f expected=pi multi-face-captures=complete\n",
+                ibl_mean, lighting_mean);
     return true;
 }
 } // namespace

@@ -12,6 +12,7 @@
 #include "runtime/scene/transform.hpp"
 #include "runtime/utils/mesh_utils.hpp"
 #include "runtime/world/world_system.hpp"
+#include <SDL3/SDL.h>
 #include <algorithm>
 #include <bx/math.h>
 #include <cmath>
@@ -382,8 +383,9 @@ bool RenderSystem::draw_diffuse_capture(const RenderSettings& rendering)
     {
         return true;
     }
-    const auto fail = [&]()
+    const auto fail = [&](const char* message)
     {
+        SDL_LogError(SDL_LOG_CATEGORY_RENDER, "Diffuse capture failed: %s", message);
         capture_status_ = SceneCaptureStatus::failed;
         capture_request_ = {};
         capture_snapshot_.clear();
@@ -396,12 +398,25 @@ bool RenderSystem::draw_diffuse_capture(const RenderSettings& rendering)
     }
     if (!scene_resources_)
     {
-        return fail();
+        return fail("Scene GPU resources are unavailable");
     }
     auto& resources = *scene_resources_;
+    if (!resources.capture_prepared)
+    {
+        // Accepting a request does not prepare its targets or transfer buffer.
+        return true;
+    }
+    if (resources.capture_width != capture_request_.width ||
+        resources.capture_height != capture_request_.height ||
+        resources.capture_pixels.size() !=
+            static_cast<std::size_t>(capture_request_.width) * capture_request_.height * 4 ||
+        !bgfx::isValid(resources.capture_framebuffer) || !bgfx::isValid(resources.capture_readback))
+    {
+        return fail("Capture targets or readback destination are not prepared");
+    }
     if (!resources.collect_frame(*world_, capture_request_.world_origin, resources.frame_data))
     {
-        return fail();
+        return fail("Cannot collect capture scene data");
     }
     if (capture_status_ == SceneCaptureStatus::pending && !resources.capture_pending)
     {
@@ -423,14 +438,14 @@ bool RenderSystem::draw_diffuse_capture(const RenderSettings& rendering)
                 request.projection.data(), static_cast<float>(request.width) / request.height,
                 bgfx::getCaps()->homogeneousDepth, lens))
         {
-            return fail();
+            return fail("Cannot read the capture projection");
         }
         render_detail::ShadowFrame capture_shadow;
         if (!resources.prepare_lighting(resources.frame_data, rendering, config_, draw, lens,
                                         capture_shadow, 3, render_detail::capture_shadow_view,
                                         &request, nullptr))
         {
-            return fail();
+            return fail("Cannot prepare capture lighting");
         }
         bgfx::setViewName(draw.id, "Diffuse lighting capture");
         bgfx::setViewFrameBuffer(draw.id, resources.capture_framebuffer);
@@ -445,7 +460,7 @@ bool RenderSystem::draw_diffuse_capture(const RenderSettings& rendering)
             !resources.draw_meshes(resources.frame_data, resources.draw_lists[3], rendering, draw,
                                    render_detail::SceneDrawMode::capture))
         {
-            return fail();
+            return fail("Cannot submit capture geometry or sky");
         }
         const bgfx::TextureRegion readback{.handle = resources.capture_readback};
         bgfx::blit(render_detail::capture_copy_view, readback,
@@ -507,21 +522,19 @@ bool RenderSystem::request_diffuse_capture(const SceneCaptureRequest& request)
     capture_request_ = request;
     capture_snapshot_ = std::move(snapshot);
     capture_status_ = SceneCaptureStatus::pending;
-    if (preparation_)
-    {
-        if (scene_resources_)
-        {
-            for (auto& [id, target] : scene_resources_->pass_targets)
-            {
-                (void)id;
-                target->description.clear();
-            }
-        }
-        preparation_->status = RenderPrepareStatus::preparing;
-    }
     if (scene_resources_)
     {
+        scene_resources_->capture_prepared = false;
         scene_resources_->capture_cancelled = false;
+        for (auto& [id, target] : scene_resources_->pass_targets)
+        {
+            (void)id;
+            target->description.clear();
+        }
+    }
+    if (preparation_)
+    {
+        preparation_->status = RenderPrepareStatus::preparing;
     }
     return true;
 }
@@ -616,6 +629,7 @@ void RenderSystem::cancel_diffuse_capture() noexcept
 
 bool RenderSystem::SceneGpuResources::prepare_capture(const SceneCaptureRequest& request)
 {
+    capture_prepared = false;
     const bool dimensions_changed =
         capture_width != request.width || capture_height != request.height;
     if (dimensions_changed || !bgfx::isValid(capture_framebuffer))
@@ -669,6 +683,7 @@ bool RenderSystem::SceneGpuResources::prepare_capture(const SceneCaptureRequest&
     }
     if (!changed)
     {
+        capture_prepared = true;
         return true;
     }
     for (auto handle : capture_lightmaps)
@@ -746,6 +761,7 @@ bool RenderSystem::SceneGpuResources::prepare_capture(const SceneCaptureRequest&
         capture_meshes.push_back(std::move(geometry));
     }
     capture_sources = request.indirect;
+    capture_prepared = true;
     return true;
 }
 
@@ -854,6 +870,7 @@ bool RenderSystem::SceneGpuResources::draw_capture_sky(const SceneCaptureRequest
 
 void RenderSystem::SceneGpuResources::release_capture() noexcept
 {
+    capture_prepared = false;
     // bgfx owns the readback pointer until its returned frame is reached.
     while (capture_pending)
     {

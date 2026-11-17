@@ -149,6 +149,7 @@ struct RenderSystem::SceneGpuResources
     std::uint32_t capture_ready_frame = 0;
     std::uint16_t capture_width = 0, capture_height = 0;
     bool capture_pending = false;
+    bool capture_prepared = false;
     bool capture_cancelled = false;
     bgfx::TextureHandle hdr_capture_readback = BGFX_INVALID_HANDLE;
     std::vector<std::uint16_t> hdr_capture_pixels;
