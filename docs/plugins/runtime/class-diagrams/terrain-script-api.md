@@ -70,6 +70,10 @@ classDiagram
 ScriptBinding 的 name/source/register_functions 方法，不把 VM 句柄暴露到核心。
 
 - 数值坐标用 Number/double；ID/revision 用 bigint；MCP JSON 转为十进制字符串。
+- GetRegions 返回[当前需求与已发布区域](terrain-regions.md#当前需求与已发布区域)的同一快照。
+  先判断顶层 state/errorCode/error；准备或失败时 regions 可以保留旧的 ready 数据。
+  settingsRevision/demandRevision 表示当前目标，publishedSettingsRevision/publishedDemandRevision
+  表示已发布目标，不将旧区域状态当作新需求完成。无源时仍可查询状态，regions 为空。
   无效句柄/不属当前 Run 的操作返回 null/false，不能读取另一会话。
 - Request* 只返回受理身份；Update 或临时测试脚本通过 GetOperation 观察，不阻塞 VM，
   不自动返回 Promise，不继续保留 bool completion 机制。

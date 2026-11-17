@@ -106,19 +106,21 @@ void set_static_feature(const Arguments& arguments)
 void get_rvt_role(const Arguments& arguments)
 {
     const auto mesh = binding_detail::component<MeshRenderer>(arguments, 2);
-    arguments.set_return(mesh ? std::string(schema::EnumNameRvtRole(mesh.rvt_role()))
-                              : std::string{});
+    arguments.set_return({});
+    if (mesh)
+    {
+        arguments.set_return(static_cast<std::uint32_t>(mesh.rvt_role()));
+    }
 }
 void set_rvt_role(const Arguments& arguments)
 {
     auto mesh = binding_detail::component<MeshRenderer>(arguments, 3);
-    std::string text, error;
-    schema::RvtRole role{};
     arguments.set_return(false);
-    if (mesh && BindingContext::text(arguments, 2, text) &&
-        schema::control_json::read(nlohmann::json(text), role, error, false, "rvtRole"))
+    if (mesh && arguments.is_uint32(2) &&
+        arguments.unsigned_integer(2) <= static_cast<std::uint32_t>(schema::RvtRole::MAX))
     {
-        arguments.set_return(mesh.set_rvt_role(role));
+        arguments.set_return(
+            mesh.set_rvt_role(static_cast<schema::RvtRole>(arguments.unsigned_integer(2))));
     }
 }
 void cast_shadows(const Arguments& arguments)

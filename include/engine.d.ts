@@ -892,7 +892,19 @@ declare module "engine" {
         key: TerrainRegionKey; densityRevision: bigint; meshRevision: bigint; collisionRevision: bigint;
         collisionRequired: boolean; known: boolean; dirty: boolean; pinCount: number; state: string; blockedReason: string;
     }
-    export interface TerrainRegionSnapshot { revision: bigint; settingsRevision: bigint; fragmentCount: bigint; regions: TerrainRegionStatus[]; nextCursor: string; }
+    export interface TerrainRegionSnapshot {
+        state: SceneWorkProgress["state"];
+        revision: bigint;
+        settingsRevision: bigint;
+        demandRevision: bigint;
+        publishedSettingsRevision: bigint;
+        publishedDemandRevision: bigint;
+        errorCode: string;
+        error: string;
+        fragmentCount: bigint;
+        regions: TerrainRegionStatus[];
+        nextCursor: string;
+    }
     /** Optional terrain plugin. All edits publish asynchronously; coordinates are in world space. */
     export class TerrainComponent extends Component {
         private constructor();

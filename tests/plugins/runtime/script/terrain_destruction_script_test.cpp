@@ -46,7 +46,7 @@ TerrainSystem* installed_terrain = nullptr;
 DestructionSystem* installed_destruction = nullptr;
 constexpr std::string_view destruction_guid = "50000000-0000-4000-8000-000000000022";
 constexpr std::string_view source = R"js(
-import { Gameplay, Scene, TerrainComponent, DestructionComponent } from 'engine';
+import { Gameplay, Scene, TerrainComponent, DestructionComponent, MeshRenderer } from 'engine';
 function check(value, message) { if (!value) throw new Error(message); }
 const bounds = {minimum:{x:-4,y:-4,z:-4},maximum:{x:4,y:4,z:4}};
 const brush = {center:{x:0,y:-1,z:0},extent:{x:2,y:2,z:2},operation:'dig'};
@@ -55,6 +55,12 @@ export default class extends Gameplay {
     callbacks=0;
     OnInitialize() {
         this.scene=Scene.Create('Terrain operations');
+        const mesh=this.scene.CreateNode('RVT binding test').AddComponent(MeshRenderer);
+        check(mesh && mesh.SetRvtRole(3) && mesh.rvtRole===3,'numeric RVT role is not preserved');
+        check(!mesh.SetRvtRole('writer_reader') && !mesh.SetRvtRole(4) &&
+            !mesh.SetRvtRole(-1) && !mesh.SetRvtRole(1.5) && mesh.rvtRole===3,
+            'RVT role accepts only generated numeric enum values');
+        check(mesh.SetRvtRole(0),'cannot reset RVT role');
         this.terrain=this.scene.CreateNode('Terrain').AddComponent(TerrainComponent);
         this.building=this.scene.CreateNode('Building').AddComponent(DestructionComponent);
         check(this.terrain.RequestEdit({brushes:[brush]})===null,'unready request accepted');
@@ -63,7 +69,10 @@ export default class extends Gameplay {
     Update() {
         if(this.phase===0) {
             const regions=this.terrain.GetRegions({bounds});
-            if(!regions || regions.revision===0n || !this.building.ready) return;
+            if(!regions || regions.state!=='ready' || regions.revision===0n || !this.building.ready) return;
+            check(regions.settingsRevision===regions.publishedSettingsRevision &&
+                regions.demandRevision===regions.publishedDemandRevision && !regions.errorCode,
+                'terrain demand status differs from its published identities');
             check(this.terrain.RequestEdit({brushes:[]})===null,'empty brush batch accepted');
             const settings=this.terrain.GetSettings();
             check(settings.streamingEnabled && settings.collisionEnabled,'generated settings mismatch');

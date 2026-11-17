@@ -45,14 +45,6 @@ classDiagram
     class TerrainOperation {
         <<private owned record>>
     }
-    class TerrainRegionSnapshot {
-        <<copied value>>
-        +uint64 revision
-        +uint64 settings_revision
-        +uint64 fragment_count
-        +vector~TerrainRegionStatus~ regions
-        +string next_cursor
-    }
     class GeometryUpdate
     class ResourceLoad
     class TerrainReadSnapshot
@@ -67,7 +59,6 @@ classDiagram
     TerrainOperationSnapshot *-- SceneWorkProgress
     TerrainRegionStatus *-- TerrainRegionKey
     TerrainRegionStatus ..> SceneWorkState
-    TerrainRegionSnapshot *-- TerrainRegionStatus
 ```
 
 ID 在组件生命周期内不复用，0 表示空身份；原生 uint64、TS bigint、JSON 十进制字符串。
@@ -98,7 +89,8 @@ brush 批次有数量/影响块数上限；超限拒绝并报告限制，不拆�
 实际基线记录在快照 base_revision。发布前仍重验邻域，不能静默覆盖外部修改或偷偷重放请求。
 LOD/视域变更不是内容修改，仍需匹配块和邻接依赖版本。
 
-区域查询同时返回组件整体 revision、设置 revision 和片段数量，AI/编辑器可据此提交乐观校验。
+区域快照只在[当前需求与已发布区域](terrain-regions.md#当前需求与已发布区域)定义；
+查询同时返回当前需求状态、目标与已发布身份、组件整体 revision 和片段数量，AI/编辑器可据此判断就绪或提交乐观校验。
 分页 cursor 绑定本次 revision；版本变更使旧 cursor 明确失效，重新查询，不混合两版区域列表。
 
 ## 受理与终态

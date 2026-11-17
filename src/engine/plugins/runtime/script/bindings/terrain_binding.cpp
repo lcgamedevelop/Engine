@@ -14,7 +14,7 @@ function terrainInput(value) {
     if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k,v])=>[k.replace(/[A-Z]/g,m=>'_'+m.toLowerCase()),terrainInput(v)]));
     return value;
 }
-const terrainIntegers = new Set(['world_epoch','node_id','component_instance','sequence','revision','settings_revision','fragment_count','base_revision','published_revision','content_revision','captured_revision','density_revision','mesh_revision','collision_revision','completed','total']);
+const terrainIntegers = new Set(['world_epoch','node_id','component_instance','sequence','revision','settings_revision','demand_revision','published_settings_revision','published_demand_revision','fragment_count','base_revision','published_revision','content_revision','captured_revision','density_revision','mesh_revision','collision_revision','completed','total']);
 function terrainOutput(value,key='') {
     if (typeof value==='string' && terrainIntegers.has(key)) return BigInt(value);
     if (Array.isArray(value)) return value.map(v=>terrainOutput(v));

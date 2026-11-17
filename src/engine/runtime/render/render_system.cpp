@@ -539,6 +539,11 @@ RenderSubmitStatus RenderSystem::render(Camera camera)
     scene_collected_ = false;
     rvt_debug_visible_ = false;
     vsm_debug_visible_ = false;
+    rvt_status_.effective = false;
+    if (rvt_status_.requested)
+    {
+        rvt_status_.reason = "No drawable scene view";
+    }
     if (vsm_pass_)
     {
         vsm_pass_->poll(frame_number_);
@@ -697,6 +702,12 @@ RenderSubmitStatus RenderSystem::render(Camera camera)
 RenderSubmitStatus RenderSystem::present_movie_frame(const MovieFrame& frame)
 {
     render_detail::ui_draws = 0;
+    rvt_status_.effective = false;
+    rvt_debug_visible_ = vsm_debug_visible_ = false;
+    if (rvt_status_.requested)
+    {
+        rvt_status_.reason = "Scene view is not rendered";
+    }
     const auto prepared = prepare_frame();
     if (prepared != render_detail::FramePrepareStatus::ready)
     {

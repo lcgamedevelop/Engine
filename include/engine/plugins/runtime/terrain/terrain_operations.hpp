@@ -57,9 +57,15 @@ struct TerrainOperationSnapshot
 
 struct TerrainRegionSnapshot
 {
+    SceneWorkState state = SceneWorkState::queued;
     std::uint64_t revision = 0;
     std::uint64_t settings_revision = 0;
+    std::uint64_t demand_revision = 0;
+    std::uint64_t published_settings_revision = 0;
+    std::uint64_t published_demand_revision = 0;
     std::uint64_t fragment_count = 0;
+    std::string error_code;
+    std::string error;
     std::vector<TerrainRegionStatus> regions;
     std::string next_cursor;
 };

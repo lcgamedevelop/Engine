@@ -191,6 +191,9 @@ classDiagram
 和 rvt_ready；ScreenshotSnapshot 沿用其内含的帧证据。
 rvt_ready 表示该帧可见需求在要求 mip 下无过期/缺页，不等于整个世界所有页面常驻。
 关闭时按 not_required 处理，不能当作 RVT 质量测试通过。
+每次渲染入口先清除当前帧 effective，只有本次主视图成功准备并使用页面时才能重新置位。
+无可绘制镜头和电影/清屏帧不继承旧视图的 effective 或 rvt_ready；缓存可以保留供恢复复用，
+但 resident_bytes 和旧页数不能证明本帧实际使用。电影帧的 VSM 就绪与诊断可见证据也必须为 false。
 固定镜头后等待目标需求就绪，再请求现有 capture_frame 并核对帧里的相同版本；
 视域变化后重新等待，不能拿上一镜头的 ready 归档当前图。
 

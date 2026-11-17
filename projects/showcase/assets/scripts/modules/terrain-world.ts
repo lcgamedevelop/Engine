@@ -50,11 +50,11 @@ export default class TerrainWorld extends Gameplay {
         const stop = world_stops[this.destination];
         const state = terrain.GetRegions({bounds:{minimum:{x:stop.x-128,y:-128,z:stop.z-128},
             maximum:{x:stop.x+128,y:128,z:stop.z+128}},limit:256});
-        const failed = state?.regions.find(region => region.state === "failed");
+        const failed = state?.state === "failed" || state?.state === "cancelled";
         if (failed) {
             terrain.RemoveView(this.nextView);
-            this.model.status = `Region preparation failed: ${failed.blockedReason}`;
-        } else if (state && state.regions.length && !state.nextCursor && state.regions.every(
+            this.model.status = `Region preparation failed: ${state?.errorCode}: ${state?.error}`;
+        } else if (state?.state === "ready" && state.regions.length && !state.nextCursor && state.regions.every(
             region => region.known && region.state === "ready" && region.meshRevision === region.densityRevision &&
                 (!region.collisionRequired || region.collisionRevision === region.densityRevision))) {
             if (!this.camera?.SetPosition(stop.x+340,250,stop.z+390) || !terrain.RemoveView(this.currentView)) {

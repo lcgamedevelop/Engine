@@ -37,7 +37,7 @@ export class TerrainRequests {
 
 export function terrainReady(terrain: TerrainComponent | null, bounds: TerrainBounds): boolean {
     const state = terrain?.GetRegions({bounds,limit:4096});
-    return !!state && state.revision > 0n && !state.nextCursor && state.regions.length > 0 &&
+    return state?.state === "ready" && state.revision > 0n && !state.nextCursor && state.regions.length > 0 &&
         state.regions.every(region => region.known && region.state === "ready" &&
             region.collisionRequired && region.densityRevision === region.collisionRevision);
 }

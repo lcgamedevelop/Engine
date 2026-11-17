@@ -313,11 +313,18 @@ bool call(TerrainComponent component, std::string_view method, const Json& args,
         {
             return false;
         }
-        output = {{"revision", std::to_string(status.revision)},
-                  {"settings_revision", std::to_string(status.settings_revision)},
-                  {"fragment_count", std::to_string(status.fragment_count)},
-                  {"next_cursor", status.next_cursor},
-                  {"regions", Json::array()}};
+        output = {
+            {"revision", std::to_string(status.revision)},
+            {"state", work_states[std::size_t(status.state)]},
+            {"settings_revision", std::to_string(status.settings_revision)},
+            {"demand_revision", std::to_string(status.demand_revision)},
+            {"published_settings_revision", std::to_string(status.published_settings_revision)},
+            {"published_demand_revision", std::to_string(status.published_demand_revision)},
+            {"error_code", status.error_code},
+            {"error", status.error},
+            {"fragment_count", std::to_string(status.fragment_count)},
+            {"next_cursor", status.next_cursor},
+            {"regions", Json::array()}};
         for (const auto& region : status.regions)
         {
             output["regions"].push_back(

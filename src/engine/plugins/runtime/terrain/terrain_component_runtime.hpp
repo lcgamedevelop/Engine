@@ -61,8 +61,10 @@ struct TerrainComponentRuntime
     std::uint64_t settings_revision_ = 1;
     std::uint64_t demand_revision_ = 1;
     std::uint64_t prepared_settings_revision_ = 0;
+    std::uint64_t published_demand_revision_ = 0;
     bool plan_dirty_ = true;
     bool ready_ = false;
     std::string error_;
+    std::string error_code_;
 };
 } // namespace engine::plugins::terrain

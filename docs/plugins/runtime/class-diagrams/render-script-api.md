@@ -3,6 +3,8 @@
 [绑定实现](script-bindings.md) · [类图索引](../../../class-diagrams/index.md)
 
 这里展示 TypeScript 门面；每个门面仍由对应 `ScriptBinding` 实现，原生组件不依赖任何脚本虚拟机。
+图中的 ControlData_RvtRole 对应生成类型 `ControlData.RvtRole`，值为数字 0..3。
+MeshRenderer.rvtRole 返回同一数字枚举；SetRvtRole 只接受该枚举，不保留字符串兼容入口。
 
 C++ 绑定实现属于 `engine::plugins::script::bindings`，原生组件属于 `engine`。TypeScript 导出名称与 `engine` 模块入口保持不变。
 

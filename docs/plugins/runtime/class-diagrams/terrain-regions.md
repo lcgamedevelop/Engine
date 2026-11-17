@@ -2,6 +2,45 @@
 
 [设计入口](../terrain-world-design.md) · [操作状态](terrain-operations.md)
 
+## 当前需求与已发布区域
+
+```mermaid
+classDiagram
+    direction TB
+    class TerrainComponent
+    class TerrainRegionQuery
+    class TerrainRegionSnapshot {
+        <<copied runtime value>>
+        +SceneWorkState state
+        +uint64 revision
+        +uint64 settings_revision
+        +uint64 demand_revision
+        +uint64 published_settings_revision
+        +uint64 published_demand_revision
+        +uint64 fragment_count
+        +string error_code
+        +string error
+        +vector~TerrainRegionStatus~ regions
+        +string next_cursor
+    }
+    class TerrainSystem
+    class TerrainRegionStatus
+    class SceneWorkState
+    TerrainSystem ..> TerrainComponent : updates existing runtime state
+    TerrainComponent ..> TerrainRegionQuery : pure query input
+    TerrainComponent ..> TerrainRegionSnapshot : copied query output
+    TerrainRegionSnapshot *-- TerrainRegionStatus : published region facts
+    TerrainRegionSnapshot ..> SceneWorkState : current demand state
+```
+
+`TerrainComponent::query_regions(const TerrainRegionQuery&, TerrainRegionSnapshot&) const` 继续是唯一查询；
+业务、脚本 GetRegions 与 MCP 使用同一快照，不增加第二套流送管理器或推进型查询。
+state/error_code/error 描述当前设置和需求；revision、regions 描述仍可使用的已发布数据。
+settings_revision/demand_revision 是当前目标，published_settings_revision/published_demand_revision 是最后成功发布的目标。
+ready 只在两组身份匹配且没有失败时成立。准备中返回 working，失败返回 failed 并保留旧几何；
+无效句柄或非法查询返回 false；有效但禁用的组件或节点不参与准备，状态为 not_required。修改设置/视域清除旧失败并建立新需求，查询本身不推进工作。
+源尚未加载或当前变换失败时，合法的无游标查询仍返回状态与空区域列表，避免错误入口本身不可查询。
+
 ## 权威数据
 
 ```mermaid

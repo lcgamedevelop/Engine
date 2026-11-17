@@ -371,6 +371,28 @@ bool test_runtime()
         return false;
     }
     TerrainRegionQuery query;
+    SceneScopeId inactive;
+    if (!host.world()->begin_scope(SceneLoadKind::append_batch, scene->id(), inactive) ||
+        !host.world()->with_scope_write(
+            inactive,
+            [&](Scene& candidate)
+            {
+                auto node = candidate.create_node("Inactive terrain");
+                auto terrain = node.add_component<TerrainComponent>();
+                auto parent = candidate.create_node("Inactive parent");
+                auto child = candidate.create_node("Inactive descendant");
+                auto descendant = child.add_component<TerrainComponent>();
+                return terrain && descendant && terrain.set_settings(config) &&
+                       descendant.set_settings(config) && child.set_parent(parent) &&
+                       parent.set_enabled(false) && node.set_enabled(false);
+            }) ||
+        !expect(installed_terrain->prepare_scope(inactive, {}) == SceneWorkState::ready,
+                "disabled terrain nodes and descendants do not block scene preparation"))
+    {
+        return false;
+    }
+    installed_terrain->release_scope(inactive);
+    host.world()->release_scope(inactive);
     query.bounds = {{-8, 0, -8}, {8, 8, 8}};
     TerrainRegionSnapshot snapshot;
     const auto advance = [&](const auto& ready)
@@ -419,6 +441,42 @@ bool test_runtime()
         return false;
     }
     const auto cached = rvt.cache_revision;
+    if (!camera.set_enabled(false) || host.tick(0) != FrameStatus::running ||
+        !host.renderer()->rvt_status(rvt) ||
+        !expect(!rvt.effective, "a frame without a scene camera cannot report effective RVT") ||
+        !camera.set_enabled(true) ||
+        !advance([&]() { return host.renderer()->rvt_status(rvt) && rvt.effective; }))
+    {
+        return false;
+    }
+    auto insufficient = config;
+    insufficient.budget = std::make_unique<schema::TerrainBudgetDataT>();
+    insufficient.budget->max_regions = 1;
+    if (!component.set_settings(insufficient) ||
+        !advance(
+            [&]()
+            {
+                return component.query_regions(query, snapshot) &&
+                       snapshot.state == SceneWorkState::failed;
+            }) ||
+        !expect(!snapshot.error_code.empty() && !snapshot.error.empty() &&
+                    snapshot.settings_revision > snapshot.published_settings_revision &&
+                    snapshot.revision > 0 && !snapshot.regions.empty(),
+                "streaming failure exposes the target error while retaining published regions") ||
+        !component.set_settings(config) ||
+        !advance(
+            [&]()
+            {
+                return component.query_regions(query, snapshot) &&
+                       snapshot.state == SceneWorkState::ready;
+            }) ||
+        !expect(snapshot.error.empty() && snapshot.error_code.empty() &&
+                    snapshot.settings_revision == snapshot.published_settings_revision &&
+                    snapshot.demand_revision == snapshot.published_demand_revision,
+                "a corrected demand recovers with matching published identities"))
+    {
+        return false;
+    }
     const auto initial = snapshot.revision;
     TerrainEditSpec edit;
     edit.expected_revision = initial;

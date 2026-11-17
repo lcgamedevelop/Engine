@@ -25,16 +25,24 @@ macOS arm64 / Metal 已完成受影响 Debug、Release 编译，功能测试只�
 
 | 已覆盖内容 | 证据入口 |
 | --- | --- |
-| 稀疏块、LOD 过渡、区域预算、未知邻区拒绝、取消、显示与碰撞同版本发布 | `engine.terrain_runtime` |
-| 源格式、噪声/高度图/道路/画层、局部块缓存、层纹理编译、可撤销源事务与重启恢复 | `editor.terrain_pipeline` |
+| 稀疏块、LOD 过渡、区域预算、未知邻区拒绝、取消、显示与碰撞同版本发布；禁用节点和祖先不阻塞准备；当前需求失败与恢复 | `engine.terrain_runtime` |
+| 源格式、噪声/高度图/道路/画层、局部块缓存、层纹理编译、可撤销源事务与重启恢复；宿主生成器注入与实现指纹隔离 | `editor.terrain_pipeline` |
 | 流送依赖随包导出而不自动常驻、目录版本与失败原子性 | `engine.resource_catalog`、`plugins.runtime.resource_graph`、`editor.asset_pipeline`、`editor.asset_build` |
 | 场景准备、几何事务、ECS 生命周期 | `engine.scene`、`engine.runtime_host` |
 | 双精度位置、睡眠状态、局部导航与骨骼世界姿态 | `engine.physics`、`engine.navigation`、`engine.navigation_terrain`、`engine.animation_rigging_events` |
 | 破坏支撑集合、建筑候选分批准备与取消、封存后到激活前的隔离、异步地形脚本、存档与碎块 | `engine.destruction_runtime`、`engine.terrain_destruction_script`、`engine.terrain_runtime` |
-| RVT 页面生成、材质回退、开关及实时 GPU 面板 | `engine.terrain_runtime` 及公开项目 MCP 实窗回执 |
+| RVT 页面生成、材质回退、开关及实时 GPU 面板；无相机帧不沿用缓存的生效状态 | `engine.terrain_runtime` 及公开项目 MCP 实窗回执 |
 | 新纹理数组编码、项目类型与用例登记 | `resource.codecs`、showcase `case_contract_test.mjs` |
 | Shader 依赖、跨语言 RVT 数据与 MCP 工具登记 | `editor.texture_pipeline`、`engine.render_foundation`、`engine.scene_data`、`engine.scene_schema_cross_language`、`engine.script_tooling` |
 | 依赖方向和源码约束 | `engine.architecture_boundaries`、`engine.architecture_rules` |
+
+当前修复的 7 项 Release 检查通过：`engine.terrain_runtime`、`editor.terrain_pipeline`、
+`engine.terrain_destruction_script`、`engine.render_submission`、`engine.script_tooling` 及两项架构检查。
+脚本回归包含 RVT 数字枚举及非法输入拒绝；状态查询同时校验当前与已发布需求身份、失败错误及预算恢复。
+公共交付工具的 Android 30 项、桌面/iOS/Web 28 项测试通过；目录夹具从当前 Schema 生成，
+覆盖 terrain_block、流送引用、旧版本拒绝及失败时保留既有输出。
+真实 macOS 运行包包含 4,205 项资源与两个合并包，已通过公共交付工具的复制、实体头和逐项哈希校验。
+这些交付检查不代表 Android、iOS 或浏览器实际运行通过。
 
 `engine.plugin_selection` 通过。另以同一 Release 预设关闭 runtime/editor 插件与测试支持，
 确认不生成地形、FastNoise、MCP、脚本或编辑器目标；核心宿主实际链接并通过 Metal 绘制 4 帧后正常退出。
@@ -45,6 +53,12 @@ MCP 实窗流程已完成四角切换、挖地、保存、重置、恢复、法�
 共 10 张真实截图。四角均等待当前需求页面就绪；关闭 RVT 后 `residentBytes=0`，关闭查看器后
 截图帧 `rvtDebugVisible=false`。归档位于
 `projects/showcase/cache/terrain-world/20261116T074006Z-91663412/`，包含帧证据与操作回执。
+
+定向实窗回归归档在 `projects/showcase/cache/branch-review-fixed/live-corrected/`，包含 4 张截图和 MCP 回执。
+禁用地形节点的追加批次正常到达 ready；将活动地形预算调低后返回 failed / planning_failed，
+旧发布版本与画面保留，恢复预算后发布身份与当前需求再次一致。
+禁用相机后仍保留 RVT 页面缓存，但 effective=false、meshDraws=0、截图 rvtReady=false；
+恢复相机后页面重新生效。运行时业务、脚本与 MCP 读取同一状态，没有额外测试加载流程。
 
 公开资源不含付费或私有内容。没有运行 Windows、Android、iOS、WebGPU 实机地形验收；
 四角截图也不等于已经验证所有位置的角色、音频、粒子和碰撞组合。

@@ -722,6 +722,11 @@ bool TerrainSystem::update(TerrainComponent component, SceneScopeId scope,
         state = component.runtime();
         state->generated_enabled_ = enabled;
         state->plan_dirty_ = enabled;
+        if (enabled)
+        {
+            state->error_.clear();
+            state->error_code_.clear();
+        }
     }
     std::erase_if(state->operations_,
                   [](const auto& item)
@@ -738,6 +743,7 @@ bool TerrainSystem::update(TerrainComponent component, SceneScopeId scope,
     if (!pose_of(component, pose))
     {
         state->error_ = "Terrain requires a root with translation and positive uniform scale";
+        state->error_code_ = "invalid_transform";
         return false;
     }
     const auto budget = settings.budget ? *settings.budget : schema::TerrainBudgetDataT{};
@@ -773,6 +779,7 @@ bool TerrainSystem::update(TerrainComponent component, SceneScopeId scope,
                  state->material_loading_, state->pending_material_, state->error_);
         if (source == SceneWorkState::failed || material == SceneWorkState::failed)
         {
+            state->error_code_ = "resource_failed";
             return false;
         }
         if (source != SceneWorkState::ready || material != SceneWorkState::ready)
@@ -783,6 +790,7 @@ bool TerrainSystem::update(TerrainComponent component, SceneScopeId scope,
         if (!data)
         {
             state->error_ = "Terrain source has the wrong type";
+            state->error_code_ = "resource_type";
             return false;
         }
         auto operation = std::make_unique<TerrainOperation>();
@@ -793,6 +801,7 @@ bool TerrainSystem::update(TerrainComponent component, SceneScopeId scope,
         if (operation->replace_source &&
             !operation->candidate_volume.initialize(*data, state->error_))
         {
+            state->error_code_ = "invalid_source";
             return false;
         }
         operation->reconfigure = true;
@@ -838,6 +847,7 @@ bool TerrainSystem::update(TerrainComponent component, SceneScopeId scope,
     if (terminal(operation->snapshot.state))
     {
         state->error_ = operation->snapshot.error;
+        state->error_code_ = operation->snapshot.error_code;
         return false;
     }
     auto& op = *operation;
@@ -1602,9 +1612,14 @@ bool TerrainSystem::update(TerrainComponent component, SceneScopeId scope,
         state->retired_ids_.swap(retired_ids);
         state->next_debris_ = next_debris;
         state->revision_ = revision;
+        if (op.residency_only)
+        {
+            state->published_demand_revision_ = op.demand_revision;
+        }
         state->ready_ = true;
         state->plan_dirty_ = false;
         state->error_.clear();
+        state->error_code_.clear();
         op.snapshot.published_revision = revision;
         op.snapshot.content_revision = published.content_revision;
         op.snapshot.dirty_bounds = published.dirty_bounds;
@@ -1649,6 +1664,7 @@ bool TerrainSystem::update(TerrainComponent component, SceneScopeId scope,
         if (!success)
         {
             state->error_ = op.snapshot.error;
+            state->error_code_ = op.snapshot.error_code;
         }
         state->streaming_.reset();
         return success;
@@ -1688,7 +1704,7 @@ SceneWorkState TerrainSystem::prepare_scope(SceneScopeId scope, const SceneWorkB
     for (auto node : nodes)
     {
         auto component = node.get_component<TerrainComponent>();
-        if (!component || !component.enabled())
+        if (!component || !component.active())
         {
             continue;
         }

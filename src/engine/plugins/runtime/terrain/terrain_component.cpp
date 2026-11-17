@@ -101,6 +101,8 @@ bool TerrainComponent::set_settings(const Data& value)
     *write_data<Data>() = value;
     auto* state = runtime();
     ++state->settings_revision_;
+    state->error_.clear();
+    state->error_code_.clear();
     state->plan_dirty_ = true;
     state->views_[0] = value.initial_view ? *value.initial_view : TerrainView{};
     modified();
@@ -130,6 +132,8 @@ bool TerrainComponent::set_view(std::uint64_t key, const TerrainView& view)
     state->views_.erase(0);
     ++state->demand_revision_;
     state->views_[key] = view;
+    state->error_.clear();
+    state->error_code_.clear();
     state->plan_dirty_ = true;
     return true;
 }
@@ -141,6 +145,8 @@ bool TerrainComponent::remove_view(std::uint64_t key)
     }
     ++runtime()->demand_revision_;
     runtime()->plan_dirty_ = true;
+    runtime()->error_.clear();
+    runtime()->error_code_.clear();
     return true;
 }
 bool TerrainComponent::pin_regions(const TerrainPinSpec& spec, TerrainPinId& output)
@@ -166,6 +172,8 @@ bool TerrainComponent::pin_regions(const TerrainPinSpec& spec, TerrainPinId& out
     }
     const auto sequence = state->next_pin_++;
     state->pins_.emplace(sequence, spec);
+    state->error_.clear();
+    state->error_code_.clear();
     ++state->demand_revision_;
     state->plan_dirty_ = true;
     output = {node().world()->epoch(), node().id(), instance_id(), sequence};
@@ -179,6 +187,8 @@ bool TerrainComponent::release_pin(TerrainPinId id)
     }
     ++runtime()->demand_revision_;
     runtime()->plan_dirty_ = true;
+    runtime()->error_.clear();
+    runtime()->error_code_.clear();
     return true;
 }
 bool TerrainComponent::request_edit(const TerrainEditSpec& spec, TerrainOperationId& output)
@@ -276,15 +286,52 @@ bool TerrainComponent::query_regions(const TerrainRegionQuery& query,
 {
     output = {};
     TerrainRegionQuery local;
-    if (!valid() || query.limit == 0 || query.limit > 4096 || !local_query(*this, query, local))
+    if (!valid() || query.limit == 0 || query.limit > 4096 ||
+        !terrain_detail::valid_bounds(query.bounds))
     {
         return false;
     }
+    const bool enabled = active();
     const auto* state = runtime();
-    const auto* source = state->source_.data<TerrainResource>();
-    if (!source)
+    output.revision = state->revision_;
+    output.settings_revision = state->settings_revision_;
+    output.demand_revision = state->demand_revision_;
+    output.published_settings_revision = state->prepared_settings_revision_;
+    output.published_demand_revision = state->published_demand_revision_;
+    output.fragment_count = state->fragments_.size();
+    const auto* data = read_data<Data>();
+    if (!enabled || data->terrain_guid.empty())
     {
-        return false;
+        output.state = SceneWorkState::not_required;
+    }
+    else if (state->streaming_ &&
+             state->streaming_->settings_revision == state->settings_revision_ &&
+             state->streaming_->demand_revision == state->demand_revision_ &&
+             state->streaming_->snapshot.state == TerrainOperationState::failed)
+    {
+        output.state = SceneWorkState::failed;
+        output.error_code = state->streaming_->snapshot.error_code;
+        output.error = state->streaming_->snapshot.error;
+    }
+    else if (!state->error_.empty())
+    {
+        output.state = SceneWorkState::failed;
+        output.error_code = state->error_code_.empty() ? "streaming_failed" : state->error_code_;
+        output.error = state->error_;
+    }
+    else
+    {
+        output.state = state->ready_ &&
+                               state->prepared_settings_revision_ == state->settings_revision_ &&
+                               state->published_demand_revision_ == state->demand_revision_
+                           ? SceneWorkState::ready
+                           : SceneWorkState::working;
+    }
+    const auto* source = state->source_.data<TerrainResource>();
+    if (!source || !local_query(*this, query, local))
+    {
+        return query.cursor.empty() && (!source || output.state == SceneWorkState::failed ||
+                                        output.state == SceneWorkState::not_required);
     }
     std::vector<TerrainRegionKey> keys;
     if (!terrain_detail::enumerate(*source, local.bounds, local.lod, 65536, keys))
@@ -310,9 +357,6 @@ bool TerrainComponent::query_regions(const TerrainRegionQuery& query,
             return false;
         }
     }
-    output.revision = state->revision_;
-    output.settings_revision = state->settings_revision_;
-    output.fragment_count = state->fragments_.size();
     const auto end = std::min(keys.size(), start + query.limit);
     for (auto index = start; index < end; ++index)
     {
