@@ -508,6 +508,7 @@ bool GpuProgram::prepare_material(const Material& material, const TextureTable& 
             }
             binding.shadow_alpha[1] = static_cast<float>(tint.w());
             binding.shadow_texture = texture->handle;
+            binding.shadow_texture_resource = texture->resource.handle();
             if (const auto* uv = parameter("uvTransform"))
             {
                 if (!uv->default_value.AsVec4Value())

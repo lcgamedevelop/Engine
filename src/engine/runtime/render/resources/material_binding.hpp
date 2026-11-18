@@ -1,5 +1,6 @@
 #pragma once
 
+#include "runtime/resource/resource_handle.hpp"
 #include "runtime/schema/material_generated.h"
 #include "runtime/schema/shader_generated.h"
 
@@ -38,6 +39,7 @@ struct MaterialBinding
     std::array<float, 4> shadow_alpha{0, 1, 0, 0};
     std::array<float, 4> shadow_uv{1, 1, 0, 0};
     bgfx::TextureHandle shadow_texture = BGFX_INVALID_HANDLE;
+    ResourceHandle shadow_texture_resource;
 
     bool operator==(const MaterialBinding& other) const
     {

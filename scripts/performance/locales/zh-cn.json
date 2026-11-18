@@ -143,6 +143,7 @@
     "Render.drawScene": "场景绘制提交",
     "Render.prepareLighting": "灯光与阴影准备",
     "Render.shadowSubmit": "阴影提交",
+    "Render.shadowCacheInputs": "阴影缓存输入比较",
     "Render.depthSubmit": "深度提交",
     "Render.surfaceSubmit": "材质表面提交",
     "Render.aoSubmit": "AO 提交",
@@ -180,6 +181,8 @@
     "CharacterCamera.updateVisibility": "角色镜头可见性过滤"
   },
   "plots": {
+    "Render.shadowCacheHit": "普通阴影缓存命中",
+    "Render.shadowSubmittedPages": "普通阴影提交页数",
     "Bgfx.drawCalls": "全帧绘制提交",
     "Bgfx.computeCalls": "全帧计算调度",
     "Bgfx.blitCalls": "全帧拷贝提交",

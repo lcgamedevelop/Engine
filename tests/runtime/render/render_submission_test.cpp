@@ -858,24 +858,101 @@ int test()
     shadow_settings.shadow_cascades = 4;
     SceneCaptureImage shadow_ordinary, shadow_instanced;
     RenderViewStats shadow_stats;
+    const auto sample_shadow_draws = [&](std::uint32_t& peak)
+    {
+        peak = 0;
+        // Include the changed frame after the upstream submission/render queue catches up.
+        for (unsigned index = 0; index < 4; ++index)
+        {
+            if (!frames(window, renderer, 1))
+            {
+                return false;
+            }
+            peak = std::max(peak, bgfx::getStats()->numDraw);
+        }
+        return true;
+    };
+    std::uint32_t ordinary_draws = 0, instanced_draws = 0;
     if (!receiver || !receiver.set_mesh(geometry.path) ||
         !receiver_node.get_component<Transform>().set_settings(receiver_pose) ||
         !light_node.get_component<Transform>().set_settings(sun_pose) ||
         !light.set_settings(shadow_settings) ||
         !visible[1].material().set_float("alphaCutoff", .5F) ||
         !visible[1].material().set_v4("baseColor", {.2, .6, .9, .25}) ||
-        !set_instancing(meshes, false) || !capture(window, renderer, shadow_ordinary, shadow_stats))
+        !set_instancing(meshes, false) || !sample_shadow_draws(ordinary_draws) ||
+        !capture(window, renderer, shadow_ordinary, shadow_stats))
     {
         return 1;
     }
-    const auto ordinary_draws = bgfx::getStats()->numDraw;
-    if (!set_instancing(meshes, true) ||
+    if (!set_instancing(meshes, true) || !sample_shadow_draws(instanced_draws) ||
         !capture(window, renderer, shadow_instanced, shadow_stats) ||
         !pixels(
             shadow_ordinary, shadow_instanced,
             "shadow batching preserves alpha clipping, mirrored culling and off-camera casters") ||
-        !expect(bgfx::getStats()->numDraw < ordinary_draws,
-                "shadow instancing reduces actual backend draws"))
+        !expect(instanced_draws < ordinary_draws, "shadow instancing reduces actual backend draws"))
+    {
+        return 1;
+    }
+    const auto cached_draws = bgfx::getStats()->numDraw;
+    const auto refreshed_shadow = [&](const char* message)
+    {
+        std::uint32_t peak = 0;
+        return sample_shadow_draws(peak) && expect(peak > cached_draws, message);
+    };
+    SceneCaptureImage ordinary_cached, ordinary_changed;
+    auto caster_pose = test_support::read_settings(visible[0].node().get_component<Transform>());
+    const auto saved_caster_pose = caster_pose;
+    caster_pose.position.mutate_x(caster_pose.position.x() + .4);
+    if (!expect(cached_draws < instanced_draws, "unchanged shadows omit backend atlas draws") ||
+        !capture(window, renderer, ordinary_cached, shadow_stats) ||
+        !pixels(shadow_instanced, ordinary_cached,
+                "cached ordinary shadows preserve every pixel") ||
+        !visible[0].node().get_component<Transform>().set_settings(caster_pose) ||
+        !refreshed_shadow("moving a caster redraws the ordinary atlas") ||
+        !capture(window, renderer, ordinary_changed, shadow_stats) ||
+        !expect(ordinary_changed.rgba != ordinary_cached.rgba,
+                "moving a caster produces a changed image") ||
+        !visible[0].node().get_component<Transform>().set_settings(saved_caster_pose) ||
+        !visible[1].material().set_float("alphaCutoff", 0) ||
+        !refreshed_shadow("changing alpha clipping redraws the ordinary atlas") ||
+        !visible[1].material().set_float("alphaCutoff", .5F))
+    {
+        return 1;
+    }
+    auto changed_sun = sun_pose;
+    changed_sun.rotation = {0, -40, 0};
+    auto changed_camera = camera_pose;
+    changed_camera.position.mutate_x(.1);
+    if (!light_node.get_component<Transform>().set_settings(changed_sun) ||
+        !refreshed_shadow("moving a light redraws the ordinary atlas") ||
+        !light_node.get_component<Transform>().set_settings(sun_pose) ||
+        !camera_node.get_component<Transform>().set_settings(changed_camera) ||
+        !refreshed_shadow("moving the camera redraws the ordinary atlas") ||
+        !camera_node.get_component<Transform>().set_settings(camera_pose))
+    {
+        return 1;
+    }
+    visible[0].set_cast_shadows(false);
+    if (!refreshed_shadow("changing a caster's shadow flag redraws the ordinary atlas"))
+    {
+        return 1;
+    }
+    visible[0].set_cast_shadows(true);
+    auto deformed = geometry.vertices;
+    std::vector<Vec4> deformed_tangents(deformed.size(), {1, 0, 0, 1});
+    deformed.front().mutate_z(.1F);
+    if (!visible[0].set_deformation(deformed, deformed_tangents) ||
+        !refreshed_shadow("deformed casters use ordinary per-frame shadow submission") ||
+        !capture(window, renderer, ordinary_changed, shadow_stats) ||
+        !expect(bgfx::getStats()->numDraw > cached_draws,
+                "unchanged dynamic buffers do not enable static atlas reuse"))
+    {
+        return 1;
+    }
+    visible[0].clear_deformation();
+    if (!capture(window, renderer, ordinary_cached, shadow_stats) ||
+        !pixels(shadow_instanced, ordinary_cached,
+                "restoring all shadow inputs reconstructs the original atlas"))
     {
         return 1;
     }

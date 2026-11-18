@@ -215,6 +215,9 @@ classDiagram
     class ShadowPass {
         <<private>>
         +draw(...) bool
+        -cached_signature_ vector~uint64_t~
+        -candidate_signature_ vector~uint64_t~
+        -cache_valid_ bool
     }
     class WorldSystem
     class RenderFrameData

@@ -15,12 +15,95 @@
 
 #include <SDL3/SDL_log.h>
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cstring>
 #include <map>
 
 namespace engine::render_detail
 {
+namespace
+{
+bool shadow_signature(const RenderFrameData& frame, std::span<const VsmPageDraw> pages,
+                      const VsmPageTarget& target, std::vector<std::uint64_t>& values)
+{
+    ENGINE_PROFILE_ZONE("Render.shadowCacheInputs");
+    values.clear();
+    const auto append_floats = [&](const auto& source)
+    {
+        for (const float value : source)
+        {
+            values.push_back(std::bit_cast<std::uint32_t>(value));
+        }
+    };
+    const auto append_resource = [&](ResourceHandle handle)
+    {
+        values.push_back(handle.owner);
+        values.push_back(handle.id);
+        values.push_back(handle.generation);
+    };
+    values.push_back(frame.world_epoch);
+    values.push_back(target.framebuffer.idx);
+    values.push_back(target.fallback.idx);
+    values.push_back(target.depth_uniform.idx);
+    values.push_back(target.caster_ids != nullptr);
+    values.push_back(pages.size());
+    for (const auto& page : pages)
+    {
+        values.push_back(page.view_id);
+        values.push_back(page.x);
+        values.push_back(page.y);
+        values.push_back(page.size);
+        append_floats(page.view);
+        append_floats(page.projection);
+    }
+    values.push_back(frame.meshes.size());
+    for (const auto& source : frame.meshes)
+    {
+        if (!source.cast_shadows || !source.gpu ||
+            (target.caster_ids && std::find(target.caster_ids->begin(), target.caster_ids->end(),
+                                            source.gpu->node_id) == target.caster_ids->end()))
+        {
+            continue;
+        }
+        const auto& mesh = *source.gpu;
+        // GPU/CPU deformation may update buffer contents without changing its handle.
+        if (bgfx::isValid(mesh.deformed_vertices) || !mesh.geometry ||
+            !mesh.geometry->resource.handle().id)
+        {
+            return false;
+        }
+        values.push_back(mesh.node_id);
+        values.push_back(mesh.instance_id);
+        values.push_back(mesh.revision);
+        append_resource(mesh.geometry->resource.handle());
+        values.push_back(mesh.geometry->vertices.idx);
+        values.push_back(mesh.geometry->indices.idx);
+        values.push_back(source.instancing);
+        values.push_back(source.instance_eligible);
+        append_floats(source.model);
+        append_floats(mesh.minimum);
+        append_floats(mesh.maximum);
+        values.push_back(mesh.materials.size());
+        for (const auto& material : mesh.materials)
+        {
+            if (material.frame_textures ||
+                (bgfx::isValid(material.shadow_texture) && !material.shadow_texture_resource.id))
+            {
+                return false;
+            }
+            values.push_back(static_cast<std::uint64_t>(material.blend));
+            values.push_back(static_cast<std::uint64_t>(material.cull));
+            values.push_back(material.shadow_valid);
+            append_floats(material.shadow_alpha);
+            append_floats(material.shadow_uv);
+            values.push_back(material.shadow_texture.idx);
+            append_resource(material.shadow_texture_resource);
+        }
+    }
+    return true;
+}
+} // namespace
 
 ShadowPass::~ShadowPass() noexcept
 {
@@ -96,6 +179,9 @@ void ShadowPass::release() noexcept
     resolution_ = 0;
     attached_views_.clear();
     last_skipped_lights_ = 0;
+    cached_signature_.clear();
+    candidate_signature_.clear();
+    cache_valid_ = false;
 }
 
 bool ShadowPass::prepare(std::uint16_t size)
@@ -460,13 +546,37 @@ bool ShadowPass::draw(const RenderFrameData& frame_data, const RenderSettings& s
         selected.assign(caster_ids->begin(), caster_ids->end());
         target.caster_ids = &selected;
     }
+    const bool cacheable = shadow_signature(frame_data, pages, target, candidate_signature_);
+    if (cacheable && cache_valid_ && cached_signature_ == candidate_signature_)
+    {
+        ENGINE_PROFILE_PLOT("Render.shadowCacheHit", std::int64_t{1});
+        ENGINE_PROFILE_PLOT("Render.shadowSubmittedPages", std::int64_t{0});
+        return true;
+    }
+    ENGINE_PROFILE_PLOT("Render.shadowCacheHit", std::int64_t{0});
+    ENGINE_PROFILE_PLOT("Render.shadowSubmittedPages", static_cast<std::int64_t>(pages.size()));
+    cache_valid_ = false;
     // Prepare caster world bounds once for the whole atlas, preserving page/view order.
-    return draw_pages(frame_data, pages, target);
+    if (!draw_pages(frame_data, pages, target))
+    {
+        return false;
+    }
+    if (cacheable)
+    {
+        cached_signature_.swap(candidate_signature_);
+        cache_valid_ = true;
+    }
+    return true;
 }
 
 bool ShadowPass::draw_pages(const RenderFrameData& frame_data, std::span<const VsmPageDraw> pages,
                             const VsmPageTarget& target)
 {
+    if (target.framebuffer.idx == framebuffer_.idx)
+    {
+        // Direct callers may overwrite this atlas; only draw() publishes a complete key.
+        cache_valid_ = false;
+    }
     if (!bgfx::isValid(target.framebuffer) || !bgfx::isValid(program_) ||
         !bgfx::isValid(target.depth_uniform) || !bgfx::isValid(target.fallback))
     {

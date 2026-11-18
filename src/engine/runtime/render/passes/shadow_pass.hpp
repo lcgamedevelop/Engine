@@ -61,6 +61,9 @@ private:
     std::uint16_t resolution_ = 0;
     std::vector<bgfx::ViewId> attached_views_;
     std::uint32_t last_skipped_lights_ = 0;
+    std::vector<std::uint64_t> cached_signature_;
+    std::vector<std::uint64_t> candidate_signature_;
+    bool cache_valid_ = false;
 };
 
 } // namespace engine::render_detail

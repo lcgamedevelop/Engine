@@ -142,6 +142,7 @@ classDiagram
     class GpuGeometry
     class GpuProgram
     class GpuTexture
+    class ResourceHandle
     class Material
     class ShaderDataT
     class MaterialBinding {
@@ -196,6 +197,7 @@ classDiagram
     MaterialBinding ..> GpuProgram : 借用当前版本及uniform布局
     GpuProgram ..> ShaderDataT : 版本由所属GPU资源保活
     MaterialBinding ..> GpuTexture : 借用已就绪纹理身份
+    MaterialBinding ..> ResourceHandle : 复制阴影裁切纹理的获取身份
     RenderFrameData ..> GpuMesh : 当前稳定阶段借用
     RenderFrameData ..> MaterialBinding : 当前稳定阶段借用
     ViewDrawList --> RenderFrameData : 本次视图期间借用
@@ -225,6 +227,17 @@ ComponentStorage、NodeRuntime 与 WorldTransform 引用[场景 ECS 列](ecs-sce
 `content_hash` 仅用于快速定位；共享绑定编号必须在完整数值、类型、纹理与 Shader 版本相等后分配。`DrawBatchKey::binding` 是颜色 Pass 的完整材质规范化编号；阴影不比较颜色编号，直接比较其实际 alpha/UV/纹理字段。哈希冲突不能合并对象；不得直接哈希含未初始化 padding 的 struct。动态帧纹理按既有 sampler source 在视图提交时补齐，不能把上一帧颜色、深度或平面反射句柄固化进跨帧缓存。
 
 普通阴影在同一次 `draw` 中先组织级联和局部灯的页描述，再一次调用已有 `draw_pages`。该调用只构造一次投影物世界边界，各页继续独立裁剪、组批、清理与提交；页顺序、矩阵、atlas 区域、alpha 裁切及捕获筛选不改变，不跨帧缓存投影物或 ECS 借用。
+
+### 普通阴影 atlas 复用
+
+`ShadowPass` 在原有 atlas 内只保留最后一次完整绘制结果，不增加 GPU 目标、场景开关或另一套阴影调度。它拥有两个 `vector<uint64_t>` 值数组及有效标记：当前调用生成候选签名，与上次成功绘制的完整签名逐值比较。签名不借用 ECS、材质或资源地址，不使用可能碰撞的散列代替相等。
+
+- 输入包括世界代次、各页的实际 view id、矩阵与 atlas 区域、筛选后的投影物身份、几何资源获取身份、模型矩阵及边界、实例化状态，以及每个材质槽的剔面、混合、alpha 裁切、UV 和裁切纹理版本。`MaterialBinding` 在原绑定准备中额外复制裁切纹理的 `ResourceHandle` 值；它不增加资源引用，由原 `GpuTexture` 继续保活。
+- 相同输入复用颜色 atlas，不清理、不 touch、不再次提交这些阴影视图；本次 `ShadowFrame` 的矩阵和局部灯绑定仍正常计算。不同输入整批重绘，成功后才发布新签名；不能将旧 atlas 的部分区域视为另一观察者的有效结果。
+- 蒙皮、CPU/GPU 变形以及动态帧纹理保守地逐帧重绘。资源、投影物、相机、灯或捕获选择变化均参与失效；`release`、目标重建和直接向本 atlas 调用 `draw_pages` 清除有效性。VSM 使用自己的 atlas 和现有页缓存，不共享普通 atlas 的有效标记。
+- 反射、捕获与多相机继续按原视图顺序执行。共享 atlas 被另一组页覆盖后，只能复用最后一组完整匹配的输入，不能按 view id 单独保存多份有效标记。缓存只减少相同输入的重复工作，不降低分辨率、级联数或阴影质量。
+
+设计参考开源 [The Forge](https://github.com/ConfettiFX/The-Forge) 的 `09_LightShadowPlayground` 中就绪/更新批次分离，以及 [Ant](https://github.com/ejoy/ant) 的 `shadow_system.lua` 按变化更新矩阵。这里仅复用其减少未变化工作这一思路；不移植 ASM 框架，也不把 Ant 的矩阵更新判断描述为完整 atlas 缓存。间接绘制命令压紧仍受当前几何与材质绑定方式限制，独立于本优化。
 
 `RenderFrameData` 是派生快照，ECS 仍是唯一持久场景状态。几何、程序和纹理继续由既有 GPU 拥有者管理；帧数据不借用可跨结构修改的 ECS 列地址。所有 GPU/材质借用在 `prepare_scope` 完成后建立，在本次同步提交结束前使用完；资源回收、绑定表修改和结构发布不得插入这段消费过程。扩展回调沿用现有只读提交边界。
 

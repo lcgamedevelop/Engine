@@ -139,7 +139,7 @@ macOS arm64 的受影响 Debug / Release 目标编译通过；Release 的 `engin
 
 ## 手动集成与 GPU 验证
 
-- `engine.render_submission`：剔除、实例化、材质/Probe 分组、LOD、瞬态缓冲不足和阴影像素回归；另覆盖 SSR 关闭不提交材质表面、开启后准备附件、再次关闭恢复完全相同的 HDR，以及两个平面反射、CSM 与 Meshlet 组合。
+- `engine.render_submission`：剔除、实例化、材质/Probe 分组、LOD、瞬态缓冲不足和阴影像素回归；普通阴影覆盖静态 atlas 复用的实际提交减少、严格像素一致，以及相机、灯、投影物、裁切材质、投影开关变化后的重绘和动态变形不缓存。另覆盖 SSR 关闭不提交材质表面、开启后准备附件、再次关闭恢复完全相同的 HDR，以及两个平面反射、CSM 与 Meshlet 组合。
 - `engine.scene_hdr_capture` / `engine.scene_hdr_transparency` / `engine.hdr_extension_capture`：按实际修改选择对应捕获或透明链路。
 - `engine.window_render`：窗口、GPU 资源、多效果与生命周期集成，耗时较长，不作为所有渲染修改的默认补充项。
 - `editor.scene_bake_core_loader`：实际 GPU IBL、纹理捕获、多面立方体 UV2 与跨帧照明积分；连续取走结果后不重新准备就渲染时必须延后读回，准备完成后再返回独立、非空的像素结果，覆盖编辑器逐面烘焙的调用顺序和 lightmapper 借用输入的生命周期。同一用例还以单工作项和 256 字节上传预算重绑新的 Lightmap，验证 GPU 上传未完成时帧继续提交、最终就绪并可清除。
@@ -226,6 +226,8 @@ Release 的 13 项 CTest 全部通过（9.06 秒）：`engine.character_motor`�
 当前性能采样与中文报告入口见[性能采样](runtime/performance.md)。macOS arm64 / Metal 的受影响 Debug（Tracy OFF）和 Release（Tracy ON）目标编译、链接通过；Release `engine.render_submission` 及性能分析工具检查通过。工具检查覆盖父子／跨线程计时、缺失自身时间、异步 GPU 源帧、旧结果去重、非法时间戳与中文单文件报告。代表场景实窗采集验证了宿主、资源准备、各提交阶段、bgfx 内部回调及原生视图记录；这不等于首帧加载、独占 GPU Shader 成本或其他平台已测。具体项目资源、截图和采样结果留在各自忽略目录。
 
 无损顶点索引生成、普通阴影按 atlas 共用投影物准备，以及没有角色标记时的镜头过滤优化，完成受影响 Debug／Release 构建。Release `editor.fbx_pipeline`、`editor.fbx_bind_pose`、`engine.character_controller`、`engine.character_host`、`engine.render_submission` 通过；复用用例检查重复角点去重与 UV／切线／蒙皮接缝、材质分区和索引属性、旧镜头过滤清理、阴影／反射／Meshlet 的严格 HDR 对照。中文报告脚本的标签转义及输入数量检查通过。实窗只重测本次代表场景，没有重跑全量场景或其他平台；没有把局部 CPU 降幅宣称为 5–6 ms 的完整帧率验收。
+
+普通阴影 atlas 静态复用完成相同预设的 Debug／Release 编译链接，Release `engine.render_submission` 与 `engine.performance_analysis` 通过。现有渲染用例通过实际 bgfx 提交计数检查缓存命中和各类失效，并检查恢复原输入后严格 HDR 一致；原有反射、VSM 与 Meshlet 组合继续通过。实窗代表场景的普通、Meshlet、关闭后恢复三张 PNG 与修改前逐像素完全相同，稳定采样期间普通阴影提交页数为零；收益适用于输入未变化的 atlas，相机或投影物变化仍按正常路径重绘，不代表动态场景或其他平台有同等性能收益。
 
 2026-11-08，Windows x64 / Release / DirectX 12 / QuickJS，RTX 4070 Laptop，驱动 `31.0.15.4601`；1280×720、MSAA 1、VSync 关闭、Tracy OFF。优化前源码为 `5070daf9`，实现和当时完整夹具见 `ec7d74d7`。
 
