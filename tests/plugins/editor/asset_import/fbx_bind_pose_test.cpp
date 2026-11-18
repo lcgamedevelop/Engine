@@ -121,6 +121,74 @@ bool expect(bool condition, const std::string& message)
     return condition;
 }
 
+bool indexed_corner_attributes()
+{
+    using namespace engine::plugins::asset_import;
+    for (const bool seam : {false, true})
+    {
+        // Distinct control points and materials can still have identical completed attributes.
+        // A UV seam must remain distinct even when all positions coincide.
+        std::string source = "v 0 0 0\nv 1 0 0\nv 0 1 0\n"
+                             "v 0 0 0\nv 1 0 0\nv 0 1 0\n"
+                             "vt 0 0\nvt 1 0\nvt 0 1\nvt 0.25 0\n"
+                             "vn 0 0 1\nusemtl first\nf 1/1/1 2/2/1 3/3/1\nusemtl second\n";
+        source += seam ? "f 4/4/1 5/2/1 6/3/1\n" : "f 4/1/1 5/2/1 6/3/1\n";
+        FbxDocument document;
+        ufbx_load_opts options{};
+        options.file_format = UFBX_FILE_FORMAT_OBJ;
+        ufbx_error source_error{};
+        document.scene.reset(ufbx_load_memory(source.data(), source.size(), &options,
+                                               &source_error));
+        if (!expect(document.scene != nullptr, "load duplicated triangle attribute fixture"))
+        {
+            return false;
+        }
+        const ufbx_node* node = nullptr;
+        for (const auto* candidate : document.scene->nodes)
+        {
+            if (candidate->mesh)
+            {
+                node = candidate;
+                break;
+            }
+        }
+        engine::schema::MeshDataT output;
+        std::string error;
+        if (!expect(node && convert_mesh(document, *node, output, error),
+                    "convert duplicated corner streams: " + error) ||
+            !expect(output.indices.size() == 6 &&
+                        (seam ? output.vertices.size() > 3 : output.vertices.size() == 3),
+                    "exact duplicates reuse vertices while UV seams remain split") ||
+            !expect(output.submeshes.size() == 2 &&
+                        output.submeshes[0].first_index() == 0 &&
+                        output.submeshes[1].first_index() == 3 &&
+                        output.submeshes[0].index_count() == 3 &&
+                        output.submeshes[1].index_count() == 3 &&
+                        output.submeshes[0].material_slot() != output.submeshes[1].material_slot(),
+                    "index generation preserves both triangles and material partitions"))
+        {
+            return false;
+        }
+        for (std::size_t corner = 0; corner < output.indices.size(); ++corner)
+        {
+            const auto index = output.indices[corner];
+            const auto& vertex = output.vertices[index];
+            const auto& uv = output.texcoords[index];
+            const double x = corner % 3 == 1 ? 1.0 : 0.0;
+            const double y = corner % 3 == 2 ? 1.0 : 0.0;
+            if (!expect(vertex.x() == x && vertex.y() == y && vertex.z() == 0 &&
+                            vertex.nx() == 0 && vertex.ny() == 0 && vertex.nz() == 1 &&
+                            uv.x() == (seam && corner == 3 ? 0.25 : x) && uv.y() == y &&
+                            output.tangents[index].w() == 1,
+                        "every indexed corner retains its original position, normal and UV"))
+            {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 bool motion_track_validation()
 {
     using namespace engine::plugins::asset_import;
@@ -993,6 +1061,7 @@ int main()
 {
     return large_source_snapshot() && unit_independent_bind_comparison() && coordinate_settings() &&
                    imported_tangent_frames() && generated_tangent_frames() &&
+                   indexed_corner_attributes() &&
                    motion_track_validation() && motion_rotation_axes()
                ? 0
                : 1;

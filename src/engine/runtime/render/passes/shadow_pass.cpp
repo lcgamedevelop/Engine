@@ -211,6 +211,8 @@ bool ShadowPass::draw(const RenderFrameData& frame_data, const RenderSettings& s
     {
         return false;
     }
+    std::vector<VsmPageDraw> pages;
+    pages.reserve(maximum_views);
     struct Caster
     {
         const GpuMesh* mesh = nullptr;
@@ -311,17 +313,7 @@ bool ShadowPass::draw(const RenderFrameData& frame_data, const RenderSettings& s
         page.size = frame.tile_size;
         page.view = frame.view;
         std::copy_n(projection, 16, page.projection.begin());
-        VsmPageTarget target{framebuffer_, fallback, depth_uniform, nullptr};
-        std::vector<std::uint64_t> selected;
-        if (caster_ids)
-        {
-            selected.assign(caster_ids->begin(), caster_ids->end());
-            target.caster_ids = &selected;
-        }
-        if (!draw_pages(frame_data, std::span{&page, 1}, target))
-        {
-            return false;
-        }
+        pages.push_back(page);
     }
     std::vector<const LocalShadowLight*> candidates;
     for (const auto& light : local_lights)
@@ -441,17 +433,7 @@ bool ShadowPass::draw(const RenderFrameData& frame_data, const RenderSettings& s
             page.size = size;
             std::copy_n(view_matrix, 16, page.view.begin());
             std::copy_n(projection, 16, page.projection.begin());
-            VsmPageTarget target{framebuffer_, fallback, depth_uniform, nullptr};
-            std::vector<std::uint64_t> selected;
-            if (caster_ids)
-            {
-                selected.assign(caster_ids->begin(), caster_ids->end());
-                target.caster_ids = &selected;
-            }
-            if (!draw_pages(frame_data, std::span{&page, 1}, target))
-            {
-                return false;
-            }
+            pages.push_back(page);
             frame.local_records.push_back(record);
         }
         lights[light->light_index].kind_inner[2] = static_cast<float>(first_record + 1);
@@ -467,7 +449,19 @@ bool ShadowPass::draw(const RenderFrameData& frame_data, const RenderSettings& s
         }
         last_skipped_lights_ = frame.skipped_local_lights;
     }
-    return true;
+    if (pages.empty())
+    {
+        return true;
+    }
+    VsmPageTarget target{framebuffer_, fallback, depth_uniform, nullptr};
+    std::vector<std::uint64_t> selected;
+    if (caster_ids)
+    {
+        selected.assign(caster_ids->begin(), caster_ids->end());
+        target.caster_ids = &selected;
+    }
+    // Prepare caster world bounds once for the whole atlas, preserving page/view order.
+    return draw_pages(frame_data, pages, target);
 }
 
 bool ShadowPass::draw_pages(const RenderFrameData& frame_data, std::span<const VsmPageDraw> pages,

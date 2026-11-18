@@ -224,6 +224,8 @@ ComponentStorage、NodeRuntime 与 WorldTransform 引用[场景 ECS 列](ecs-sce
 
 `content_hash` 仅用于快速定位；共享绑定编号必须在完整数值、类型、纹理与 Shader 版本相等后分配。`DrawBatchKey::binding` 是颜色 Pass 的完整材质规范化编号；阴影不比较颜色编号，直接比较其实际 alpha/UV/纹理字段。哈希冲突不能合并对象；不得直接哈希含未初始化 padding 的 struct。动态帧纹理按既有 sampler source 在视图提交时补齐，不能把上一帧颜色、深度或平面反射句柄固化进跨帧缓存。
 
+普通阴影在同一次 `draw` 中先组织级联和局部灯的页描述，再一次调用已有 `draw_pages`。该调用只构造一次投影物世界边界，各页继续独立裁剪、组批、清理与提交；页顺序、矩阵、atlas 区域、alpha 裁切及捕获筛选不改变，不跨帧缓存投影物或 ECS 借用。
+
 `RenderFrameData` 是派生快照，ECS 仍是唯一持久场景状态。几何、程序和纹理继续由既有 GPU 拥有者管理；帧数据不借用可跨结构修改的 ECS 列地址。所有 GPU/材质借用在 `prepare_scope` 完成后建立，在本次同步提交结束前使用完；资源回收、绑定表修改和结构发布不得插入这段消费过程。扩展回调沿用现有只读提交边界。
 
 ### 收集、更新与失效

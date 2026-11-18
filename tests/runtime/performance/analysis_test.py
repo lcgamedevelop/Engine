@@ -101,6 +101,12 @@ class AnalysisTest(unittest.TestCase):
                     'rss_summary_bytes':{'max':1048576}}))
                 sources.append(source)
             report=write_reports(sources,Path(directory)/'report.html').read_text()
+            labeled=write_reports(sources,Path(directory)/'labeled.html',
+                                  ['Before <unsafe>','After']).read_text()
+            self.assertIn('Before &lt;unsafe&gt;',labeled)
+            self.assertNotIn('<unsafe>',labeled)
+            with self.assertRaises(ValueError):
+                write_reports(sources,Path(directory)/'invalid.html',['Only one'])
         self.assertIn('lang="zh-CN"',report)
         self.assertIn(locale['title'],report)
         self.assertIn(locale['unknown'],report)

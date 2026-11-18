@@ -738,6 +738,52 @@ bool convert_mesh(const FbxDocument& document, const ufbx_node& node, schema::Me
     {
         return false;
     }
+    // FBX corner indices describe attribute seams, not necessarily distinct final vertices.
+    // Compare every completed stream so exact duplicates share vertex shader work while
+    // normal/UV/tangent/color/skin discontinuities and triangle order remain unchanged.
+    std::array<ufbx_vertex_stream, 7> streams{};
+    std::size_t stream_count = 0;
+    const auto add_stream = [&](auto& values)
+    {
+        if (!values.empty())
+        {
+            streams[stream_count++] = {values.data(), values.size(), sizeof(values.front())};
+        }
+    };
+    add_stream(output.vertices);
+    add_stream(output.texcoords);
+    add_stream(output.tangents);
+    add_stream(output.colors);
+    add_stream(output.lightmap_texcoords);
+    add_stream(output.skin);
+    std::vector<std::uint32_t> remap(output.vertices.size());
+    ufbx_error index_error{};
+    const auto unique_count = ufbx_generate_indices(streams.data(), stream_count, remap.data(),
+                                                   remap.size(), nullptr, &index_error);
+    if (unique_count == 0)
+    {
+        error = "Cannot generate FBX vertex indices: " +
+                std::string(index_error.description.data, index_error.description.length);
+        return false;
+    }
+    for (auto& index : output.indices)
+    {
+        index = remap[index];
+    }
+    const auto compact = [unique_count](auto& values)
+    {
+        if (!values.empty())
+        {
+            values.resize(unique_count);
+            values.shrink_to_fit();
+        }
+    };
+    compact(output.vertices);
+    compact(output.texcoords);
+    compact(output.tangents);
+    compact(output.colors);
+    compact(output.lightmap_texcoords);
+    compact(output.skin);
     result = std::move(output);
     return true;
 }

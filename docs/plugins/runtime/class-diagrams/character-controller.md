@@ -38,4 +38,6 @@ CharacterVisual 使用 body、head、first_person 分类。子树采用最近祖
 
 CharacterCameraSystem 在 CameraSystem 提交后更新每镜头隐藏列表；它不求解镜头、不写 Transform 或投影、不修改 MeshRenderer 全局可见性。禁用、删除组件或卸载场景时清除旧列表，完整组件身份防止旧句柄控制替换实例。
 
+每帧先查询已发布、参与模拟的 CharacterVisual。没有此类标记且当前镜头没有第一人称目标时，所有网格均采用默认 body 分类，直接提交空隐藏列表，不遍历普通场景的网格／祖先；仍清除上一帧的过滤结果。查询每帧重做，不缓存“没有角色”的结论，新增或删除标记后下一次更新即生效。
+
 持久数据来自 runtime/character_controller.fbs 与 runtime/camera.fbs；运行输入、动作缓冲、能力计时和镜头混合历史只在 ECS Runtime。场景与预制体二进制只接受 schema_version=3，旧缓存重新导入。旧位置参数式 SetInput、系统级玩家选择、CharacterView 和旧 CharacterCamera 算法字段已删除，不提供转换分支或兼容别名。

@@ -20,7 +20,10 @@ def number(value, missing):
     return f'{value:,.3f}' if isinstance(value, (int,float)) else missing
 
 
-def write_reports(summaries, output):
+def write_reports(summaries, output, labels=None):
+    if labels is not None and len(labels)!=len(summaries):
+        raise ValueError("Provide exactly one label per analysis file")
+    sample_labels={Path(path).resolve():name for path,name in zip(summaries,labels or [])}
     locale=json.loads((Path(__file__).parent/'locales/zh-cn.json').read_text())
     missing=locale['unknown']
     def label(name):
@@ -36,6 +39,8 @@ def write_reports(summaries, output):
     def value(stats,key='mean'):
         return number(stats.get(key),missing) if stats.get('count') else missing
     def sample_name(path,capture):
+        if path in sample_labels:
+            return sample_labels[path]
         metadata=capture.get('metadata',{})
         mode=metadata.get('mode','')
         return metadata.get('case',path.parent.parent.name)+' / '+locale['modes'].get(mode,mode)
@@ -77,7 +82,8 @@ def write_reports(summaries, output):
         meta=capture.get('metadata',{})
         settings=meta.get('actualSettings',{}).get('native',{}).get('render',{})
         metadata_rows=[]
-        for key in ['head','branch','dirtyDiffSha256','binarySha256','os','architecture','backend',
+        for key in ['head','branch','dirtyDiffSha256','sourcePatchSha256','binarySha256',
+                    'os','architecture','backend',
                     'build','logicalWindow','warmupFrames']:
             if key in meta:
                 metadata_rows.append([locale['metadata'][key],escape(meta[key])])
@@ -190,5 +196,6 @@ if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--analysis',type=Path,action='append',required=True,help='A summary.json file')
     parser.add_argument('--output',type=Path,required=True)
+    parser.add_argument('--label',action='append',help='Display label, once per analysis file')
     args=parser.parse_args()
-    print(write_reports(args.analysis,args.output))
+    print(write_reports(args.analysis,args.output,args.label))

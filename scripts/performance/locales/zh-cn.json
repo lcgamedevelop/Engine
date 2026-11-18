@@ -164,8 +164,8 @@
     "bgfx/Metal wait command completion": "Metal 等待命令完成",
     "bgfx/Metal resolve GPU timestamps": "Metal 解析 GPU 时间戳",
     "bgfx/Metal create render pipeline": "Metal 创建渲染管线",
-    "bgfx/API thread wait": "bgfx API 线程等待",
-    "bgfx/Render thread wait": "bgfx 渲染线程等待",
+    "bgfx/API thread wait": "等待 API 提交线程（渲染线程）",
+    "bgfx/Render thread wait": "等待渲染线程（API 线程）",
     "bgfx/API thread frame": "bgfx API 线程换帧",
     "bgfx/Exec commands post": "bgfx 后置命令处理",
     "bgfx/Exec commands pre": "bgfx 前置命令处理",
@@ -175,7 +175,9 @@
     "bgfx/DedupBind": "bgfx 绑定去重",
     "bgfx/flip": "bgfx 呈现换帧",
     "bgfx::renderFrame": "bgfx 渲染线程帧",
-    "bgfx/Low latency sleep": "bgfx 低延迟休眠"
+    "bgfx/Low latency sleep": "bgfx 低延迟休眠",
+    "CharacterCamera.tick": "角色镜头更新",
+    "CharacterCamera.updateVisibility": "角色镜头可见性过滤"
   },
   "plots": {
     "Bgfx.drawCalls": "全帧绘制提交",
@@ -230,7 +232,8 @@
     "size": "实际渲染尺寸",
     "msaa": "MSAA 倍数",
     "vsync": "垂直同步",
-    "targetFps": "目标帧率（-1 为不限帧）"
+    "targetFps": "目标帧率（-1 为不限帧）",
+    "sourcePatchSha256": "可复现源码补丁 SHA256"
   },
   "native_views": {
     "Shadow page": "阴影页",

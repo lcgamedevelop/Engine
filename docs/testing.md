@@ -225,6 +225,8 @@ Release 的 13 项 CTest 全部通过（9.06 秒）：`engine.character_motor`�
 
 当前性能采样与中文报告入口见[性能采样](runtime/performance.md)。macOS arm64 / Metal 的受影响 Debug（Tracy OFF）和 Release（Tracy ON）目标编译、链接通过；Release `engine.render_submission` 及性能分析工具检查通过。工具检查覆盖父子／跨线程计时、缺失自身时间、异步 GPU 源帧、旧结果去重、非法时间戳与中文单文件报告。代表场景实窗采集验证了宿主、资源准备、各提交阶段、bgfx 内部回调及原生视图记录；这不等于首帧加载、独占 GPU Shader 成本或其他平台已测。具体项目资源、截图和采样结果留在各自忽略目录。
 
+无损顶点索引生成、普通阴影按 atlas 共用投影物准备，以及没有角色标记时的镜头过滤优化，完成受影响 Debug／Release 构建。Release `editor.fbx_pipeline`、`editor.fbx_bind_pose`、`engine.character_controller`、`engine.character_host`、`engine.render_submission` 通过；复用用例检查重复角点去重与 UV／切线／蒙皮接缝、材质分区和索引属性、旧镜头过滤清理、阴影／反射／Meshlet 的严格 HDR 对照。中文报告脚本的标签转义及输入数量检查通过。实窗只重测本次代表场景，没有重跑全量场景或其他平台；没有把局部 CPU 降幅宣称为 5–6 ms 的完整帧率验收。
+
 2026-11-08，Windows x64 / Release / DirectX 12 / QuickJS，RTX 4070 Laptop，驱动 `31.0.15.4601`；1280×720、MSAA 1、VSync 关闭、Tracy OFF。优化前源码为 `5070daf9`，实现和当时完整夹具见 `ec7d74d7`。
 
 主场景为 4,096 个共享网格/材质的静态对象；120 稳定帧后采集 600 帧，交替执行三对。下表为 render 调用的 P50 / P95 / P99（ms），包含提交与等待，不是纯 CPU 耗时。

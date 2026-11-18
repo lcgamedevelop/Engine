@@ -323,7 +323,7 @@ bool FbxImporter::inspect_batch(const ImportContext& context, std::string& finge
         return false;
     }
     fingerprint += ":ufbx-0.23.1:ozz-0.17.0:mikktspace-3e895b49-angle-precision-1-degenerate-1:fbx-"
-                   "importer-14-"
+                   "importer-15-indexed-"
                    "sampling-ozz-0.17.0" +
                    editor::mesh_lod_fingerprint() + editor::meshlet_fingerprint();
     return true;
