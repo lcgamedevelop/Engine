@@ -538,8 +538,11 @@ void RenderSystem::apply_debug_state()
 {
     std::uint32_t flags = stats_visible() ? BGFX_DEBUG_STATS : BGFX_DEBUG_NONE;
 #if defined(ENGINE_ENABLE_TRACY)
-    // Per-view timestamps are part of explicit profiling builds; no stats HUD is required.
-    flags |= BGFX_DEBUG_PROFILER;
+    // Stage-boundary sampling changes native pass scheduling; keep it scoped to a capture.
+    if (ENGINE_PROFILE_CONNECTED())
+    {
+        flags |= BGFX_DEBUG_PROFILER;
+    }
 #endif
     bgfx::setDebug(flags);
 }
@@ -662,6 +665,10 @@ render_detail::FramePrepareStatus RenderSystem::prepare_frame()
         }
     }
 
+    // Collectors can connect or disconnect while the same renderer stays alive.
+#if defined(ENGINE_ENABLE_TRACY)
+    apply_debug_state();
+#endif
     std::uint32_t width = 0;
     std::uint32_t height = 0;
     bgfx::SwapChain swap_chain{};

@@ -24,6 +24,7 @@ vcpkg_extract_source_archive(
     webgpu-readback-yield.patch
     profiler-option.patch
     metal-profiler-scopes.patch
+    metal-counter-validity.patch
 )
 file(COPY "${CMAKE_CURRENT_LIST_DIR}/windows-utf8.manifest"
      DESTINATION "${SOURCE_PATH}/cmake")
