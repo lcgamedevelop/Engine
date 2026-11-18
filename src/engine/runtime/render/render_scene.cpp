@@ -111,6 +111,7 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
         {
             continue;
         }
+        ENGINE_PROFILE_ZONE("Render.planarViewSubmit");
         const auto node = world_->find_node(target.node_id);
         const auto base = static_cast<bgfx::ViewId>(3 + index * 39);
         render_detail::SceneDrawView draw;
@@ -221,16 +222,14 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
             return false;
         }
     }
+    if (rendering.ssr_enabled)
     {
         ENGINE_PROFILE_ZONE("Render.surfaceSubmit");
-        if (rendering.ssr_enabled)
+        draw.id = render_detail::surface_view;
+        if (!resources.draw_meshes(resources.frame_data, resources.draw_lists[2], rendering, draw,
+                                   render_detail::SceneDrawMode::surface))
         {
-            draw.id = render_detail::surface_view;
-            if (!resources.draw_meshes(resources.frame_data, resources.draw_lists[2], rendering,
-                                       draw, render_detail::SceneDrawMode::surface))
-            {
-                return false;
-            }
+            return false;
         }
     }
     if (vsm_batch.generation &&
@@ -239,10 +238,10 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
     {
         return false;
     }
+    if (rendering.ao_enabled)
     {
         ENGINE_PROFILE_ZONE("Render.aoSubmit");
-        if (rendering.ao_enabled &&
-            !resources.targets().ambient_occlusion.compute(
+        if (!resources.targets().ambient_occlusion.compute(
                 settings, rendering, projection, resources.targets().surface_pass.depth()))
         {
             return false;
@@ -267,27 +266,25 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
         }
     }
     auto frozen_scene = resources.targets().hdr_post_process.opaque_color();
+    if (rendering.ssr_enabled)
     {
         ENGINE_PROFILE_ZONE("Render.ssrSubmit");
-        if (rendering.ssr_enabled)
+        // Match the main PBR pass: disabling IBL selects the analytical DFG
+        // fallback even when an earlier bake has left its LUT loaded.
+        const bgfx::TextureHandle reflection_lut =
+            rendering.ibl_enabled && resources.targets().ibl_textures[2]
+                ? resources.targets().ibl_textures[2]->handle
+                : bgfx::TextureHandle{bgfx::kInvalidHandle};
+        if (!resources.targets().reflections.render(
+                view, projection, frozen_scene,
+                resources.targets().hdr_post_process.opaque_specular(),
+                resources.targets().surface_pass.depth(),
+                resources.targets().surface_pass.normal_roughness(),
+                resources.targets().surface_pass.specular(), reflection_lut, rendering))
         {
-            // Match the main PBR pass: disabling IBL selects the analytical DFG
-            // fallback even when an earlier bake has left its LUT loaded.
-            const bgfx::TextureHandle reflection_lut =
-                rendering.ibl_enabled && resources.targets().ibl_textures[2]
-                    ? resources.targets().ibl_textures[2]->handle
-                    : bgfx::TextureHandle{bgfx::kInvalidHandle};
-            if (!resources.targets().reflections.render(
-                    view, projection, frozen_scene,
-                    resources.targets().hdr_post_process.opaque_specular(),
-                    resources.targets().surface_pass.depth(),
-                    resources.targets().surface_pass.normal_roughness(),
-                    resources.targets().surface_pass.specular(), reflection_lut, rendering))
-            {
-                return false;
-            }
-            frozen_scene = resources.targets().reflections.texture();
+            return false;
         }
+        frozen_scene = resources.targets().reflections.texture();
     }
     resources.targets().hdr_post_process.begin_transparency(frozen_scene, view, projection);
     draw.id = render_detail::transparent_view;

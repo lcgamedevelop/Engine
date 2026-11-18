@@ -1,0 +1,88 @@
+--- a/bgfx/src/renderer_mtl.h
++++ b/bgfx/src/renderer_mtl.h
+@@ -704,6 +704,7 @@
+ 
+ 		void beginFrame(uint32_t _frameNum);
+ 		void attach(MTL::RenderPassDescriptor* _renderPassDescriptor);
++		void attach(MTL::ComputePassDescriptor* _computePassDescriptor);
+ 		void resolve(uint32_t _samplingIdx);
+ 
+ 		struct Result
+--- a/bgfx/src/renderer_mtl.cpp
++++ b/bgfx/src/renderer_mtl.cpp
+@@ -6030,6 +6030,25 @@
+ 		sampling.m_numSamples += 2;
+ 	}
+ 
++	void TimerQueryMtl::attach(MTL::ComputePassDescriptor* _computePassDescriptor)
++	{
++		Sampling& sampling = m_sampling[m_samplingIdx];
++
++		if (UINT32_MAX == sampling.m_activeQuery
++		||  sampling.m_numSamples + 2 > kMaxTimestampSamples)
++		{
++			return;
++		}
++
++		MTL::ComputePassSampleBufferAttachmentDescriptor* desc = _computePassDescriptor->sampleBufferAttachments()->object(0);
++		desc->setSampleBuffer(sampling.m_sampleBuffer);
++		desc->setStartOfEncoderSampleIndex(sampling.m_numSamples);
++		desc->setEndOfEncoderSampleIndex(sampling.m_numSamples + 1);
++
++		sampling.m_query[sampling.m_activeQuery].m_num += 2;
++		sampling.m_numSamples += 2;
++	}
++
+ 	void TimerQueryMtl::resolve(uint32_t _samplingIdx)
+ 	{
+ 		BGFX_PROFILER_SCOPE("bgfx/Metal resolve GPU timestamps", kColorFrame);
+@@ -6224,6 +6243,7 @@
+ 			return;
+ 		}
+ 
++		BGFX_PROFILER_SCOPE("bgfx/Metal encode blits", kColorFrame);
+ 		endEncoding();
+ 
+ 		m_blitCommandEncoder = getBlitCommandEncoder();
+@@ -6899,6 +6919,10 @@
+ 							}
+ 
+ 							rce = m_commandBuffer->renderCommandEncoder(renderPassDescriptor);
++							if (profileViews)
++							{
++								rce->setLabel(nsstr(viewName) );
++							}
+ 							setRenderCommandEncoder(rce);
+ 							m_renderCommandEncoderFbh = fbh;
+ 							blendFactor = 0;
+@@ -6949,7 +6973,9 @@
+ 
+ 				if (isCompute)
+ 				{
+-					if (!wasCompute)
++					// Stage-boundary counters identify a compute encoder. A profiled view
++					// gets its own encoder so its samples do not also cover neighboring views.
++					if (!wasCompute || (profileViews && viewChanged) )
+ 					{
+ 						wasCompute = true;
+ 
+@@ -6960,7 +6986,18 @@
+ 						BGFX_MTL_PROFILER_END();
+ 						BGFX_MTL_PROFILER_BEGIN(view, kColorCompute);
+ 
+-						m_computeCommandEncoder = m_commandBuffer->computeCommandEncoder();
++						if (profileViews)
++						{
++							MTL::ComputePassDescriptor* descriptor = MTL::ComputePassDescriptor::alloc()->init();
++							m_gpuTimer.attach(descriptor);
++							m_computeCommandEncoder = m_commandBuffer->computeCommandEncoder(descriptor);
++							m_computeCommandEncoder->setLabel(nsstr(viewName) );
++							MTL_RELEASE(descriptor, 0);
++						}
++						else
++						{
++							m_computeCommandEncoder = m_commandBuffer->computeCommandEncoder();
++						}
+ 					}
+ 					else if (viewChanged && BX_ENABLED(BGFX_CONFIG_DEBUG_ANNOTATION) )
+ 					{

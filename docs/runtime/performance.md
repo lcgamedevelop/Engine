@@ -19,6 +19,10 @@ bgfx 内部标记覆盖线程交接、排序及后端提交；Metal 补丁另标
 
 Metal 阶段计数器只接受当前校准采样区间内、完整且有序的起止样本。复用采样缓冲时，仅清理附件或未执行的阶段可能遗留旧值；旧值、单端点和错误值不能拼成有效的 GPU 时长。缺失的视图标为未采集，不用零或整帧时间补齐；完整命令缓冲的独立时间记录继续保留。
 
+支持阶段边界采样的 Metal 设备上，采集期间每个计算视图使用独立编码器，记录实际计算编码器的起止时间。绘制与计算编码器沿用 bgfx 视图名，便于和原生 Metal 记录对应。常规运行继续沿用原有编码流程；性能验收配对采集未连接分析器的宿主帧间隔。
+
+离线分析按 GPU 源帧统计阶段内视图区间的并集，报告有效帧数、P50、P95、全视图并集和重复计入量。跨阶段区间仍可能交叠。纯拷贝记录 CPU 编码和提交次数，合成中的多采样颜色初始化另有绘制视图。
+
 连接采集器时，渲染报告增加以下观测；未连接不遍历资源计算这些统计，关闭 Tracy 时不编译该路径：
 
 | 指标 | 口径 |
@@ -29,9 +33,10 @@ Metal 阶段计数器只接受当前校准采样区间内、完整且有序的�
 | `Render.textureStagingBytes` / `Render.preparePending*` | 准备暂存字节与待完成纹理、材质、程序数 |
 | `Meshlet.candidatePairs` / `indirectCommandSlots` / `computeBatches` / `budgetFallbacks` | 实际候选、提交命令槽、计算批次和预算回退；槽数不等于可见命令数 |
 | `Meshlet.workspaceGpuBytes` | 输入、实例、描述数组和间接命令的当前申请容量，不含共享几何、驱动对齐或驻留；不能替代 RSS |
+| `Vsm.*Pages` / `Rvt.*Pages` / `*.residentBytes` | 页面需求、就绪或重绘状态和所属 GPU 缓存容量。VSM 另记录缺页回退及反馈读回环满导致的跳过 |
 | `ResourceGraph.records` / `acquisitions` / `requests` | 资源图持有规模与请求数量 |
 
-`Render.profileMemory` 和 `Render.profileStats` 单独记录统计本身的开销。CPU 数组统计不覆盖全部分配，GPU 缓冲估算不等于驱动驻留，二者都不能与 RSS 加减求“剩余内存”。CPU future 完成、CPU 帧末与 GPU 完成不是同一状态。
+`Render.profileMemory` 和 `Render.profileStats` 单独记录统计本身的开销。CPU 数组统计不覆盖全部分配，GPU 缓冲估算也与驱动内存口径不同。Metal 在 `Bgfx.gpuResidentBytes` 中报告 `currentAllocatedSize`，即设备分配量。各项不能与 RSS 加减求“剩余内存”。CPU future 完成、CPU 帧末与 GPU 完成使用不同时间点。
 
 ## 固定操作步骤
 
@@ -108,6 +113,16 @@ python3 scripts/performance/trace_report.py \
 ```
 
 多轮采样可以按输入顺序重复传入 `--label`，为每份摘要指定中文显示名，例如区分优化前、优化后或已撤回的试验；标签数量必须与 `--analysis` 一致。标签只影响报告，不改写原始 trace、计数或版本指纹。
+
+macOS 深入定位时，用 Instruments 的 `Metal System Trace` 模板附加到同一个测试进程，并在 bgfx 视图采样开启的时段记录命名编码器。从该记录各导出一次 `metal-application-encoders-list` 和 `metal-gpu-intervals`。例如对两种 `schema` 值分别执行以下命令，使用同名 `.xml` 文件名保存。
+
+```sh
+xcrun xctrace export --input recording.trace \
+  --xpath '/trace-toc/run[@number="1"]/data/table[@schema="metal-gpu-intervals"]' \
+  --output metal-gpu-intervals.xml
+```
+
+对同一工作负载运行 `summarize_trace.py` 时，以 `--metal-tables <directory>` 传入两份 XML 的目录。报告通过编码器 ID 关联 GPU 活跃区间，按 GPU 源帧归并同名通道，也提供逐视图的顶点、片元和计算数据。没有命名或未导出的区间不参与统计。联合采样用于定位，帧率取未连接采集器的独立运行。
 
 完整宿主帧、关键阶段、实际 bgfx 回调和原生视图记录应由具体测试流程按目标检查，不能仅以 trace 文件存在判定采集完成。分析器拒绝交叉的 CPU 区间、缺失的自身时间、倒序的原生时间戳及回调失配；失败保留原始输入。根帧的直接阶段覆盖率只说明顶层区间包住了多少时间，不表示所有函数已细分；线程覆盖与等待都是墙钟观测，不是 CPU 利用率。
 

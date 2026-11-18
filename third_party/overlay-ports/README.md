@@ -40,6 +40,7 @@ Android 使用仓库锁定的库版本；单项版本升级由对应 overlay 明
 | `windows-tool-utf8.patch` | 保留，工具继续使用 Windows UTF-8 manifest。 |
 | `d3d12-compressed-mip-update.patch` | 删除；上游 `TextureD3D12::update` 已按压缩块向上取整宽高、行距与复制区域。 |
 | `metal-uniform-buffer-segments.patch` | 删除旧容量管理；上游 `ChunkedScratchBufferMtl` 已支持分块及延迟释放。仅保留 `metal-uniform-bounds.patch`，对 CPU stage scratch 的写入长度使用 64 位计算和边界检查，不另建容量管理器。 |
+| `metal-compute-timing.patch` | 采集期间对计算视图使用阶段边界时间戳，复用现有采样缓冲和有效性校验。绘制和计算编码器携带视图名称，Blit 记录 CPU 编码区间。[Metal 采样接口](https://developer.apple.com/documentation/metal/sampling-gpu-data-into-counter-sample-buffers) |
 | `framebuffer-sampling-caps.patch` | 删除本地 MSAA 数组，使用上游逐格式的 `BGFX_CAPS_FORMAT_TEXTURE_FRAMEBUFFER_MSAA_X2/_X4/_X8/_X16`。仅保留 `max-anisotropy-caps.patch`，在 C++、C99 和 IDL 中同步暴露实际后端最大各向异性；未报告后端保持 1。 |
 
 原生后端继续使用 Metal、DirectX 12 和 Vulkan；Web 运行产物使用 WebGPU。普通 Shader 工具默认关闭 Tint；显式 `web` feature 为宿主 bgfx 启用 `wgsl`，通过 `spirv-tools[internal-headers]` 使用同版本内部头文件。浏览器后端、回读和工具链补丁的固定来源及许可见 [WebGPU 接入说明](../notices/webgpu.md)。

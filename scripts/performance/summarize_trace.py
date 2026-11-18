@@ -15,6 +15,7 @@ import subprocess
 import sys
 
 from analysis_views import frame_breakdown, native_view_timings
+from analysis_metal import metal_encoder_timings
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -261,6 +262,8 @@ def analyze(args) -> Path:
                         "host-work percentages across multiple threads can exceed 100%"]}
     result["cpu_frames"] = frame_breakdown(selected, own, args.frame_zone, end - start)
     result["renderer_views"] = native_view_timings(messages, start, end, statistics_of)
+    if args.metal_tables:
+        result["metal_encoders"] = metal_encoder_timings(args.metal_tables, statistics_of)
     result["coverage"] = {
         "observed_zone_names": sorted({row["name"] for row in selected}),
         "bgfx_callback_events": sum(row["name"].startswith("bgfx/") for row in selected),
@@ -282,6 +285,8 @@ def main() -> int:
     parser.add_argument("--csvexport", type=Path, required=True)
     parser.add_argument("--frameexport", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True, help="Empty directory under the repository build/ directory")
+    parser.add_argument("--metal-tables", type=Path,
+                        help="Process-scoped Xcode Metal encoder and GPU interval XML exports")
     parser.add_argument("--start-ns", type=int)
     parser.add_argument("--end-ns", type=int)
     parser.add_argument("--message-prefix", help="Tracy message prefix followed by a JSON object, for example Rocket range sample")

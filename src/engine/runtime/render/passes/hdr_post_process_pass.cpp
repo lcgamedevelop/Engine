@@ -292,6 +292,7 @@ bgfx::FrameBufferHandle HdrPostProcessPass::scene_framebuffer() const noexcept
 void HdrPostProcessPass::begin_transparency(bgfx::TextureHandle frozen_scene, const float* view,
                                             const float* projection)
 {
+    ENGINE_PROFILE_ZONE("Render.transparentSceneCopySubmit");
     bgfx::setViewName(scene_copy_view, "Freeze opaque scene for refraction");
     if (samples_ == 1)
     {

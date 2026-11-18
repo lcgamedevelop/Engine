@@ -135,14 +135,21 @@ def native_view_timings(messages, first, last, statistics_of):
     for value in records["gpuView"].values():
         gpu_frames[value["sourceFrame"]].append(value)
     unions = []
+    group_spans = defaultdict(list)
     for frame, rows in sorted(gpu_frames.items()):
         frequencies = {row["frequency"] for row in rows}
         if len(frequencies) != 1:
             raise ValueError("Native view clocks differ within one GPU source frame")
         frequency = next(iter(frequencies))
-        unions.append({"source_frame": frame, "observed_views": len(rows),
-            "union_ms": interval_union((row["begin"], row["end"]) for row in rows) * 1000 / frequency,
-            "sum_ms": sum(row["duration_ms"] for row in rows)})
+        intervals = defaultdict(list)
+        for row in rows:
+            intervals[row["group"]].append((row["begin"], row["end"]))
+        for group, spans in intervals.items():
+            group_spans[group].append(interval_union(spans) * 1000 / frequency)
+        union_ms = interval_union((row["begin"], row["end"]) for row in rows) * 1000 / frequency
+        total_ms = sum(row["duration_ms"] for row in rows)
+        unions.append({"source_frame": frame, "observed_views": len(rows), "union_ms": union_ms,
+            "sum_ms": total_ms, "overlap_ms": max(0.0, total_ms - union_ms)})
     normalized = []
     for view in sorted(views.values(), key=lambda value: value["view_id"]):
         frames = sorted(view.pop("source_frames"))
@@ -151,6 +158,10 @@ def native_view_timings(messages, first, last, statistics_of):
             "gpu_available": bool(view["gpu_ms"])})
     return {"views": normalized, "gpu_view_frames": unions,
         "gpu_view_frame_count": len(gpu_frames),
+        "gpu_group_spans": [{"group": group, "gpu_ms": statistics_of(spans)}
+            for group, spans in sorted(group_spans.items())],
+        "gpu_view_union_ms": statistics_of([row["union_ms"] for row in unions]),
+        "gpu_view_overlap_ms": statistics_of([row["overlap_ms"] for row in unions]),
         "missing_gpu_view_ids": [view["view_id"] for view in normalized if not view["gpu_available"]],
         "gpu_command_buffer_ms": statistics_of([value["duration_ms"]
             for value in records["gpuFrame"].values()]),

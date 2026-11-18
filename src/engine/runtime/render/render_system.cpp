@@ -100,6 +100,19 @@ std::size_t profile_view_group(bgfx::ViewId id)
     {
         return 12;
     }
+    if (id == atmosphere_transmittance_view || id == atmosphere_multiscatter_view ||
+        id == atmosphere_main_skyview || id == atmosphere_capture_skyview)
+    {
+        return 14;
+    }
+    if (id == scene_copy_view)
+    {
+        return 15;
+    }
+    if (id == skinning_view)
+    {
+        return 16;
+    }
     return 13;
 }
 
@@ -139,7 +152,7 @@ void profile_view_record(const char* kind, std::uint16_t id, const char* name, s
     }
 }
 
-void profile_renderer_stats()
+void profile_renderer_stats(const RvtStatus& rvt, const VsmStatus& vsm)
 {
     ENGINE_PROFILE_ZONE("Render.profileStats");
     if (!ENGINE_PROFILE_CONNECTED())
@@ -150,6 +163,19 @@ void profile_renderer_stats()
     if (stats == nullptr)
     {
         return;
+    }
+    if (rvt.effective)
+    {
+        ENGINE_PROFILE_PLOT("Rvt.requiredPages", static_cast<std::int64_t>(rvt.required_pages));
+        ENGINE_PROFILE_PLOT("Rvt.readyPages", static_cast<std::int64_t>(rvt.ready_pages));
+        ENGINE_PROFILE_PLOT("Rvt.residentBytes", static_cast<std::int64_t>(rvt.resident_bytes));
+    }
+    if (vsm.state != VsmState::disabled)
+    {
+        ENGINE_PROFILE_PLOT("Vsm.demandedPages", static_cast<std::int64_t>(vsm.demanded_pages));
+        ENGINE_PROFILE_PLOT("Vsm.redrawnPages", static_cast<std::int64_t>(vsm.redrawn_pages));
+        ENGINE_PROFILE_PLOT("Vsm.fallbackPages", static_cast<std::int64_t>(vsm.fallback_pages));
+        ENGINE_PROFILE_PLOT("Vsm.residentBytes", static_cast<std::int64_t>(vsm.resident_bytes));
     }
     // Stats 对应已经完成的后端帧，可能滞后于提交线程。
     // cpuTimeFrame 包含玩法与限帧等待，不能作为渲染 CPU 耗时。
@@ -192,15 +218,19 @@ void profile_renderer_stats()
         }
     }
     constexpr std::array cpu_names{
-        "Bgfx.cpuPlanarMs",      "Bgfx.cpuShadowMs",  "Bgfx.cpuDepthMs",   "Bgfx.cpuSurfaceMs",
-        "Bgfx.cpuOpaqueMs",      "Bgfx.cpuAoMs",      "Bgfx.cpuSsrMs",     "Bgfx.cpuTransparentMs",
-        "Bgfx.cpuPostMs",        "Bgfx.cpuPresentMs", "Bgfx.cpuMeshletMs", "Bgfx.cpuRvtMs",
-        "Bgfx.cpuVsmFeedbackMs", "Bgfx.cpuOtherMs"};
+        "Bgfx.cpuPlanarMs",      "Bgfx.cpuShadowMs",      "Bgfx.cpuDepthMs",
+        "Bgfx.cpuSurfaceMs",     "Bgfx.cpuOpaqueMs",      "Bgfx.cpuAoMs",
+        "Bgfx.cpuSsrMs",         "Bgfx.cpuTransparentMs", "Bgfx.cpuPostMs",
+        "Bgfx.cpuPresentMs",     "Bgfx.cpuMeshletMs",     "Bgfx.cpuRvtMs",
+        "Bgfx.cpuVsmFeedbackMs", "Bgfx.cpuOtherMs",       "Bgfx.cpuAtmosphereMs",
+        "Bgfx.cpuSceneCopyMs",   "Bgfx.cpuSkinningMs"};
     constexpr std::array gpu_names{
-        "Bgfx.gpuPlanarMs",      "Bgfx.gpuShadowMs",  "Bgfx.gpuDepthMs",   "Bgfx.gpuSurfaceMs",
-        "Bgfx.gpuOpaqueMs",      "Bgfx.gpuAoMs",      "Bgfx.gpuSsrMs",     "Bgfx.gpuTransparentMs",
-        "Bgfx.gpuPostMs",        "Bgfx.gpuPresentMs", "Bgfx.gpuMeshletMs", "Bgfx.gpuRvtMs",
-        "Bgfx.gpuVsmFeedbackMs", "Bgfx.gpuOtherMs"};
+        "Bgfx.gpuPlanarMs",      "Bgfx.gpuShadowMs",      "Bgfx.gpuDepthMs",
+        "Bgfx.gpuSurfaceMs",     "Bgfx.gpuOpaqueMs",      "Bgfx.gpuAoMs",
+        "Bgfx.gpuSsrMs",         "Bgfx.gpuTransparentMs", "Bgfx.gpuPostMs",
+        "Bgfx.gpuPresentMs",     "Bgfx.gpuMeshletMs",     "Bgfx.gpuRvtMs",
+        "Bgfx.gpuVsmFeedbackMs", "Bgfx.gpuOtherMs",       "Bgfx.gpuAtmosphereMs",
+        "Bgfx.gpuSceneCopyMs",   "Bgfx.gpuSkinningMs"};
     std::array<double, cpu_names.size()> cpu{}, gpu{};
     std::array<bool, cpu_names.size()> cpu_valid{}, gpu_valid{};
     static thread_local std::array<std::int64_t, 256> cpu_begin{}, gpu_begin{};
@@ -891,7 +921,7 @@ RenderSubmitStatus RenderSystem::render(Camera camera)
     }
     ENGINE_PROFILE_FRAME_NAMED("Render");
 #if defined(ENGINE_ENABLE_TRACY)
-    profile_renderer_stats();
+    profile_renderer_stats(rvt_status_, vsm_status_);
 #endif
     return drawn ? RenderSubmitStatus::submitted : RenderSubmitStatus::failed;
 }

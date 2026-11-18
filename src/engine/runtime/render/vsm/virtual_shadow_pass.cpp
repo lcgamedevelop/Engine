@@ -2,6 +2,7 @@
 
 #include "cs_vsm_clear.bin.h"
 #include "cs_vsm_feedback.bin.h"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/render/passes/shadow_pass.hpp"
 #include "runtime/render/render_system.hpp"
 
@@ -92,6 +93,7 @@ bool VirtualShadowPass::prepare(const schema::VsmSettingsT& settings, const Rend
 }
 void VirtualShadowPass::poll(std::uint32_t frame_number)
 {
+    ENGINE_PROFILE_ZONE("Render.vsmResolveFeedback");
     for (auto& slot : readbacks_)
     {
         if (!slot.pending || static_cast<std::int32_t>(frame_number - slot.ready_frame) < 0)
@@ -149,8 +151,11 @@ bool VirtualShadowPass::submit_feedback(const VsmView& view, bgfx::TextureHandle
                               [](const auto& slot) { return !slot.pending; });
     if (found == readbacks_.end())
     {
+        ENGINE_PROFILE_PLOT("Vsm.feedbackSkipped", std::int64_t{1});
         return true;
     }
+    ENGINE_PROFILE_ZONE("Render.vsmFeedbackSubmit");
+    ENGINE_PROFILE_PLOT("Vsm.feedbackSkipped", std::int64_t{0});
     auto& slot = *found;
     std::vector<std::array<float, 4>> data;
     vsm_pack_view(view, data);
@@ -186,6 +191,7 @@ bool VirtualShadowPass::submit_feedback(const VsmView& view, bgfx::TextureHandle
 bool VirtualShadowPass::draw_pages(const RenderFrameData& frame, const VsmPageBatch& batch,
                                    ShadowPass& shadow)
 {
+    ENGINE_PROFILE_ZONE("Render.vsmPageSubmit");
     if (batch.generation != generation_ || !bgfx::isValid(framebuffer_))
     {
         return false;

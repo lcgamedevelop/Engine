@@ -153,8 +153,40 @@ def write_reports(summaries, output, labels=None):
             locale['gpu_p95']+' ms',locale['cpu_mean']+' ms',locale['source_frames']],rows)
         absent=views.get('missing_gpu_view_ids',[])
         body+='<p>'+locale['gpu_missing']+': '+(escape(', '.join(map(str,absent))) if absent else '—')+'</p>'
+        if views.get('gpu_group_spans'):
+            body+=heading('gpu_groups')+'<p>'+locale['gpu_groups_note']+'</p>'
+            body+=table([locale['pass'],locale['frames'],locale['p50']+' ms',locale['p95']+' ms'],
+                [[escape(locale['groups'][item['group']]),item['gpu_ms']['count'],
+                    value(item['gpu_ms'],'p50'),value(item['gpu_ms'],'p95')]
+                    for item in views['gpu_group_spans']])
+            body+=table([locale['metric'],locale['p50']+' ms',locale['p95']+' ms'],
+                [[locale[title],value(views[key],'p50'),value(views[key],'p95')]
+                    for title,key in [('gpu_view_union','gpu_view_union_ms'),
+                                      ('gpu_view_overlap','gpu_view_overlap_ms')]])
         body+='<p>'+locale['gpu_frame_span']+': '+value(views.get('gpu_command_buffer_ms',{}))+' ms</p>'
         body+='<p>'+locale['gpu_frame_note']+'</p>'
+        native=data.get('metal_encoders',{})
+        if native.get('views'):
+            body+=heading('metal_encoders')+'<p>'+locale['metal_encoders_note']+'</p>'
+            body+=table([locale['pass'],locale['frames'],locale['p50']+' ms',locale['p95']+' ms'],
+                [[marker(row['name']),row['execution_ms']['count'],
+                  value(row['execution_ms'],'p50'),value(row['execution_ms'],'p95')]
+                  for row in native['passes']])
+            body+='<details><summary>'+locale['metal_channel']+'</summary>'
+            body+=table([locale['view'],locale['pass'],locale['metal_channel'],locale['frames'],
+                         locale['p50']+' ms',locale['p95']+' ms'],
+                [[row['view_id'],marker(row['name']),
+                  escape(locale['metal_channels'].get(row['channel'],row['channel'])),
+                  row['execution_ms']['count'],value(row['execution_ms'],'p50'),
+                  value(row['execution_ms'],'p95')] for row in native['views']])
+            body+='</details>'
+        workload=meta.get('actualSettings',{}).get('submissions',{}).get('views',[])
+        if workload:
+            body+=heading('view_work')+'<p>'+locale['view_work_note']+'</p>'
+            body+=table([locale['view'],locale['visible_meshes'],locale['mesh_draws'],
+                         locale['instance_batches'],locale['indirect_slots']],
+                [[row['viewId'],row['visibleMeshes'],row['drawCalls'],row['directInstanceBatches'],
+                  row['indirectCommands']] for row in workload])
         body+=heading('memory')+'<p>'+locale['memory_note']+'</p>'
         rss=capture.get('rss_summary_bytes') or {}
         rows=[[locale[label_key],number(rss[key]/1048576,missing)+' MiB' if key in rss else missing]

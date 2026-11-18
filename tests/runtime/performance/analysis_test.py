@@ -4,10 +4,12 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from xml.etree import ElementTree
 
 ROOT=Path(__file__).resolve().parents[3]
 sys.path.insert(0,str(ROOT/'scripts/performance'))
 from analysis_views import frame_breakdown, native_view_timings
+from analysis_metal import metal_encoder_timings
 from summarize_trace import statistics_of
 from trace_report import write_reports
 
@@ -24,6 +26,40 @@ def view(kind,identity,first,stop,frame=10,name='Opaque',timestamp=1):
 
 
 class AnalysisTest(unittest.TestCase):
+    def test_native_metal_joins_active_intervals_and_merges_overlaps(self):
+        def write_table(directory, name, columns, rows):
+            document=ElementTree.Element('trace-query-result')
+            node=ElementTree.SubElement(document,'node')
+            schema=ElementTree.SubElement(node,'schema',name=name)
+            for column in columns:
+                ElementTree.SubElement(ElementTree.SubElement(schema,'col'),'name').text=column
+            for values in rows:
+                row=ElementTree.SubElement(node,'row')
+                for value in values:
+                    element=ElementTree.SubElement(row,'value')
+                    if isinstance(value,dict):
+                        element.attrib.update(value)
+                    else:
+                        element.text=value
+            ElementTree.ElementTree(document).write(directory/f'{name}.xml')
+
+        with tempfile.TemporaryDirectory() as temporary:
+            directory=Path(temporary)
+            write_table(directory,'metal-application-encoders-list',
+                        ['Frame','Encoder','Event Type','Encoder Id'],
+                        [['1',' 112C  ASSAO Q2','Encoding','123']])
+            write_table(directory,'metal-gpu-intervals',
+                        ['Creation','Duration','Channel Name','State','Encoder Id'],
+                        [['1000000','2000000','Compute','Active','123'],
+                         ['2000000','2000000','Compute','Active','123'],
+                         ['5000000','7000000','Compute','Waiting','123'],
+                         ['1000000','8000000','Compute','Active','999']])
+            result=metal_encoder_timings(directory,statistics_of)
+        self.assertEqual(result['frames'],1)
+        self.assertEqual(result['views'][0]['view_id'],112)
+        self.assertEqual(result['views'][0]['execution_ms']['p50'],3)
+        self.assertEqual(result['passes'][0]['name'],'ASSAO Q2')
+
     def test_nested_frames_and_parallel_threads_do_not_double_count(self):
         events=[]
         own=[]
@@ -70,6 +106,10 @@ class AnalysisTest(unittest.TestCase):
         combined=next(row for row in result['gpu_view_frames'] if row['source_frame']==10)
         self.assertEqual(combined['union_ms'],15)
         self.assertEqual(combined['sum_ms'],20)
+        self.assertEqual(combined['overlap_ms'],5)
+        self.assertEqual(result['gpu_view_union_ms']['max'],15)
+        self.assertEqual(result['gpu_group_spans'][0],
+                         {'group':4,'gpu_ms':statistics_of([5,15])})
         self.assertEqual(result['missing_gpu_view_ids'],[130])
         self.assertEqual(next(row for row in result['views'] if row['view_id']==130)['gpu_ms'],{'count':0})
 
