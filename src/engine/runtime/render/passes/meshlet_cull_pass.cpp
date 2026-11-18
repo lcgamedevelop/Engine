@@ -55,6 +55,26 @@ bgfx::VertexLayout instance_layout()
     layout.end();
     return layout;
 }
+
+[[nodiscard]] bool ensure_buffer(bgfx::DynamicVertexBufferHandle& buffer, std::uint32_t& capacity,
+                                 std::uint32_t required, std::uint32_t maximum,
+                                 const bgfx::VertexLayout& layout, std::uint16_t flags)
+{
+    if (required <= capacity)
+    {
+        return true;
+    }
+    const auto count = std::max(required, std::min(maximum, capacity * 2));
+    const auto next = bgfx::createDynamicVertexBuffer(count, layout, flags);
+    if (!bgfx::isValid(next))
+    {
+        return false;
+    }
+    bgfx::destroy(buffer);
+    buffer = next;
+    capacity = count;
+    return true;
+}
 } // namespace
 
 bool meshlet_supported() noexcept
@@ -97,22 +117,24 @@ bool MeshletCullPass::prepare(const RenderConfig& config)
     }
     parameters_ = bgfx::createUniform("u_meshlet_parameters", bgfx::UniformType::Vec4, 3);
     planes_ = bgfx::createUniform("u_meshlet_planes", bgfx::UniformType::Vec4, 6);
-    inputs_ = bgfx::createDynamicVertexBuffer(capacity * 8, GpuGeometry::vector_layout(),
-                                              BGFX_BUFFER_COMPUTE_READ);
-    instances_ =
-        bgfx::createDynamicVertexBuffer(capacity, instance_layout(), BGFX_BUFFER_COMPUTE_WRITE);
-    commands_ = bgfx::createIndirectBuffer(capacity);
+    inputs_ =
+        bgfx::createDynamicVertexBuffer(1, GpuGeometry::vector_layout(), BGFX_BUFFER_COMPUTE_READ);
+    instances_ = bgfx::createDynamicVertexBuffer(1, instance_layout(), BGFX_BUFFER_COMPUTE_WRITE);
+    descriptors_ =
+        bgfx::createDynamicVertexBuffer(1, GpuGeometry::vector_layout(), BGFX_BUFFER_COMPUTE_READ);
+    commands_ = bgfx::createIndirectBuffer(1);
     const std::array<std::uint32_t, 4> zero{};
     counters_ = bgfx::createIndexBuffer(bgfx::copy(zero.data(), sizeof(zero)),
                                         BGFX_BUFFER_INDEX32 | BGFX_BUFFER_COMPUTE_READ_WRITE);
     if (!bgfx::isValid(program_) || !bgfx::isValid(clear_) || !bgfx::isValid(parameters_) ||
         !bgfx::isValid(planes_) || !bgfx::isValid(inputs_) || !bgfx::isValid(instances_) ||
-        !bgfx::isValid(commands_) || !bgfx::isValid(counters_))
+        !bgfx::isValid(commands_) || !bgfx::isValid(counters_) || !bgfx::isValid(descriptors_))
     {
         release_gpu();
         return false;
     }
     capacity_ = capacity;
+    input_capacity_ = instance_capacity_ = command_capacity_ = descriptor_capacity_ = 1;
     bgfx::setViewName(meshlet_clear_view, "Meshlet counters");
     bgfx::setViewName(meshlet_cull_view, "Meshlet visibility");
     bgfx::setViewMode(meshlet_clear_view, bgfx::ViewMode::Sequential);
@@ -190,13 +212,15 @@ bool MeshletCullPass::dispatch(const RenderFrameData& frame, const SceneDrawView
         build_frustum_planes(view.view, view.projection, bgfx::getCaps()->homogeneousDepth, planes);
     const bool orthographic = view.projection[15] > 0.5F;
     std::vector<std::array<float, 4>> inputs;
-    std::uint32_t used_pairs = 0, used_commands = 0;
+    std::uint32_t used_pairs = 0, used_commands = 0, used_instances = 0;
     struct Work
     {
         const GpuGeometry* geometry;
         std::size_t lod;
+        const schema::MeshletDataT* source;
         std::uint32_t first_cluster, cluster_count, first_input, instance_count;
         std::uint32_t first_command, first_output;
+        MeshletDrawRange* output;
     };
     std::vector<Work> work;
     auto& counters = draws.opaque_stats;
@@ -289,20 +313,96 @@ bool MeshletCullPass::dispatch(const RenderFrameData& frame, const SceneDrawView
         batch.meshlets = {commands_,     instances_,
                           used_commands, range.meshlet_count(),
                           used_pairs,    static_cast<std::uint32_t>(pairs)};
-        work.push_back({item.geometry, item.lod, range.first_meshlet(), range.meshlet_count(),
-                        first_input, count, used_commands, used_pairs});
+        work.push_back({item.geometry, item.lod, data, range.first_meshlet(), range.meshlet_count(),
+                        first_input, count, used_commands, used_pairs, &batch.meshlets});
         used_pairs += static_cast<std::uint32_t>(pairs);
         used_commands += range.meshlet_count();
+        if (count > 1)
+        {
+            used_instances = used_pairs;
+        }
         counters.meshlet_candidate_pairs += pairs;
         counters.meshlet_candidate_triangles += static_cast<std::uint64_t>(item.count / 3) * count;
         counters.meshlet_instanced_batches += count > 1;
     }
     ENGINE_PROFILE_PLOT("Meshlet.candidatePairs", static_cast<double>(used_pairs));
     ENGINE_PROFILE_PLOT("Meshlet.indirectCommandSlots", static_cast<double>(used_commands));
-    ENGINE_PROFILE_PLOT("Meshlet.computeBatches", static_cast<double>(work.size()));
+    constexpr std::uint32_t maximum_groups = 65535;
+    ENGINE_PROFILE_PLOT("Meshlet.computeBatches",
+                        static_cast<double>((used_commands + maximum_groups - 1) / maximum_groups));
     ENGINE_PROFILE_PLOT("Meshlet.budgetFallbacks",
                         static_cast<double>(counters.meshlet_budget_fallbacks));
     ENGINE_PROFILE_PLOT("Meshlet.capacityPairs", static_cast<double>(capacity_));
+    if (!ensure_buffer(inputs_, input_capacity_, static_cast<std::uint32_t>(inputs.size()),
+                       capacity_ * 8, GpuGeometry::vector_layout(), BGFX_BUFFER_COMPUTE_READ) ||
+        !ensure_buffer(instances_, instance_capacity_, used_instances, capacity_, instance_layout(),
+                       BGFX_BUFFER_COMPUTE_WRITE) ||
+        !ensure_buffer(descriptors_, descriptor_capacity_, used_commands * 4, capacity_ * 4,
+                       GpuGeometry::vector_layout(), BGFX_BUFFER_COMPUTE_READ))
+    {
+        return fail();
+    }
+    if (used_commands > command_capacity_)
+    {
+        const auto count = std::max(used_commands, std::min(capacity_, command_capacity_ * 2));
+        const auto next = bgfx::createIndirectBuffer(count);
+        if (!bgfx::isValid(next))
+        {
+            return fail();
+        }
+        bgfx::destroy(commands_);
+        commands_ = next;
+        command_capacity_ = count;
+    }
+    std::vector<std::uint64_t> layout;
+    for (const auto& batch : work)
+    {
+        batch.output->commands = commands_;
+        batch.output->instances = instances_;
+        const auto identity = batch.geometry->resource.handle();
+        layout.insert(layout.end(),
+                      {identity.owner, identity.id, identity.generation, batch.lod,
+                       batch.first_cluster, batch.cluster_count, batch.first_input,
+                       batch.instance_count, batch.first_command, batch.first_output});
+    }
+    if (layout != descriptor_layout_)
+    {
+        ENGINE_PROFILE_ZONE("Render.meshletPrepareDescriptors");
+        std::vector<std::array<float, 4>> descriptors;
+        descriptors.reserve(used_commands * 4);
+        for (const auto& batch : work)
+        {
+            for (std::uint32_t index = 0; index < batch.cluster_count; ++index)
+            {
+                const auto& cluster = batch.source->meshlets[batch.first_cluster + index];
+                descriptors.push_back({static_cast<float>(cluster.center().x()),
+                                       static_cast<float>(cluster.center().y()),
+                                       static_cast<float>(cluster.center().z()), cluster.radius()});
+                descriptors.push_back({static_cast<float>(cluster.cone_axis().x()),
+                                       static_cast<float>(cluster.cone_axis().y()),
+                                       static_cast<float>(cluster.cone_axis().z()),
+                                       cluster.cone_cutoff()});
+                descriptors.push_back({std::bit_cast<float>(cluster.first_index()),
+                                       std::bit_cast<float>(cluster.index_count()), 0, 0});
+                const std::array<std::uint32_t, 4> offsets{
+                    batch.first_input, batch.instance_count,
+                    batch.first_output + index * batch.instance_count, 0};
+                descriptors.push_back(std::bit_cast<std::array<float, 4>>(offsets));
+            }
+        }
+        if (!descriptors.empty())
+        {
+            bgfx::update(
+                descriptors_, 0,
+                bgfx::copy(descriptors.data(), static_cast<std::uint32_t>(descriptors.size() *
+                                                                          sizeof(descriptors[0]))));
+        }
+        descriptor_layout_ = std::move(layout);
+    }
+    ENGINE_PROFILE_PLOT("Meshlet.workspaceGpuBytes",
+                        static_cast<double>(input_capacity_ + descriptor_capacity_) * 16 +
+                            static_cast<double>(instance_capacity_) * 112 +
+                            static_cast<double>(command_capacity_) * 32);
     if (!inputs.empty())
     {
         bgfx::update(inputs_, 0,
@@ -315,35 +415,22 @@ bool MeshletCullPass::dispatch(const RenderFrameData& frame, const SceneDrawView
         bgfx::setBuffer(4, counters_, bgfx::Access::Write);
         bgfx::dispatch(meshlet_clear_view, clear_, 1);
     }
-    for (const auto& batch : work)
+    for (std::uint32_t first = 0; first < used_commands; first += maximum_groups)
     {
-        constexpr std::uint32_t maximum_groups = 65535;
-        for (std::uint32_t first = 0; first < batch.cluster_count; first += maximum_groups)
-        {
-            const auto count = std::min(maximum_groups, batch.cluster_count - first);
-            const std::array<std::uint32_t, 8> integers = {batch.first_cluster + first,
-                                                           batch.first_input,
-                                                           batch.first_command + first,
-                                                           batch.first_output +
-                                                               first * batch.instance_count,
-                                                           batch.instance_count,
-                                                           0,
-                                                           0,
-                                                           0};
-            std::array<float, 12> parameters{};
-            std::memcpy(parameters.data(), integers.data(), sizeof(integers));
-            parameters[8] = frustum ? 1.0F : 0.0F;
-            parameters[9] = orthographic ? 1.0F : 0.0F;
-            parameters[10] = readback ? 1.0F : 0.0F;
-            bgfx::setUniform(parameters_, parameters.data(), 3);
-            bgfx::setUniform(planes_, planes.data(), 6);
-            bgfx::setBuffer(0, batch.geometry->meshlet_descriptors(batch.lod), bgfx::Access::Read);
-            bgfx::setBuffer(1, inputs_, bgfx::Access::Read);
-            bgfx::setBuffer(2, instances_, bgfx::Access::Write);
-            bgfx::setBuffer(3, commands_, bgfx::Access::Write);
-            bgfx::setBuffer(4, counters_, bgfx::Access::ReadWrite);
-            bgfx::dispatch(meshlet_cull_view, program_, count);
-        }
+        const auto count = std::min(maximum_groups, used_commands - first);
+        std::array<float, 12> parameters{};
+        parameters[0] = std::bit_cast<float>(first);
+        parameters[8] = frustum ? 1.0F : 0.0F;
+        parameters[9] = orthographic ? 1.0F : 0.0F;
+        parameters[10] = readback ? 1.0F : 0.0F;
+        bgfx::setUniform(parameters_, parameters.data(), 3);
+        bgfx::setUniform(planes_, planes.data(), 6);
+        bgfx::setBuffer(0, descriptors_, bgfx::Access::Read);
+        bgfx::setBuffer(1, inputs_, bgfx::Access::Read);
+        bgfx::setBuffer(2, instances_, bgfx::Access::Write);
+        bgfx::setBuffer(3, commands_, bgfx::Access::Write);
+        bgfx::setBuffer(4, counters_, bgfx::Access::ReadWrite);
+        bgfx::dispatch(meshlet_cull_view, program_, count);
     }
     if (readback)
     {
@@ -426,7 +513,7 @@ void MeshletCullPass::release_gpu() noexcept
             *handle = BGFX_INVALID_HANDLE;
         }
     }
-    for (auto* handle : {&inputs_, &instances_})
+    for (auto* handle : {&inputs_, &instances_, &descriptors_})
     {
         if (bgfx::isValid(*handle))
         {
@@ -445,12 +532,15 @@ void MeshletCullPass::release_gpu() noexcept
         counters_ = BGFX_INVALID_HANDLE;
     }
     capacity_ = 0;
+    input_capacity_ = instance_capacity_ = command_capacity_ = descriptor_capacity_ = 0;
+    descriptor_layout_.clear();
 }
 
 std::uint32_t MeshletCullPass::resource_count() const noexcept
 {
     return static_cast<std::uint32_t>(bgfx::isValid(program_)) + bgfx::isValid(clear_) +
            bgfx::isValid(parameters_) + bgfx::isValid(planes_) + bgfx::isValid(inputs_) +
-           bgfx::isValid(instances_) + bgfx::isValid(commands_) + bgfx::isValid(counters_);
+           bgfx::isValid(instances_) + bgfx::isValid(commands_) + bgfx::isValid(counters_) +
+           bgfx::isValid(descriptors_);
 }
 } // namespace engine::render_detail

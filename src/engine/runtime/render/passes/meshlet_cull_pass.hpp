@@ -53,12 +53,16 @@ private:
     std::vector<std::uint64_t> resources_;
     bool sampling_ = false;
     std::uint32_t capacity_ = 0;
+    std::uint32_t input_capacity_ = 0, instance_capacity_ = 0, command_capacity_ = 0;
+    std::uint32_t descriptor_capacity_ = 0;
+    std::vector<std::uint64_t> descriptor_layout_;
     bgfx::ProgramHandle program_ = BGFX_INVALID_HANDLE;
     bgfx::ProgramHandle clear_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle parameters_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle planes_ = BGFX_INVALID_HANDLE;
     bgfx::DynamicVertexBufferHandle inputs_ = BGFX_INVALID_HANDLE;
     bgfx::DynamicVertexBufferHandle instances_ = BGFX_INVALID_HANDLE;
+    bgfx::DynamicVertexBufferHandle descriptors_ = BGFX_INVALID_HANDLE;
     bgfx::IndirectBufferHandle commands_ = BGFX_INVALID_HANDLE;
     bgfx::IndexBufferHandle counters_ = BGFX_INVALID_HANDLE;
 };

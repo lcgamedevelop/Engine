@@ -677,6 +677,7 @@ int test()
                                    bgfx::getCaps()->limits.maxComputeBindings >= 5;
     const auto meshlet_pixels = [&](const SceneCaptureImage& reference, const char* message)
     {
+        const auto ordinary_compute = bgfx::getStats()->numCompute;
         auto settings = test_support::read_settings(environment);
         settings.meshlet_culling_enabled = true;
         SceneCaptureImage image;
@@ -686,7 +687,9 @@ int test()
                     "enabling before GPU preparation keeps the ordinary frame drawable") ||
             !capture(window, renderer, image, stats) || !pixels(reference, image, message) ||
             !expect(!meshlet_supported || stats.indirect_batches > 0,
-                    "compatible geometry uses actual GPU indirect submissions"))
+                    "compatible geometry uses actual GPU indirect submissions") ||
+            !expect(!meshlet_supported || bgfx::getStats()->numCompute <= ordinary_compute + 1,
+                    "all prepared batches share one culling dispatch"))
         {
             return false;
         }
@@ -694,6 +697,12 @@ int test()
         return environment.set_settings(settings);
     };
     if (!meshlet_pixels(instanced, "Meshlet indirect instances preserve every pixel"))
+    {
+        return 1;
+    }
+    if (!set_instancing(meshes, false) ||
+        !meshlet_pixels(culled, "unified culling preserves singleton batch pixels") ||
+        !set_instancing(meshes, true))
     {
         return 1;
     }

@@ -152,6 +152,7 @@
     "Render.transparentSubmit": "透明提交",
     "Render.submitMeshes": "网格提交",
     "Render.meshletCullSubmit": "Meshlet 剔除提交",
+    "Render.meshletPrepareDescriptors": "准备 Meshlet 统一描述数组",
     "Render.extensionsSubmit": "渲染扩展提交",
     "Render.frameSubmit": "帧与呈现提交",
     "Render.outputPresentSubmit": "呈现画面准备",
@@ -181,6 +182,7 @@
     "CharacterCamera.updateVisibility": "角色镜头可见性过滤"
   },
   "plots": {
+    "Meshlet.workspaceGpuBytes": "Meshlet 工作缓冲申请容量（GPU）",
     "Render.shadowCacheHit": "普通阴影缓存命中",
     "Render.shadowSubmittedPages": "普通阴影提交页数",
     "Bgfx.drawCalls": "全帧绘制提交",

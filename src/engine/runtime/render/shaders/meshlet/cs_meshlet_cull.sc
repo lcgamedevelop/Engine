@@ -15,21 +15,20 @@ NUM_THREADS(64, 1, 1)
 void main()
 {
     uint lane = gl_LocalInvocationID.x;
-    uint cluster = gl_WorkGroupID.x;
-    uvec4 offsets = floatBitsToUint(u_meshlet_parameters[0]);
-    uvec4 counts = floatBitsToUint(u_meshlet_parameters[1]);
-    vec4 sphere = meshletDescriptors[(offsets.x + cluster) * 3u];
-    vec4 cone = meshletDescriptors[(offsets.x + cluster) * 3u + 1u];
-    uvec4 topology = floatBitsToUint(meshletDescriptors[(offsets.x + cluster) * 3u + 2u]);
-    uint firstInstance = offsets.w + cluster * counts.x;
+    uint cluster = floatBitsToUint(u_meshlet_parameters[0].x) + gl_WorkGroupID.x;
+    vec4 sphere = meshletDescriptors[cluster * 4u];
+    vec4 cone = meshletDescriptors[cluster * 4u + 1u];
+    uvec4 topology = floatBitsToUint(meshletDescriptors[cluster * 4u + 2u]);
+    uvec4 batch_info = floatBitsToUint(meshletDescriptors[cluster * 4u + 3u]);
+    uint firstInstance = batch_info.z;
     if (lane == 0u)
     {
         visibleCount = 0u;
     }
     barrier();
-    for (uint instance = lane; instance < counts.x; instance += 64u)
+    for (uint instance = lane; instance < batch_info.y; instance += 64u)
     {
-        uint source = (offsets.y + instance) * 8u;
+        uint source = (batch_info.x + instance) * 8u;
         vec4 column0 = meshletInputs[source];
         vec4 column1 = meshletInputs[source + 1u];
         vec4 column2 = meshletInputs[source + 2u];
@@ -64,17 +63,20 @@ void main()
         {
             uint slot;
             atomicFetchAndAdd(visibleCount, 1u, slot);
-            uint destination = (firstInstance + slot) * 7u;
-            for (uint column = 0u; column < 7u; ++column)
+            if (batch_info.y > 1u)
             {
-                meshletInstances[destination + column] = meshletInputs[source + column];
+                uint destination = (firstInstance + slot) * 7u;
+                for (uint column = 0u; column < 7u; ++column)
+                {
+                    meshletInstances[destination + column] = meshletInputs[source + column];
+                }
             }
         }
     }
     barrier();
     if (lane == 0u)
     {
-        drawIndexedIndirect(meshletCommands, offsets.z + cluster, topology.y, visibleCount,
+        drawIndexedIndirect(meshletCommands, cluster, topology.y, visibleCount,
                             topology.x, 0u, firstInstance);
         if (u_meshlet_parameters[2].z > 0.5)
         {

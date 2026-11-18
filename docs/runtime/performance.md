@@ -28,6 +28,7 @@ Metal 阶段计数器只接受当前校准采样区间内、完整且有序的�
 | `Render.sharedGeometryGpuEstimatedBytes` | 已创建共享静态几何缓冲估算，不含实例、蒙皮和 Meshlet 工作缓冲 |
 | `Render.textureStagingBytes` / `Render.preparePending*` | 准备暂存字节与待完成纹理、材质、程序数 |
 | `Meshlet.candidatePairs` / `indirectCommandSlots` / `computeBatches` / `budgetFallbacks` | 实际候选、提交命令槽、计算批次和预算回退；槽数不等于可见命令数 |
+| `Meshlet.workspaceGpuBytes` | 输入、实例、描述数组和间接命令的当前申请容量，不含共享几何、驱动对齐或驻留；不能替代 RSS |
 | `ResourceGraph.records` / `acquisitions` / `requests` | 资源图持有规模与请求数量 |
 
 `Render.profileMemory` 和 `Render.profileStats` 单独记录统计本身的开销。CPU 数组统计不覆盖全部分配，GPU 缓冲估算不等于驱动驻留，二者都不能与 RSS 加减求“剩余内存”。CPU future 完成、CPU 帧末与 GPU 完成不是同一状态。
