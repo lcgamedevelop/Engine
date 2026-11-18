@@ -81,10 +81,12 @@ vec3 direct_light(uint index, vec3 world_position, vec3 world_dx, vec3 world_dy,
     float visibility = 1.0;
     if (u_shadow_settings.w > 0.5 && abs(float(index) - u_shadow_settings.z) < 0.5)
     {
-        visibility = shadow_visibility(world_position, world_dx, world_dy);
 #if defined(ENGINE_VSM)
-        visibility = vsm_visibility(world_position, world_dx, world_dy, visibility);
+        if (!sample_vsm_visibility(world_position, world_dx, world_dy, visibility))
 #endif
+        {
+            visibility = shadow_visibility(world_position, world_dx, world_dy);
+        }
     }
     if (kind > 0.5)
     {

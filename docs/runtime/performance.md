@@ -33,7 +33,7 @@ Metal 阶段计数器只接受当前校准采样区间内、完整且有序的�
 | `Render.textureStagingBytes` / `Render.preparePending*` | 准备暂存字节与待完成纹理、材质、程序数 |
 | `Meshlet.candidatePairs` / `indirectCommandSlots` / `computeBatches` / `budgetFallbacks` | 实际候选、提交命令槽、计算批次和预算回退；槽数不等于可见命令数 |
 | `Meshlet.workspaceGpuBytes` | 输入、实例、描述数组和间接命令的当前申请容量，不含共享几何、驱动对齐或驻留；不能替代 RSS |
-| `Vsm.*Pages` / `Rvt.*Pages` / `*.residentBytes` | 页面需求、就绪或重绘状态和所属 GPU 缓存容量。VSM 另记录缺页回退及反馈读回环满导致的跳过 |
+| `Vsm.*Pages` / `Rvt.*Pages` / `*.residentBytes` | 页面需求、就绪或重绘状态和所属 GPU 缓存容量。VSM 另记录缺页回退、反馈复用和读回环满时的跳过 |
 | `ResourceGraph.records` / `acquisitions` / `requests` | 资源图持有规模与请求数量 |
 
 `Render.profileMemory` 和 `Render.profileStats` 单独记录统计本身的开销。CPU 数组统计不覆盖全部分配，GPU 缓冲估算也与驱动内存口径不同。Metal 在 `Bgfx.gpuResidentBytes` 中报告 `currentAllocatedSize`，即设备分配量。各项不能与 RSS 加减求“剩余内存”。CPU future 完成、CPU 帧末与 GPU 完成使用不同时间点。

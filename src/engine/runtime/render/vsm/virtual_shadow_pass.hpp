@@ -11,6 +11,8 @@ namespace render_detail
 {
 class ShadowPass;
 struct RenderFrameData;
+struct SceneDrawView;
+struct ViewDrawList;
 class VirtualShadowPass final
 {
 public:
@@ -23,7 +25,9 @@ public:
     void poll(std::uint32_t frame_number);
     [[nodiscard]] bool take_demand(VsmPageDemand& output);
     [[nodiscard]] bool submit_feedback(const VsmView& view, bgfx::TextureHandle depth,
-                                       std::uint64_t submission_id);
+                                       const SceneDrawView& draw, const RenderFrameData& frame,
+                                       const ViewDrawList& list, std::uint64_t submission_id);
+    void accept_feedback(std::uint64_t receiver_revision) noexcept;
     [[nodiscard]] bool draw_pages(const RenderFrameData& frame, const VsmPageBatch& batch,
                                   ShadowPass& shadow);
     [[nodiscard]] bool binding(VsmGpuBinding& output) const;
@@ -36,12 +40,15 @@ private:
     {
         VsmView view;
         std::vector<std::uint32_t> bits;
-        std::uint64_t submission_id = 0;
+        std::uint64_t submission_id = 0, receiver_revision = 0;
         std::uint32_t ready_frame = 0;
         bool pending = false;
     };
     std::array<Readback, 3> readbacks_;
     std::deque<VsmPageDemand> completed_;
+    VsmView feedback_view_;
+    std::vector<std::uint64_t> feedback_inputs_, candidate_inputs_;
+    std::uint64_t receiver_revision_ = 0, accepted_receiver_revision_ = 0;
     std::uint64_t generation_ = 0, bytes_ = 0;
     std::uint32_t resolution_ = 0, physical_pages_ = 0, word_count_ = 0;
     bgfx::TextureHandle atlas_ = BGFX_INVALID_HANDLE, depth_ = BGFX_INVALID_HANDLE;

@@ -86,7 +86,7 @@ struct ViewDrawList
         std::array<std::array<float, 4>, 9> coefficients{};
         bgfx::TextureHandle lightmap = BGFX_INVALID_HANDLE;
         bool has_lightmap = false, has_probe = false;
-        // Actual main-pass transform path, including transient-buffer fallbacks.
+        // Actual depth or main-pass transform path, including transient-buffer fallbacks.
         bool instanced_transform = false;
     };
     std::array<std::uint64_t, 2> observer{};

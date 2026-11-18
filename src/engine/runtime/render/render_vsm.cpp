@@ -173,7 +173,10 @@ bool RenderSystem::prepare_vsm(const render_detail::RenderFrameData& frame,
     render_detail::VsmPageDemand demand;
     while (vsm_pass_->take_demand(demand))
     {
-        (void)vsm_cache_->request(demand); // Stale readbacks are deliberately discarded.
+        if (vsm_cache_->request(demand))
+        {
+            vsm_pass_->accept_feedback(demand.receiver_revision);
+        }
     }
     if (!vsm_cache_->plan(config_.vsm_pages_per_frame, output))
     {

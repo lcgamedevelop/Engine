@@ -215,9 +215,12 @@ classDiagram
     class ShadowPass {
         <<private>>
         +draw(...) bool
-        -cached_signature_ vector~uint64_t~
+        -cached_pages_ map~ViewId, CachedPages~
         -candidate_signature_ vector~uint64_t~
-        -cache_valid_ bool
+    }
+    class ShadowAtlasView {
+        +uint16_t index
+        +uint16_t count
     }
     class WorldSystem
     class RenderFrameData
@@ -263,6 +266,7 @@ classDiagram
     ShadowPass ..> TextureHandle : 回退贴图借用
     ShadowPass ..> UniformHandle : 深度参数句柄借用
     ShadowPass ..> ViewId : 级联或灯面视图起点
+    ShadowPass ..> ShadowAtlasView : 同帧分区序号和数量
 ```
 
 长签名如下，全部属于渲染私有实现；既有 ViewId、GPU 句柄和 float 矩阵借用仍不进入业务公开接口：
@@ -283,7 +287,7 @@ classDiagram
                         bgfx::UniformHandle depth_uniform, const RenderConfig& config,
                         std::span<const LocalShadowLight> local_lights,
                         std::span<ClusterLight> lights, const float* camera_world,
-                        bgfx::ViewId base_view,
+                        bgfx::ViewId base_view, ShadowAtlasView atlas_view,
                         const std::span<const std::uint64_t>* caster_ids = nullptr);
 ```
 

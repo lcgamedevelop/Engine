@@ -246,8 +246,23 @@ bool RenderSystem::SceneGpuResources::prepare_lighting(
     {
         caster_ids = capture->node_ids;
     }
+    render_detail::ShadowAtlasView atlas_view;
+    if (!capture)
+    {
+        for (std::size_t index = 0; index < targets().planar.size(); ++index)
+        {
+            if (targets().planar[index].node_id != 0)
+            {
+                if (draw.reflection && index == cluster_index)
+                {
+                    atlas_view.index = atlas_view.count;
+                }
+                ++atlas_view.count;
+            }
+        }
+    }
     if (!targets().shadow.draw(frame_data, light_settings, frame, shadow_fallback, shadow_depth,
-                               config, local_lights, lights, draw.world, base,
+                               config, local_lights, lights, draw.world, base, atlas_view,
                                capture ? &caster_ids : nullptr))
     {
         return fail("Cannot submit the shadow atlas");
@@ -480,7 +495,8 @@ bool RenderSystem::SceneGpuResources::draw_meshes(const render_detail::RenderFra
                                                 batch.meshlets.instance_capacity);
             }
             const auto submitted_count = indirect ? remaining : count;
-            if (mode == SceneDrawMode::opaque && draw.id == render_detail::main_view)
+            if (depth_only ||
+                (mode == SceneDrawMode::opaque && draw.id == render_detail::main_view))
             {
                 for (std::uint32_t index = 0; index < submitted_count; ++index)
                 {

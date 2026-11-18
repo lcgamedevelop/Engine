@@ -255,7 +255,8 @@ class VirtualShadowPass {
     +prepare(settings, config, generation) bool
     +poll(frame_number) void
     +take_demand(output) bool
-    +submit_feedback(view, depth, submission_id) bool
+    +submit_feedback(view, depth, draw, frame, list, submission_id) bool
+    +accept_feedback(receiver_revision) void
     +draw_pages(frame, batch, shadow) bool
     +binding(output) bool
     +reset_scene() void
@@ -269,6 +270,8 @@ class VsmView
 class VsmPageDemand
 class VsmPageBatch
 class RenderFrameData
+class SceneDrawView
+class ViewDrawList
 class VsmGpuBinding
 class ClusteredLightingPass {
     <<existing delta>>
@@ -286,6 +289,8 @@ VirtualShadowPass ..> VsmView
 VirtualShadowPass ..> VsmPageDemand
 VirtualShadowPass ..> VsmPageBatch
 VirtualShadowPass ..> RenderFrameData
+VirtualShadowPass ..> SceneDrawView : 当前深度绘制参数
+VirtualShadowPass ..> ViewDrawList : 已提交的深度覆盖
 VirtualShadowPass ..> VsmGpuBinding
 ClusteredLightingPass ..> RenderConfig
 ClusteredLightingPass ..> CameraSettings
@@ -299,12 +304,15 @@ ClusteredLightingPass ..> VsmPageBatch : uploads full current table
 | `bool prepare(const schema::VsmSettingsT&, const RenderConfig&, uint64_t generation)` | 校验 compute、原子位图、缓冲回读、纹理格式和容量，建立专用资源；失败清理候选 |
 | `void poll(uint32_t frame_number)` | 在协调线程检查已发起回读的完成帧，不等待 GPU |
 | `bool take_demand(VsmPageDemand& output)` | 取走一个完整需求值；未完成或没有结果返回 false 并清空输出；过期代次直接丢弃 |
-| `bool submit_feedback(const VsmView&, bgfx::TextureHandle depth, uint64_t submission_id)` | 借用主视图深度，提交需求标记和小型位图回读；槽满时跳过本帧并返回 true，ready 仍由当前观察者的最近完整需求决定；实际错误返回 false，不阻塞 |
+| `bool submit_feedback(const VsmView&, bgfx::TextureHandle depth, const SceneDrawView&, const RenderFrameData&, const ViewDrawList&, uint64_t submission_id)` | 借用当前深度及已提交的覆盖输入。完全匹配的已接收或在途需求可复用，其余情况提交需求标记和位图回读。槽满时保留最近需求并返回 true，实际错误返回 false |
+| `void accept_feedback(uint64_t receiver_revision) noexcept` | 调用方在 `VirtualShadowCache::request` 接收完整需求后确认该深度输入可复用 |
 | `bool draw_pages(const RenderFrameData&, const VsmPageBatch&, ShadowPass&)` | 借用已有阴影绘制，按预算填完整页与边界，不独立采样骨骼或重建网格 |
 | `bool binding(VsmGpuBinding& output) const` | 返回调用期可用的物理图集及寻址布局；失败清空句柄 |
 | `void reset_scene() noexcept` | 停止旧代次提交，使结果失效；保留仍在被 GPU 写入的 CPU 回读存储 |
 | `void release_gpu() noexcept` | 幂等销毁 GPU 对象；不提前释放尚在途的 CPU 地址 |
 | `uint32_t resource_count() const noexcept` | 纳入既有资源统计 |
+
+`VirtualShadowPass` 拥有深度输入签名与接收面修订。签名逐字段包含视图和深度目标、绘制范围、几何与资源身份、实际实例变换路径、材质参数与采样设置。加入、删除或移动参与深度的普通物体同样更新接收面修订，即使它不投射阴影。自定义 Shader、变形顶点与帧贴图继续逐帧提交。回读值携带提交时的接收面修订，只有已被缓存接受的同修订需求允许后续帧跳过反馈。相同修订已在途时只保留一次读取。关闭场景或重建设备时随现有资源一起失效。
 
 ClusteredLightingPass 只在原方法中增加必要参数，不新增平行上传入口：
 
@@ -346,7 +354,7 @@ RVT 为 8/9、AO 为 11、IBL 为 12..14、常规阴影为 15。
 2. 蒙皮先完成，常规 CSM/局部阴影正常提交；页面绘制使用同一份有效顶点。
 3. 主深度/表面通道输出接收者深度；GPU 标记需求，回读只影响后续帧的计划。
 4. 绘制本帧计划的虚拟阴影页，包含全部边界；成功安排后将当前完整页表与光照缓冲提交一次。
-5. 主不透明着色按页表采 VSM，缺页/脏页采同帧 CSM；随后沿用透明和后处理。
+5. 主不透明着色先查询 VSM。虚拟页可以采样时执行该页的过滤。VSM 不可用、缺页或投影越界时才执行同帧 CSM 过滤。随后沿用透明和后处理。
 6. 调试视图在最终显示之后、截图之前绘制，反映该提交帧实际使用的 GPU 数据。
 
 `render_constants.hpp` 统一分配 view ID，并由现有提交处给出显式 view 执行顺序。

@@ -4,6 +4,7 @@
 
 #include <bgfx/bgfx.h>
 
+#include <map>
 #include <span>
 #include <vector>
 
@@ -19,6 +20,11 @@ struct RenderFrameData;
 struct MaterialBinding;
 struct VsmPageDraw;
 struct VsmPageTarget;
+
+struct ShadowAtlasView
+{
+    std::uint16_t index = 0, count = 1;
+};
 
 class ShadowPass final
 {
@@ -36,7 +42,7 @@ public:
                             bgfx::UniformHandle depth_uniform, const RenderConfig& config,
                             std::span<const LocalShadowLight> local_lights,
                             std::span<ClusterLight> lights, const float* camera_world,
-                            bgfx::ViewId base_view,
+                            bgfx::ViewId base_view, ShadowAtlasView atlas_view,
                             const std::span<const std::uint64_t>* caster_ids = nullptr);
     [[nodiscard]] bool draw_pages(const RenderFrameData& frame, std::span<const VsmPageDraw> pages,
                                   const VsmPageTarget& target);
@@ -45,6 +51,16 @@ public:
     void release() noexcept;
 
 private:
+    struct AtlasTile
+    {
+        std::uint16_t x, y, size;
+    };
+    struct CachedPages
+    {
+        std::vector<std::uint64_t> signature;
+        std::vector<AtlasTile> tiles;
+    };
+
     [[nodiscard]] bool bind_material(const MaterialBinding& material, bgfx::TextureHandle fallback);
 
     bgfx::TextureHandle color_ = BGFX_INVALID_HANDLE;
@@ -61,9 +77,8 @@ private:
     std::uint16_t resolution_ = 0;
     std::vector<bgfx::ViewId> attached_views_;
     std::uint32_t last_skipped_lights_ = 0;
-    std::vector<std::uint64_t> cached_signature_;
+    std::map<bgfx::ViewId, CachedPages> cached_pages_;
     std::vector<std::uint64_t> candidate_signature_;
-    bool cache_valid_ = false;
 };
 
 } // namespace engine::render_detail

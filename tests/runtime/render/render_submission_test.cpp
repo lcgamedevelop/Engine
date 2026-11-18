@@ -1005,6 +1005,53 @@ int test()
     {
         return 1;
     }
+    if (!frames(window, renderer, 4) || !renderer.vsm_status(vsm))
+    {
+        return 1;
+    }
+    const auto steady_demand = vsm.demand_revision;
+    const auto steady_compute = bgfx::getStats()->numCompute;
+    const auto refreshed_feedback = [&](const char* message)
+    {
+        const auto previous = vsm.demand_revision;
+        for (unsigned attempt = 0; attempt < 24; ++attempt)
+        {
+            if (!frames(window, renderer, 1) || !renderer.vsm_status(vsm))
+            {
+                return false;
+            }
+            if (vsm.demand_revision > previous)
+            {
+                return true;
+            }
+        }
+        return expect(false, message);
+    };
+    if (!frames(window, renderer, 4) || !renderer.vsm_status(vsm) ||
+        !expect(vsm.demand_revision == steady_demand &&
+                    bgfx::getStats()->numCompute == steady_compute,
+                "stable receivers reuse the completed VSM feedback") ||
+        !camera_node.get_component<Transform>().set_settings(changed_camera) ||
+        !refreshed_feedback("moving the camera refreshes VSM feedback") ||
+        !camera_node.get_component<Transform>().set_settings(camera_pose) || !settle_vsm())
+    {
+        return 1;
+    }
+    receiver.set_cast_shadows(false);
+    auto moved_receiver = receiver_pose;
+    moved_receiver.position.mutate_x(0.5);
+    if (!settle_vsm() || !frames(window, renderer, 4) || !renderer.vsm_status(vsm) ||
+        !receiver_node.get_component<Transform>().set_settings(moved_receiver) ||
+        !refreshed_feedback("moving a non-caster refreshes VSM receiver feedback") ||
+        !receiver_node.get_component<Transform>().set_settings(receiver_pose))
+    {
+        return 1;
+    }
+    receiver.set_cast_shadows(true);
+    if (!settle_vsm())
+    {
+        return 1;
+    }
     const auto original_generation = vsm.generation;
     if (!camera.set_enabled(false) || !frames(window, renderer, 2) || !renderer.vsm_status(vsm) ||
         !expect(vsm.state == VsmState::disabled && !vsm.resident_pages && !vsm.resident_bytes,
@@ -1058,6 +1105,19 @@ int test()
             return 1;
         }
     }
+    auto water_node = scene->create_node("Transparent water with frame textures");
+    auto water = water_node.add_component<MeshRenderer>();
+    TransformSettings water_pose;
+    water_pose.position = {0, -1.75, 0};
+    water_pose.scale = {3, .025, 3};
+    if (!water || !water.set_mesh("builtin://meshes/cube") ||
+        !water_node.get_component<Transform>().set_settings(water_pose) ||
+        !water.material().set_type("builtin://materials/default-water") ||
+        !water.material().set_v2("waterFlow", {0, 0}))
+    {
+        return 1;
+    }
+    water.set_cast_shadows(true);
     SceneCaptureImage reflected_reference;
     if (!capture(window, renderer, reflected_reference, shadow_stats))
     {
@@ -1078,6 +1138,24 @@ int test()
                 "both nondegenerate planar captures submit actual geometry") ||
         !meshlet_pixels(reflected_reference,
                         "Meshlet culling with two planar captures and CSM preserves every pixel"))
+    {
+        return 1;
+    }
+    if (!frames(window, renderer, 4))
+    {
+        return 1;
+    }
+    const auto reflected_cached_draws = bgfx::getStats()->numDraw;
+    std::uint32_t reflected_refreshed_draws = 0;
+    SceneCaptureImage reflected_restored;
+    if (!light_node.get_component<Transform>().set_settings(changed_sun) ||
+        !sample_shadow_draws(reflected_refreshed_draws) ||
+        !expect(reflected_refreshed_draws > reflected_cached_draws,
+                "main and reflected shadow regions stay cached with transparent water present") ||
+        !light_node.get_component<Transform>().set_settings(sun_pose) ||
+        !capture(window, renderer, reflected_restored, shadow_stats) ||
+        !pixels(reflected_reference, reflected_restored,
+                "restoring the light preserves the main and reflected shadow images"))
     {
         return 1;
     }

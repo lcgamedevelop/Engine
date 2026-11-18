@@ -60,7 +60,7 @@ bool shadow_signature(const RenderFrameData& frame, std::span<const VsmPageDraw>
     values.push_back(frame.meshes.size());
     for (const auto& source : frame.meshes)
     {
-        if (!source.cast_shadows || !source.gpu ||
+        if (!source.cast_shadows || !source.any_opaque || !source.gpu ||
             (target.caster_ids && std::find(target.caster_ids->begin(), target.caster_ids->end(),
                                             source.gpu->node_id) == target.caster_ids->end()))
         {
@@ -87,12 +87,16 @@ bool shadow_signature(const RenderFrameData& frame, std::span<const VsmPageDraw>
         values.push_back(mesh.materials.size());
         for (const auto& material : mesh.materials)
         {
+            values.push_back(static_cast<std::uint64_t>(material.blend));
+            if (material.blend != schema::BlendMode::opaque)
+            {
+                continue;
+            }
             if (material.frame_textures ||
                 (bgfx::isValid(material.shadow_texture) && !material.shadow_texture_resource.id))
             {
                 return false;
             }
-            values.push_back(static_cast<std::uint64_t>(material.blend));
             values.push_back(static_cast<std::uint64_t>(material.cull));
             values.push_back(material.shadow_valid);
             append_floats(material.shadow_alpha);
@@ -179,9 +183,8 @@ void ShadowPass::release() noexcept
     resolution_ = 0;
     attached_views_.clear();
     last_skipped_lights_ = 0;
-    cached_signature_.clear();
+    cached_pages_.clear();
     candidate_signature_.clear();
-    cache_valid_ = false;
 }
 
 bool ShadowPass::prepare(std::uint16_t size)
@@ -276,7 +279,8 @@ bool ShadowPass::draw(const RenderFrameData& frame_data, const RenderSettings& s
                       bgfx::UniformHandle depth_uniform, const RenderConfig& config,
                       std::span<const LocalShadowLight> local_lights,
                       std::span<ClusterLight> lights, const float* camera_world,
-                      bgfx::ViewId base_view, const std::span<const std::uint64_t>* caster_ids)
+                      bgfx::ViewId base_view, ShadowAtlasView atlas_view,
+                      const std::span<const std::uint64_t>* caster_ids)
 {
     ENGINE_PROFILE_ZONE("Render.shadowSubmit");
     frame.local_records.clear();
@@ -293,12 +297,39 @@ bool ShadowPass::draw(const RenderFrameData& frame_data, const RenderSettings& s
         (cascade_count != 0 && settings.shadow_resolution > resolution_) ||
         config.local_shadow_tile_size == 0 || config.local_shadow_tile_size > resolution_ ||
         camera_world == nullptr || !finite_matrix(camera_world) ||
+        atlas_view.index >= atlas_view.count ||
         std::uint32_t{base_view} + maximum_views > bgfx::getCaps()->limits.maxViews)
     {
         return false;
     }
     std::vector<VsmPageDraw> pages;
     pages.reserve(maximum_views);
+    const std::uint32_t cell_size = config.local_shadow_tile_size;
+    const std::uint32_t cells_per_row = resolution_ / cell_size;
+    const std::uint32_t atlas_cells = cells_per_row * cells_per_row;
+    const std::uint32_t directional_cells =
+        cascade_count == 0 ? 0 : (settings.shadow_resolution + cell_size - 1) / cell_size;
+    const std::uint32_t reserved_cells = directional_cells * directional_cells;
+    std::uint32_t local_faces = 0;
+    for (const auto& light : local_lights)
+    {
+        if (light.settings.cast_shadows && light.settings.kind != schema::LightKind::directional)
+        {
+            local_faces += light.settings.kind == schema::LightKind::point ? 6U : 1U;
+        }
+    }
+    local_faces = std::min({local_faces, std::uint32_t{config.maximum_local_shadow_faces},
+                            atlas_cells - reserved_cells});
+    const auto regions_per_row = directional_cells ? cells_per_row / directional_cells : 1U;
+    // Reserve the same per-view face budget before choosing disjoint regions.
+    // Small atlases retain the original ordered writes to the shared region.
+    if ((directional_cells && atlas_view.count > regions_per_row * regions_per_row) ||
+        atlas_view.count * (reserved_cells + local_faces) > atlas_cells)
+    {
+        atlas_view = {};
+    }
+    const auto directional_x = (atlas_view.index % regions_per_row) * directional_cells * cell_size;
+    const auto directional_y = (atlas_view.index / regions_per_row) * directional_cells * cell_size;
     struct Caster
     {
         const GpuMesh* mesh = nullptr;
@@ -384,8 +415,10 @@ bool ShadowPass::draw(const RenderFrameData& frame_data, const RenderSettings& s
             return false;
         }
         const auto view = static_cast<std::uint16_t>(base_view + index);
-        const auto tile_x = static_cast<std::uint16_t>((index % 2) * frame.tile_size);
-        const auto tile_y = static_cast<std::uint16_t>((index / 2) * frame.tile_size);
+        const auto tile_x =
+            static_cast<std::uint16_t>(directional_x + (index % 2) * frame.tile_size);
+        const auto tile_y =
+            static_cast<std::uint16_t>(directional_y + (index / 2) * frame.tile_size);
         const float scale = static_cast<float>(frame.tile_size) / resolution_;
         frame.rectangles[index] = {static_cast<float>(tile_x) / resolution_,
                                    caps->originBottomLeft
@@ -432,23 +465,26 @@ bool ShadowPass::draw(const RenderFrameData& frame_data, const RenderSettings& s
                   const auto b = distance_squared(*right);
                   return a != b ? a < b : left->node_id < right->node_id;
               });
-    // Fixed-size cells deliberately avoid a second atlas allocator. Smaller requested
-    // faces occupy the upper-left of their cell; CSM keeps its original complete region.
+    // Smaller faces occupy the upper-left of a fixed cell. Every view gets its own
+    // contiguous slice of the cells outside the reserved directional regions.
     std::vector<std::array<std::uint16_t, 2>> free_tiles;
-    const auto cell_size = config.local_shadow_tile_size;
-    const auto cells_per_row = static_cast<std::uint16_t>(resolution_ / cell_size);
-    for (std::uint16_t y = 0; y < cells_per_row; ++y)
+    free_tiles.reserve(local_faces);
+    const auto first_local = atlas_view.index * local_faces;
+    std::uint32_t free_index = 0;
+    for (std::uint32_t y = 0; y < cells_per_row && free_tiles.size() < local_faces; ++y)
     {
-        for (std::uint16_t x = 0; x < cells_per_row; ++x)
+        for (std::uint32_t x = 0; x < cells_per_row && free_tiles.size() < local_faces; ++x)
         {
-            const auto px = static_cast<std::uint16_t>(x * cell_size);
-            const auto py = static_cast<std::uint16_t>(y * cell_size);
-            if (cascade_count != 0 && px < settings.shadow_resolution &&
-                py < settings.shadow_resolution)
+            if (directional_cells &&
+                y / directional_cells * regions_per_row + x / directional_cells < atlas_view.count)
             {
                 continue;
             }
-            free_tiles.push_back({px, py});
+            if (free_index++ >= first_local)
+            {
+                free_tiles.push_back({static_cast<std::uint16_t>(x * cell_size),
+                                      static_cast<std::uint16_t>(y * cell_size)});
+            }
         }
     }
     const std::array<bx::Vec3, 6> point_directions = {
@@ -468,7 +504,8 @@ bool ShadowPass::draw(const RenderFrameData& frame_data, const RenderSettings& s
             ++frame.skipped_local_lights;
             continue;
         }
-        const auto size = std::min(light->settings.shadow_resolution, cell_size);
+        const auto size =
+            std::min(light->settings.shadow_resolution, config.local_shadow_tile_size);
         const bx::Vec3 position{light->world[12], light->world[13], light->world[14]};
         const float near_plane = light->settings.range * 0.001F;
         const float far_plane = light->settings.range;
@@ -547,7 +584,9 @@ bool ShadowPass::draw(const RenderFrameData& frame_data, const RenderSettings& s
         target.caster_ids = &selected;
     }
     const bool cacheable = shadow_signature(frame_data, pages, target, candidate_signature_);
-    if (cacheable && cache_valid_ && cached_signature_ == candidate_signature_)
+    const auto previous = cached_pages_.find(base_view);
+    if (cacheable && previous != cached_pages_.end() &&
+        previous->second.signature == candidate_signature_)
     {
         ENGINE_PROFILE_PLOT("Render.shadowCacheHit", std::int64_t{1});
         ENGINE_PROFILE_PLOT("Render.shadowSubmittedPages", std::int64_t{0});
@@ -555,7 +594,6 @@ bool ShadowPass::draw(const RenderFrameData& frame_data, const RenderSettings& s
     }
     ENGINE_PROFILE_PLOT("Render.shadowCacheHit", std::int64_t{0});
     ENGINE_PROFILE_PLOT("Render.shadowSubmittedPages", static_cast<std::int64_t>(pages.size()));
-    cache_valid_ = false;
     // Prepare caster world bounds once for the whole atlas, preserving page/view order.
     if (!draw_pages(frame_data, pages, target))
     {
@@ -563,8 +601,14 @@ bool ShadowPass::draw(const RenderFrameData& frame_data, const RenderSettings& s
     }
     if (cacheable)
     {
-        cached_signature_.swap(candidate_signature_);
-        cache_valid_ = true;
+        auto& cached = cached_pages_[base_view];
+        cached.signature.swap(candidate_signature_);
+        cached.tiles.clear();
+        cached.tiles.reserve(pages.size());
+        for (const auto& page : pages)
+        {
+            cached.tiles.push_back({page.x, page.y, page.size});
+        }
     }
     return true;
 }
@@ -574,8 +618,27 @@ bool ShadowPass::draw_pages(const RenderFrameData& frame_data, std::span<const V
 {
     if (target.framebuffer.idx == framebuffer_.idx)
     {
-        // Direct callers may overwrite this atlas; only draw() publishes a complete key.
-        cache_valid_ = false;
+        for (auto& [view, cached] : cached_pages_)
+        {
+            const bool overwritten =
+                std::any_of(cached.tiles.begin(), cached.tiles.end(),
+                            [&](const auto& tile)
+                            {
+                                return std::any_of(pages.begin(), pages.end(),
+                                                   [&](const auto& page)
+                                                   {
+                                                       return page.x < tile.x + tile.size &&
+                                                              tile.x < page.x + page.size &&
+                                                              page.y < tile.y + tile.size &&
+                                                              tile.y < page.y + page.size;
+                                                   });
+                            });
+            if (overwritten)
+            {
+                cached.signature.clear();
+                cached.tiles.clear();
+            }
+        }
     }
     if (!bgfx::isValid(target.framebuffer) || !bgfx::isValid(program_) ||
         !bgfx::isValid(target.depth_uniform) || !bgfx::isValid(target.fallback))
@@ -595,7 +658,7 @@ bool ShadowPass::draw_pages(const RenderFrameData& frame_data, std::span<const V
     std::vector<Caster> casters;
     for (const auto& source : frame_data.meshes)
     {
-        if (!source.cast_shadows || !source.gpu ||
+        if (!source.cast_shadows || !source.any_opaque || !source.gpu ||
             (target.caster_ids && std::find(target.caster_ids->begin(), target.caster_ids->end(),
                                             source.gpu->node_id) == target.caster_ids->end()))
         {

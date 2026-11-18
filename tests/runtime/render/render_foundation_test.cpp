@@ -114,7 +114,7 @@ bool check_virtual_shadow_cache()
     {
         return false;
     }
-    VsmPageDemand demand{batch.view, 1, {{0, 0, 0}, {0, 3, 0}}};
+    VsmPageDemand demand{batch.view, 1, 0, {{0, 0, 0}, {0, 3, 0}}};
     cache.cancel_batch();
     if (!cache.request(demand) || !cache.plan(1, batch) ||
         !expect(batch.pages.size() == 1, "VSM honors the per-frame page budget") ||

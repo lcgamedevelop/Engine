@@ -233,7 +233,8 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
         }
     }
     if (vsm_batch.generation &&
-        !vsm_pass_->submit_feedback(vsm_batch.view, resources.targets().surface_pass.depth(),
+        !vsm_pass_->submit_feedback(vsm_batch.view, resources.targets().surface_pass.depth(), draw,
+                                    resources.frame_data, resources.draw_lists[2],
                                     submission_sequence_ + 1))
     {
         return false;

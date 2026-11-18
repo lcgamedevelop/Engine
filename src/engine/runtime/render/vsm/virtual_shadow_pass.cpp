@@ -4,13 +4,82 @@
 #include "cs_vsm_feedback.bin.h"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/render/passes/shadow_pass.hpp"
+#include "runtime/render/render_submission.hpp"
 #include "runtime/render/render_system.hpp"
+#include "runtime/render/resources/gpu_program.hpp"
+#include "runtime/render/scene_draw.hpp"
+#include "runtime/resource/resource.hpp"
 
 #include <algorithm>
+#include <bit>
+#include <span>
+#include <string_view>
 #include <utility>
 
 namespace engine::render_detail
 {
+namespace
+{
+bool collect_receiver_inputs(const SceneDrawView& draw, const RenderFrameData& frame,
+                             const ViewDrawList& list, bgfx::TextureHandle depth,
+                             std::vector<std::uint64_t>& output)
+{
+    ENGINE_PROFILE_ZONE("Render.vsmReceiverInputs");
+    output.clear();
+    const auto append_floats = [&](std::span<const float> values)
+    {
+        for (const auto value : values)
+        {
+            output.push_back(std::bit_cast<std::uint32_t>(value));
+        }
+    };
+    const auto append_resource = [&](ResourceHandle handle)
+    {
+        output.push_back(handle.owner);
+        output.push_back(handle.id);
+        output.push_back(handle.generation);
+    };
+    append_floats({draw.view, 16});
+    append_floats({draw.projection, 16});
+    output.insert(output.end(), {depth.idx, draw.max_anisotropy, list.opaque.size()});
+    for (const auto& item : list.opaque)
+    {
+        const auto& mesh = frame.meshes[item.mesh];
+        const auto& material = mesh.gpu->materials[item.slot];
+        // Reuse only built-in depth coverage whose vertex and discard inputs are known.
+        const std::string_view program = material.program->path;
+        if (bgfx::isValid(mesh.gpu->deformed_vertices) || material.frame_textures ||
+            (program != "builtin://shaders/pbr" && program != "builtin://shaders/terrain-pbr" &&
+             program != "builtin://shaders/unlit" && program != "builtin://shaders/blinn-phong"))
+        {
+            return false;
+        }
+        append_resource(item.geometry->resource.handle());
+        append_resource(material.program->resource.handle());
+        output.insert(output.end(),
+                      {mesh.gpu->node_id, mesh.gpu->instance_id, mesh.gpu->revision,
+                       item.geometry->vertices.idx, item.geometry->indices.idx, item.slot, item.lod,
+                       item.first, item.count, item.instanced_transform,
+                       material.program->program.idx, static_cast<std::uint64_t>(material.cull),
+                       material.values.size(), material.samplers.size(),
+                       mesh.gpu->textures.size()});
+        append_floats(mesh.model);
+        for (const auto& value : material.values)
+        {
+            append_floats(value);
+        }
+        for (const auto& sampler : material.samplers)
+        {
+            output.insert(output.end(), {sampler.texture, sampler.flags});
+        }
+        for (const auto* texture : mesh.gpu->textures)
+        {
+            output.push_back(texture ? texture->generation() : 0);
+        }
+    }
+    return true;
+}
+} // namespace
 bool vsm_supported(const schema::VsmSettingsT& settings, std::uint32_t physical_pages) noexcept
 {
     const auto* caps = bgfx::getCaps();
@@ -109,6 +178,7 @@ void VirtualShadowPass::poll(std::uint32_t frame_number)
         VsmPageDemand result;
         result.view = slot.view;
         result.submission_id = slot.submission_id;
+        result.receiver_revision = slot.receiver_revision;
         const auto n = slot.view.pages_per_axis;
         const auto count = n * n * slot.view.level_count;
         for (std::uint32_t index = 0; index < count; ++index)
@@ -141,11 +211,39 @@ bool VirtualShadowPass::take_demand(VsmPageDemand& output)
     return true;
 }
 bool VirtualShadowPass::submit_feedback(const VsmView& view, bgfx::TextureHandle depth,
-                                        std::uint64_t submission_id)
+                                        const SceneDrawView& draw, const RenderFrameData& frame,
+                                        const ViewDrawList& list, std::uint64_t submission_id)
 {
     if (!bgfx::isValid(depth) || !bgfx::isValid(feedback_) || view.generation != generation_)
     {
         return false;
+    }
+    const bool reusable = collect_receiver_inputs(draw, frame, list, depth, candidate_inputs_);
+    if (reusable && (view != feedback_view_ || candidate_inputs_ != feedback_inputs_))
+    {
+        feedback_view_ = view;
+        feedback_inputs_.swap(candidate_inputs_);
+        ++receiver_revision_;
+    }
+    if (!reusable)
+    {
+        feedback_view_ = {};
+        feedback_inputs_.clear();
+    }
+    const bool reuse =
+        reusable && (accepted_receiver_revision_ == receiver_revision_ ||
+                     std::any_of(readbacks_.begin(), readbacks_.end(),
+                                 [&](const auto& slot)
+                                 {
+                                     return slot.pending &&
+                                            slot.view.generation == view.generation &&
+                                            slot.receiver_revision == receiver_revision_;
+                                 }));
+    ENGINE_PROFILE_PLOT("Vsm.feedbackReused", static_cast<std::int64_t>(reuse));
+    if (reuse)
+    {
+        ENGINE_PROFILE_PLOT("Vsm.feedbackSkipped", std::int64_t{0});
+        return true;
     }
     auto found = std::find_if(readbacks_.begin(), readbacks_.end(),
                               [](const auto& slot) { return !slot.pending; });
@@ -181,12 +279,21 @@ bool VirtualShadowPass::submit_feedback(const VsmView& view, bgfx::TextureHandle
     bgfx::dispatch(vsm_feedback_view, feedback_, (view.width + 7) / 8, (view.height + 7) / 8);
     slot.view = view;
     slot.submission_id = submission_id;
+    slot.receiver_revision = reusable ? receiver_revision_ : 0;
     slot.bits.assign(word_count_, 0);
     bgfx::BufferRegion region;
     region.init(demands_, 0, word_count_ * sizeof(std::uint32_t));
     slot.ready_frame = bgfx::read(region, slot.bits.data());
+    if (slot.ready_frame == UINT32_MAX)
+    {
+        return false;
+    }
     slot.pending = true;
     return true;
+}
+void VirtualShadowPass::accept_feedback(std::uint64_t receiver_revision) noexcept
+{
+    accepted_receiver_revision_ = receiver_revision;
 }
 bool VirtualShadowPass::draw_pages(const RenderFrameData& frame, const VsmPageBatch& batch,
                                    ShadowPass& shadow)
@@ -223,6 +330,10 @@ void VirtualShadowPass::reset_scene() noexcept
 void VirtualShadowPass::release_gpu() noexcept
 {
     generation_ = 0;
+    receiver_revision_ = accepted_receiver_revision_ = 0;
+    feedback_view_ = {};
+    feedback_inputs_.clear();
+    candidate_inputs_.clear();
     completed_.clear();
     if (bgfx::isValid(framebuffer_))
     {

@@ -23,6 +23,7 @@ struct VsmClipmap
 {
     std::int64_t x = 0, y = 0;
     double page_world_size = 0;
+    bool operator==(const VsmClipmap&) const = default;
 };
 struct VsmView
 {
@@ -39,11 +40,12 @@ struct VsmView
     std::uint32_t pages_per_axis = 0, level_count = 0, physical_pages = 0;
     std::uint16_t width = 0, height = 0;
     bool homogeneous_depth = false, origin_bottom_left = false, orthographic = false;
+    bool operator==(const VsmView&) const = default;
 };
 struct VsmPageDemand
 {
     VsmView view;
-    std::uint64_t submission_id = 0;
+    std::uint64_t submission_id = 0, receiver_revision = 0;
     std::vector<VsmPageKey> pages;
 };
 struct VsmPageDraw
