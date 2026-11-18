@@ -165,9 +165,10 @@ void main()
         // Directional lights are global; the cluster list only stores bounded local lights.
         for (uint index = 0u; index < uint(u_cluster_counts.x); ++index)
         {
-            if (load_cluster_light(index).kind_inner.x < 0.5)
+            ClusterLightData light = load_cluster_light(index);
+            if (light.kind_inner.x < 0.5)
             {
-                color += direct_light(index, v_world_position, world_dx, world_dy,
+                color += direct_light(index, light, v_world_position, world_dx, world_dy,
                                       surface.normal, v_world_normal, view_dir, surface.base_color.rgb,
                                       surface.metallic, surface.roughness, surface.specular_color,
                                       surface.smoothness);
@@ -178,9 +179,10 @@ void main()
         for (uint item = 0u; item < count; ++item)
         {
             uint index = cluster_light_index(offset, item, overflow);
-            if (load_cluster_light(index).kind_inner.x > 0.5)
+            ClusterLightData light = load_cluster_light(index);
+            if (light.kind_inner.x > 0.5)
             {
-                color += direct_light(index, v_world_position, world_dx, world_dy,
+                color += direct_light(index, light, v_world_position, world_dx, world_dy,
                                       surface.normal, v_world_normal, view_dir, surface.base_color.rgb,
                                       surface.metallic, surface.roughness, surface.specular_color,
                                       surface.smoothness);

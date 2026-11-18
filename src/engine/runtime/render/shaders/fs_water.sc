@@ -134,9 +134,10 @@ void main()
                  (1.0 - fresnel) + reflection * fresnel * surface.occlusion;
     for (uint index = 0u; index < uint(u_cluster_counts.x); ++index)
     {
-        if (load_cluster_light(index).kind_inner.x < 0.5)
+        ClusterLightData light = load_cluster_light(index);
+        if (light.kind_inner.x < 0.5)
         {
-            color += direct_light(index, v_world_position, world_dx, world_dy, normal,
+            color += direct_light(index, light, v_world_position, world_dx, world_dy, normal,
                                   v_world_normal, view_dir, vec3_splat(0.0), surface.metallic,
                                   surface.roughness, vec3_splat(f0), surface.smoothness);
         }
@@ -146,9 +147,10 @@ void main()
     for (uint item = 0u; item < count; ++item)
     {
         uint index = cluster_light_index(offset, item, overflow);
-        if (load_cluster_light(index).kind_inner.x > 0.5)
+        ClusterLightData light = load_cluster_light(index);
+        if (light.kind_inner.x > 0.5)
         {
-            color += direct_light(index, v_world_position, world_dx, world_dy, normal,
+            color += direct_light(index, light, v_world_position, world_dx, world_dy, normal,
                                   v_world_normal, view_dir, vec3_splat(0.0), surface.metallic,
                                   surface.roughness, vec3_splat(f0), surface.smoothness);
         }

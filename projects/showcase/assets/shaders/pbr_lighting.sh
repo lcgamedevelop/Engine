@@ -2,11 +2,11 @@
 // bgfx and The Forge attribution is retained in fs_cube.sc and pbr_helpers.sh.
 #ifndef ENGINE_PBR_LIGHTING_SH
 #define ENGINE_PBR_LIGHTING_SH
-vec3 direct_light(uint index, vec3 world_position, vec3 world_dx, vec3 world_dy,
+vec3 direct_light(uint index, ClusterLightData light, vec3 world_position,
+                  vec3 world_dx, vec3 world_dy,
                   vec3 normal, vec3 base_normal, vec3 view_dir, vec3 base_color,
                   float metallic, float roughness, vec3 specular_color, float smoothness)
 {
-    ClusterLightData light = load_cluster_light(index);
     vec3 light_dir = -light.direction_outer.xyz;
     float attenuation = 1.0;
     float kind = light.kind_inner.x;
@@ -34,13 +34,32 @@ vec3 direct_light(uint index, vec3 world_position, vec3 world_dx, vec3 world_dy,
         return vec3_splat(0.0);
     }
     float n_dot_l = saturate(dot(normal, light_dir));
+    bool empirical = u_material.z > 1.5;
+    // Preserve Blinn-Phong's empirical highlight when the mapped normal faces away.
+    if (attenuation <= 0.0 || (!empirical && n_dot_l <= 0.0))
+    {
+        return vec3_splat(0.0);
+    }
+    float visibility = 1.0;
+    if (u_shadow_settings.w > 0.5 && abs(float(index) - u_shadow_settings.z) < 0.5)
+    {
+        visibility = shadow_visibility(world_position, world_dx, world_dy);
+    }
+    if (kind > 0.5)
+    {
+        visibility *= local_shadow_visibility(light, world_position);
+    }
+    if (visibility <= 0.0)
+    {
+        return vec3_splat(0.0);
+    }
     float n_dot_v = max(dot(normal, view_dir), 0.0001);
     vec3 halfway_sum = view_dir + light_dir;
     vec3 halfway = halfway_sum / max(length(halfway_sum), 0.0001);
     float n_dot_h = saturate(dot(normal, halfway));
     float v_dot_h = saturate(dot(view_dir, halfway));
     vec3 response;
-    if (u_material.z > 1.5)
+    if (empirical)
     {
         // 18-ibl calcLambert/calcBlinn/specPwr adapted to an empirical surface response:
         // no normalization, Fresnel or N.L multiplier on the highlight; exponent bias is 1.
@@ -78,15 +97,6 @@ vec3 direct_light(uint index, vec3 world_position, vec3 world_dx, vec3 world_dy,
         response = (diffuse + (u_capture_mode.x > 0.5 ? vec3_splat(0.0) : specular)) * n_dot_l;
     }
     vec3 radiance = light.color_intensity.rgb * light.color_intensity.w;
-    float visibility = 1.0;
-    if (u_shadow_settings.w > 0.5 && abs(float(index) - u_shadow_settings.z) < 0.5)
-    {
-        visibility = shadow_visibility(world_position, world_dx, world_dy);
-    }
-    if (kind > 0.5)
-    {
-        visibility *= local_shadow_visibility(index, world_position);
-    }
     return response * radiance * attenuation * visibility;
 }
 

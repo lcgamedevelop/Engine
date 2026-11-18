@@ -78,6 +78,8 @@ classDiagram
 - 单簇超预算标记为溢出，该簇遍历完整灯列表，保证不漏光；零灯帧清空计数。超出全局 `maximum_lights` 返回失败并给出原因，不静默截断。
 - `Light::set_settings()` 与 TS `Light.SetShadows(enabled, resolution, bias)` 保持签名，扩展为三种灯都可投影。CSM 参数仅对方向灯有效，仍最多一个方向光投影。
 - CSM、聚光单面和点光六面写同一 atlas。点光六面分别使用 90 度投影，统一深度编码；PCF 处理 tile 边界与立方体面接缝。复用现有蒙皮、alpha 裁切和投射物可见性规则。
+- 直接光按片元判定贡献。距离或锥角衰减为零时跳过阴影采样与 BRDF，标准 PBR 也按入射余弦剔除无贡献片元。完全遮挡时跳过 BRDF。Blinn-Phong 保留既有高光语义。提前退出的阶段划分参考 [Filament 的逐光源求值](https://github.com/google/filament/blob/5ce4cbf19051729d74db9ba33ad5bd04cf6b4f37/shaders/src/surface_light_punctual.fs#L178-L225)。
+- 点光 PCF 保持 16 个采样及同半径深度比较。落在当前立方体面内的采样由 UV 和近远裁面直接计算透视深度；跨面采样继续解析相邻面并按其矩阵投影。场景和资源格式沿用原契约。
 - 阴影页绘制与缓存签名仅使用参与投影的不透明材质，含 alpha 裁切。透明水面的帧纹理不影响阴影页复用，级联拟合后的投影矩阵仍参与缓存比较。
 - CSM 的 `shadow_resolution` 仍表示其完整区域边长。局部灯每面有效边长为 `min(shadow_resolution, local_shadow_tile_size)`。atlas 先保留 CSM，再分配局部区域；空间不足或超面数时按镜头距离和稳定节点 ID 选择，输出明确的预算不足诊断。不能把没有得到 atlas 的灯标成有阴影。
 - 平面反射超数量预算时按可见距离和稳定身份选择，未捕获的面退回 IBL，不能复用其他反射面的纹理。正交镜头平视镜面时可能产生退化的斜裁剪投影；投影必须可逆，否则不发布该捕获，继续普通场景与 IBL 绘制。
