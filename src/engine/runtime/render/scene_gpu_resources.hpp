@@ -125,7 +125,6 @@ struct RenderSystem::SceneGpuResources
     bgfx::UniformHandle shadow_splits = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle shadow_params = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle shadow_settings = BGFX_INVALID_HANDLE;
-    bgfx::UniformHandle shadow_depth = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle shadow_sampler = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle shadow_fallback = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle ibl_params = BGFX_INVALID_HANDLE;

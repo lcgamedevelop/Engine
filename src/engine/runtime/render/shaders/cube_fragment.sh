@@ -16,7 +16,6 @@
 #include <bgfx_shader.sh>
 #include "pbr_helpers.sh"
 #include "material_helpers.sh"
-#include "shadow_helpers.sh"
 #define ENGINE_VSM 1
 SAMPLER2D(s_virtual_shadow, 10);
 #include "csm_helpers.sh"

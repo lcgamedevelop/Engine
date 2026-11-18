@@ -160,6 +160,7 @@ export class AnimationStateMachine {
     AddTransition() { return true; }
 }
 export class Camera {}
+export class Light {}
 export class EnvironmentComponent {}
 export class CharacterMotor {}
 export class NavigationAgent {}

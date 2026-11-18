@@ -261,8 +261,8 @@ bool RenderSystem::SceneGpuResources::prepare_lighting(
             }
         }
     }
-    if (!targets().shadow.draw(frame_data, light_settings, frame, shadow_fallback, shadow_depth,
-                               config, local_lights, lights, draw.world, base, atlas_view,
+    if (!targets().shadow.draw(frame_data, light_settings, frame, shadow_fallback, config,
+                               local_lights, lights, draw.world, base, atlas_view,
                                capture ? &caster_ids : nullptr))
     {
         return fail("Cannot submit the shadow atlas");

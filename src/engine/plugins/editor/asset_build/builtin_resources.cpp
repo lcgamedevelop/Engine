@@ -95,7 +95,6 @@ bool compile_shaders(std::string_view target, const std::filesystem::path& cache
                             "dfg_approx.sh",
                             "color_space.sh",
                             "material_helpers.sh",
-                            "shadow_helpers.sh",
                             "csm_helpers.sh",
                             "local_shadow_helpers.sh",
                             "cluster/lighting.sh"})

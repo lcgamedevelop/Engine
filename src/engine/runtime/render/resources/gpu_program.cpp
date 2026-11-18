@@ -177,9 +177,9 @@ bool GpuProgram::create(const schema::ShaderDataT& shader)
                 name == "u_fog_color" || name == "u_fog_range" || name == "u_shadow_matrices" ||
                 name == "u_shadow_rects" || name == "u_shadow_splits" ||
                 name == "u_shadow_params" || name == "u_shadow_settings" ||
-                name == "u_shadow_depth" || name == "u_vsm_layout" || name == "s_virtual_shadow" ||
-                name == "s_shadow_map" || name == "u_ibl_params" || name == "s_ibl_irradiance" ||
-                name == "s_ibl_prefilter" || name == "s_ibl_lut" || name == "s_ambient_occlusion" ||
+                name == "u_vsm_layout" || name == "s_virtual_shadow" || name == "s_shadow_map" ||
+                name == "u_ibl_params" || name == "s_ibl_irradiance" || name == "s_ibl_prefilter" ||
+                name == "s_ibl_lut" || name == "s_ambient_occlusion" ||
                 name == "u_ambient_occlusion" || name == "u_cluster_grid" ||
                 name == "u_cluster_camera" || name == "u_cluster_counts" ||
                 name == "u_cluster_viewport" || name == "u_frame_inputs" ||

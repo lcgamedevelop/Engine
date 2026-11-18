@@ -100,7 +100,7 @@ Shader `.shader` 的 `[[samplers]]` 声明 `name/uniform/stage/default_texture/e
 
 编辑器 MCP `set_camera`、`set_material_texture`、`set_light` 操作相机、材质与灯；`set_light` 支持 `kind/range/innerAngle/outerAngle`，材质命令支持可选 `slot`。场景查询返回全部材质槽和贴图，修改沿用批量事务、撤销/重做与完成回执。历史记录资源身份与版本，不让停止后的资源因撤销栈继续常驻。
 
-缓冲提交参考固定版本 bgfx `01-cubes`，切线与法线采样参考 `06-bump`；PBR 函数适配 The Forge `Common_3/Graphics/ShaderUtilities.h.fsl`。方向光阴影的 packed-depth 与 PCF 适配 bgfx `15-shadowmaps-simple`，级联划分与稳定投影参考 `16-shadowmaps`。alpha 阈值 discard 与指数雾分别适配 `16-shadowmaps/fs_shadowmaps_color_texture.sc`、`fs_shadowmaps_color_lighting_main.sh`：裁切改为可配置 alpha，雾改为前向深度、线性颜色与可配置模式，并用负指数避免溢出。可选 ACES 曲线来自 bgfx `shaderlib.sh`。源码保留上游来源，许可位于 `third_party/notices/`。
+缓冲提交参考固定版本 bgfx `01-cubes`，切线与法线采样参考 `06-bump`；PBR 函数适配 The Forge `Common_3/Graphics/ShaderUtilities.h.fsl`。方向光阴影的 PCF 适配 bgfx `15-shadowmaps-simple`，级联划分与稳定投影参考 `16-shadowmaps`。引擎为常规阴影和 VSM 分别使用可采样的 D32F 图集。自定义材质按约定从 `s_shadow_map` 或 `s_virtual_shadow` 的 R 通道直接读取深度。alpha 阈值 discard 与指数雾分别适配 `16-shadowmaps/fs_shadowmaps_color_texture.sc`、`fs_shadowmaps_color_lighting_main.sh`，裁切使用可配置的 alpha，雾使用前向深度、线性颜色及可配置模式。可选 ACES 曲线来自 bgfx `shaderlib.sh`。源码保留上游来源，许可位于 `third_party/notices/`。
 
 内置 Shader 由 `cmake/core/render_shaders.cmake` 调用宿主 shaderc 编译并嵌入目标；项目 `.shader` 引用独立源码 GUID，经资源管线生成目标平台二进制。Metal 使用 Metal 程序，DirectX 使用 Shader Model 5，Vulkan 使用 SPIR-V。宿主工具不存在或不可执行时配置失败；`ENGINE_SHADERC_EXECUTABLE` 可显式指定工具。输入及工具未变时复用生成物。
 

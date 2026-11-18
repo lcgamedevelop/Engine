@@ -45,7 +45,6 @@ bool shadow_signature(const RenderFrameData& frame, std::span<const VsmPageDraw>
     values.push_back(frame.world_epoch);
     values.push_back(target.framebuffer.idx);
     values.push_back(target.fallback.idx);
-    values.push_back(target.depth_uniform.idx);
     values.push_back(target.caster_ids != nullptr);
     values.push_back(pages.size());
     for (const auto& page : pages)
@@ -116,7 +115,7 @@ ShadowPass::~ShadowPass() noexcept
 
 bgfx::TextureHandle ShadowPass::texture() const noexcept
 {
-    return color_;
+    return depth_;
 }
 
 void ShadowPass::release() noexcept
@@ -128,10 +127,6 @@ void ShadowPass::release() noexcept
             bgfx::setViewFrameBuffer(view, BGFX_INVALID_HANDLE);
         }
         bgfx::destroy(framebuffer_);
-    }
-    if (bgfx::isValid(color_))
-    {
-        bgfx::destroy(color_);
     }
     if (bgfx::isValid(depth_))
     {
@@ -169,7 +164,6 @@ void ShadowPass::release() noexcept
     {
         bgfx::destroy(uv_transform_);
     }
-    color_ = BGFX_INVALID_HANDLE;
     depth_ = BGFX_INVALID_HANDLE;
     framebuffer_ = BGFX_INVALID_HANDLE;
     vertex_ = BGFX_INVALID_HANDLE;
@@ -194,25 +188,19 @@ bool ShadowPass::prepare(std::uint16_t size)
         return true;
     }
     release();
-    constexpr auto color_flags = BGFX_TEXTURE_RT | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP |
-                                 BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT |
-                                 BGFX_SAMPLER_MIP_POINT;
-    constexpr auto depth_flags = BGFX_TEXTURE_RT_WRITE_ONLY;
     if (size > bgfx::getCaps()->limits.maxTextureSize ||
-        !bgfx::isTextureValid(0, false, 1, bgfx::TextureFormat::RGBA8, color_flags) ||
-        !bgfx::isTextureValid(0, false, 1, bgfx::TextureFormat::D16, depth_flags))
+        !bgfx::isTextureValid(0, false, 1, bgfx::TextureFormat::D32F, shadow_atlas_flags))
     {
         return false;
     }
-    color_ = bgfx::createTexture2D(size, size, false, 1, bgfx::TextureFormat::RGBA8, color_flags);
-    depth_ = bgfx::createTexture2D(size, size, false, 1, bgfx::TextureFormat::D16, depth_flags);
-    if (!bgfx::isValid(color_) || !bgfx::isValid(depth_))
+    depth_ =
+        bgfx::createTexture2D(size, size, false, 1, bgfx::TextureFormat::D32F, shadow_atlas_flags);
+    if (!bgfx::isValid(depth_))
     {
         release();
         return false;
     }
-    const bgfx::TextureHandle attachments[] = {color_, depth_};
-    framebuffer_ = bgfx::createFrameBuffer(2, attachments, false);
+    framebuffer_ = bgfx::createFrameBuffer(1, &depth_, false);
     vertex_ = bgfx::createShader(bgfx::copy(vs_shadow, sizeof(vs_shadow)));
     fragment_ = bgfx::createShader(bgfx::copy(fs_shadow, sizeof(fs_shadow)));
     if (bgfx::isValid(vertex_) && bgfx::isValid(fragment_))
@@ -248,8 +236,7 @@ bool ShadowPass::prepare(std::uint16_t size)
 
 std::uint32_t ShadowPass::resource_count() const noexcept
 {
-    return static_cast<std::uint32_t>(bgfx::isValid(color_)) +
-           static_cast<std::uint32_t>(bgfx::isValid(depth_)) +
+    return static_cast<std::uint32_t>(bgfx::isValid(depth_)) +
            static_cast<std::uint32_t>(bgfx::isValid(framebuffer_)) +
            static_cast<std::uint32_t>(bgfx::isValid(instanced_vertex_)) +
            static_cast<std::uint32_t>(bgfx::isValid(instanced_program_)) +
@@ -275,8 +262,7 @@ bool ShadowPass::bind_material(const MaterialBinding& material, bgfx::TextureHan
 }
 
 bool ShadowPass::draw(const RenderFrameData& frame_data, const RenderSettings& settings,
-                      ShadowFrame& frame, bgfx::TextureHandle fallback,
-                      bgfx::UniformHandle depth_uniform, const RenderConfig& config,
+                      ShadowFrame& frame, bgfx::TextureHandle fallback, const RenderConfig& config,
                       std::span<const LocalShadowLight> local_lights,
                       std::span<ClusterLight> lights, const float* camera_world,
                       bgfx::ViewId base_view, ShadowAtlasView atlas_view,
@@ -576,7 +562,7 @@ bool ShadowPass::draw(const RenderFrameData& frame_data, const RenderSettings& s
     {
         return true;
     }
-    VsmPageTarget target{framebuffer_, fallback, depth_uniform, nullptr};
+    VsmPageTarget target{framebuffer_, fallback, nullptr};
     std::vector<std::uint64_t> selected;
     if (caster_ids)
     {
@@ -641,13 +627,11 @@ bool ShadowPass::draw_pages(const RenderFrameData& frame_data, std::span<const V
         }
     }
     if (!bgfx::isValid(target.framebuffer) || !bgfx::isValid(program_) ||
-        !bgfx::isValid(target.depth_uniform) || !bgfx::isValid(target.fallback))
+        !bgfx::isValid(target.fallback))
     {
         return false;
     }
     const auto* caps = bgfx::getCaps();
-    const float depth_scale[]{caps->homogeneousDepth ? .5F : 1.F,
-                              caps->homogeneousDepth ? .5F : 0.F, 0, 0};
     struct Caster
     {
         const GpuMesh* mesh = nullptr;
@@ -710,8 +694,8 @@ bool ShadowPass::draw_pages(const RenderFrameData& frame_data, std::span<const V
             DrawBatchKey key;
             key.geometry = reinterpret_cast<std::uintptr_t>(mesh.geometry.get());
             key.program = instanced_program_.idx;
-            key.state = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_WRITE_Z |
-                        BGFX_STATE_DEPTH_TEST_LESS | cull_state(material.cull, caster.model.data());
+            key.state = BGFX_STATE_WRITE_Z | BGFX_STATE_DEPTH_TEST_LESS |
+                        cull_state(material.cull, caster.model.data());
             key.first = first;
             key.count = count;
             key.shadow_alpha = material.shadow_alpha;
@@ -780,7 +764,6 @@ bool ShadowPass::draw_pages(const RenderFrameData& frame_data, std::span<const V
                 }
                 batch.cursor += count;
                 bgfx::setTransform(caster.model.data());
-                bgfx::setUniform(target.depth_uniform, depth_scale);
                 caster.mesh->bind_vertices();
                 bgfx::setIndexBuffer(caster.mesh->geometry->indices, batch.key.first,
                                      batch.key.count);
@@ -804,7 +787,7 @@ bool ShadowPass::draw_pages(const RenderFrameData& frame_data, std::span<const V
         bgfx::setViewName(page.view_id, "Shadow page");
         bgfx::setViewFrameBuffer(page.view_id, target.framebuffer);
         bgfx::setViewRect(page.view_id, page.x, page.y, page.size, page.size);
-        bgfx::setViewClear(page.view_id, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0xffffffff, 1.F, 0);
+        bgfx::setViewClear(page.view_id, BGFX_CLEAR_DEPTH, 0, 1.F, 0);
         bgfx::setViewTransform(page.view_id, page.view.data(), page.projection.data());
         bgfx::touch(page.view_id);
         if (target.framebuffer.idx == framebuffer_.idx &&

@@ -51,7 +51,7 @@ private:
     std::uint64_t receiver_revision_ = 0, accepted_receiver_revision_ = 0;
     std::uint64_t generation_ = 0, bytes_ = 0;
     std::uint32_t resolution_ = 0, physical_pages_ = 0, word_count_ = 0;
-    bgfx::TextureHandle atlas_ = BGFX_INVALID_HANDLE, depth_ = BGFX_INVALID_HANDLE;
+    bgfx::TextureHandle atlas_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle fallback_ = BGFX_INVALID_HANDLE;
     bgfx::FrameBufferHandle framebuffer_ = BGFX_INVALID_HANDLE;
     bgfx::DynamicIndexBufferHandle demands_ = BGFX_INVALID_HANDLE;
@@ -59,7 +59,7 @@ private:
     bgfx::ProgramHandle clear_ = BGFX_INVALID_HANDLE, feedback_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle sampler_ = BGFX_INVALID_HANDLE, depth_sampler_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle inverse_ = BGFX_INVALID_HANDLE, dimensions_ = BGFX_INVALID_HANDLE;
-    bgfx::UniformHandle layout_ = BGFX_INVALID_HANDLE, shadow_depth_ = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle layout_ = BGFX_INVALID_HANDLE;
 };
 } // namespace render_detail
 } // namespace engine

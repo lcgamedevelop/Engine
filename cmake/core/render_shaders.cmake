@@ -165,7 +165,6 @@ function(engine_embed_render_shaders target)
                         "${_source}/color_space.sh"
                         "${_source}/dfg_approx.sh"
                         "${_source}/material_helpers.sh"
-                        "${_source}/shadow_helpers.sh"
                         "${_source}/csm_helpers.sh"
                         "${_source}/vsm/vsm_fragment.sh"
                         "${_source}/vsm/vsm_address.sh"

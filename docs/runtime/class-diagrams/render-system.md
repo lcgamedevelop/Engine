@@ -184,15 +184,14 @@ classDiagram
 
 ```cpp
 bool draw(const RenderFrameData& frame_data, const RenderSettings& settings,
-          ShadowFrame& frame,
-          bgfx::TextureHandle fallback, bgfx::UniformHandle depth_uniform,
+          ShadowFrame& frame, bgfx::TextureHandle fallback,
           const RenderConfig& config, std::span<const LocalShadowLight> local_lights,
           std::span<ClusterLight> lights, const float* camera_world,
-          bgfx::ViewId base_view,
+          bgfx::ViewId base_view, ShadowAtlasView atlas_view,
           const std::span<const std::uint64_t>* caster_ids = nullptr);
 ```
 
-`ShadowPass` 独占 atlas 的颜色纹理、深度纹理、Framebuffer、Shader/Program 及 alpha 裁切和 UV Uniform。`prepare()` 按分辨率准备资源，`draw()` 组织逐级阴影绘制，`texture()` 返回借用句柄；调用方不得销毁它。对象不可复制或移动，析构兜底释放；`release()` 支持重复调用。两个只读查询为 `const noexcept`，释放为 `noexcept`，状态与句柄返回值标注 `[[nodiscard]]`。AO 和 HDR/Bloom 的完整接口见本文后续独立图。
+`ShadowPass` 独占可采样的 D32F 深度图集、Framebuffer、Shader/Program 及 alpha 裁切和 UV Uniform。`prepare()` 按分辨率准备资源，`draw()` 组织逐级阴影绘制，`texture()` 返回借用的深度纹理句柄。阴影页仅写硬件深度，按页清除远深度，采样侧保留原 PCF 取样与偏移。对象不可复制或移动，析构兜底释放。`release()` 支持重复调用。两个只读查询为 `const noexcept`，释放为 `noexcept`，状态与句柄返回值标注 `[[nodiscard]]`。AO 和 HDR/Bloom 的完整接口见本文后续独立图。
 
 ### 提交管线私有契约
 
@@ -283,8 +282,7 @@ classDiagram
 
 // ShadowPass
 [[nodiscard]] bool draw(const RenderFrameData& frame_data, const RenderSettings& settings,
-                        ShadowFrame& frame, bgfx::TextureHandle fallback,
-                        bgfx::UniformHandle depth_uniform, const RenderConfig& config,
+                        ShadowFrame& frame, bgfx::TextureHandle fallback, const RenderConfig& config,
                         std::span<const LocalShadowLight> local_lights,
                         std::span<ClusterLight> lights, const float* camera_world,
                         bgfx::ViewId base_view, ShadowAtlasView atlas_view,
@@ -665,7 +663,7 @@ C++ 限定符：构造为 `explicit` 且 `noexcept`，`world` 默认为 `nullptr
 - 只读聚合快照选择阴影域时，优先使用唯一启用的投影方向灯；没有投影灯时使用第一个启用方向灯。关闭第二个方向灯的投影后，快照可返回第一个方向灯的分辨率和偏移，这些值在阴影关闭时不参与绘制。需要精确修改或撤销指定灯时使用该 `Light` 的生成数据，不以组合快照代替各组件身份。
 - 环境光、雾和曝光变化只更新帧 Uniform，不重建场景 Mesh、材质程序或纹理；阴影分辨率变化仅重建阴影通道资源，修改偏移、级联数量、距离或混合参数复用已有 atlas，并在本帧重新计算级联投影。
 - 可选 `ambient_tricolor` 根据世界法线 Y 在天空、赤道与地面线性颜色间插值，仍乘 `ambient_intensity`；关闭时使用原有 `ambient_color`。`fog_mode` 选择关闭、线性、指数或平方指数雾。线性模式保留相机到片元的世界距离，在 `fog_start` 到 `fog_end` 间混合；指数模式用相机前向深度减近裁面，透过率分别为 `exp(-density*d)` 与 `exp(-(density*d)^2)`，density 为非负有限数。颜色均为线性 `fog_color`，要求 `0 <= start < end`。两者默认关闭，数据由调用方明确提交，不识别 Unity 或具体项目。
-- 方向光阴影从启用方向灯的 `cast_shadows`、`shadow_resolution`、`shadow_bias` 及下述 CSM 参数读取，当前支持一个投影方向灯；多个投影方向灯明确失败。灯的变换仍来自节点。每级根据本次镜头视锥拟合正交投影，深度范围纳入相交投射物，复用 bgfx `15-shadowmaps-simple` 的 packed-depth 路径与 16 点 PCF 采样；没有投影方向灯不产生阴影。RGBA8 深度编码与 D16 深度附件避免依赖硬件比较采样；纹理、帧缓冲及程序随场景释放，设备不支持附件格式时返回失败，不假报开启。阴影使用保留纹理槽 15，项目材质不得占用该槽。ACES 色调映射直接适配 bgfx `shaderlib.sh` 的曲线，保留来源。
+- 方向光阴影从启用方向灯的 `cast_shadows`、`shadow_resolution`、`shadow_bias` 及下述 CSM 参数读取，当前支持一个投影方向灯。灯的变换来自节点。每级根据本次镜头视锥拟合正交投影，深度范围纳入相交投射物。标准材质从保留纹理槽 15 读取 D32F 图集的深度值，用手动 PCF 过滤比较结果。设备须支持可采样的 D32F 深度附件。纹理、帧缓冲及程序随场景释放。ACES 色调映射直接适配 bgfx `shaderlib.sh` 的曲线，保留来源。
 - 纹理按资源编码和当前 GPU 能力确定格式，准备与上传统一遵守[按范围准备](render-readiness.md)契约。`texture_batch_size` 限制并发准备项，取值 1–64；`texture_staging_bytes` 限制引擎持有的暂存总量。worker 只处理稳定资源输入，不访问 bgfx、Scene 或 Node；已接收的失败任务不自动重跑。
 - Shader、Mesh、IBL 的 GPU 创建继续在允许的协调 API 线程，IBL 进入同一准备队列，不整批等待后台任务。字体 / UI 和渲染扩展显式参加所属范围准备，复用各自的正常运行缓存。
 - 任务只共享拥有独立截图数据，不借用渲染系统、回调或 GPU 对象。`tasks` 非空时须先初始化、覆盖渲染系统生命周期；为空则主线程处理截图，保留无需任务系统的独立宿主。编码处理 pitch、BGRA 与 Y 翻转；不借用桌面截图权限。关闭时等待已接收的写入任务，取消尚未提交的读回结果，不在返回后留下借用。请求、查询、提交和完成回收均由主线程调用，读回槽跨线程加锁。
@@ -675,7 +673,7 @@ C++ 限定符：构造为 `explicit` 且 `noexcept`，`world` 默认为 `nullptr
 
 方向光在 `LightData` 中保存级联数量 `shadow_cascades`（1、2、4，默认 4）、阴影距离 `shadow_distance`（默认 150，范围 `(0, 100000]`）、对数/均匀混合比例 `shadow_split_lambda`（默认 0.6，范围 `[0, 1]`）及交界混合比例 `shadow_cascade_blend`（默认 0.1，范围 `[0, 0.3]`）。`RenderSettings` 只是对应组件的快照，不保存另一份场景策略。MCP 编辑这些值仍使用已有可撤销渲染命令；普通编辑器预览以显式相机决定级联，光照参数仍来自世界场景。
 
-渲染内部参考引入时固定的 [bgfx `16-shadowmaps`](https://github.com/bkaradzic/bgfx/tree/7a70927d2af7ffcc5cef9c9e8f4c821e31fcb099/examples/16-shadowmaps)（commit `7a70927d2af7ffcc5cef9c9e8f4c821e31fcb099`）的混合距离划分、视锥分段及纹素对齐思路，复用现有 packed-depth/PCF 阴影 pass。四级放入同一 2×2 atlas，`shadow_resolution` 表示 CSM 所占区域的边长（4096 即每级 2048），只占原有纹理槽 15；统一 atlas 还容纳局部光源阴影，完整尺寸由 RenderConfig 指定。View 0 为 GPU 蒙皮，镜像组从 1、40 开始，主阴影从 80 开始，主场景为 113，UI 保留 200；完整分区见[分簇光照与反射契约](forward-lighting-reflections.md)。单级使用完整 CSM 区域；两级使用两个半边长 tile。
+渲染内部参考引入时固定的 [bgfx `16-shadowmaps`](https://github.com/bkaradzic/bgfx/tree/7a70927d2af7ffcc5cef9c9e8f4c821e31fcb099/examples/16-shadowmaps)（commit `7a70927d2af7ffcc5cef9c9e8f4c821e31fcb099`）的混合距离划分、视锥分段及纹素对齐思路。四级放入同一 2×2 atlas，`shadow_resolution` 表示 CSM 所占区域的边长（4096 即每级 2048），只占原有纹理槽 15；统一 atlas 还容纳局部光源阴影，完整尺寸由 RenderConfig 指定。View 0 为 GPU 蒙皮，镜像组从 1、40 开始，主阴影从 80 开始，主场景为 113，UI 保留 200；完整分区见[分簇光照与反射契约](forward-lighting-reflections.md)。单级使用完整 CSM 区域；两级使用两个半边长 tile。
 
 每级使用镜头视锥段的包围球保持旋转时范围稳定，中心对齐纹素，深度范围包含相应投射物。Shader 按正向相机深度选级，在每级最后一段混合区采样下一层；下一级投影向前扩展以覆盖该混合区，PCF 每个采样点限制在本级 tile 的半纹素内边界。最后一级按相同比例淡出至全可见；混合比例为 0 时硬切换。实际阴影远端取相机远裁面与 `shadow_distance` 的较小值，远端不超过近裁面时不提交阴影。
 

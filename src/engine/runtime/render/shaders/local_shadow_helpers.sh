@@ -1,5 +1,5 @@
 /*
- * Packed-depth PCF and projected local lights adapt bgfx 15-shadowmaps-simple
+ * PCF and projected local lights adapt bgfx 15-shadowmaps-simple
  * and 16-shadowmaps at 7a70927d2af7ffcc5cef9c9e8f4c821e31fcb099.
  * Copyright 2013-2014 Dario Manesku, BSD-2-Clause; see notices/bgfx.txt.
  * Point lights use six ordinary 90-degree faces in the existing 2D atlas;
@@ -8,7 +8,7 @@
 #ifndef ENGINE_LOCAL_SHADOW_HELPERS_SH
 #define ENGINE_LOCAL_SHADOW_HELPERS_SH
 
-// Include cluster/lighting.sh, shadow_helpers.sh and csm_helpers.sh before this file.
+// Include cluster/lighting.sh and csm_helpers.sh before this file.
 
 vec4 local_shadow_project(uint record, vec3 position)
 {
@@ -85,7 +85,7 @@ float local_shadow_visibility(uint light_index, vec3 world_position)
             vec2 half_texel = vec2_splat(parameters.y * 0.5);
             uv = clamp(uv, sample_rectangle.xy + half_texel,
                         sample_rectangle.xy + sample_rectangle.zw - half_texel);
-            float sample_depth = unpack_shadow_depth(texture2DLod(s_shadow_map, uv, 0.0));
+            float sample_depth = texture2DLod(s_shadow_map, uv, 0.0).r;
             visible += step(receiver_depth - parameters.x, sample_depth);
         }
     }

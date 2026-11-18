@@ -10,7 +10,6 @@ $input v_world_position, v_world_normal, v_world_tangent, v_texcoord0, v_color0,
 #include <bgfx_shader.sh>
 #include "pbr_helpers.sh"
 #include "pbr_surface.sh"
-#include "shadow_helpers.sh"
 #include "csm_helpers.sh"
 #include "cluster/lighting.sh"
 #include "local_shadow_helpers.sh"

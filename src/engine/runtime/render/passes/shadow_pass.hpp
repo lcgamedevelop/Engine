@@ -4,6 +4,7 @@
 
 #include <bgfx/bgfx.h>
 
+#include <cstdint>
 #include <map>
 #include <span>
 #include <vector>
@@ -20,6 +21,9 @@ struct RenderFrameData;
 struct MaterialBinding;
 struct VsmPageDraw;
 struct VsmPageTarget;
+
+inline constexpr std::uint64_t shadow_atlas_flags =
+    BGFX_TEXTURE_RT | BGFX_SAMPLER_UVW_CLAMP | BGFX_SAMPLER_POINT;
 
 struct ShadowAtlasView
 {
@@ -39,7 +43,7 @@ public:
     [[nodiscard]] bool prepare(std::uint16_t size);
     [[nodiscard]] bool draw(const RenderFrameData& frame_data, const RenderSettings& settings,
                             ShadowFrame& frame, bgfx::TextureHandle fallback,
-                            bgfx::UniformHandle depth_uniform, const RenderConfig& config,
+                            const RenderConfig& config,
                             std::span<const LocalShadowLight> local_lights,
                             std::span<ClusterLight> lights, const float* camera_world,
                             bgfx::ViewId base_view, ShadowAtlasView atlas_view,
@@ -63,7 +67,6 @@ private:
 
     [[nodiscard]] bool bind_material(const MaterialBinding& material, bgfx::TextureHandle fallback);
 
-    bgfx::TextureHandle color_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle depth_ = BGFX_INVALID_HANDLE;
     bgfx::FrameBufferHandle framebuffer_ = BGFX_INVALID_HANDLE;
     bgfx::ShaderHandle vertex_ = BGFX_INVALID_HANDLE;

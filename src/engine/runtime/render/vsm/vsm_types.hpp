@@ -71,7 +71,6 @@ struct VsmPageTarget
 {
     bgfx::FrameBufferHandle framebuffer = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle fallback = BGFX_INVALID_HANDLE;
-    bgfx::UniformHandle depth_uniform = BGFX_INVALID_HANDLE;
     const std::vector<std::uint64_t>* caster_ids = nullptr;
 };
 struct VsmGpuBinding

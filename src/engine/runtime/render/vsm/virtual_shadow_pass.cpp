@@ -88,8 +88,7 @@ bool vsm_supported(const schema::VsmSettingsT& settings, std::uint32_t physical_
            caps->limits.maxTextureSamplers >= 16 && caps->limits.maxViews >= 256 && side &&
            side <= caps->limits.maxTextureSize && settings.virtual_resolution >= 4096 &&
            settings.virtual_resolution <= 32768 &&
-           bgfx::isTextureValid(0, false, 1, bgfx::TextureFormat::RGBA8, BGFX_TEXTURE_RT) &&
-           bgfx::isTextureValid(0, false, 1, bgfx::TextureFormat::D32F, BGFX_TEXTURE_RT_WRITE_ONLY);
+           bgfx::isTextureValid(0, false, 1, bgfx::TextureFormat::D32F, shadow_atlas_flags);
 }
 VirtualShadowPass::~VirtualShadowPass() noexcept
 {
@@ -113,18 +112,14 @@ bool VirtualShadowPass::prepare(const schema::VsmSettingsT& settings, const Rend
     resolution_ = settings.virtual_resolution;
     const auto side =
         static_cast<std::uint16_t>(vsm_atlas_columns(physical_pages_) * vsm_tile_size);
-    constexpr auto flags = BGFX_TEXTURE_RT | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP |
-                           BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT | BGFX_SAMPLER_MIP_POINT;
-    atlas_ = bgfx::createTexture2D(side, side, false, 1, bgfx::TextureFormat::RGBA8, flags);
-    depth_ = bgfx::createTexture2D(side, side, false, 1, bgfx::TextureFormat::D32F,
-                                   BGFX_TEXTURE_RT_WRITE_ONLY);
+    atlas_ =
+        bgfx::createTexture2D(side, side, false, 1, bgfx::TextureFormat::D32F, shadow_atlas_flags);
     const std::uint32_t white = UINT32_MAX;
     fallback_ = bgfx::createTexture2D(1, 1, false, 1, bgfx::TextureFormat::RGBA8, 0,
                                       bgfx::copy(&white, sizeof(white)));
-    if (bgfx::isValid(atlas_) && bgfx::isValid(depth_))
+    if (bgfx::isValid(atlas_))
     {
-        const bgfx::TextureHandle attachments[]{atlas_, depth_};
-        framebuffer_ = bgfx::createFrameBuffer(2, attachments, false);
+        framebuffer_ = bgfx::createFrameBuffer(1, &atlas_, false);
     }
     const auto pages = resolution_ / vsm_page_size;
     word_count_ = (pages * pages * vsm_max_levels + 31) / 32;
@@ -147,16 +142,15 @@ bool VirtualShadowPass::prepare(const schema::VsmSettingsT& settings, const Rend
     inverse_ = bgfx::createUniform("u_vsm_inverse", bgfx::UniformType::Mat4);
     dimensions_ = bgfx::createUniform("u_vsm_feedback", bgfx::UniformType::Vec4);
     layout_ = bgfx::createUniform("u_vsm_layout", bgfx::UniformType::Vec4);
-    shadow_depth_ = bgfx::createUniform("u_shadow_depth", bgfx::UniformType::Vec4);
     if (!bgfx::isValid(framebuffer_) || !bgfx::isValid(fallback_) || !bgfx::isValid(demands_) ||
         !bgfx::isValid(metadata_) || !bgfx::isValid(clear_) || !bgfx::isValid(feedback_) ||
         !bgfx::isValid(sampler_) || !bgfx::isValid(depth_sampler_) || !bgfx::isValid(inverse_) ||
-        !bgfx::isValid(dimensions_) || !bgfx::isValid(layout_) || !bgfx::isValid(shadow_depth_))
+        !bgfx::isValid(dimensions_) || !bgfx::isValid(layout_))
     {
         release_gpu();
         return false;
     }
-    bytes_ = std::uint64_t{side} * side * 8 + word_count_ * sizeof(std::uint32_t) +
+    bytes_ = std::uint64_t{side} * side * sizeof(float) + word_count_ * sizeof(std::uint32_t) +
              vsm_header_vectors * sizeof(float) * 4 + 4;
     return true;
 }
@@ -276,7 +270,8 @@ bool VirtualShadowPass::submit_feedback(const VsmView& view, bgfx::TextureHandle
     bgfx::setTexture(0, depth_sampler_, depth);
     bgfx::setBuffer(4, demands_, bgfx::Access::ReadWrite);
     bgfx::setBuffer(5, metadata_, bgfx::Access::Read);
-    bgfx::dispatch(vsm_feedback_view, feedback_, (view.width + 7) / 8, (view.height + 7) / 8);
+    // Eight threads per axis, with two receiver pixels per thread on each axis.
+    bgfx::dispatch(vsm_feedback_view, feedback_, (view.width + 15) / 16, (view.height + 15) / 16);
     slot.view = view;
     slot.submission_id = submission_id;
     slot.receiver_revision = reusable ? receiver_revision_ : 0;
@@ -306,7 +301,6 @@ bool VirtualShadowPass::draw_pages(const RenderFrameData& frame, const VsmPageBa
     VsmPageTarget target;
     target.framebuffer = framebuffer_;
     target.fallback = fallback_;
-    target.depth_uniform = shadow_depth_;
     return shadow.draw_pages(frame, batch.pages, target);
 }
 bool VirtualShadowPass::binding(VsmGpuBinding& output) const
@@ -352,7 +346,6 @@ void VirtualShadowPass::release_gpu() noexcept
     };
     destroy(framebuffer_);
     destroy(atlas_);
-    destroy(depth_);
     destroy(fallback_);
     destroy(demands_);
     destroy(metadata_);
@@ -363,15 +356,13 @@ void VirtualShadowPass::release_gpu() noexcept
     destroy(inverse_);
     destroy(dimensions_);
     destroy(layout_);
-    destroy(shadow_depth_);
     bytes_ = 0;
 }
 std::uint32_t VirtualShadowPass::resource_count() const noexcept
 {
-    return bgfx::isValid(atlas_) + bgfx::isValid(depth_) + bgfx::isValid(fallback_) +
-           bgfx::isValid(framebuffer_) + bgfx::isValid(demands_) + bgfx::isValid(metadata_) +
-           bgfx::isValid(clear_) + bgfx::isValid(feedback_) + bgfx::isValid(sampler_) +
-           bgfx::isValid(depth_sampler_) + bgfx::isValid(inverse_) + bgfx::isValid(dimensions_) +
-           bgfx::isValid(layout_) + bgfx::isValid(shadow_depth_);
+    return bgfx::isValid(atlas_) + bgfx::isValid(fallback_) + bgfx::isValid(framebuffer_) +
+           bgfx::isValid(demands_) + bgfx::isValid(metadata_) + bgfx::isValid(clear_) +
+           bgfx::isValid(feedback_) + bgfx::isValid(sampler_) + bgfx::isValid(depth_sampler_) +
+           bgfx::isValid(inverse_) + bgfx::isValid(dimensions_) + bgfx::isValid(layout_);
 }
 } // namespace engine::render_detail

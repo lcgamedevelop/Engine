@@ -46,7 +46,6 @@ bool reserved_uniform(std::string_view name)
                                   std::string_view("u_shadow_splits"),
                                   std::string_view("u_shadow_params"),
                                   std::string_view("u_shadow_settings"),
-                                  std::string_view("u_shadow_depth"),
                                   std::string_view("s_shadow_map"),
                                   std::string_view("u_vsm_layout"),
                                   std::string_view("s_virtual_shadow"),

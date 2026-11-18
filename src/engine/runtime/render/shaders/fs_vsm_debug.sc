@@ -1,6 +1,5 @@
 $input v_texcoord0
 #include <bgfx_shader.sh>
-#include "shadow_helpers.sh"
 #include "cluster/lighting.sh"
 #include "vsm/vsm_address.sh"
 SAMPLER2D(s_virtual_shadow, 10);
@@ -16,7 +15,7 @@ void main()
     vec3 color = vec3(0.7, 0.2, 0.9);
     if (u_vsm_debug.x > 0.5 && u_vsm_debug.x < 1.5)
     {
-        float depth = unpack_shadow_depth(texture2DLod(s_virtual_shadow, uv, 0.0));
+        float depth = texture2DLod(s_virtual_shadow, uv, 0.0).r;
         color = vec3_splat(depth);
     }
     else
@@ -43,7 +42,7 @@ void main()
                 if (vsm_data(8 + level).w < 0.0) local.y = 1.0 - local.y;
                 else tile.y = vsm_data(5).x - tile.y - atlas.z;
                 vec2 sample_uv = (tile + atlas.y + local * atlas.x) / vsm_data(5).x;
-                color = vec3_splat(unpack_shadow_depth(texture2DLod(s_virtual_shadow, sample_uv, 0.0)));
+                color = vec3_splat(texture2DLod(s_virtual_shadow, sample_uv, 0.0).r);
             }
         }
     }
