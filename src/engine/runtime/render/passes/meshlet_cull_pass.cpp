@@ -22,6 +22,8 @@ namespace engine::render_detail
 {
 namespace
 {
+constexpr std::uint32_t singleton_clusters_per_command = 8;
+
 bool cone_safe(const float* model, schema::CullMode cull)
 {
     if (cull != schema::CullMode::back || linear_determinant(model) <= 0)
@@ -115,7 +117,7 @@ bool MeshletCullPass::prepare(const RenderConfig& config)
     {
         clear_ = bgfx::createProgram(clear_shader, true);
     }
-    parameters_ = bgfx::createUniform("u_meshlet_parameters", bgfx::UniformType::Vec4, 3);
+    parameters_ = bgfx::createUniform("u_meshlet_parameters", bgfx::UniformType::Vec4);
     planes_ = bgfx::createUniform("u_meshlet_planes", bgfx::UniformType::Vec4, 6);
     inputs_ =
         bgfx::createDynamicVertexBuffer(1, GpuGeometry::vector_layout(), BGFX_BUFFER_COMPUTE_READ);
@@ -212,7 +214,7 @@ bool MeshletCullPass::dispatch(const RenderFrameData& frame, const SceneDrawView
         build_frustum_planes(view.view, view.projection, bgfx::getCaps()->homogeneousDepth, planes);
     const bool orthographic = view.projection[15] > 0.5F;
     std::vector<std::array<float, 4>> inputs;
-    std::uint32_t used_pairs = 0, used_commands = 0, used_instances = 0;
+    std::uint32_t used_pairs = 0, used_commands = 0, used_clusters = 0, used_instances = 0;
     struct Work
     {
         const GpuGeometry* geometry;
@@ -220,6 +222,7 @@ bool MeshletCullPass::dispatch(const RenderFrameData& frame, const SceneDrawView
         const schema::MeshletDataT* source;
         std::uint32_t first_cluster, cluster_count, first_input, instance_count;
         std::uint32_t first_command, first_output;
+        std::uint32_t clusters_per_command;
         MeshletDrawRange* output;
     };
     std::vector<Work> work;
@@ -310,13 +313,17 @@ bool MeshletCullPass::dispatch(const RenderFrameData& frame, const SceneDrawView
             }
             inputs[start + 7] = {position[0], position[1], position[2], cone ? 1.0F : 0.0F};
         }
-        batch.meshlets = {commands_,     instances_,
-                          used_commands, range.meshlet_count(),
-                          used_pairs,    static_cast<std::uint32_t>(pairs)};
+        const auto clusters_per_command = count == 1 ? singleton_clusters_per_command : 1U;
+        const auto command_count =
+            (range.meshlet_count() + clusters_per_command - 1) / clusters_per_command;
+        batch.meshlets = {commands_,     instances_, used_commands,
+                          command_count, used_pairs, static_cast<std::uint32_t>(pairs)};
         work.push_back({item.geometry, item.lod, data, range.first_meshlet(), range.meshlet_count(),
-                        first_input, count, used_commands, used_pairs, &batch.meshlets});
+                        first_input, count, used_commands, used_pairs, clusters_per_command,
+                        &batch.meshlets});
         used_pairs += static_cast<std::uint32_t>(pairs);
-        used_commands += range.meshlet_count();
+        used_commands += command_count;
+        used_clusters += range.meshlet_count();
         if (count > 1)
         {
             used_instances = used_pairs;
@@ -337,8 +344,8 @@ bool MeshletCullPass::dispatch(const RenderFrameData& frame, const SceneDrawView
                        capacity_ * 8, GpuGeometry::vector_layout(), BGFX_BUFFER_COMPUTE_READ) ||
         !ensure_buffer(instances_, instance_capacity_, used_instances, capacity_, instance_layout(),
                        BGFX_BUFFER_COMPUTE_WRITE) ||
-        !ensure_buffer(descriptors_, descriptor_capacity_, used_commands * 4, capacity_ * 4,
-                       GpuGeometry::vector_layout(), BGFX_BUFFER_COMPUTE_READ))
+        !ensure_buffer(descriptors_, descriptor_capacity_, used_commands + used_clusters * 3,
+                       capacity_ * 4, GpuGeometry::vector_layout(), BGFX_BUFFER_COMPUTE_READ))
     {
         return fail();
     }
@@ -368,10 +375,22 @@ bool MeshletCullPass::dispatch(const RenderFrameData& frame, const SceneDrawView
     if (layout != descriptor_layout_)
     {
         ENGINE_PROFILE_ZONE("Render.meshletPrepareDescriptors");
-        std::vector<std::array<float, 4>> descriptors;
-        descriptors.reserve(used_commands * 4);
+        // A command header points at the first of its contiguous three-vector cluster records.
+        std::vector<std::array<float, 4>> descriptors(used_commands);
+        descriptors.reserve(used_commands + used_clusters * 3);
         for (const auto& batch : work)
         {
+            for (std::uint32_t first = 0; first < batch.cluster_count;
+                 first += batch.clusters_per_command)
+            {
+                const auto count =
+                    std::min(batch.clusters_per_command, batch.cluster_count - first);
+                const std::array<std::uint32_t, 4> command{
+                    static_cast<std::uint32_t>(descriptors.size()) + first * 3, count,
+                    batch.first_input, batch.instance_count};
+                descriptors[batch.first_command + first / batch.clusters_per_command] =
+                    std::bit_cast<std::array<float, 4>>(command);
+            }
             for (std::uint32_t index = 0; index < batch.cluster_count; ++index)
             {
                 const auto& cluster = batch.source->meshlets[batch.first_cluster + index];
@@ -382,12 +401,10 @@ bool MeshletCullPass::dispatch(const RenderFrameData& frame, const SceneDrawView
                                        static_cast<float>(cluster.cone_axis().y()),
                                        static_cast<float>(cluster.cone_axis().z()),
                                        cluster.cone_cutoff()});
-                descriptors.push_back({std::bit_cast<float>(cluster.first_index()),
-                                       std::bit_cast<float>(cluster.index_count()), 0, 0});
-                const std::array<std::uint32_t, 4> offsets{
-                    batch.first_input, batch.instance_count,
-                    batch.first_output + index * batch.instance_count, 0};
-                descriptors.push_back(std::bit_cast<std::array<float, 4>>(offsets));
+                descriptors.push_back(
+                    {std::bit_cast<float>(cluster.first_index()),
+                     std::bit_cast<float>(cluster.index_count()),
+                     std::bit_cast<float>(batch.first_output + index * batch.instance_count), 0});
             }
         }
         if (!descriptors.empty())
@@ -418,12 +435,9 @@ bool MeshletCullPass::dispatch(const RenderFrameData& frame, const SceneDrawView
     for (std::uint32_t first = 0; first < used_commands; first += maximum_groups)
     {
         const auto count = std::min(maximum_groups, used_commands - first);
-        std::array<float, 12> parameters{};
-        parameters[0] = std::bit_cast<float>(first);
-        parameters[8] = frustum ? 1.0F : 0.0F;
-        parameters[9] = orthographic ? 1.0F : 0.0F;
-        parameters[10] = readback ? 1.0F : 0.0F;
-        bgfx::setUniform(parameters_, parameters.data(), 3);
+        const std::array<float, 4> parameters{std::bit_cast<float>(first), frustum ? 1.0F : 0.0F,
+                                              orthographic ? 1.0F : 0.0F, readback ? 1.0F : 0.0F};
+        bgfx::setUniform(parameters_, parameters.data());
         bgfx::setUniform(planes_, planes.data(), 6);
         bgfx::setBuffer(0, descriptors_, bgfx::Access::Read);
         bgfx::setBuffer(1, inputs_, bgfx::Access::Read);

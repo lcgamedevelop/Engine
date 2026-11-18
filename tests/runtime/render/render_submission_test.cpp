@@ -675,7 +675,8 @@ int test()
     const bool meshlet_supported = (bgfx::getCaps()->supported & meshlet_caps) == meshlet_caps &&
                                    bgfx::getCaps()->limits.maxInstanceData >= 7 &&
                                    bgfx::getCaps()->limits.maxComputeBindings >= 5;
-    const auto meshlet_pixels = [&](const SceneCaptureImage& reference, const char* message)
+    const auto meshlet_pixels = [&](const SceneCaptureImage& reference, const char* message,
+                                    bool verify_merged_singletons = false)
     {
         const auto ordinary_compute = bgfx::getStats()->numCompute;
         auto settings = test_support::read_settings(environment);
@@ -688,6 +689,10 @@ int test()
             !capture(window, renderer, image, stats) || !pixels(reference, image, message) ||
             !expect(!meshlet_supported || stats.indirect_batches > 0,
                     "compatible geometry uses actual GPU indirect submissions") ||
+            !expect(!verify_merged_singletons || !meshlet_supported ||
+                        (stats.indirect_commands == stats.indirect_batches &&
+                         stats.meshlet_candidate_pairs == stats.indirect_batches * 2),
+                    "consecutive singleton clusters share one command without losing candidates") ||
             !expect(!meshlet_supported || bgfx::getStats()->numCompute <= ordinary_compute + 1,
                     "all prepared batches share one culling dispatch"))
         {
@@ -701,7 +706,7 @@ int test()
         return 1;
     }
     if (!set_instancing(meshes, false) ||
-        !meshlet_pixels(culled, "unified culling preserves singleton batch pixels") ||
+        !meshlet_pixels(culled, "merged singleton commands preserve every pixel", true) ||
         !set_instancing(meshes, true))
     {
         return 1;
