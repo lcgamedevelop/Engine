@@ -286,12 +286,8 @@ bool AmbientOcclusionPass::prepare(std::uint16_t width, std::uint16_t height)
         handle = bgfx::createTexture2D(half_width, half_height, true, 1, bgfx::TextureFormat::R16F,
                                        BGFX_TEXTURE_COMPUTE_WRITE | point_clamp);
     }
-    for (auto& handle : ping_pong_)
-    {
-        // Two layers ensure an array texture; the transient ping-pong data uses layer zero.
-        handle = bgfx::createTexture2D(half_width, half_height, false, 2, bgfx::TextureFormat::RG8,
-                                       BGFX_TEXTURE_COMPUTE_WRITE);
-    }
+    blur_results_ = bgfx::createTexture2D(half_width, half_height, false, 4,
+                                          bgfx::TextureFormat::RG8, BGFX_TEXTURE_COMPUTE_WRITE);
     final_results_ =
         bgfx::createTexture2D(half_width, half_height, false, 4, bgfx::TextureFormat::RG8,
                               BGFX_TEXTURE_COMPUTE_WRITE | linear_clamp);
@@ -300,8 +296,7 @@ bool AmbientOcclusionPass::prepare(std::uint16_t width, std::uint16_t height)
     if (!bgfx::isValid(normals_) || !bgfx::isValid(final_results_) || !bgfx::isValid(ao_) ||
         !std::all_of(half_depths_.begin(), half_depths_.end(),
                      [](auto handle) { return bgfx::isValid(handle); }) ||
-        !std::all_of(ping_pong_.begin(), ping_pong_.end(),
-                     [](auto handle) { return bgfx::isValid(handle); }))
+        !bgfx::isValid(blur_results_))
     {
         SDL_LogError(SDL_LOG_CATEGORY_RENDER, "Cannot allocate ASSAO frame textures");
         release();
@@ -361,33 +356,34 @@ bool AmbientOcclusionPass::compute(const CameraSettings& camera, const RenderSet
                        (mip_width + 7U) / 8U, (mip_height + 7U) / 8U);
     }
 
-    // bgfx compute sort keys preserve submission order within the view. Each phase consumes
-    // its prepared depth and writes its own final layer, sharing the two transient blur arrays.
+    // Generate the independent layers first, then blur all layers with each dispatch.
     for (std::uint16_t pass = 0; pass < 4; ++pass)
     {
         set_phase(uniforms, pass, bgfx::getCaps()->originBottomLeft);
-        uniforms[14][3] = 0.0F;
+        uniforms[14][3] = static_cast<float>(pass);
         bgfx::setUniform(parameters_, uniforms.data(), uniform_count);
         bgfx::setUniform(rectangle_, half_rect);
         bgfx::setTexture(0, samplers_[view_depth_sampler], half_depths_[pass], point_clamp);
         bgfx::setTexture(1, samplers_[mirror_depth_sampler], half_depths_[pass], point_mirror);
         bgfx::setImage(2, normals_, 0, bgfx::Access::Read, bgfx::TextureFormat::RGBA8);
-        bgfx::setImage(6, ping_pong_[0], 0, bgfx::Access::Write, bgfx::TextureFormat::RG8);
+        bgfx::setImage(6, final_results_, 0, bgfx::Access::Write, bgfx::TextureFormat::RG8);
         bgfx::dispatch(ambient_occlusion_compute_view, programs_[generate_program], half_groups_x,
                        half_groups_y);
-
-        for (std::size_t blur = 0; blur < 2; ++blur)
-        {
-            uniforms[14][3] = blur == 0 ? 0.0F : static_cast<float>(pass);
-            bgfx::setUniform(parameters_, uniforms.data(), uniform_count);
-            bgfx::setUniform(rectangle_, half_rect);
-            bgfx::setTexture(1, samplers_[blur_sampler], ping_pong_[blur], point_mirror);
-            bgfx::setImage(0, blur == 0 ? ping_pong_[1] : final_results_, 0, bgfx::Access::Write,
-                           bgfx::TextureFormat::RG8);
-            bgfx::dispatch(ambient_occlusion_compute_view, programs_[blur_program], half_groups_x,
-                           half_groups_y);
-        }
     }
+    bgfx::setUniform(parameters_, uniforms.data(), uniform_count);
+    bgfx::setUniform(rectangle_, half_rect);
+    bgfx::setTexture(1, samplers_[blur_sampler], final_results_, point_mirror);
+    bgfx::setImage(0, blur_results_, 0, bgfx::Access::Write, bgfx::TextureFormat::RG8);
+    bgfx::dispatch(ambient_occlusion_compute_view, programs_[blur_program], half_groups_x,
+                   half_groups_y, 4);
+
+    bgfx::setUniform(parameters_, uniforms.data(), uniform_count);
+    bgfx::setUniform(rectangle_, half_rect);
+    bgfx::setTexture(1, samplers_[blur_sampler], blur_results_, point_mirror);
+    bgfx::setImage(0, final_results_, 0, bgfx::Access::Write, bgfx::TextureFormat::RG8);
+    bgfx::dispatch(ambient_occlusion_compute_view, programs_[blur_program], half_groups_x,
+                   half_groups_y, 4);
+
     const float full_rect[] = {0.0F, 0.0F, static_cast<float>(viewport_width_),
                                static_cast<float>(viewport_height_)};
     bgfx::setUniform(parameters_, uniforms.data(), uniform_count);
@@ -423,16 +419,13 @@ std::uint32_t AmbientOcclusionPass::resource_count() const noexcept
     {
         count += static_cast<std::uint32_t>(bgfx::isValid(handle));
     }
-    for (auto handle : ping_pong_)
-    {
-        count += static_cast<std::uint32_t>(bgfx::isValid(handle));
-    }
+    count += static_cast<std::uint32_t>(bgfx::isValid(blur_results_));
     return count;
 }
 
 void AmbientOcclusionPass::release_textures() noexcept
 {
-    for (auto* handle : {&normals_, &final_results_, &ao_})
+    for (auto* handle : {&normals_, &blur_results_, &final_results_, &ao_})
     {
         if (bgfx::isValid(*handle))
         {
@@ -441,14 +434,6 @@ void AmbientOcclusionPass::release_textures() noexcept
         }
     }
     for (auto& handle : half_depths_)
-    {
-        if (bgfx::isValid(handle))
-        {
-            bgfx::destroy(handle);
-            handle = BGFX_INVALID_HANDLE;
-        }
-    }
-    for (auto& handle : ping_pong_)
     {
         if (bgfx::isValid(handle))
         {

@@ -48,7 +48,7 @@ private:
     bgfx::TextureHandle normals_ = BGFX_INVALID_HANDLE;
     std::array<bgfx::TextureHandle, 4> half_depths_ = {
         {BGFX_INVALID_HANDLE, BGFX_INVALID_HANDLE, BGFX_INVALID_HANDLE, BGFX_INVALID_HANDLE}};
-    std::array<bgfx::TextureHandle, 2> ping_pong_ = {{BGFX_INVALID_HANDLE, BGFX_INVALID_HANDLE}};
+    bgfx::TextureHandle blur_results_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle final_results_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle ao_ = BGFX_INVALID_HANDLE;
     std::uint16_t width_ = 0;
