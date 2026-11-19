@@ -2,7 +2,7 @@
 """Validate standalone render cases through actual MCP, RmlUi and TS without performance scores.
 
 Connect to an imported showcase editor without starting or closing it.
-Use 384 fixed objects and same-camera submission counts; keep captures and receipts in the project cache.
+Use 384 fixed objects and same-camera submission counts; keep captures and receipts in the configured record storage.
 """
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ import zlib
 
 from mcp_interaction_test import (PROJECT, EditorMcpSession, capture_for_review, click, execute,
                                   get_status, lifecycle, require, wait_for)
+from record_storage import record_path
 
 
 READ = """
@@ -536,7 +537,7 @@ def main():
         parser.error("--timeout must be positive")
     label = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8]
     directory = {"rendering": "render-features", "meshlets": "meshlet-culling", "vsm": "virtual-shadows"}[args.case]
-    output = PROJECT / "cache" / "visual-tests" / directory / label
+    output = record_path("records/validation/showcase/visual-tests") / directory / label
     output.mkdir(parents=True, exist_ok=False)
     results = {"passed": False, "case": args.case,
                "timingsCollected": False}

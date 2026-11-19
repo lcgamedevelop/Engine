@@ -27,7 +27,7 @@ python3 projects/showcase/tests/render_features_test.py \
 
 复用现有编辑器 MCP 会话和截图流程，依次检查固定镜头预热、静止无重绘、移动箱体引起失效、
 六种调试视图、非法级别拒绝、关闭回收、重新开启新代次和返回菜单清理。
-图像与 `result.json`、`receipts.jsonl` 保存在 `cache/visual-tests/virtual-shadows/<run-id>/`，不进入 Git。
+图像与 `result.json`、`receipts.jsonl` 保存在记录根目录的 `records/validation/showcase/visual-tests/virtual-shadows/<run-id>/`。 [记录目录配置](../../../docs/runtime/performance.md)
 每张图保留实际提交帧、VSM generation/view/demand/cache/debug 修订，不将命令受理当成 GPU 完成。
 
 原生回归还检查页面预算、取消未发布页面、旧反馈拒绝、动态物体旧/新范围失效、

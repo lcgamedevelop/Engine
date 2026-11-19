@@ -40,13 +40,13 @@ vec3 point_shadow_ray(uint face, vec2 ndc)
     return normalize(forward + right * ndc.x + up * ndc.y);
 }
 
-float local_shadow_visibility(ClusterLightData light, vec3 world_position)
+float local_shadow_visibility(ClusterLightData light, vec3 world_position,
+                              vec3 receiver_offset, float radial_distance)
 {
     if (light.kind_inner.z < 0.5) return 1.0;
     uint first = uint(light.kind_inner.z) - 1u;
     bool is_point = light.kind_inner.w > 1.5;
-    vec3 direction = world_position - light.position_range.xyz;
-    uint face = is_point ? point_shadow_face(direction) : 0u;
+    uint face = is_point ? point_shadow_face(receiver_offset) : 0u;
     uint record = first + face;
     vec4 position = local_shadow_project(record, world_position);
     if (position.w <= 0.0) return 1.0;
@@ -58,14 +58,12 @@ float local_shadow_visibility(ClusterLightData light, vec3 world_position)
     vec4 parameters = b_light_data[base + 5];
     vec2 texel_step = parameters.y / rectangle.zw;
     vec2 half_texel = vec2_splat(parameters.y * 0.5);
-    float radial_distance = 0.0;
     float depth_scale = 0.0;
     float depth_offset = 0.0;
     if (is_point)
     {
-        radial_distance = length(direction);
-        depth_scale = parameters.w / (parameters.w - parameters.z);
-        depth_offset = depth_scale * parameters.z / radial_distance;
+        depth_scale = parameters.z;
+        depth_offset = parameters.w / radial_distance;
     }
     float visible = 0.0;
     for (int x = 0; x < 4; ++x)

@@ -2,7 +2,7 @@
 """Validate actual MCP, Gameplay and RmlUi interactions in a running showcase editor.
 
 The caller starts the editor; close_editor shuts it down normally after successful checks.
-Write receipts only under the project cache, keep temporary TS out of assets and use UI input for Model updates.
+Write receipts only under the configured record storage, keep temporary TS out of assets and use UI input for Model updates.
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ ROOT = Path(__file__).resolve().parents[3]
 PROJECT = ROOT / "projects" / "showcase"
 sys.path.insert(0, str(ROOT / "scripts"))
 from editor_mcp_session import EditorMcpSession
+from record_storage import record_path
 
 
 IDENTITY_WRITE = """
@@ -224,7 +225,7 @@ def click(session, element_id):
 
 
 def capture_for_review(session, results, output, name):
-    relative = (output / f"{name}.png").relative_to(PROJECT / "cache")
+    relative = (output / f"{name}.png").relative_to(session.capture_root)
     captures = session.capture_scene(str(relative))
     results.setdefault("captures", []).extend(captures)
     capture = captures[-1]
@@ -356,7 +357,7 @@ def main():
     if args.timeout <= 0:
         parser.error("--timeout must be positive")
     label = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8]
-    output = PROJECT / "cache" / "mcp-interaction" / label
+    output = record_path("records/validation/showcase/mcp-interaction") / label
     output.mkdir(parents=True, exist_ok=False)
     results = {"project": str(PROJECT), "runtimeDir": str(args.runtime_dir.resolve()),
                "passed": False}

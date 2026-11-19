@@ -14,6 +14,7 @@ BUFFER_RO(b_cluster_indices, uint, 7);
 
 uniform vec4 u_cluster_grid;
 uniform vec4 u_cluster_camera;
+// Total lights, cluster capacity, shadow record offset, directional prefix length.
 uniform vec4 u_cluster_counts;
 
 struct ClusterLightData
@@ -44,17 +45,19 @@ void cluster_range(vec2 pixel, float view_depth, out uint offset, out uint count
                      u_cluster_grid.z / log2(u_cluster_camera.y / u_cluster_camera.x));
     z = clamp(z, 0.0, u_cluster_grid.z - 1.0);
     uint cluster = uint(xy.x + u_cluster_grid.x * (xy.y + u_cluster_grid.y * z));
-    uint base = cluster * (uint(u_cluster_counts.y) + 1u);
+    uint base = cluster * (1u + (uint(u_cluster_counts.y) + 1u) / 2u);
     count = b_cluster_indices[base];
     overflow = count == 0xffffffffu;
-    // The caller filters directional lights in this loop; those are evaluated separately.
-    count = overflow ? uint(u_cluster_counts.x) : count;
-    offset = base + 1u;
+    uint first_local = uint(u_cluster_counts.w);
+    count = overflow ? uint(u_cluster_counts.x) - first_local : count;
+    offset = overflow ? first_local : base + 1u;
 }
 
 uint cluster_light_index(uint offset, uint ordinal, bool overflow)
 {
-    return overflow ? ordinal : b_cluster_indices[offset + ordinal];
+    if (overflow) return offset + ordinal;
+    uint pair = b_cluster_indices[offset + ordinal / 2u];
+    return (pair >> ((ordinal & 1u) * 16u)) & 0xffffu;
 }
 
 #endif
