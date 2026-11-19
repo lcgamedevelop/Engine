@@ -1,5 +1,7 @@
 #include "runtime/render/render_system.hpp"
 
+#include "runtime/performance/profiling.hpp"
+
 #include "runtime/render/passes/debug_draw_pass.hpp"
 #include "runtime/render/passes/meshlet_cull_pass.hpp"
 #include "runtime/render/render_constants.hpp"
@@ -74,7 +76,7 @@ bool RenderSystem::set_debug_feature(RenderFeature feature, bool enabled)
     debug_requests_[index] = enabled;
     if (feature == RenderFeature::stats && renderer_initialized_)
     {
-        bgfx::setDebug(enabled ? BGFX_DEBUG_STATS : BGFX_DEBUG_NONE);
+        apply_debug_state();
     }
     if (feature == RenderFeature::debug_draw && !enabled)
     {
@@ -207,6 +209,7 @@ void RenderSystem::clear_debug_lines() noexcept
 
 void RenderSystem::publish_features() noexcept
 {
+    ENGINE_PROFILE_ZONE("Render.publishState");
     feature_applied_.fill(false);
     feature_applied_[static_cast<std::size_t>(RenderFeature::stats)] =
         debug_requests_[static_cast<std::size_t>(RenderFeature::stats)];

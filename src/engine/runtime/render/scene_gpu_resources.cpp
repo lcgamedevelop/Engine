@@ -66,7 +66,6 @@ bool RenderSystem::SceneGpuResources::initialize()
         bgfx::createUniform("u_shadow_params", bgfx::UniformFreq::View, bgfx::UniformType::Vec4);
     shadow_settings =
         bgfx::createUniform("u_shadow_settings", bgfx::UniformFreq::View, bgfx::UniformType::Vec4);
-    shadow_depth = bgfx::createUniform("u_shadow_depth", bgfx::UniformType::Vec4);
     shadow_sampler = bgfx::createUniform("s_shadow_map", bgfx::UniformType::Sampler);
     ibl_params =
         bgfx::createUniform("u_ibl_params", bgfx::UniformFreq::View, bgfx::UniformType::Vec4);
@@ -101,7 +100,6 @@ bool RenderSystem::SceneGpuResources::initialize()
                          shadow_splits,
                          shadow_params,
                          shadow_settings,
-                         shadow_depth,
                          shadow_sampler,
                          ibl_params,
                          ibl_irradiance_sampler,
@@ -202,7 +200,6 @@ void RenderSystem::SceneGpuResources::release() noexcept
                          shadow_splits,
                          shadow_params,
                          shadow_settings,
-                         shadow_depth,
                          shadow_sampler,
                          ibl_params,
                          ibl_irradiance_sampler,
@@ -242,7 +239,6 @@ void RenderSystem::SceneGpuResources::release() noexcept
     shadow_splits = BGFX_INVALID_HANDLE;
     shadow_params = BGFX_INVALID_HANDLE;
     shadow_settings = BGFX_INVALID_HANDLE;
-    shadow_depth = BGFX_INVALID_HANDLE;
     shadow_sampler = BGFX_INVALID_HANDLE;
     shadow_fallback = BGFX_INVALID_HANDLE;
     ibl_params = BGFX_INVALID_HANDLE;
@@ -257,6 +253,7 @@ void RenderSystem::SceneGpuResources::release() noexcept
     meshes.clear();
     mesh_index.clear();
     geometries.clear();
+    static_vertex_pages.clear();
     skinning.release();
     textures.clear();
 }
@@ -289,7 +286,6 @@ std::uint32_t RenderSystem::SceneGpuResources::resource_count() const noexcept
                           static_cast<std::uint32_t>(bgfx::isValid(shadow_splits)) +
                           static_cast<std::uint32_t>(bgfx::isValid(shadow_params)) +
                           static_cast<std::uint32_t>(bgfx::isValid(shadow_settings)) +
-                          static_cast<std::uint32_t>(bgfx::isValid(shadow_depth)) +
                           static_cast<std::uint32_t>(bgfx::isValid(shadow_sampler)) +
                           static_cast<std::uint32_t>(bgfx::isValid(shadow_fallback)) +
                           static_cast<std::uint32_t>(bgfx::isValid(ibl_params)) +
@@ -354,6 +350,10 @@ std::uint32_t RenderSystem::SceneGpuResources::resource_count() const noexcept
             count += geometry->resource_count();
         }
     }
+    for (const auto& page : static_vertex_pages)
+    {
+        count += page.expired() ? 0U : 2U;
+    }
     for (const auto& [source, texture] : textures)
     {
         count += static_cast<std::uint32_t>(bgfx::isValid(texture.handle));
@@ -363,8 +363,16 @@ std::uint32_t RenderSystem::SceneGpuResources::resource_count() const noexcept
         count += static_cast<std::uint32_t>(bgfx::isValid(program.vertex_shader)) +
                  static_cast<std::uint32_t>(bgfx::isValid(program.fragment_shader)) +
                  static_cast<std::uint32_t>(bgfx::isValid(program.program)) +
+                 static_cast<std::uint32_t>(bgfx::isValid(program.pbr_opaque_shader)) +
+                 static_cast<std::uint32_t>(bgfx::isValid(program.pbr_opaque_program)) +
+                 static_cast<std::uint32_t>(bgfx::isValid(program.instanced_pbr_opaque_program)) +
                  static_cast<std::uint32_t>(bgfx::isValid(program.surface_shader)) +
                  static_cast<std::uint32_t>(bgfx::isValid(program.surface_program)) +
+                 static_cast<std::uint32_t>(bgfx::isValid(program.depth_shader)) +
+                 static_cast<std::uint32_t>(bgfx::isValid(program.depth_program)) +
+                 static_cast<std::uint32_t>(bgfx::isValid(program.instanced_depth_program)) +
+                 static_cast<std::uint32_t>(bgfx::isValid(program.solid_depth_program)) +
+                 static_cast<std::uint32_t>(bgfx::isValid(program.instanced_solid_depth_program)) +
                  static_cast<std::uint32_t>(bgfx::isValid(program.instanced_vertex_shader)) +
                  static_cast<std::uint32_t>(bgfx::isValid(program.instanced_program)) +
                  static_cast<std::uint32_t>(bgfx::isValid(program.instanced_surface_program));

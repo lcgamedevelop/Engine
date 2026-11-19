@@ -121,6 +121,10 @@ bool VsmDebugView::draw(const VsmStatus& status, const VirtualShadowPass* pass,
     float projection[16];
     bx::mtxOrtho(projection, 0, width, height, 0, 0, 1000, 0, bgfx::getCaps()->homogeneousDepth);
     bgfx::setViewTransform(vsm_debug_view, nullptr, projection);
+    if (lighting)
+    {
+        lighting->bind_view(vsm_debug_view, true);
+    }
     struct Vertex
     {
         float x, y, z, u, v;

@@ -109,7 +109,8 @@ public:
     [[nodiscard]] bool read(const schema::FileLocationT& location, std::uint64_t offset,
                             std::uint64_t size, ByteBuffer& output);
     [[nodiscard]] static bool read_file(const std::filesystem::path& path, ByteBuffer& output,
-                                        std::string* error = nullptr);
+                                        std::string* error = nullptr,
+                                        std::uint64_t maximum_bytes = 64U * 1024U * 1024U);
     [[nodiscard]] static bool write_file(const std::filesystem::path& path, ByteView bytes,
                                          std::string& error);
     [[nodiscard]] static bool stat(const std::filesystem::path& path, FileEntry& output,

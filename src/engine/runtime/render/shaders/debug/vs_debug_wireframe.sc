@@ -4,19 +4,20 @@ $output v_color
  * Vertex pulling and screen-space edge expansion adapted from bgfx 28-wireframe,
  * b2513038f4b753ebeced40821c193978daa0492f.
  * Copyright 2026 Alessandro Muntoni. BSD-2-Clause; third_party/notices/bgfx-debugdraw.md.
- * Engine buffers use uint32 indices and the actual packed vertex stride.
+ * Engine buffers carry their index width and the actual packed vertex stride.
  */
 #include <bgfx_shader.sh>
 #include <bgfx_compute.sh>
 
 BUFFER_RAW_RO(positions, 0);
 BUFFER_RAW_RO(indices, 1);
+#include "debug_indices.sh"
 uniform vec4 u_debug_wire_parameters;
 uniform vec4 u_debug_wire_color;
 
 vec3 positionAt(uint index)
 {
-    uint offset = index * uint(u_debug_wire_parameters.x);
+    uint offset = (index + uint(u_debug_wire_parameters.w)) * uint(u_debug_wire_parameters.x);
     return vec3(rawLoadFloat(positions, offset), rawLoadFloat(positions, offset + 1u),
                 rawLoadFloat(positions, offset + 2u));
 }
@@ -26,8 +27,9 @@ void main()
     uint lineIndex = gl_VertexID / 6u;
     uint edgeIndex = lineIndex % 3u;
     uint triFirst = lineIndex - edgeIndex;
-    uint a = rawLoadUint(indices, triFirst + edgeIndex);
-    uint b = rawLoadUint(indices, triFirst + ((edgeIndex + 1u) % 3u));
+    bool shortIndices = u_debug_wire_parameters.z > 0.5;
+    uint a = geometryIndex(triFirst + edgeIndex, shortIndices);
+    uint b = geometryIndex(triFirst + ((edgeIndex + 1u) % 3u), shortIndices);
     vec4 p0 = mul(u_modelViewProj, vec4(positionAt(a), 1.0));
     vec4 p1 = mul(u_modelViewProj, vec4(positionAt(b), 1.0));
     const float nearEpsilon = 0.001;

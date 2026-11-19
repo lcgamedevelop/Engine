@@ -6,6 +6,7 @@
 #include "runtime/font/font_system.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/render/passes/meshlet_cull_pass.hpp"
+#include "runtime/render/passes/planar_reflection_math.hpp"
 #include "runtime/render/render_constants.hpp"
 #include "runtime/render/render_context.hpp"
 #include "runtime/render/render_extension.hpp"
@@ -34,6 +35,57 @@
 
 namespace engine
 {
+namespace
+{
+render_detail::PlanarReflectionScissor
+reflection_scissor(const render_detail::PlanarReflectionPass& target,
+                   const render_detail::RenderFrameData& frame)
+{
+    const auto receiver =
+        std::find_if(frame.meshes.begin(), frame.meshes.end(),
+                     [&](const auto& mesh) { return mesh.gpu->node_id == target.node_id; });
+    if (receiver == frame.meshes.end() || bgfx::isValid(receiver->gpu->deformed_vertices))
+    {
+        return {};
+    }
+    bool samples_reflection = false;
+    float distortion = 0;
+    for (const auto& material : receiver->gpu->materials)
+    {
+        if (!std::any_of(
+                material.samplers.begin(), material.samplers.end(), [](const auto& sampler)
+                { return sampler.source == schema::ShaderTextureSource::planar_reflection; }))
+        {
+            continue;
+        }
+        const auto* program = material.program;
+        if (!program || program->path != "builtin://shaders/water")
+        {
+            return {};
+        }
+        const auto uniform =
+            std::find_if(program->uniforms.begin(), program->uniforms.end(),
+                         [](const auto& item) { return item.name == "u_water_parameters"; });
+        const auto index = static_cast<std::size_t>(uniform - program->uniforms.begin());
+        if (uniform == program->uniforms.end() || index >= material.values.size() ||
+            !std::isfinite(material.values[index][0]))
+        {
+            return {};
+        }
+        // fs_water adds a normalized normal's xy scaled by 0.025 and refractionStrength.
+        distortion = std::max(distortion, 0.025002F * std::abs(material.values[index][0]));
+        samples_reflection = true;
+    }
+    if (!samples_reflection)
+    {
+        return {};
+    }
+    return render_detail::planar_receiver_scissor(
+        receiver->model.data(), target.view_projection.data(), receiver->gpu->minimum,
+        receiver->gpu->maximum, distortion, target.width, target.height);
+}
+} // namespace
+
 bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& rendering)
 {
     ENGINE_PROFILE_ZONE("Render.drawScene");
@@ -111,6 +163,7 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
         {
             continue;
         }
+        ENGINE_PROFILE_ZONE("Render.planarViewSubmit");
         const auto node = world_->find_node(target.node_id);
         const auto base = static_cast<bgfx::ViewId>(3 + index * 39);
         render_detail::SceneDrawView draw;
@@ -123,6 +176,18 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
         draw.world = target.world.data();
         draw.view = target.view.data();
         draw.projection = target.projection.data();
+        const auto scissor = reflection_scissor(target, resources.frame_data);
+        const auto cropped_projection =
+            scissor.width != 0 ? render_detail::planar_culling_projection(
+                                     target.projection, scissor, draw.width, draw.height)
+                               : std::array<float, 16>{};
+        if (scissor.width != 0)
+        {
+            draw.culling_projection = cropped_projection.data();
+        }
+        ENGINE_PROFILE_PLOT("Render.planarCapturePixels",
+                            std::int64_t{scissor.width != 0 ? scissor.width : draw.width} *
+                                (scissor.width != 0 ? scissor.height : draw.height));
         draw.reflection = true;
         draw.frustum_culling_enabled = settings.frustum_culling_enabled;
         draw.lod_observer = {camera.instance_id(),
@@ -135,15 +200,36 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
         {
             return false;
         }
-        target.begin(draw.id, rendering.clear_color);
+        auto& list = resources.draw_lists[index];
+        if (!resources.collect_view(resources.frame_data, draw, list))
+        {
+            return false;
+        }
+        const auto color_view = draw.id;
+        const auto depth_view = render_detail::planar_depth_views[index];
+        draw.opaque_depth_prepared =
+            draw.multisampling &&
+            render_detail::can_submit_opaque_depth(resources.frame_data, list) &&
+            target.begin_opaque_depth(depth_view, scissor);
+        if (draw.opaque_depth_prepared)
+        {
+            ENGINE_PROFILE_ZONE("Render.planarDepthSubmit");
+            draw.id = depth_view;
+            if (!resources.draw_meshes(resources.frame_data, list, rendering, draw,
+                                       render_detail::SceneDrawMode::depth))
+            {
+                return false;
+            }
+        }
+        draw.id = color_view;
+        target.begin(draw.id, rendering.clear_color, draw.opaque_depth_prepared, scissor);
         if (!resources.atmosphere.draw(scene->id(), rendering, draw, index,
                                        static_cast<bgfx::ViewId>(base + 29)))
         {
             return false;
         }
-        if (!resources.collect_view(resources.frame_data, draw, resources.draw_lists[index]) ||
-            !resources.draw_meshes(resources.frame_data, resources.draw_lists[index], rendering,
-                                   draw, render_detail::SceneDrawMode::opaque))
+        if (!resources.draw_meshes(resources.frame_data, list, rendering, draw,
+                                   render_detail::SceneDrawMode::opaque))
         {
             return false;
         }
@@ -185,12 +271,15 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
     }
     if (vsm_batch.generation)
     {
+        const auto& shadow_pass = resources.targets().shadow;
+        draw.vsm.local_range_layout = vsm_pass_->submit_local_depth_ranges(
+            shadow_pass.texture(), shadow.local_records, shadow_pass.local_depth_revision());
         if (!vsm_cache_->publish(vsm_batch, submission_sequence_ + 1))
         {
             return false;
         }
         (void)vsm_cache_->status(vsm_status_);
-        vsm_status_.resident_bytes = draw.vsm.resident_bytes + vsm_batch.gpu_data.size() * 16;
+        vsm_status_.resident_bytes = draw.vsm.resident_bytes + vsm_batch.page_table.size() * 16;
     }
     if (!resources.collect_view(resources.frame_data, draw, resources.draw_lists[2]))
     {
@@ -211,49 +300,99 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
     {
         meshlet_culling_->reset_scene();
     }
-    resources.targets().surface_pass.begin(view, projection);
-    draw.id = render_detail::ambient_occlusion_depth_view;
-    if (!resources.draw_meshes(resources.frame_data, resources.draw_lists[2], rendering, draw,
-                               render_detail::SceneDrawMode::depth))
+    auto& surface = resources.targets().surface_pass;
+    auto& list = resources.draw_lists[2];
+    draw.surface_writes_depth = surface.can_combine_depth(resources.frame_data, list);
+    ENGINE_PROFILE_PLOT("Render.sceneSurfaceCombined",
+                        static_cast<std::int64_t>(draw.surface_writes_depth));
+    surface.begin(view, projection, draw.surface_writes_depth);
+    const auto submit_surface = [&]
+    {
+        ENGINE_PROFILE_ZONE("Render.surfaceSubmit");
+        draw.id = render_detail::surface_view;
+        return resources.draw_meshes(resources.frame_data, list, rendering, draw,
+                                     render_detail::SceneDrawMode::surface);
+    };
+    {
+        ENGINE_PROFILE_ZONE("Render.depthSubmit");
+        if (draw.surface_writes_depth)
+        {
+            if (!submit_surface())
+            {
+                return false;
+            }
+        }
+        else
+        {
+            draw.id = render_detail::ambient_occlusion_depth_view;
+            if (!resources.draw_meshes(resources.frame_data, list, rendering, draw,
+                                       render_detail::SceneDrawMode::depth))
+            {
+                return false;
+            }
+        }
+    }
+    if (rendering.ssr_enabled && !draw.surface_writes_depth && !submit_surface())
     {
         return false;
     }
-    draw.id = render_detail::surface_view;
-    if (!resources.draw_meshes(resources.frame_data, resources.draw_lists[2], rendering, draw,
-                               render_detail::SceneDrawMode::surface))
-    {
-        return false;
-    }
+    const auto depth_revision =
+        (rendering.ao_enabled || rendering.ssr_enabled || vsm_batch.generation)
+            ? surface.identify_depth(draw, resources.frame_data, list)
+            : 0;
     if (vsm_batch.generation &&
-        !vsm_pass_->submit_feedback(vsm_batch.view, resources.targets().surface_pass.depth(),
+        !vsm_pass_->submit_feedback(vsm_batch.view, surface.depth(), surface.depth_inputs(),
                                     submission_sequence_ + 1))
     {
         return false;
     }
-    if (rendering.ao_enabled &&
-        !resources.targets().ambient_occlusion.compute(settings, rendering, projection,
-                                                       resources.targets().surface_pass.depth()))
+    if (rendering.ao_enabled)
     {
-        return false;
+        ENGINE_PROFILE_ZONE("Render.aoSubmit");
+        if (!resources.targets().ambient_occlusion.compute(settings, rendering, projection,
+                                                           surface.depth(), depth_revision))
+        {
+            return false;
+        }
+    }
+    draw.multisampling = config_.msaa_samples > 1;
+    auto& hdr = resources.targets().hdr_post_process;
+    draw.opaque_depth_prepared =
+        draw.multisampling && render_detail::can_submit_opaque_depth(resources.frame_data, list) &&
+        hdr.begin_opaque_depth(view, projection);
+    ENGINE_PROFILE_PLOT("Render.opaqueDepthReuse",
+                        static_cast<std::int64_t>(draw.opaque_depth_prepared));
+    if (draw.opaque_depth_prepared)
+    {
+        ENGINE_PROFILE_ZONE("Render.opaqueDepthSubmit");
+        draw.id = render_detail::opaque_depth_view;
+        if (!resources.draw_meshes(resources.frame_data, list, rendering, draw,
+                                   render_detail::SceneDrawMode::depth))
+        {
+            return false;
+        }
     }
     draw.id = render_detail::main_view;
-    draw.multisampling = config_.msaa_samples > 1;
     draw.ambient_occlusion = rendering.ao_enabled;
     bgfx::setViewTransform(draw.id, view, projection);
-    resources.targets().hdr_post_process.begin_scene(rendering.clear_color);
+    hdr.begin_scene(rendering.clear_color, draw.opaque_depth_prepared);
     if (!resources.atmosphere.draw(scene->id(), rendering, draw, 2,
                                    render_detail::atmosphere_main_skyview))
     {
         return false;
     }
-    if (!resources.draw_meshes(resources.frame_data, resources.draw_lists[2], rendering, draw,
-                               render_detail::SceneDrawMode::opaque))
     {
-        return false;
+        ENGINE_PROFILE_ZONE("Render.opaqueSubmit");
+        if (!resources.draw_meshes(resources.frame_data, resources.draw_lists[2], rendering, draw,
+                                   render_detail::SceneDrawMode::opaque))
+        {
+            return false;
+        }
     }
     auto frozen_scene = resources.targets().hdr_post_process.opaque_color();
     if (rendering.ssr_enabled)
     {
+        ENGINE_PROFILE_ZONE("Render.ssrSubmit");
         // Match the main PBR pass: disabling IBL selects the analytical DFG
         // fallback even when an earlier bake has left its LUT loaded.
         const bgfx::TextureHandle reflection_lut =
@@ -262,10 +401,9 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
                 : bgfx::TextureHandle{bgfx::kInvalidHandle};
         if (!resources.targets().reflections.render(
                 view, projection, frozen_scene,
-                resources.targets().hdr_post_process.opaque_specular(),
-                resources.targets().surface_pass.depth(),
-                resources.targets().surface_pass.normal_roughness(),
-                resources.targets().surface_pass.specular(), reflection_lut, rendering))
+                resources.targets().hdr_post_process.opaque_specular(), surface.depth(),
+                surface.normal_roughness(), surface.specular(), reflection_lut, rendering,
+                depth_revision))
         {
             return false;
         }
@@ -274,11 +412,14 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
     resources.targets().hdr_post_process.begin_transparency(frozen_scene, view, projection);
     draw.id = render_detail::transparent_view;
     draw.textures[0] = frozen_scene;
-    draw.textures[1] = resources.targets().surface_pass.depth();
-    if (!resources.draw_meshes(resources.frame_data, resources.draw_lists[2], rendering, draw,
-                               render_detail::SceneDrawMode::transparent))
+    draw.textures[1] = surface.depth();
     {
-        return false;
+        ENGINE_PROFILE_ZONE("Render.transparentSubmit");
+        if (!resources.draw_meshes(resources.frame_data, resources.draw_lists[2], rendering, draw,
+                                   render_detail::SceneDrawMode::transparent))
+        {
+            return false;
+        }
     }
     if (fonts_)
     {
@@ -292,6 +433,7 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
     }
     if (!extensions_.empty())
     {
+        ENGINE_PROFILE_ZONE("Render.extensionsSubmit");
         RenderContext context{*scene};
         context.world_origin = origin;
         std::copy_n(view, context.view.size(), context.view.begin());

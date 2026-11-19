@@ -1,6 +1,7 @@
 #pragma once
 
 #include "runtime/render/passes/shadow_frame.hpp"
+#include "runtime/render/vsm/vsm_types.hpp"
 
 #include <bgfx/bgfx.h>
 
@@ -18,7 +19,6 @@ namespace engine::render_detail
 
 // One instance per camera submission. A later camera must not update buffers
 // already referenced by an earlier camera in the same bgfx frame.
-struct VsmPageBatch;
 class ClusteredLightingPass final
 {
 public:
@@ -31,9 +31,9 @@ public:
                                std::uint16_t height, std::uint32_t vsm_vectors);
     [[nodiscard]] bool cull(bgfx::ViewId view, const CameraSettings& camera,
                             const float* view_matrix, const float* projection,
-                            std::span<const ClusterLight> lights,
+                            std::span<const ClusterLight> lights, std::uint32_t directional_count,
                             std::span<const ShadowRecord> shadows, const VsmPageBatch* vsm);
-    void bind_view(bgfx::ViewId view) const;
+    void bind_view(bgfx::ViewId view, bool virtual_shadow) const;
     void bind(bool virtual_shadow) const;
     void release() noexcept;
     [[nodiscard]] std::uint32_t resource_count() const noexcept;
@@ -54,12 +54,15 @@ private:
     std::array<float, 4> counts_{};
     std::array<float, 4> viewport_{};
     std::uint32_t cluster_count_ = 0;
+    std::uint32_t cluster_buffer_words_ = 0;
     std::uint32_t maximum_lights_ = 0;
     std::uint16_t maximum_cluster_lights_ = 0;
     std::uint16_t maximum_shadow_faces_ = 0;
     std::uint32_t vsm_vectors_ = 0;
     bgfx::UniformHandle vsm_layout_ = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle vsm_view_uniform_ = BGFX_INVALID_HANDLE;
     std::array<float, 4> vsm_parameters_{};
+    VsmViewUniforms vsm_view_{};
     bool ready_ = false;
 };
 

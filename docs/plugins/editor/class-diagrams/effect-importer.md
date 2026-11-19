@@ -4,6 +4,8 @@
 
 特效编辑器插件负责官方 `.efkefc` 资源导入、场景组件编解码、可撤销设置命令及 MCP 协议适配。运行时播放和绘制由独立运行时插件完成；基础编辑器不 include 或链接具体特效插件。宿主按 CMake 插件清单装配。
 
+`EffectCodec` 接受场景框架写出的 `type`、`enabled`、`visible` 通用字段；启用和可见性由通用组件编解码处理，特效编解码只处理自身设置。保存、重新导入与烘焙发布使用同一格式，未知特效字段仍返回错误。
+
 ```mermaid
 classDiagram
     class AssetImporter

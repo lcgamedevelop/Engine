@@ -228,6 +228,15 @@ bool oversized_file(const std::filesystem::path& root)
                           "oversized binary input fails without partial output");
     success &= expect(!read_file_text(path, text) && text.empty(),
                       "oversized text input fails without partial output");
+    std::string error = "previous error";
+    constexpr std::uint64_t file_size = 64U * 1024U * 1024U + 1U;
+    success &= expect(engine::VirtualFileSystem::read_file(path, binary, &error, file_size) &&
+                          binary.size() == file_size && binary.front() == std::byte{} &&
+                          binary.back() == std::byte{} && error.empty(),
+                      "explicit native byte budget reads beyond the default limit exactly");
+    success &= expect(!engine::VirtualFileSystem::read_file(path, binary, &error, file_size - 1) &&
+                          binary.empty() && error.find("read byte limit") != std::string::npos,
+                      "caller byte budget is enforced and clears prior output");
     return success;
 }
 

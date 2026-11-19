@@ -38,7 +38,7 @@ bool verify(bool homogeneous, bool orthographic, bool tilted)
     plane[12] = 2.0F;
     plane[13] = 3.0F;
     plane[14] = -1.0F;
-    bx::mtxIdentity(camera.data());
+    bx::mtxRotateX(camera.data(), orthographic ? 0.5F : 0.0F);
     for (std::size_t axis = 0; axis < 3; ++axis)
     {
         camera[12 + axis] = plane[12 + axis] + normal[axis] * 5.0F;
@@ -60,6 +60,13 @@ bool verify(bool homogeneous, bool orthographic, bool tilted)
                 "prepare perspective/orthographic oblique mirror") ||
         !expect(engine::render_detail::linear_determinant(world.data()) < 0,
                 "mirror retains negative determinant for winding reversal"))
+    {
+        return false;
+    }
+    std::array<float, 16> inverse_projection{};
+    bx::mtxInverse(inverse_projection.data(), projection.data());
+    if (!expect(engine::render_detail::finite_matrix(inverse_projection.data()),
+                "accepted reflected projections remain invertible for clustered lighting"))
     {
         return false;
     }
@@ -97,6 +104,21 @@ bool verify(bool homogeneous, bool orthographic, bool tilted)
                 : height > bias ? near_half_space > 0
                                 : near_half_space < 0,
                 "oblique near plane retains above-water geometry and rejects below-water geometry"))
+        {
+            return false;
+        }
+    }
+    if (orthographic)
+    {
+        auto parallel = camera;
+        bx::mtxIdentity(parallel.data());
+        parallel[12] = camera[12];
+        parallel[13] = camera[13];
+        parallel[14] = camera[14];
+        if (!expect(!engine::render_detail::prepare_planar_reflection(
+                        plane.data(), parallel.data(), input.data(), bias, homogeneous, world, view,
+                        projection, combined),
+                    "edge-on orthographic mirror does not publish a singular projection"))
         {
             return false;
         }
@@ -160,15 +182,56 @@ bool verify_capture_projection(bool homogeneous, bool orthographic, bool off_cen
                                                                      homogeneous, lens),
                   "singular capture projection is rejected");
 }
+
+bool verify_receiver_scissor()
+{
+    using namespace engine::render_detail;
+    std::array<float, 16> model{}, projection{};
+    bx::mtxIdentity(model.data());
+    bx::mtxIdentity(projection.data());
+    const std::array<float, 3> minimum{-0.25F, 0.0F, -0.5F}, maximum{0.25F, 0.25F, 0.5F};
+    const auto scissor = planar_receiver_scissor(model.data(), projection.data(), minimum, maximum,
+                                                 0.025F, 800, 400);
+    if (!expect(scissor.x > 274 && scissor.x <= 278 && scissor.x + scissor.width >= 522 &&
+                    scissor.x + scissor.width < 526 && scissor.y > 134 && scissor.y <= 138 &&
+                    scissor.y + scissor.height >= 212 && scissor.y + scissor.height < 216,
+                "the receiver extent includes distortion, filtering and top-left coordinates"))
+    {
+        return false;
+    }
+    const auto cropped = planar_culling_projection(projection, scissor, 800, 400);
+    const auto corner =
+        clip(cropped, {2 * scissor.x / 800.0F - 1, 1 - 2 * scissor.y / 400.0F, .4F});
+    if (!expect(std::abs(corner[0] + 1) < .00001F && std::abs(corner[1] - 1) < .00001F &&
+                    corner[2] == .4F && corner[3] == 1,
+                "the reduced frustum maps the same raster boundary without changing depth"))
+    {
+        return false;
+    }
+    model[12] = -0.92F;
+    const auto edge = planar_receiver_scissor(model.data(), projection.data(), minimum, maximum,
+                                              0.025F, 800, 400);
+    if (!expect(edge.x == 0 && edge.width > 0,
+                "a partially offscreen receiver retains the sampled edge texels"))
+    {
+        return false;
+    }
+    projection[11] = 1;
+    projection[15] = 0;
+    return expect(
+        planar_receiver_scissor(model.data(), projection.data(), minimum, maximum, 0.025F, 800, 400)
+                .width == 0,
+        "a receiver crossing the reflected eye keeps the full capture");
+}
 } // namespace
 
 int main()
 {
     // The same decoder supplies main and mirrored clear colors. Test values
     // from both sRGB branches against independent standard reference values.
-    for (const auto [encoded, expected] : std::array{
-             std::array{0.0F, 0.0F}, std::array{0.04045F, 0.003130805F},
-             std::array{0.5F, 0.21404114F}, std::array{1.0F, 1.0F}})
+    for (const auto [encoded, expected] :
+         std::array{std::array{0.0F, 0.0F}, std::array{0.04045F, 0.003130805F},
+                    std::array{0.5F, 0.21404114F}, std::array{1.0F, 1.0F}})
     {
         if (!expect(std::abs(engine::render_detail::display_srgb_to_linear(encoded) - expected) <
                         0.000001F,
@@ -191,6 +254,10 @@ int main()
             }
         }
     }
-    std::puts("Planar reflection and capture projection math: 16 combinations passed.");
+    if (!verify_receiver_scissor())
+    {
+        return 1;
+    }
+    std::puts("Planar reflection, capture projection and receiver scissor passed.");
     return 0;
 }

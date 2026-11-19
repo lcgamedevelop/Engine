@@ -29,6 +29,9 @@
     }
   ],
   "features": {
+    "profiler": {
+      "description": "Internal CPU profiler callbacks for explicit engine profiling builds"
+    },
     "multithreaded": {
       "description": "Encode and render on different threads",
       "supports": "!emscripten"

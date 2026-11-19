@@ -17,6 +17,7 @@
 #include "runtime/engine_config.hpp"
 #include "runtime/gameplay/gameplay_session.hpp"
 #include "runtime/gameplay/script_runtime.hpp"
+#include "runtime/render/render_constants.hpp"
 #include "runtime/render/render_context.hpp"
 #include "runtime/render/render_extension.hpp"
 #include "runtime/render/render_system.hpp"
@@ -64,6 +65,8 @@ namespace
 
 constexpr double delta_time = 1.0 / 60.0;
 constexpr int max_frame_attempts = 200;
+// The submission fixtures use depth and opaque color, with SSR disabled.
+constexpr std::uint32_t opaque_submesh_draws = 2;
 
 double srgb_to_linear(double value)
 {
@@ -587,7 +590,7 @@ bool test_scene_renderer(const engine::EngineConfig& config)
                     camera_less.programs > idle.programs && bgfx::getStats()->numDraw == idle_draws,
                 "camera-less interval keeps mesh buffers and releases camera targets") ||
         !create_cube_scene(world, true) || !render_frames(windows, renderer, 8) ||
-        !expect(bgfx::getStats()->numDraw == retained_draws + 3,
+        !expect(bgfx::getStats()->numDraw == retained_draws + opaque_submesh_draws,
                 "new active camera renders both retained and current meshes") ||
         !expect(retained.scene()->destroy_node(retained.id()), "delete retained mesh explicitly") ||
         !render_frames(windows, renderer, 8) ||
@@ -704,17 +707,37 @@ bool screenshot(engine::WindowSystem& windows, engine::RenderSystem& renderer,
     }
     static const std::filesystem::path artifacts = []
     {
-        if (const char* override_path = std::getenv("ENGINE_RENDER_TEST_ARTIFACTS");
-            override_path != nullptr && *override_path != '\0')
-        {
-            return engine::PathUtils::from_utf8(override_path);
-        }
         const auto stamp = std::chrono::duration_cast<std::chrono::nanoseconds>(
                                std::chrono::system_clock::now().time_since_epoch())
                                .count();
+        if (const char* override_path = std::getenv("ENGINE_RENDER_TEST_ARTIFACTS");
+            override_path != nullptr && *override_path != '\0')
+        {
+            auto root = engine::PathUtils::from_utf8(override_path);
+            std::error_code error;
+            if (!root.is_absolute() || !std::filesystem::is_directory(root, error) || error)
+            {
+                const char* fallback = std::getenv("ENGINE_RENDER_TEST_ARTIFACTS_FALLBACK");
+                if (fallback == nullptr || *fallback == '\0')
+                {
+                    return std::filesystem::path{};
+                }
+                root = engine::PathUtils::from_utf8(fallback);
+                error.clear();
+                if (!root.is_absolute() || !std::filesystem::is_directory(root, error) || error)
+                {
+                    return std::filesystem::path{};
+                }
+            }
+            return root / std::to_string(stamp);
+        }
         return engine::PathUtils::from_utf8(ENGINE_RENDER_TEST_ARTIFACTS_DIR) /
                std::to_string(stamp);
     }();
+    if (!expect(!artifacts.empty(), "configured render review artifact root is unavailable"))
+    {
+        return false;
+    }
     std::error_code error;
     std::filesystem::create_directories(artifacts, error);
     if (!expect(!error, "create render review artifact directory"))
@@ -1004,6 +1027,25 @@ bool test_scene_sampling(const engine::EngineConfig& config)
     }
     else if (!expect(!renderer.set_max_anisotropy(true) && !renderer.max_anisotropy(),
                      "unsupported anisotropy never reports accepted"))
+    {
+        return false;
+    }
+    auto material = mesh.material();
+    Screenshot plain_uv, hex_uv, restored_uv;
+    if (!transform.set_settings(engine::TransformSettings{}) ||
+        !material.set_type("builtin://materials/default-pbr") ||
+        !material.set_v4("baseColor", {1, 1, 1, 1}) ||
+        !material.set_v4("uvTransform", {0.125, 0.125, 0.03, 0.01}) ||
+        !material.set_texture("baseColorTexture", checker.path) ||
+        !screenshot(windows, renderer, fixture.root, "pbr-plain-uv", plain_uv) ||
+        !material.set_float("hexTilingEnabled", 1.0F) ||
+        !screenshot(windows, renderer, fixture.root, "pbr-hex-uv", hex_uv) ||
+        !expect(hex_uv.pixels != plain_uv.pixels,
+                "enabling hex tiling updates the opaque program and texture sampling") ||
+        !material.set_float("hexTilingEnabled", 0.0F) ||
+        !screenshot(windows, renderer, fixture.root, "pbr-plain-uv-restored", restored_uv) ||
+        !expect(restored_uv.pixels == plain_uv.pixels,
+                "restoring plain UVs restores every sampled pixel"))
     {
         return false;
     }
@@ -2355,14 +2397,19 @@ bool test_incremental_preparation(const engine::EngineConfig& config)
     return expect(false, "incremental preparation finishes within the fixture frame limit");
 }
 
-bool test_textured_renderer(const engine::EngineConfig& config, bool shared)
+bool test_textured_renderer(const engine::EngineConfig& config, bool shared,
+                            std::array<std::uint8_t, 3>& all_lights_pixel)
 {
     engine::ThreadSystem threads({.worker_limit = 2});
     engine::TaskSystem tasks(threads, {.name = "Texture preparation", .max_concurrency = 2});
     test_support::ResourceServices services(&threads);
     engine::WorldSystem world(&services.loader);
     engine::WindowSystem windows;
-    engine::RenderSystem renderer(windows, &world, nullptr, nullptr, shared ? &tasks : nullptr);
+    // Three local lights fill one packed pair and the low half of the next word.
+    const engine::RenderConfig limits{
+        .maximum_cluster_lights = static_cast<std::uint16_t>(shared ? 1 : 3)};
+    engine::RenderSystem renderer(windows, &world, nullptr, nullptr, shared ? &tasks : nullptr,
+                                  limits);
     test_support::ResourceFixture fixture;
     if (!expect((threads.initialize(config) && tasks.initialize(config)) &&
                     (services.initialize(config) && services.prepare_builtins()) &&
@@ -2676,7 +2723,7 @@ bool test_textured_renderer(const engine::EngineConfig& config, bool shared)
                     second.material().set_texture("baseColorTexture", "textures/gray-linear"),
                 "add another mesh referencing the same texture path") ||
         !render_frames(windows, renderer, 8) ||
-        !expect(bgfx::getStats()->numDraw == single_draws + 3 &&
+        !expect(bgfx::getStats()->numDraw == single_draws + opaque_submesh_draws &&
                     gpu_counts().textures == single_mesh.textures + texture_increment &&
                     gpu_counts().vertices == single_mesh.vertices + 1,
                 "GPU uploads share immutable resources through the injected loader"))
@@ -2691,7 +2738,7 @@ bool test_textured_renderer(const engine::EngineConfig& config, bool shared)
                     mesh.set_mesh_data(data),
                 "assign independent material slots to two submeshes") ||
         !render_frames(windows, renderer, 8) ||
-        !expect(bgfx::getStats()->numDraw == single_draws + 6 &&
+        !expect(bgfx::getStats()->numDraw == single_draws + 2 * opaque_submesh_draws &&
                     gpu_counts().textures == single_mesh.textures + 2 * texture_increment,
                 "submesh material textures obey the selected resource loading policy"))
     {
@@ -2707,16 +2754,18 @@ bool test_textured_renderer(const engine::EngineConfig& config, bool shared)
     if (!expect(mesh.set_deformation(data.vertices, data.tangents),
                 "deformation supports multiple material slots") ||
         !render_frames(windows, renderer, 8) ||
-        !expect(bgfx::getStats()->numDraw == single_draws + 6 && mesh.material_count() == 2 &&
-                    gpu_counts().indices == multi_slot.indices,
+        !expect(bgfx::getStats()->numDraw == single_draws + 2 * opaque_submesh_draws &&
+                    mesh.material_count() == 2 && gpu_counts().indices == multi_slot.indices,
                 "deformed submeshes retain material submissions and shared topology"))
     {
         return false;
     }
     mesh.clear_deformation();
     std::vector<engine::Light> lights;
-    for (const auto kind : {engine::schema::LightKind::directional,
-                            engine::schema::LightKind::point, engine::schema::LightKind::spot})
+    for (const auto kind : {engine::schema::LightKind::point,
+                            engine::schema::LightKind::directional,
+                            engine::schema::LightKind::spot,
+                            engine::schema::LightKind::point})
     {
         auto node = scene->create_node("Light");
         auto light = node ? node.add_component<engine::Light>() : engine::Light{};
@@ -2726,7 +2775,7 @@ bool test_textured_renderer(const engine::EngineConfig& config, bool shared)
         transform.position = {0, 0, 2};
         if (!expect(light && light.set_settings(settings) &&
                         node.get_component<engine::Transform>().set_settings(transform),
-                    "create directional, point and spot lights"))
+                    "create the directional light and three local lights"))
         {
             return false;
         }
@@ -2776,11 +2825,12 @@ bool test_textured_renderer(const engine::EngineConfig& config, bool shared)
         !screenshot(windows, renderer, fixture.root, "all-lights", image) ||
         !expect(brightness(image.pixel(cx, cy)) > brightest_single + 5,
                 "multiple light contributions accumulate in the rendered pixel") ||
-        !expect(bgfx::getStats()->numDraw == single_draws + 6,
+        !expect(bgfx::getStats()->numDraw == single_draws + 2 * opaque_submesh_draws,
                 "multiple lights preserve mesh draw count"))
     {
         return false;
     }
+    all_lights_pixel = image.pixel(cx, cy);
     world.destroy_scene();
     renderer.release_scene();
     if (!render_frames(windows, renderer, 8) ||
@@ -2827,6 +2877,7 @@ bool test_shadow_edge_filtering(const engine::EngineConfig& config)
     lens.projection = engine::schema::Projection::orthographic;
     lens.orthographic_size = 3.5F;
     lens.far_clip = 30.0F;
+    lens.frustum_culling_enabled = true;
     engine::TransformSettings pose;
     pose.position = {0, 1, 10};
     if (!camera.set_settings(lens) || !scene->set_active_camera(camera) ||
@@ -2920,8 +2971,50 @@ bool test_shadow_edge_filtering(const engine::EngineConfig& config)
     }
     std::printf("Shadow edge filtering: rows=%zu maximum_horizontal_range=%d maximum_step=%d\n",
                 edge_rows, maximum_range, maximum_step);
-    return expect(edge_rows > 2 && maximum_step <= 2,
-                  "oblique shadow edge remains continuous across magnified shadow texels");
+    double light_world[16]{};
+    if (!expect(edge_rows > 2 && maximum_step <= 2,
+                "oblique shadow edge remains continuous across magnified shadow texels") ||
+        !light_node.get_component<engine::Transform>().world_matrix(light_world))
+    {
+        return false;
+    }
+    // Along the direction towards the light, this caster is above the view but
+    // directly upstream of the middle of the visible receiver.
+    floor_pose.position = {9.0 * light_world[8], 9.0 * light_world[9], 9.0 * light_world[10]};
+    floor_pose.scale = {0.75, 0.75, 0.75};
+    Screenshot without_caster_shadow;
+    Screenshot with_caster_shadow;
+    if (!floor.get_component<engine::Transform>().set_settings(floor_pose) ||
+        !render_frames(windows, renderer, 8) ||
+        !screenshot(windows, renderer, fixture.root, "offscreen-caster-reference",
+                    without_caster_shadow))
+    {
+        return false;
+    }
+    floor_mesh.set_cast_shadows(true);
+    if (!render_frames(windows, renderer, 8) ||
+        !screenshot(windows, renderer, fixture.root, "offscreen-caster-shadow", with_caster_shadow))
+    {
+        return false;
+    }
+    const auto views = renderer.submission_stats();
+    if (!expect(std::ranges::any_of(views,
+                                    [](const auto& view)
+                                    {
+                                        return view.view_id == engine::render_detail::main_view &&
+                                               view.visible_meshes == 1 && view.culled_meshes == 1;
+                                    }),
+                "the caster is outside the camera's orthographic frustum"))
+    {
+        return false;
+    }
+    std::size_t affected_pixels = 0;
+    for (std::size_t i = 0; i < with_caster_shadow.pixels.size(); ++i)
+    {
+        affected_pixels += without_caster_shadow.pixels[i][0] > with_caster_shadow.pixels[i][0] + 3;
+    }
+    return expect(affected_pixels > 16,
+                  "receiver bounds preserve a directional shadow cast from outside the view");
 }
 
 bool test_render_settings_and_capture(const engine::EngineConfig& config)
@@ -3505,6 +3598,19 @@ bool test_reflections_water_and_diffuse_capture(const engine::EngineConfig& conf
         !screenshot(windows, renderer, fixture.root, "planar-water", reflected))
     {
         return false;
+    }
+    if (renderer.msaa_samples() == 4 &&
+        (bgfx::getCaps()->formats[bgfx::TextureFormat::D32FS8] &
+         BGFX_CAPS_FORMAT_TEXTURE_FRAMEBUFFER_MSAA_X4) != 0)
+    {
+        const auto views = renderer.submission_stats();
+        if (!expect(std::any_of(views.begin(), views.end(),
+                                [](const auto& stats)
+                                { return stats.view_id == 34 && stats.draw_calls > 0; }),
+                    "the MSAA planar reflection writes matching depth before opaque color"))
+        {
+            return false;
+        }
     }
     if (!reflection.set_enabled(false))
     {
@@ -4211,6 +4317,7 @@ public:
     {
         ++draws;
         scene_id = context.scene.id();
+        origin = context.world_origin;
         view = context.view;
         projection = context.projection;
         hdr = context.hdr;
@@ -4245,6 +4352,7 @@ public:
 
     std::array<float, 16> view{};
     std::array<float, 16> projection{};
+    engine::Vec3 origin{};
     std::uint64_t scene_id = 0;
     std::uint16_t view_id = bgfx::kInvalidHandle;
     unsigned int draws = 0;
@@ -4304,6 +4412,7 @@ bool test_render_extensions(const engine::EngineConfig& config)
             preview_node.valid() ? preview_node.add_component<engine::Camera>() : engine::Camera{};
         engine::TransformSettings preview_transform;
         preview_transform.position = {3, 2, 5};
+        preview_transform.rotation = {0, 30, 0};
         auto post_settings = test_support::read_settings(post);
         post_settings.hdr_enabled = true;
         post_settings.bloom_enabled = true;
@@ -4312,9 +4421,17 @@ bool test_render_extensions(const engine::EngineConfig& config)
                             preview_transform) &&
                         post.set_settings(post_settings),
                     "configure preview camera and scene HDR") ||
-            !render_frames(windows, renderer, 1, preview) ||
-            !expect(extension.draws == 2 && extension.view != game_view && extension.hdr,
-                    "extension receives actual preview matrices and scene HDR state"))
+            !test_support::prepare_render(renderer, preview))
+        {
+            return false;
+        }
+        const auto before_preview = extension.draws;
+        if (!expect(renderer.render(preview) == engine::RenderSubmitStatus::submitted &&
+                        extension.draws == before_preview + 1 && extension.view != game_view &&
+                        extension.origin.x() == preview_transform.position.x() &&
+                        extension.origin.y() == preview_transform.position.y() &&
+                        extension.origin.z() == preview_transform.position.z() && extension.hdr,
+                    "extension receives preview orientation, world origin, and scene HDR state"))
         {
             return false;
         }
@@ -4325,6 +4442,7 @@ bool test_render_extensions(const engine::EngineConfig& config)
             return false;
         }
         extension.accept_draw = true;
+        const auto before_unload = extension.draws;
         const auto retained_releases = extension.scene_releases;
         if (!expect(camera_node.set_persistent(true), "retain a camera and its HDR settings"))
         {
@@ -4332,7 +4450,8 @@ bool test_render_extensions(const engine::EngineConfig& config)
         }
         world.unload_scene();
         if (!render_frames(windows, renderer, 1) ||
-            !expect(extension.scene_releases == retained_releases && extension.draws == 3,
+            !expect(extension.scene_releases == retained_releases &&
+                        extension.draws == before_unload,
                     "ordinary unload neither releases extensions nor uses the retained camera"))
         {
             return false;
@@ -4640,10 +4759,14 @@ int main(int, char**)
 
     const bool windows_passed = test_window_and_renderer(config);
     const bool scene_passed = windows_passed && test_scene_renderer(config);
-    bool textures_passed = scene_passed && test_scope_frames_and_capture(config) &&
-                           test_incremental_preparation(config) &&
-                           test_textured_renderer(config, false);
-    textures_passed = textures_passed && test_textured_renderer(config, true);
+    std::array<std::uint8_t, 3> clustered_pixel{}, overflow_pixel{};
+    const bool textures_passed =
+        scene_passed && test_scope_frames_and_capture(config) &&
+        test_incremental_preparation(config) &&
+        test_textured_renderer(config, false, clustered_pixel) &&
+        test_textured_renderer(config, true, overflow_pixel) &&
+        expect(clustered_pixel == overflow_pixel,
+               "cluster overflow preserves the full directional and local light sum");
     const bool sampling_passed = textures_passed && test_scene_sampling(config);
     const bool skinning_passed = sampling_passed && test_orthographic_pbr_view(config) &&
                                  test_pbr_occlusion_lighting(config) &&

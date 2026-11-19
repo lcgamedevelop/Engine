@@ -36,8 +36,8 @@ bool EffectCodec::validate(const schema::ComponentDataT& component, std::string&
 bool EffectCodec::read(const toml::table& table, schema::ComponentDataT& component,
                        std::string& error) const
 {
-    constexpr std::array<std::string_view, 6> fields = {"type",  "enabled", "effect",
-                                                        "speed", "loop",    "play_on_awake"};
+    constexpr std::array<std::string_view, 7> fields = {
+        "type", "enabled", "visible", "effect", "speed", "loop", "play_on_awake"};
     for (const auto& [name, field] : table)
     {
         static_cast<void>(field);

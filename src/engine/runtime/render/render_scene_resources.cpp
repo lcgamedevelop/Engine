@@ -182,9 +182,12 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
         output = state.progress;
         return state.status;
     }
-    if (!world_->refresh_scene_state() || (ui_ && !ui_->synchronize()))
     {
-        return fail("Cannot synchronize scene state");
+        ENGINE_PROFILE_ZONE("Render.prepareSynchronize");
+        if (!world_->refresh_scene_state() || (ui_ && !ui_->synchronize()))
+        {
+            return fail("Cannot synchronize scene state");
+        }
     }
     const auto selected_camera = camera                   ? camera
                                  : scope_preparing_scene_ ? scope_preparing_scene_->active_camera()
@@ -254,32 +257,6 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
         return runtime && (target_scene == world_->scene() ? entity.has<ecs_detail::Published>()
                                                            : runtime->scope_scene == target_scene);
     };
-    const auto required_texture = [&](const Resource* source)
-    {
-        if (std::find(targets.ibl_sources.begin(), targets.ibl_sources.end(), source) !=
-            targets.ibl_sources.end())
-        {
-            return true;
-        }
-        return std::any_of(resources.meshes.begin(), resources.meshes.end(),
-                           [&](const auto& mesh)
-                           {
-                               return includes(mesh.node_id) &&
-                                      std::find(mesh.textures.begin(), mesh.textures.end(),
-                                                source) != mesh.textures.end();
-                           });
-    };
-    const auto required_program = [&](const schema::ShaderDataT* source)
-    {
-        return std::any_of(resources.meshes.begin(), resources.meshes.end(),
-                           [&](const auto& mesh)
-                           {
-                               return includes(mesh.node_id) &&
-                                      std::find(mesh.programs.begin(), mesh.programs.end(),
-                                                source) != mesh.programs.end();
-                           });
-    };
-
     if (state.ibl_dirty)
     {
         for (auto& [id, target] : resources.pass_targets)
@@ -438,244 +415,250 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
         state.discover = false;
     }
     auto* loader = world_->resource_loader();
-    while (budget())
     {
-        const auto pending_node =
-            std::find_if(state.dirty_nodes.begin(), state.dirty_nodes.end(), [&](auto id)
-                         { return includes(id) || !ecs_is_alive(world_->native_world(), id); });
-        if (pending_node == state.dirty_nodes.end())
+        ENGINE_PROFILE_ZONE("Render.prepareDirtyMeshes");
+        while (budget())
         {
-            break;
-        }
-        ++items;
-        const auto id = *pending_node;
-        state.dirty_nodes.erase(pending_node);
-        auto node = world_->find_node(id);
-        if (!node)
-        {
-            for (const auto& [scope, value] : scope_preparations_)
+            const auto pending_node =
+                std::find_if(state.dirty_nodes.begin(), state.dirty_nodes.end(), [&](auto id)
+                             { return includes(id) || !ecs_is_alive(world_->native_world(), id); });
+            if (pending_node == state.dirty_nodes.end())
             {
-                (void)value;
-                auto* candidate = world_->scope_candidate(scope);
-                if (candidate && (node = candidate->find_node(id)))
+                break;
+            }
+            ++items;
+            const auto id = *pending_node;
+            state.dirty_nodes.erase(pending_node);
+            auto node = world_->find_node(id);
+            if (!node)
+            {
+                for (const auto& [scope, value] : scope_preparations_)
                 {
-                    break;
-                }
-            }
-        }
-        const auto renderer = node.get_component<MeshRenderer>();
-        auto found = resources.mesh_index.lower_bound({epoch, id, 0});
-        const bool exists = found != resources.mesh_index.end() &&
-                            found->first.world_epoch == epoch && found->first.entity == id;
-        auto* mesh = exists ? &resources.meshes[found->second] : nullptr;
-        std::vector<const Resource*> previous_textures;
-        std::vector<const schema::ShaderDataT*> previous_programs;
-        const Resource* previous_geometry = nullptr;
-        if (mesh)
-        {
-            previous_textures = mesh->textures;
-            previous_programs = mesh->programs;
-            previous_geometry = mesh->geometry ? mesh->geometry->resource.get() : nullptr;
-        }
-        if (mesh && !mesh->materials.empty() && !resources.retained_meshes.contains(id))
-        {
-            for (auto* source : mesh->textures)
-            {
-                ++state.texture_users[source];
-            }
-            for (auto* source : mesh->programs)
-            {
-                ++state.program_users[source];
-            }
-            resources.retained_meshes.emplace(id, std::move(*mesh));
-        }
-        const bool visible = renderer && renderer.active() && renderer.visible_in_hierarchy() &&
-                             !ecs_detail::component_runtime(renderer)->geometry_removed_;
-        if (!visible)
-        {
-            if (const auto retained = resources.retained_meshes.find(id);
-                retained != resources.retained_meshes.end())
-            {
-                for (auto* source : retained->second.textures)
-                {
-                    if (--state.texture_users[source] == 0)
+                    (void)value;
+                    auto* candidate = world_->scope_candidate(scope);
+                    if (candidate && (node = candidate->find_node(id)))
                     {
-                        state.unused_textures.insert(source);
+                        break;
                     }
                 }
-                for (auto* source : retained->second.programs)
+            }
+            const auto renderer = node.get_component<MeshRenderer>();
+            auto found = resources.mesh_index.lower_bound({epoch, id, 0});
+            const bool exists = found != resources.mesh_index.end() &&
+                                found->first.world_epoch == epoch && found->first.entity == id;
+            auto* mesh = exists ? &resources.meshes[found->second] : nullptr;
+            std::vector<const Resource*> previous_textures;
+            std::vector<const schema::ShaderDataT*> previous_programs;
+            const Resource* previous_geometry = nullptr;
+            if (mesh)
+            {
+                previous_textures = mesh->textures;
+                previous_programs = mesh->programs;
+                previous_geometry = mesh->geometry ? mesh->geometry->resource.get() : nullptr;
+            }
+            if (mesh && !mesh->materials.empty() && !resources.retained_meshes.contains(id))
+            {
+                for (auto* source : mesh->textures)
                 {
-                    if (--state.program_users[source] == 0)
+                    ++state.texture_users[source];
+                }
+                for (auto* source : mesh->programs)
+                {
+                    ++state.program_users[source];
+                }
+                resources.retained_meshes.emplace(id, std::move(*mesh));
+            }
+            const bool visible = renderer && renderer.active() && renderer.visible_in_hierarchy() &&
+                                 !ecs_detail::component_runtime(renderer)->geometry_removed_;
+            if (!visible)
+            {
+                if (const auto retained = resources.retained_meshes.find(id);
+                    retained != resources.retained_meshes.end())
+                {
+                    for (auto* source : retained->second.textures)
                     {
-                        state.unused_programs.insert(source);
+                        if (--state.texture_users[source] == 0)
+                        {
+                            state.unused_textures.insert(source);
+                        }
                     }
-                }
-                resources.retained_meshes.erase(retained);
-            }
-            state.pending_materials.erase(id);
-            if (exists)
-            {
-                const auto index = found->second;
-                resources.mesh_index.erase(found);
-                const auto instance = resources.meshes[index].instance_id;
-                const auto old_lod = [instance](const auto& entry)
-                { return entry.first.first == instance; };
-                std::erase_if(resources.selected_lods, old_lod);
-                std::erase_if(resources.selected_lod_revisions, old_lod);
-                if (index + 1 != resources.meshes.size())
-                {
-                    resources.meshes[index] = std::move(resources.meshes.back());
-                    const auto& moved = resources.meshes[index];
-                    resources.mesh_index[{epoch, moved.node_id, moved.instance_id}] = index;
-                }
-                resources.meshes.pop_back();
-            }
-            mesh = nullptr;
-        }
-        else
-        {
-            const Resource* source = nullptr;
-            const auto* data = renderer.mesh_data();
-            if (!data || !loader ||
-                loader->get(renderer.mesh_resource(), source) != ResourceError::none)
-            {
-                return fail("Mesh binding is not loaded");
-            }
-            if (!exists)
-            {
-                resources.meshes.emplace_back();
-                mesh = &resources.meshes.back();
-            }
-            else if (mesh->instance_id != renderer.instance_id())
-            {
-                resources.mesh_index.erase(found);
-            }
-            if (mesh->instance_id != renderer.instance_id() ||
-                mesh->revision != renderer.mesh_revision())
-            {
-                auto geometry = resources.geometries[source].lock();
-                if (!geometry)
-                {
-                    geometry = std::make_shared<render_detail::GpuGeometry>();
-                    if (!geometry->create(renderer))
+                    for (auto* source : retained->second.programs)
                     {
-                        return fail("Cannot create GPU geometry");
+                        if (--state.program_users[source] == 0)
+                        {
+                            state.unused_programs.insert(source);
+                        }
                     }
-                    resources.geometries[source] = geometry;
+                    resources.retained_meshes.erase(retained);
                 }
-                if (!mesh->create(renderer, std::move(geometry)))
+                state.pending_materials.erase(id);
+                if (exists)
                 {
-                    return fail("Cannot create GPU mesh instance");
+                    const auto index = found->second;
+                    resources.mesh_index.erase(found);
+                    const auto instance = resources.meshes[index].instance_id;
+                    const auto old_lod = [instance](const auto& entry)
+                    { return entry.first.first == instance; };
+                    std::erase_if(resources.selected_lods, old_lod);
+                    std::erase_if(resources.selected_lod_revisions, old_lod);
+                    if (index + 1 != resources.meshes.size())
+                    {
+                        resources.meshes[index] = std::move(resources.meshes.back());
+                        const auto& moved = resources.meshes[index];
+                        resources.mesh_index[{epoch, moved.node_id, moved.instance_id}] = index;
+                    }
+                    resources.meshes.pop_back();
                 }
+                mesh = nullptr;
             }
-            resources.mesh_index[{epoch, id, renderer.instance_id()}] =
-                mesh - resources.meshes.data();
-            const auto* runtime =
-                flecs::world(world_->native_world()).entity(id).try_get<MeshRendererRuntime>();
-            if (!runtime || !mesh->update_deformation(*runtime, resources.skinning))
-            {
-                return fail("Cannot prepare mesh deformation");
-            }
-            mesh->textures.clear();
-            mesh->programs.clear();
-            mesh->materials.clear();
-            state.pending_materials.insert(id);
-            const auto texture = [&](ResourceHandle handle)
+            else
             {
                 const Resource* source = nullptr;
-                if (!loader || loader->get(handle, source) != ResourceError::none ||
-                    !state.request_texture(loader, handle))
+                const auto* data = renderer.mesh_data();
+                if (!data || !loader ||
+                    loader->get(renderer.mesh_resource(), source) != ResourceError::none)
                 {
-                    return false;
+                    return fail("Mesh binding is not loaded");
                 }
-                if (std::find(mesh->textures.begin(), mesh->textures.end(), source) ==
-                    mesh->textures.end())
+                if (!exists)
                 {
-                    mesh->textures.push_back(source);
+                    resources.meshes.emplace_back();
+                    mesh = &resources.meshes.back();
                 }
-                return true;
-            };
-            if (renderer.lightmap_resource().id && !texture(renderer.lightmap_resource()))
-            {
-                return fail("Lightmap binding is not loaded");
-            }
-            std::set<std::size_t> slots;
-            if (data->submeshes.empty())
-            {
-                slots.insert(0);
-            }
-            for (const auto& submesh : data->submeshes)
-            {
-                slots.insert(submesh.material_slot());
-            }
-            for (const auto& lod : data->lods)
-            {
-                for (const auto& range : lod->submeshes)
+                else if (mesh->instance_id != renderer.instance_id())
                 {
-                    slots.insert(range.material_slot());
+                    resources.mesh_index.erase(found);
                 }
-            }
-            for (auto slot : slots)
-            {
-                const auto material = renderer.material(slot);
-                const auto* shader = material.shader_data();
-                if (!material || !shader)
+                if (mesh->instance_id != renderer.instance_id() ||
+                    mesh->revision != renderer.mesh_revision())
                 {
-                    return fail("Material or shader binding is not loaded");
-                }
-                auto [program, inserted] = resources.programs.try_emplace(shader);
-                if (inserted && !program->second.resource.retain(loader, material.shader()))
-                {
-                    return fail("Shader binding is not loaded");
-                }
-                if (inserted)
-                {
-                    state.pending_programs.insert(shader);
-                }
-                if (std::find(mesh->programs.begin(), mesh->programs.end(), shader) ==
-                    mesh->programs.end())
-                {
-                    mesh->programs.push_back(shader);
-                }
-                for (const auto& sampler : shader->samplers)
-                {
-                    if (sampler->source == schema::ShaderTextureSource::resource &&
-                        !texture(material.texture(sampler->name)))
+                    auto geometry = resources.geometries[source].lock();
+                    if (!geometry)
                     {
-                        return fail("Material texture binding is not loaded");
+                        geometry = std::make_shared<render_detail::GpuGeometry>();
+                        auto* pages = render_detail::meshlet_index_compaction_supported()
+                                          ? &resources.static_vertex_pages
+                                          : nullptr;
+                        if (!geometry->create(renderer, pages))
+                        {
+                            return fail("Cannot create GPU geometry");
+                        }
+                        resources.geometries[source] = geometry;
+                    }
+                    if (!mesh->create(renderer, std::move(geometry)))
+                    {
+                        return fail("Cannot create GPU mesh instance");
+                    }
+                }
+                resources.mesh_index[{epoch, id, renderer.instance_id()}] =
+                    mesh - resources.meshes.data();
+                const auto* runtime =
+                    flecs::world(world_->native_world()).entity(id).try_get<MeshRendererRuntime>();
+                if (!runtime || !mesh->update_deformation(*runtime, resources.skinning))
+                {
+                    return fail("Cannot prepare mesh deformation");
+                }
+                mesh->textures.clear();
+                mesh->programs.clear();
+                mesh->materials.clear();
+                state.pending_materials.insert(id);
+                const auto texture = [&](ResourceHandle handle)
+                {
+                    const Resource* source = nullptr;
+                    if (!loader || loader->get(handle, source) != ResourceError::none ||
+                        !state.request_texture(loader, handle))
+                    {
+                        return false;
+                    }
+                    if (std::find(mesh->textures.begin(), mesh->textures.end(), source) ==
+                        mesh->textures.end())
+                    {
+                        mesh->textures.push_back(source);
+                    }
+                    return true;
+                };
+                if (renderer.lightmap_resource().id && !texture(renderer.lightmap_resource()))
+                {
+                    return fail("Lightmap binding is not loaded");
+                }
+                std::set<std::size_t> slots;
+                if (data->submeshes.empty())
+                {
+                    slots.insert(0);
+                }
+                for (const auto& submesh : data->submeshes)
+                {
+                    slots.insert(submesh.material_slot());
+                }
+                for (const auto& lod : data->lods)
+                {
+                    for (const auto& range : lod->submeshes)
+                    {
+                        slots.insert(range.material_slot());
+                    }
+                }
+                for (auto slot : slots)
+                {
+                    const auto material = renderer.material(slot);
+                    const auto* shader = material.shader_data();
+                    if (!material || !shader)
+                    {
+                        return fail("Material or shader binding is not loaded");
+                    }
+                    auto [program, inserted] = resources.programs.try_emplace(shader);
+                    if (inserted && !program->second.resource.retain(loader, material.shader()))
+                    {
+                        return fail("Shader binding is not loaded");
+                    }
+                    if (inserted)
+                    {
+                        state.pending_programs.insert(shader);
+                    }
+                    if (std::find(mesh->programs.begin(), mesh->programs.end(), shader) ==
+                        mesh->programs.end())
+                    {
+                        mesh->programs.push_back(shader);
+                    }
+                    for (const auto& sampler : shader->samplers)
+                    {
+                        if (sampler->source == schema::ShaderTextureSource::resource &&
+                            !texture(material.texture(sampler->name)))
+                        {
+                            return fail("Material texture binding is not loaded");
+                        }
                     }
                 }
             }
-        }
-        const auto update_users =
-            [](auto& users, auto& unused, const auto& previous, const auto& next)
-        {
-            for (auto key : previous)
+            const auto update_users =
+                [](auto& users, auto& unused, const auto& previous, const auto& next)
             {
-                if (std::find(next.begin(), next.end(), key) == next.end() && --users[key] == 0)
+                for (auto key : previous)
                 {
-                    unused.insert(key);
+                    if (std::find(next.begin(), next.end(), key) == next.end() && --users[key] == 0)
+                    {
+                        unused.insert(key);
+                    }
                 }
-            }
-            for (auto key : next)
-            {
-                if (std::find(previous.begin(), previous.end(), key) == previous.end())
+                for (auto key : next)
                 {
-                    ++users[key];
-                    unused.erase(key);
+                    if (std::find(previous.begin(), previous.end(), key) == previous.end())
+                    {
+                        ++users[key];
+                        unused.erase(key);
+                    }
                 }
-            }
-        };
-        update_users(state.texture_users, state.unused_textures, previous_textures,
-                     mesh ? mesh->textures : std::vector<const Resource*>{});
-        update_users(state.program_users, state.unused_programs, previous_programs,
-                     mesh ? mesh->programs : std::vector<const schema::ShaderDataT*>{});
-        if (previous_geometry)
-        {
-            const auto old = resources.geometries.find(previous_geometry);
-            if (old != resources.geometries.end() && old->second.expired())
+            };
+            update_users(state.texture_users, state.unused_textures, previous_textures,
+                         mesh ? mesh->textures : std::vector<const Resource*>{});
+            update_users(state.program_users, state.unused_programs, previous_programs,
+                         mesh ? mesh->programs : std::vector<const schema::ShaderDataT*>{});
+            if (previous_geometry)
             {
-                resources.geometries.erase(old);
+                const auto old = resources.geometries.find(previous_geometry);
+                if (old != resources.geometries.end() && old->second.expired())
+                {
+                    resources.geometries.erase(old);
+                }
             }
         }
     }
@@ -689,54 +672,81 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
         }
         targets.ibl_dirty = false;
     }
-    while (!state.unused_textures.empty() && budget())
+    // 本次节点与 IBL 更新完成后建立局部集合，后续上传、进度和就绪判断共用。
+    // 不为每项资源重新遍历所有网格，也不跨调用缓存场景或 ECS 借用数据。
+    std::set<const Resource*> required_textures(targets.ibl_sources.begin(),
+                                                targets.ibl_sources.end());
+    std::set<const schema::ShaderDataT*> required_programs;
     {
-        ++items;
-        const auto source = *state.unused_textures.begin();
-        const auto work = state.textures.find(source);
-        if (work != state.textures.end())
+        ENGINE_PROFILE_ZONE("Render.prepareResourceSet");
+        for (const auto& mesh : resources.meshes)
         {
-            state.retired_work.push_back(std::move(work->second));
-            state.textures.erase(work);
+            if (includes(mesh.node_id))
+            {
+                required_textures.insert(mesh.textures.begin(), mesh.textures.end());
+                required_programs.insert(mesh.programs.begin(), mesh.programs.end());
+            }
         }
-        state.ready_textures.erase(source);
-        state.decoded_blocks.erase(source);
-        state.uploaded_bytes.erase(source);
-        state.upload_total.erase(source);
-        resources.textures.erase(source);
-        state.texture_users.erase(source);
-        state.unused_textures.erase(state.unused_textures.begin());
     }
-    while (!state.unused_programs.empty() && budget())
+    const auto required_texture = [&](const Resource* source)
+    { return required_textures.contains(source); };
+    const auto required_program = [&](const schema::ShaderDataT* source)
+    { return required_programs.contains(source); };
     {
-        ++items;
-        const auto source = *state.unused_programs.begin();
-        state.pending_programs.erase(source);
-        resources.programs.erase(source);
-        state.program_users.erase(source);
-        state.unused_programs.erase(state.unused_programs.begin());
+        ENGINE_PROFILE_ZONE("Render.prepareRetireResources");
+        while (!state.unused_textures.empty() && budget())
+        {
+            ++items;
+            const auto source = *state.unused_textures.begin();
+            const auto work = state.textures.find(source);
+            if (work != state.textures.end())
+            {
+                state.retired_work.push_back(std::move(work->second));
+                state.textures.erase(work);
+            }
+            state.ready_textures.erase(source);
+            state.decoded_blocks.erase(source);
+            state.uploaded_bytes.erase(source);
+            state.upload_total.erase(source);
+            resources.textures.erase(source);
+            state.texture_users.erase(source);
+            state.unused_textures.erase(state.unused_textures.begin());
+        }
+        while (!state.unused_programs.empty() && budget())
+        {
+            ++items;
+            const auto source = *state.unused_programs.begin();
+            state.pending_programs.erase(source);
+            resources.programs.erase(source);
+            state.program_users.erase(source);
+            state.unused_programs.erase(state.unused_programs.begin());
+        }
     }
-    while (budget())
     {
-        const auto pending_program = std::find_if(state.pending_programs.begin(),
-                                                  state.pending_programs.end(), required_program);
-        if (pending_program == state.pending_programs.end())
+        ENGINE_PROFILE_ZONE("Render.preparePrograms");
+        while (budget())
         {
-            break;
+            const auto pending_program = std::find_if(
+                state.pending_programs.begin(), state.pending_programs.end(), required_program);
+            if (pending_program == state.pending_programs.end())
+            {
+                break;
+            }
+            ++items;
+            const auto source = *pending_program;
+            auto& program = resources.programs.find(source)->second;
+            auto retained = std::move(program.resource);
+            if (!program.create(*source))
+            {
+                return fail("Cannot create GPU program");
+            }
+            program.resource = std::move(retained);
+            state.pending_programs.erase(pending_program);
         }
-        ++items;
-        const auto source = *pending_program;
-        auto& program = resources.programs.find(source)->second;
-        auto retained = std::move(program.resource);
-        if (!program.create(*source))
-        {
-            return fail("Cannot create GPU program");
-        }
-        program.resource = std::move(retained);
-        state.pending_programs.erase(pending_program);
     }
     // 每个工作项拥有稳定源获取。预算计入正在执行及已完成等待上传的缓冲。
     {
+        ENGINE_PROFILE_ZONE("Render.prepareTextureJobs");
         for (auto item = state.textures.begin(); item != state.textures.end() && budget();)
         {
             if (!required_texture(item->first))
@@ -896,93 +906,98 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
         resources.targets().ibl_textures[index] =
             found == resources.textures.end() ? nullptr : &found->second;
     }
-    while (budget())
     {
-        const auto pending_material = std::find_if(
-            state.pending_materials.begin(), state.pending_materials.end(),
-            [&](auto id)
-            {
-                if (!includes(id) || state.dirty_nodes.contains(id))
+        ENGINE_PROFILE_ZONE("Render.prepareMaterialBindings");
+        while (budget())
+        {
+            const auto pending_material = std::find_if(
+                state.pending_materials.begin(), state.pending_materials.end(),
+                [&](auto id)
                 {
-                    return false;
-                }
-                const auto mesh =
-                    std::find_if(resources.meshes.begin(), resources.meshes.end(),
-                                 [&](const auto& value) { return value.node_id == id; });
-                return mesh != resources.meshes.end() &&
-                       std::none_of(mesh->textures.begin(), mesh->textures.end(),
-                                    [&](auto source) { return state.textures.contains(source); }) &&
-                       std::none_of(mesh->programs.begin(), mesh->programs.end(), [&](auto source)
-                                    { return state.pending_programs.contains(source); });
-            });
-        if (pending_material == state.pending_materials.end())
-        {
-            break;
-        }
-        ++items;
-        const auto id = *pending_material;
-        const auto node =
-            target_scene == world_->scene() ? world_->find_node(id) : target_scene->find_node(id);
-        const auto renderer = node.get_component<MeshRenderer>();
-        const auto found = resources.mesh_index.find({epoch, id, renderer.instance_id()});
-        if (!renderer || found == resources.mesh_index.end())
-        {
-            return fail("Material owner changed during preparation");
-        }
-        auto& bindings = resources.meshes[found->second].materials;
-        bindings.resize(renderer.material_count());
-        std::set<std::size_t> used_slots;
-        const auto* data = renderer.mesh_data();
-        if (data->submeshes.empty())
-        {
-            used_slots.insert(0);
-        }
-        for (const auto& range : data->submeshes)
-        {
-            used_slots.insert(range.material_slot());
-        }
-        for (const auto& lod : data->lods)
-        {
-            for (const auto& range : lod->submeshes)
+                    if (!includes(id) || state.dirty_nodes.contains(id))
+                    {
+                        return false;
+                    }
+                    const auto mesh =
+                        std::find_if(resources.meshes.begin(), resources.meshes.end(),
+                                     [&](const auto& value) { return value.node_id == id; });
+                    return mesh != resources.meshes.end() &&
+                           std::none_of(mesh->textures.begin(), mesh->textures.end(),
+                                        [&](auto source)
+                                        { return state.textures.contains(source); }) &&
+                           std::none_of(mesh->programs.begin(), mesh->programs.end(),
+                                        [&](auto source)
+                                        { return state.pending_programs.contains(source); });
+                });
+            if (pending_material == state.pending_materials.end())
+            {
+                break;
+            }
+            ++items;
+            const auto id = *pending_material;
+            const auto node = target_scene == world_->scene() ? world_->find_node(id)
+                                                              : target_scene->find_node(id);
+            const auto renderer = node.get_component<MeshRenderer>();
+            const auto found = resources.mesh_index.find({epoch, id, renderer.instance_id()});
+            if (!renderer || found == resources.mesh_index.end())
+            {
+                return fail("Material owner changed during preparation");
+            }
+            auto& bindings = resources.meshes[found->second].materials;
+            bindings.resize(renderer.material_count());
+            std::set<std::size_t> used_slots;
+            const auto* data = renderer.mesh_data();
+            if (data->submeshes.empty())
+            {
+                used_slots.insert(0);
+            }
+            for (const auto& range : data->submeshes)
             {
                 used_slots.insert(range.material_slot());
             }
-        }
-        for (std::size_t slot = 0; slot < bindings.size(); ++slot)
-        {
-            const auto material = renderer.material(slot);
-            const auto program = resources.programs.find(material.shader_data());
-            if (!used_slots.contains(slot))
+            for (const auto& lod : data->lods)
             {
-                // 未被子网格引用的槽仍参与原有全不透明/LOD 判断，但不分配 GPU 资源。
-                bindings[slot].blend = material.blend_mode();
-                continue;
-            }
-            if (program == resources.programs.end() ||
-                !program->second.prepare_material(material, resources.textures, bindings[slot]))
-            {
-                return fail("Cannot prepare material binding");
-            }
-        }
-        state.pending_materials.erase(pending_material);
-        if (const auto retained = resources.retained_meshes.find(id);
-            retained != resources.retained_meshes.end())
-        {
-            for (auto* source : retained->second.textures)
-            {
-                if (--state.texture_users[source] == 0)
+                for (const auto& range : lod->submeshes)
                 {
-                    state.unused_textures.insert(source);
+                    used_slots.insert(range.material_slot());
                 }
             }
-            for (auto* source : retained->second.programs)
+            for (std::size_t slot = 0; slot < bindings.size(); ++slot)
             {
-                if (--state.program_users[source] == 0)
+                const auto material = renderer.material(slot);
+                const auto program = resources.programs.find(material.shader_data());
+                if (!used_slots.contains(slot))
                 {
-                    state.unused_programs.insert(source);
+                    // 未被子网格引用的槽仍参与原有全不透明/LOD 判断，但不分配 GPU 资源。
+                    bindings[slot].blend = material.blend_mode();
+                    continue;
+                }
+                if (program == resources.programs.end() ||
+                    !program->second.prepare_material(material, resources.textures, bindings[slot]))
+                {
+                    return fail("Cannot prepare material binding");
                 }
             }
-            resources.retained_meshes.erase(retained);
+            state.pending_materials.erase(pending_material);
+            if (const auto retained = resources.retained_meshes.find(id);
+                retained != resources.retained_meshes.end())
+            {
+                for (auto* source : retained->second.textures)
+                {
+                    if (--state.texture_users[source] == 0)
+                    {
+                        state.unused_textures.insert(source);
+                    }
+                }
+                for (auto* source : retained->second.programs)
+                {
+                    if (--state.program_users[source] == 0)
+                    {
+                        state.unused_programs.insert(source);
+                    }
+                }
+                resources.retained_meshes.erase(retained);
+            }
         }
     }
     // 目标按现有准备预算逐项推进；完成后稳定描述只做比较，不重新创建。
@@ -1004,89 +1019,84 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
             return fail("Virtual shadow maps are unsupported by the render device or page budget");
         }
     }
-    bool meshlet_demand = rendering.meshlet_culling_enabled;
-    if (!meshlet_demand)
     {
-        // Published active environment and preparing scopes share immutable geometry uploads.
-        const auto inspect = [&](Scene* scene)
+        ENGINE_PROFILE_ZONE("Render.prepareMeshletGeometry");
+        bool meshlet_demand = rendering.meshlet_culling_enabled;
+        if (!meshlet_demand)
         {
-            render_detail::SceneRenderComponents components;
-            EnvironmentSettings environment;
-            return scene && render_detail::scene_render_components(*scene, components) &&
-                   components.environment.get_settings(environment) &&
-                   environment.meshlet_culling_enabled;
-        };
-        meshlet_demand = inspect(world_->scene());
-        for (const auto& [scope, record] : scope_preparations_)
-        {
-            (void)record;
-            meshlet_demand = meshlet_demand || inspect(world_->scope_candidate(scope));
-        }
-    }
-    meshlet_demand = meshlet_demand && render_detail::meshlet_supported();
-    if (meshlet_demand)
-    {
-        if (!meshlet_culling_)
-        {
-            meshlet_culling_ = std::make_unique<render_detail::MeshletCullPass>();
-        }
-        if (!meshlet_culling_->prepare(config_))
-        {
-            return fail("Cannot prepare meshlet GPU work buffers");
-        }
-    }
-    else if (meshlet_culling_)
-    {
-        meshlet_culling_->reset_scene();
-    }
-    const bool meshlet_geometry_demand =
-        meshlet_demand ||
-        (debug_requests_[static_cast<std::size_t>(RenderFeature::meshlet_colors)] &&
-         render_detail::DebugDrawPass::supports_meshlet_colors());
-    for (auto& [source, weak] : resources.geometries)
-    {
-        (void)source;
-        if (auto geometry = weak.lock())
-        {
-            if (!meshlet_geometry_demand)
+            // Published active environment and preparing scopes share immutable geometry uploads.
+            const auto inspect = [&](Scene* scene)
             {
-                geometry->release_meshlets();
-                continue;
-            }
-            const auto* mesh = geometry->resource.data<MeshResource>();
-            if (!mesh || !mesh->meshlets || bgfx::isValid(geometry->meshlet_indices(0)))
-            {
-                continue;
-            }
-            std::uint64_t bytes = 0;
-            const auto count_bytes = [&bytes](const schema::MeshletDataT& data)
-            {
-                bytes += data.indices.size() * sizeof(std::uint32_t) +
-                         data.meshlets.size() * 3 * 4 * sizeof(float);
+                render_detail::SceneRenderComponents components;
+                EnvironmentSettings environment;
+                return scene && render_detail::scene_render_components(*scene, components) &&
+                       components.environment.get_settings(environment) &&
+                       environment.meshlet_culling_enabled;
             };
-            count_bytes(*mesh->meshlets);
-            for (const auto& lod : mesh->lods)
+            meshlet_demand = inspect(world_->scene());
+            for (const auto& [scope, record] : scope_preparations_)
             {
-                if (lod->meshlets)
+                (void)record;
+                meshlet_demand = meshlet_demand || inspect(world_->scope_candidate(scope));
+            }
+        }
+        meshlet_demand = meshlet_demand && render_detail::meshlet_supported();
+        if (meshlet_demand)
+        {
+            if (!meshlet_culling_)
+            {
+                meshlet_culling_ = std::make_unique<render_detail::MeshletCullPass>();
+            }
+            if (!meshlet_culling_->prepare(config_))
+            {
+                return fail("Cannot prepare meshlet GPU work buffers");
+            }
+        }
+        else if (meshlet_culling_)
+        {
+            meshlet_culling_->reset_scene();
+        }
+        const bool meshlet_debug =
+            debug_requests_[static_cast<std::size_t>(RenderFeature::meshlet_colors)] &&
+            render_detail::DebugDrawPass::supports_meshlet_colors();
+        const bool meshlet_geometry_demand = meshlet_demand || meshlet_debug;
+        for (auto& [source, weak] : resources.geometries)
+        {
+            (void)source;
+            if (auto geometry = weak.lock())
+            {
+                if (!meshlet_geometry_demand)
                 {
-                    count_bytes(*lod->meshlets);
+                    geometry->release_meshlets();
+                    continue;
                 }
+                if (!meshlet_debug && geometry->meshlets_ready(true))
+                {
+                    geometry->release_meshlet_debug();
+                }
+                const auto* mesh = geometry->resource.data<MeshResource>();
+                if (!mesh || !mesh->meshlets || geometry->meshlets_ready(meshlet_debug))
+                {
+                    continue;
+                }
+                const auto bytes = geometry->meshlet_upload_bytes(meshlet_debug);
+                // Geometry creation is atomic. One oversized item can advance an otherwise
+                // empty step; subsequent items wait for the next existing upload budget.
+                if (!budget() ||
+                    (uploaded != 0 && (uploaded >= config_.upload_bytes_per_step ||
+                                       bytes > config_.upload_bytes_per_step - uploaded)))
+                {
+                    state.status = RenderPrepareStatus::preparing;
+                    output = state.progress;
+                    return state.status;
+                }
+                if (!geometry->prepare_meshlets(meshlet_debug))
+                {
+                    return fail("Cannot prepare meshlet geometry buffers");
+                }
+                uploaded += bytes;
+                ++items;
             }
-            // Geometry creation is atomic. One oversized item can advance an otherwise
-            // empty step; subsequent items wait for the next existing upload budget.
-            if (!budget() || (uploaded != 0 && (uploaded >= config_.upload_bytes_per_step ||
-                                                bytes > config_.upload_bytes_per_step - uploaded)))
-            {
-                state.status = RenderPrepareStatus::preparing;
-                output = state.progress;
-                return state.status;
-            }
-            if (!geometry->prepare_meshlets())
-            {
-                return fail("Cannot prepare meshlet geometry buffers");
-            }
-            uploaded += bytes;
-            ++items;
         }
     }
     const bool drawable = render_detail::drawable_scene(*world_, camera, !extensions_.empty(),
@@ -1201,156 +1211,249 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
         targets.stage = 0;
     }
     constexpr std::size_t target_steps = 10;
-    while (targets.stage < target_steps && budget())
     {
-        ++items;
-        bool ready = true;
-        const auto width = static_cast<std::uint16_t>(width_);
-        const auto height = static_cast<std::uint16_t>(height_);
-        switch (targets.stage)
+        ENGINE_PROFILE_ZONE("Render.preparePassTargets");
+        while (targets.stage < target_steps && budget())
         {
-        case 0:
-            ready = !drawable || resources.targets().shadow.prepare(config_.shadow_atlas_size);
-            break;
-        case 1:
-            ready = !drawable || resources.targets().surface_pass.prepare(width, height);
-            break;
-        case 2:
-            ready = !drawable || resources.targets().hdr_post_process.prepare(
-                                     width, height, rendering.bloom_enabled, config_.msaa_samples);
-            break;
-        case 3:
-            if (drawable && rendering.ao_enabled)
+            ++items;
+            bool ready = true;
+            const auto width = static_cast<std::uint16_t>(width_);
+            const auto height = static_cast<std::uint16_t>(height_);
+            switch (targets.stage)
             {
-                ready = resources.targets().ambient_occlusion.prepare(width, height);
-            }
-            else
+            case 0:
+                ready = !drawable || resources.targets().shadow.prepare(config_.shadow_atlas_size);
+                break;
+            case 1:
+                ready = !drawable || resources.targets().surface_pass.prepare(
+                                         width, height, rendering.ssr_enabled);
+                break;
+            case 2:
+                ready = !drawable || resources.targets().hdr_post_process.prepare(
+                                         width, height, rendering.bloom_enabled,
+                                         config_.msaa_samples, rendering.ssr_enabled);
+                break;
+            case 3:
+                if (drawable && rendering.ao_enabled)
+                {
+                    ready = resources.targets().ambient_occlusion.prepare(width, height);
+                }
+                else
+                {
+                    resources.targets().ambient_occlusion.release();
+                }
+                break;
+            case 4:
+                ready =
+                    !drawable || resources.targets().reflections.prepare(width, height, rendering);
+                break;
+            case 5:
+                ready =
+                    !drawable || resources.targets().clusters[2].prepare(config_, width, height, 0);
+                break;
+            case 6:
+            case 7:
             {
-                resources.targets().ambient_occlusion.release();
+                const auto index = targets.stage - 6;
+                auto& target = resources.targets().planar[index];
+                if (plane_nodes[index])
+                {
+                    ready = target.prepare(plane_widths[index], plane_heights[index],
+                                           config_.msaa_samples) &&
+                            resources.targets().clusters[index].prepare(
+                                config_, plane_widths[index], plane_heights[index], 0);
+                    target.node_id = plane_nodes[index].id();
+                }
+                else
+                {
+                    target.release();
+                    resources.targets().clusters[index].release();
+                }
+                break;
             }
-            break;
-        case 4:
-            ready = !drawable || resources.targets().reflections.prepare(width, height, rendering);
-            break;
-        case 5:
-            ready = !drawable || resources.targets().clusters[2].prepare(config_, width, height, 0);
-            break;
-        case 6:
-        case 7:
-        {
-            const auto index = targets.stage - 6;
-            auto& target = resources.targets().planar[index];
-            if (plane_nodes[index])
-            {
-                ready = target.prepare(plane_widths[index], plane_heights[index],
-                                       config_.msaa_samples) &&
-                        resources.targets().clusters[index].prepare(config_, plane_widths[index],
-                                                                    plane_heights[index], 0);
-                target.node_id = plane_nodes[index].id();
-            }
-            else
-            {
-                target.release();
-                resources.targets().clusters[index].release();
-            }
-            break;
-        }
-        case 8:
-            ready = !capture_active ||
+            case 8:
+                ready =
+                    !capture_active ||
                     (resources.targets().shadow.prepare(config_.shadow_atlas_size) &&
                      resources.targets().clusters[3].prepare(config_, capture_request_.width,
                                                              capture_request_.height, 0) &&
                      (resources.capture_pending || resources.prepare_capture(capture_request_)));
-            break;
-        case 9:
-            if (hdr_capture_status_ == SceneCaptureStatus::pending &&
-                !resources.hdr_capture_pending)
-            {
-                constexpr auto flags = BGFX_TEXTURE_BLIT_DST | BGFX_TEXTURE_READ_BACK;
-                ready = drawable &&
-                        bgfx::isTextureValid(0, false, 1, bgfx::TextureFormat::RGBA16F, flags);
-                if (ready)
+                break;
+            case 9:
+                if (hdr_capture_status_ == SceneCaptureStatus::pending &&
+                    !resources.hdr_capture_pending)
                 {
-                    if (bgfx::isValid(resources.hdr_capture_readback))
+                    constexpr auto flags = BGFX_TEXTURE_BLIT_DST | BGFX_TEXTURE_READ_BACK;
+                    ready = drawable &&
+                            bgfx::isTextureValid(0, false, 1, bgfx::TextureFormat::RGBA16F, flags);
+                    if (ready)
                     {
-                        bgfx::destroy(resources.hdr_capture_readback);
+                        if (bgfx::isValid(resources.hdr_capture_readback))
+                        {
+                            bgfx::destroy(resources.hdr_capture_readback);
+                        }
+                        resources.hdr_capture_readback = bgfx::createTexture2D(
+                            width, height, false, 1, bgfx::TextureFormat::RGBA16F, flags);
+                        ready = bgfx::isValid(resources.hdr_capture_readback);
+                        resources.hdr_capture_width = width;
+                        resources.hdr_capture_height = height;
+                        resources.hdr_capture_pixels.resize(static_cast<std::size_t>(width) *
+                                                            height * 4);
                     }
-                    resources.hdr_capture_readback = bgfx::createTexture2D(
-                        width, height, false, 1, bgfx::TextureFormat::RGBA16F, flags);
-                    ready = bgfx::isValid(resources.hdr_capture_readback);
-                    resources.hdr_capture_width = width;
-                    resources.hdr_capture_height = height;
-                    resources.hdr_capture_pixels.resize(static_cast<std::size_t>(width) * height *
-                                                        4);
                 }
+                break;
             }
-            break;
+            if (!ready)
+            {
+                return fail("Cannot prepare render pass target");
+            }
+            ++targets.stage;
         }
-        if (!ready)
-        {
-            return fail("Cannot prepare render pass target");
-        }
-        ++targets.stage;
     }
-    state.progress.generation = state.generation;
-    state.progress.staging_bytes = state.staging_bytes;
-    state.progress.discovery_complete =
-        std::none_of(state.dirty_nodes.begin(), state.dirty_nodes.end(), includes) &&
-        !targets.ibl_dirty;
-    state.progress.instances_total = state.progress.instances_ready = 0;
-    state.progress.programs_total = state.progress.programs_ready = 0;
-    state.progress.texture_jobs = 0;
-    state.progress.decoded_blocks = state.progress.upload_bytes = state.progress.upload_total = 0;
-    for (const auto& mesh : resources.meshes)
     {
-        if (includes(mesh.node_id))
+        ENGINE_PROFILE_ZONE("Render.prepareProgress");
+        state.progress.generation = state.generation;
+        state.progress.staging_bytes = state.staging_bytes;
+        state.progress.discovery_complete =
+            std::none_of(state.dirty_nodes.begin(), state.dirty_nodes.end(), includes) &&
+            !targets.ibl_dirty;
+        state.progress.instances_total = state.progress.instances_ready = 0;
+        state.progress.programs_total = state.progress.programs_ready = 0;
+        state.progress.texture_jobs = 0;
+        state.progress.decoded_blocks = state.progress.upload_bytes = state.progress.upload_total =
+            0;
+        for (const auto& mesh : resources.meshes)
         {
-            ++state.progress.instances_total;
-            state.progress.instances_ready += !state.dirty_nodes.contains(mesh.node_id) &&
-                                              !state.pending_materials.contains(mesh.node_id);
+            if (includes(mesh.node_id))
+            {
+                ++state.progress.instances_total;
+                state.progress.instances_ready += !state.dirty_nodes.contains(mesh.node_id) &&
+                                                  !state.pending_materials.contains(mesh.node_id);
+            }
         }
+        for (const auto& [program, gpu] : resources.programs)
+        {
+            if (required_program(program))
+            {
+                (void)gpu;
+                ++state.progress.programs_total;
+                state.progress.programs_ready += !state.pending_programs.contains(program);
+            }
+        }
+        std::uint32_t texture_total = 0, texture_ready = 0;
+        for (const auto& [source, users] : state.texture_users)
+        {
+            if (users && required_texture(source))
+            {
+                ++texture_total;
+                texture_ready += state.ready_textures.contains(source);
+                const auto pending = state.textures.find(source);
+                state.progress.texture_jobs +=
+                    pending != state.textures.end() && pending->second->reserved_bytes != 0;
+                state.progress.decoded_blocks += state.decoded_blocks[source];
+                state.progress.upload_bytes += state.uploaded_bytes[source];
+                state.progress.upload_total += state.upload_total[source];
+            }
+        }
+        state.progress.resources_total =
+            state.progress.instances_total + state.progress.programs_total + texture_total;
+        state.progress.resources_ready =
+            state.progress.instances_ready + state.progress.programs_ready + texture_ready;
+        state.status = state.progress.discovery_complete &&
+                               std::none_of(state.textures.begin(), state.textures.end(),
+                                            [&](const auto& value)
+                                            { return required_texture(value.first); }) &&
+                               std::none_of(state.pending_programs.begin(),
+                                            state.pending_programs.end(), required_program) &&
+                               std::none_of(state.pending_materials.begin(),
+                                            state.pending_materials.end(), includes) &&
+                               targets.stage == target_steps
+                           ? RenderPrepareStatus::ready
+                           : RenderPrepareStatus::preparing;
+        ENGINE_PROFILE_PLOT("Render.textureStagingBytes", static_cast<double>(state.staging_bytes));
+        output = state.progress;
     }
-    for (const auto& [program, gpu] : resources.programs)
+#if defined(ENGINE_ENABLE_TRACY)
+    if (ENGINE_PROFILE_CONNECTED())
     {
-        if (required_program(program))
+        ENGINE_PROFILE_ZONE("Render.profileMemory");
+        const auto bytes = [](const auto& values)
+        { return static_cast<std::uint64_t>(values.capacity()) * sizeof(values.front()); };
+        const auto meshlet_bytes = [&bytes](const schema::MeshletDataT* value)
         {
-            (void)gpu;
-            ++state.progress.programs_total;
-            state.progress.programs_ready += !state.pending_programs.contains(program);
-        }
-    }
-    std::uint32_t texture_total = 0, texture_ready = 0;
-    for (const auto& [source, users] : state.texture_users)
-    {
-        if (users && required_texture(source))
+            return value ? bytes(value->indices) + bytes(value->meshlets) + bytes(value->submeshes)
+                         : std::uint64_t{0};
+        };
+        std::uint64_t mesh_cpu = 0, meshlet_cpu = 0, geometry_gpu = 0, texture_cpu = 0;
+        std::uint64_t vertices = 0, indices = 0, geometries = 0;
+        for (const auto& [source, weak] : resources.geometries)
         {
-            ++texture_total;
-            texture_ready += state.ready_textures.contains(source);
-            const auto pending = state.textures.find(source);
-            state.progress.texture_jobs +=
-                pending != state.textures.end() && pending->second->reserved_bytes != 0;
-            state.progress.decoded_blocks += state.decoded_blocks[source];
-            state.progress.upload_bytes += state.uploaded_bytes[source];
-            state.progress.upload_total += state.upload_total[source];
+            (void)source;
+            const auto geometry = weak.lock();
+            const auto* data = geometry ? geometry->resource.data<MeshResource>() : nullptr;
+            if (!data)
+            {
+                continue;
+            }
+            ++geometries;
+            vertices += data->vertices.size();
+            indices += data->indices.size();
+            mesh_cpu += bytes(data->vertices) + bytes(data->indices) + bytes(data->texcoords) +
+                        bytes(data->tangents) + bytes(data->colors) + bytes(data->submeshes) +
+                        bytes(data->skin) + bytes(data->mesh_to_skeleton) +
+                        bytes(data->lightmap_texcoords);
+            meshlet_cpu += meshlet_bytes(data->meshlets.get());
+            geometry_gpu += geometry->vertex_buffer_bytes() + geometry->index_buffer_bytes();
+            const auto gpu_meshlets = [&](const schema::MeshletDataT* value, std::size_t level)
+            {
+                if (value && bgfx::isValid(geometry->meshlet_debug_offsets(level)))
+                {
+                    geometry_gpu += value->meshlets.size() * sizeof(std::uint32_t);
+                }
+            };
+            gpu_meshlets(data->meshlets.get(), 0);
+            for (std::size_t level = 0; level < data->lods.size(); ++level)
+            {
+                const auto& lod = *data->lods[level];
+                mesh_cpu += bytes(lod.indices) + bytes(lod.submeshes);
+                meshlet_cpu += meshlet_bytes(lod.meshlets.get());
+                gpu_meshlets(lod.meshlets.get(), level + 1);
+            }
         }
+        std::uint64_t vertex_page_bytes = 0;
+        for (const auto& page : resources.static_vertex_pages)
+        {
+            if (const auto storage = page.lock())
+            {
+                vertex_page_bytes += storage->byte_size();
+            }
+        }
+        geometry_gpu += vertex_page_bytes;
+        ENGINE_PROFILE_PLOT("Render.staticVertexPageBytes", static_cast<double>(vertex_page_bytes));
+        for (const auto& [source, texture] : resources.textures)
+        {
+            (void)source;
+            if (const auto* data = texture.resource.data<TextureResource>())
+            {
+                texture_cpu += bytes(data->data) + bytes(data->subresources);
+            }
+        }
+        ENGINE_PROFILE_PLOT("Render.meshCpuArrayBytes", static_cast<double>(mesh_cpu));
+        ENGINE_PROFILE_PLOT("Render.meshletCpuArrayBytes", static_cast<double>(meshlet_cpu));
+        ENGINE_PROFILE_PLOT("Render.textureCpuArrayBytes", static_cast<double>(texture_cpu));
+        ENGINE_PROFILE_PLOT("Render.sharedGeometryGpuEstimatedBytes",
+                            static_cast<double>(geometry_gpu));
+        ENGINE_PROFILE_PLOT("Render.uniqueGeometries", static_cast<double>(geometries));
+        ENGINE_PROFILE_PLOT("Render.sourceVertices", static_cast<double>(vertices));
+        ENGINE_PROFILE_PLOT("Render.sourceIndices", static_cast<double>(indices));
+        ENGINE_PROFILE_PLOT("Render.preparePendingTextures",
+                            static_cast<double>(state.textures.size()));
+        ENGINE_PROFILE_PLOT("Render.preparePendingMaterials",
+                            static_cast<double>(state.pending_materials.size()));
+        ENGINE_PROFILE_PLOT("Render.preparePendingPrograms",
+                            static_cast<double>(state.pending_programs.size()));
     }
-    state.progress.resources_total =
-        state.progress.instances_total + state.progress.programs_total + texture_total;
-    state.progress.resources_ready =
-        state.progress.instances_ready + state.progress.programs_ready + texture_ready;
-    state.status =
-        state.progress.discovery_complete &&
-                std::none_of(state.textures.begin(), state.textures.end(),
-                             [&](const auto& value) { return required_texture(value.first); }) &&
-                std::none_of(state.pending_programs.begin(), state.pending_programs.end(),
-                             required_program) &&
-                std::none_of(state.pending_materials.begin(), state.pending_materials.end(),
-                             includes) &&
-                targets.stage == target_steps
-            ? RenderPrepareStatus::ready
-            : RenderPrepareStatus::preparing;
-    ENGINE_PROFILE_PLOT("Render.textureStagingBytes", static_cast<double>(state.staging_bytes));
-    output = state.progress;
+#endif
     const bool any_capture_active = capture_status_ == SceneCaptureStatus::pending ||
                                     hdr_capture_status_ == SceneCaptureStatus::pending;
     if (state.status == RenderPrepareStatus::ready && resources.meshes.empty() &&

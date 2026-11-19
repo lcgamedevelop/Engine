@@ -4,7 +4,7 @@
  * at 7a70927d2af7ffcc5cef9c9e8f4c821e31fcb099. BSD-2-Clause.
  * Copyright 2013-2014 Dario Manesku. See third_party/notices/bgfx.txt.
  * Changes: one atlas, camera-depth selection, overlapping split transitions,
- * distance fade and per-tap tile clamping. Packing stays in shadow_helpers.sh.
+ * distance fade and per-tap tile clamping on a native depth atlas.
  */
 
 SAMPLER2D(s_shadow_map, 15);
@@ -19,6 +19,24 @@ uniform vec4 u_shadow_splits;
 uniform vec4 u_shadow_params;
 // Depth bias, reciprocal atlas size, directional light index, enabled.
 uniform vec4 u_shadow_settings;
+
+#if defined(ENGINE_VSM_DEPTH_RANGES)
+float fully_lit_pcf(vec2 fraction)
+{
+    float visible = 0.0;
+    // Accumulate in the same order as the filtered samples.
+    for (int x = 0; x < 5; ++x)
+    {
+        float weight_x = x == 0 ? 1.0 - fraction.x : (x == 4 ? fraction.x : 1.0);
+        visible += weight_x * (1.0 - fraction.y);
+        visible += weight_x;
+        visible += weight_x;
+        visible += weight_x;
+        visible += weight_x * fraction.y;
+    }
+    return visible / 16.0;
+}
+#endif
 
 float shadow_filter(vec3 projected, vec3 dx, vec3 dy, vec4 rectangle,
                      float inverse_size, float bias, float border, bool virtual_map)
@@ -35,12 +53,26 @@ float shadow_filter(vec3 projected, vec3 dx, vec3 dy, vec4 rectangle,
     vec2 half_texel = vec2_splat(inverse_size * 0.5);
     vec2 minimum_uv = rectangle.xy + half_texel - vec2_splat(border * inverse_size);
     vec2 maximum_uv = rectangle.xy + rectangle.zw - half_texel + vec2_splat(border * inverse_size);
-    // Filter comparison results, not packed RGBA depth. The four bilinear PCF
+    // Filter depth comparison results. The four bilinear PCF
     // taps per axis share five texels; combine their weights before fetching.
     // Keeping the fractional footprint avoids a snapped 4x4 stencil's stripes.
     vec2 footprint = uv / inverse_size - 2.0;
     vec2 first_texel = floor(footprint);
     vec2 fraction = fract(footprint);
+#if defined(ENGINE_VSM_DEPTH_RANGES)
+    if (virtual_map && u_lighting_params.z > 0.5)
+    {
+        ivec2 block = ivec2(first_texel + 2.0) / 8;
+        vec2 range = texelFetch(s_lightmap, block, 0).rg;
+        // The outer sample centres lie less than three texels from this receiver.
+        vec2 reach = vec2_splat(3.0 * inverse_size) / rectangle.zw;
+        float span = dot(abs(depth_gradient), reach);
+        float roundoff = 0.000001 * (1.0 + span + abs(bias));
+        float receiver = projected.z - bias;
+        if (range.y < receiver - span - roundoff) return 0.0;
+        if (range.x >= receiver + span + roundoff) return fully_lit_pcf(fraction);
+    }
+#endif
     float visible = 0.0;
     for (int x = 0; x < 5; ++x)
     {
@@ -50,14 +82,14 @@ float shadow_filter(vec3 projected, vec3 dx, vec3 dy, vec4 rectangle,
             float weight_y = y == 0 ? 1.0 - fraction.y : (y == 4 ? fraction.y : 1.0);
             vec2 centre = (first_texel + vec2(float(x), float(y)) + 0.5) * inverse_size;
             vec2 sample_uv = clamp(centre, minimum_uv, maximum_uv);
-            // Packed-depth textures use POINT sampling. Compare against the receiver
+            // The depth atlas uses POINT sampling. Compare against the receiver
             // plane at the actual texel centre, including the subtexel displacement.
             float depth;
 #if defined(ENGINE_VSM)
-            if (virtual_map) depth = unpack_shadow_depth(texture2DLod(s_virtual_shadow, sample_uv, 0.0));
+            if (virtual_map) depth = texture2DLod(s_virtual_shadow, sample_uv, 0.0).r;
             else
 #endif
-                depth = unpack_shadow_depth(texture2DLod(s_shadow_map, sample_uv, 0.0));
+                depth = texture2DLod(s_shadow_map, sample_uv, 0.0).r;
             float receiver_depth = projected.z +
                 dot(depth_gradient, (sample_uv - uv) / rectangle.zw);
             visible += weight_x * weight_y * step(receiver_depth - bias, depth);

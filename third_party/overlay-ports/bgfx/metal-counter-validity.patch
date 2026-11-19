@@ -1,0 +1,42 @@
+--- a/bgfx/src/renderer_mtl.cpp
++++ b/bgfx/src/renderer_mtl.cpp
+@@ -6067,23 +6067,29 @@
+ 		{
+ 			const Query& query = sampling.m_query[ii];
+ 
+-			// A pass that never ran leaves its samples at the error value, so
+-			// the widest pair that did is what the view took.
++			// Clear-only or skipped stages can retain old values in a reused sample
++			// buffer. Accept only complete ordered pairs from this sampling epoch.
+ 			uint64_t begin = UINT64_MAX;
+ 			uint64_t end   = 0;
+ 
+-			for (uint32_t jj = query.m_first, num = bx::min(query.m_first + query.m_num, numResolved); jj < num; ++jj)
+-			{
+-				const uint64_t value = timestamp[jj].timestamp;
+-
+-				if (0                     == value
+-				||  MTL::CounterErrorValue == value)
++			for (uint32_t jj = query.m_first, num = bx::min(query.m_first + query.m_num, numResolved); jj + 1 < num; jj += 2)
++			{
++				const uint64_t first = timestamp[jj].timestamp;
++				const uint64_t last  = timestamp[jj + 1].timestamp;
++
++				if (0                     == first
++				||  0                     == last
++				||  MTL::CounterErrorValue == first
++				||  MTL::CounterErrorValue == last
++				||  first < sampling.m_gpuTimestamp
++				||  last  > gpuTimestamp
++				||  last  < first)
+ 				{
+ 					continue;
+ 				}
+ 
+-				begin = bx::min(begin, value);
+-				end   = bx::max(end,   value);
++				begin = bx::min(begin, first);
++				end   = bx::max(end,   last);
+ 			}
+ 
+ 			if (UINT64_MAX != begin)

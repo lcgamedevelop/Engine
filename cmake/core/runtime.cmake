@@ -99,7 +99,8 @@ if(ENGINE_ENABLE_RUNTIME_DEPS)
                 bgfx::bx
                 basisu::basisu_encoder)
     include(${PROJECT_SOURCE_DIR}/cmake/core/render_shaders.cmake)
-    engine_embed_render_shaders(engine_render shadow shadow_instanced movie rvt_debug vsm_debug)
+    engine_embed_render_shaders(engine_render shadow shadow_instanced shadow_solid shadow_position
+                                movie rvt_debug vsm_debug cube_depth terrain_depth cube_pbr_opaque)
     engine_embed_upstream_feature_shaders(engine_render)
     engine_embed_assao_shaders(engine_render)
     engine_embed_skinning_shader(engine_render)

@@ -28,7 +28,7 @@ struct ShadowRecord
 {
     std::array<float, 16> matrix{};
     std::array<float, 4> rectangle{};
-    // Bias, reciprocal atlas size, near, far.
+    // Bias, reciprocal atlas size, point depth scale and depth numerator.
     std::array<float, 4> parameters{};
 };
 
@@ -38,6 +38,7 @@ struct LocalShadowLight
     std::uint32_t light_index = 0;
     LightSettings settings{};
     std::array<float, 16> world{};
+    Vec3 world_position{};
     std::uint64_t instance_id = 0;
 };
 
@@ -74,9 +75,11 @@ struct ShadowFrame
     std::array<std::array<float, 16>, maximum_shadow_cascades> matrices{};
     std::array<std::array<float, 4>, maximum_shadow_cascades> rectangles{};
     std::array<ShadowBounds, maximum_shadow_cascades> bounds{};
+    std::array<ShadowBounds, maximum_shadow_cascades> receiver_bounds{};
     std::array<float, 4> splits{};
     std::array<float, 4> parameters{};
     std::uint16_t tile_size = 0;
+    bool receiver_bounds_available = false;
     std::vector<ShadowRecord> local_records;
     std::uint32_t skipped_local_lights = 0;
 };
@@ -84,6 +87,7 @@ struct ShadowFrame
 [[nodiscard]] bool prepare_shadow_frame(const CameraSettings& camera,
                                         const RenderSettings& settings, float aspect,
                                         const float* camera_world, const float* camera_view_matrix,
+                                        const float* receiver_projection,
                                         const std::array<float, 4>& direction, ShadowFrame& frame);
 
 } // namespace engine::render_detail

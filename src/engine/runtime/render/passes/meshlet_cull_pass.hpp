@@ -6,6 +6,9 @@
 
 #include <array>
 #include <chrono>
+#include <cstddef>
+#include <map>
+#include <optional>
 #include <vector>
 
 namespace engine
@@ -16,6 +19,7 @@ struct RenderConfig;
 namespace engine::render_detail
 {
 struct RenderFrameData;
+struct GpuGeometry;
 struct SceneDrawView;
 struct ViewDrawList;
 
@@ -37,6 +41,12 @@ public:
     [[nodiscard]] std::uint32_t resource_count() const noexcept;
 
 private:
+    [[nodiscard]] bool prepare_index_compaction();
+    void release_index_compaction() noexcept;
+    [[nodiscard]] std::optional<std::uint32_t>
+    cache_index_source(const GpuGeometry& geometry, std::size_t lod, std::uint32_t first,
+                       std::uint32_t count, std::uint32_t& remaining_copies);
+
     struct Readback
     {
         std::array<std::uint32_t, 4> counters{};
@@ -53,15 +63,32 @@ private:
     std::vector<std::uint64_t> resources_;
     bool sampling_ = false;
     std::uint32_t capacity_ = 0;
+    std::uint32_t input_capacity_ = 0, instance_capacity_ = 0, command_capacity_ = 0;
+    std::uint32_t descriptor_capacity_ = 0;
+    std::vector<std::uint64_t> descriptor_layout_;
+    std::vector<std::array<float, 4>> uploaded_inputs_;
+    std::array<std::array<float, 4>, 6> result_planes_{};
+    std::uint32_t result_flags_ = 0;
+    bool result_valid_ = false;
     bgfx::ProgramHandle program_ = BGFX_INVALID_HANDLE;
     bgfx::ProgramHandle clear_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle parameters_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle planes_ = BGFX_INVALID_HANDLE;
     bgfx::DynamicVertexBufferHandle inputs_ = BGFX_INVALID_HANDLE;
     bgfx::DynamicVertexBufferHandle instances_ = BGFX_INVALID_HANDLE;
+    bgfx::DynamicVertexBufferHandle descriptors_ = BGFX_INVALID_HANDLE;
     bgfx::IndirectBufferHandle commands_ = BGFX_INVALID_HANDLE;
     bgfx::IndexBufferHandle counters_ = BGFX_INVALID_HANDLE;
+    bool index_compaction_attempted_ = false;
+    std::uint32_t index_region_capacity_ = 0, index_source_count_ = 0;
+    std::map<std::array<std::uint64_t, 5>, std::uint32_t> index_sources_;
+    std::vector<std::array<std::uint32_t, 4>> uploaded_index_jobs_;
+    bgfx::DynamicIndexBufferHandle index_arena_ = BGFX_INVALID_HANDLE;
+    bgfx::DynamicVertexBufferHandle index_compaction_jobs_ = BGFX_INVALID_HANDLE;
+    bgfx::ProgramHandle index_compaction_ = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle index_compaction_parameters_ = BGFX_INVALID_HANDLE;
 };
 
 [[nodiscard]] bool meshlet_supported() noexcept;
+[[nodiscard]] bool meshlet_index_compaction_supported() noexcept;
 } // namespace engine::render_detail

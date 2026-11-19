@@ -8,7 +8,9 @@
 SAMPLER2D(s_base_color, 0);
 SAMPLER2D(s_normal, 1);
 SAMPLER2D(s_orm, 2);
+#if !defined(ENGINE_PBR_CAMERA_PASS)
 SAMPLER2D(s_specular, 3);
+#endif
 SAMPLER2D(s_emission, 4);
 uniform vec4 u_base_color;
 // x: metallic, y: roughness, z: lighting (0 PBR, 1 unlit, 2 Blinn-Phong), w: alpha cutoff.
@@ -52,23 +54,31 @@ PbrSurface sample_pbr_surface(vec2 texcoord, vec4 vertex_color, vec3 world_norma
     vec4 base_texture;
     vec3 sampled_normal;
     vec3 orm;
+#if !defined(ENGINE_PBR_CAMERA_PASS)
     vec4 specular_texture;
+#endif
     vec3 emission_texture;
+#if !defined(ENGINE_PBR_PLAIN_UV)
     if (u_hex_tiling.x > 0.5)
     {
         HexTilingContext tile = hextile_context(uv, u_hex_tiling.y, u_hex_tiling.z,
                                                 s_base_color, base_texture);
         sampled_normal = hextile_normal(s_normal, tile);
         orm = hextile_texture(s_orm, tile).rgb;
+#if !defined(ENGINE_PBR_CAMERA_PASS)
         specular_texture = hextile_texture(s_specular, tile);
+#endif
         emission_texture = hextile_texture(s_emission, tile).rgb;
     }
     else
+#endif
     {
         base_texture = texture2D(s_base_color, uv);
         sampled_normal = texture2D(s_normal, uv).xyz * 2.0 - 1.0;
         orm = texture2D(s_orm, uv).rgb;
+#if !defined(ENGINE_PBR_CAMERA_PASS)
         specular_texture = texture2D(s_specular, uv);
+#endif
         emission_texture = texture2D(s_emission, uv).rgb;
     }
     vec4 base_sample = base_texture * u_base_color;
@@ -87,7 +97,8 @@ PbrSurface sample_pbr_surface(vec2 texcoord, vec4 vertex_color, vec3 world_norma
     vec3 specular_color = mix(vec3_splat(0.04), base_color.rgb, metallic);
     float diffuse_weight = 1.0 - metallic;
     float smoothness = saturate(u_surface_parameters.x);
-    if (u_specular.w > 0.5 || u_material.z > 1.5)
+#if !defined(ENGINE_PBR_CAMERA_PASS)
+    if (u_specular.w > 0.5 || ENGINE_PBR_LIGHTING_MODE > 1.5)
     {
         vec4 specular_sample = specular_texture;
         specular_color = saturate(u_specular.rgb * specular_sample.rgb);
@@ -96,6 +107,7 @@ PbrSurface sample_pbr_surface(vec2 texcoord, vec4 vertex_color, vec3 world_norma
         roughness = max(1.0 - smoothness, 0.045);
         diffuse_weight = 1.0 - max(max(specular_color.r, specular_color.g), specular_color.b);
     }
+#endif
 
     if (u_surface.x > 0.5 && dot(world_normal, view_direction) < 0.0)
     {

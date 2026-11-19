@@ -48,7 +48,7 @@ bool MeshImporter::inspect_batch(const ImportContext&, std::string& fingerprint,
     {
         return false;
     }
-    fingerprint += ":mikktspace-3e895b49-angle-precision-1:mesh-importer-2" +
+    fingerprint += ":mikktspace-3e895b49-angle-precision-1-degenerate-1:mesh-importer-2" +
                    mesh_lod_fingerprint() + meshlet_fingerprint();
     return true;
 }

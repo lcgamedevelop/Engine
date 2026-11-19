@@ -431,6 +431,7 @@ FrameStatus step_runtime_app(RuntimeAppState& state, double delta_time)
     const auto script_factory = state.script_factory;
     const auto retargeter_factory = state.retargeter_factory;
 #endif
+    ENGINE_PROFILE_FRAME();
     ENGINE_PROFILE_ZONE("Host.frame");
 #if defined(ENGINE_ENABLE_TRACY)
     const auto profile_frame_begin = std::chrono::steady_clock::now();

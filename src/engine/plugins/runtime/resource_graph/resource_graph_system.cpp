@@ -1,5 +1,7 @@
 #include "plugins/runtime/resource_graph/resource_graph_system.hpp"
 
+#include "runtime/performance/profiling.hpp"
+
 #include "runtime/resource/resource_system.hpp"
 #include "runtime/task/task_system.hpp"
 
@@ -1229,11 +1231,17 @@ bool ResourceGraphSystem::on_initialize(const EngineConfig&)
 }
 bool ResourceGraphSystem::on_tick(double)
 {
+    ENGINE_PROFILE_ZONE("ResourceGraph.tick");
     if (!state_->command())
     {
         return false;
     }
     state_->advance();
+    ENGINE_PROFILE_PLOT("ResourceGraph.records", static_cast<std::int64_t>(state_->records.size()));
+    ENGINE_PROFILE_PLOT("ResourceGraph.acquisitions",
+                        static_cast<std::int64_t>(state_->acquisitions.size()));
+    ENGINE_PROFILE_PLOT("ResourceGraph.requests",
+                        static_cast<std::int64_t>(state_->requests.size()));
     return true;
 }
 void ResourceGraphSystem::on_shutdown() noexcept

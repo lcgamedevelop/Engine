@@ -1,4 +1,5 @@
 #include "runtime/render/rvt/rvt_pass.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/render/render_constants.hpp"
 #include "runtime/render/render_math.hpp"
 #include "runtime/render/resources/gpu_program.hpp"
@@ -124,6 +125,7 @@ bool RvtPass::configure(const schema::RvtSettingsT& settings, std::uint64_t devi
 }
 void RvtPass::invalidate_sources(VirtualTextureCache& cache, const RenderFrameData& frame)
 {
+    ENGINE_PROFILE_ZONE("Render.rvtInvalidateSources");
     std::map<std::uint64_t, Source> next;
     for (const auto& mesh : frame.meshes)
     {
@@ -161,6 +163,7 @@ void RvtPass::invalidate_sources(VirtualTextureCache& cache, const RenderFrameDa
 }
 bool RvtPass::prepare_pages(VirtualTextureCache& cache, const RenderFrameData& sources)
 {
+    ENGINE_PROFILE_ZONE("Render.rvtPageSubmit");
     if (!available())
     {
         return false;
@@ -263,6 +266,7 @@ bool RvtPass::prepare_pages(VirtualTextureCache& cache, const RenderFrameData& s
     {
         return false;
     }
+    ENGINE_PROFILE_PLOT("Rvt.redrawnPages", static_cast<std::int64_t>(batch.pages.size()));
     minimum_mip_ = cache.maximum_mip();
     for (const auto key : cache.demand())
     {

@@ -10,7 +10,7 @@
 
 ## 范围
 
-- 沿用分簇前向渲染、标准 PBR、当前阴影深度编码与 PCF。首版为主观察者的一盏方向光提供分页阴影；
+- 沿用分簇前向渲染、标准 PBR、可采样 D32F 深度与 PCF。为主观察者的一盏方向光提供分页阴影；
   编辑器预览与玩法使用同一主观察者入口。点光、聚光、透明接收者、平面反射和烘焙捕获继续使用现有阴影。
 - 光源的生产模式保存在 Light 组件。唯一启用投影的方向光仍由现有规则选择；
   新模式默认关闭，不在 Environment、Scene 或 RenderSystem 再放一份场景开关。
@@ -192,8 +192,10 @@ class VsmPageBatch {
     <<owned value>>
     +uint64 generation
     +uint64 batch_id
+    +VsmView view
     +VsmPageDraw[] pages
-    +uint32[] page_table
+    +float4[] page_table
+    +uint32 dominant_level
 }
 class VsmPageDemand
 class VsmView
@@ -255,8 +257,10 @@ class VirtualShadowPass {
     +prepare(settings, config, generation) bool
     +poll(frame_number) void
     +take_demand(output) bool
-    +submit_feedback(view, depth, submission_id) bool
+    +submit_feedback(view, depth, depth_inputs, submission_id) bool
+    +accept_feedback(receiver_revision) void
     +draw_pages(frame, batch, shadow) bool
+    +submit_local_depth_ranges(atlas, records, depth_revision) float
     +binding(output) bool
     +reset_scene() void
     +release_gpu() void
@@ -269,13 +273,14 @@ class VsmView
 class VsmPageDemand
 class VsmPageBatch
 class RenderFrameData
-class VsmGpuBinding
-class ClusteredLightingPass {
-    <<existing delta>>
-    +prepare(config, width, height, vsm_vectors) bool
-    +cull(view, camera, view_matrix, projection, lights, shadows, vsm) bool
-    +bind(virtual_shadow) void
+class SurfacePass
+class RenderSystem
+class VsmGpuBinding {
+    +TextureHandle atlas
+    +TextureHandle depth_ranges
+    +float local_range_layout
 }
+class ClusteredLightingPass
 class CameraSettings
 class ClusterLight
 class ShadowRecord
@@ -286,7 +291,10 @@ VirtualShadowPass ..> VsmView
 VirtualShadowPass ..> VsmPageDemand
 VirtualShadowPass ..> VsmPageBatch
 VirtualShadowPass ..> RenderFrameData
-VirtualShadowPass ..> VsmGpuBinding
+RenderSystem ..> SurfacePass : 读取已提交的深度覆盖签名
+RenderSystem ..> VirtualShadowPass : 传入当前深度与签名
+VirtualShadowPass ..> VsmGpuBinding : 借出当帧图集与深度范围
+VirtualShadowPass ..> ShadowRecord : 借用局部灯面定位
 ClusteredLightingPass ..> RenderConfig
 ClusteredLightingPass ..> CameraSettings
 ClusteredLightingPass ..> ClusterLight
@@ -299,26 +307,26 @@ ClusteredLightingPass ..> VsmPageBatch : uploads full current table
 | `bool prepare(const schema::VsmSettingsT&, const RenderConfig&, uint64_t generation)` | 校验 compute、原子位图、缓冲回读、纹理格式和容量，建立专用资源；失败清理候选 |
 | `void poll(uint32_t frame_number)` | 在协调线程检查已发起回读的完成帧，不等待 GPU |
 | `bool take_demand(VsmPageDemand& output)` | 取走一个完整需求值；未完成或没有结果返回 false 并清空输出；过期代次直接丢弃 |
-| `bool submit_feedback(const VsmView&, bgfx::TextureHandle depth, uint64_t submission_id)` | 借用主视图深度，提交需求标记和小型位图回读；槽满时跳过本帧并返回 true，ready 仍由当前观察者的最近完整需求决定；实际错误返回 false，不阻塞 |
-| `bool draw_pages(const RenderFrameData&, const VsmPageBatch&, ShadowPass&)` | 借用已有阴影绘制，按预算填完整页与边界，不独立采样骨骼或重建网格 |
-| `bool binding(VsmGpuBinding& output) const` | 返回调用期可用的物理图集及寻址布局；失败清空句柄 |
+| `bool submit_feedback(const VsmView&, bgfx::TextureHandle depth, std::span<const uint64_t> depth_inputs, uint64_t submission_id)` | 借用 SurfacePass 已识别的深度覆盖输入。完全匹配的已接收或在途需求可复用，其余情况提交需求标记和位图回读。槽满时保留最近需求并返回 true，实际错误返回 false |
+| `void accept_feedback(uint64_t receiver_revision) noexcept` | 调用方在 `VirtualShadowCache::request` 接收完整需求后确认该深度输入可复用 |
+| `bool draw_pages(const RenderFrameData&, const VsmPageBatch&, ShadowPass&)` | 借用已有阴影绘制，按预算填完整页与边界，随后更新改写页的深度范围 |
+| `float submit_local_depth_ranges(bgfx::TextureHandle, std::span<const ShadowRecord>, uint64_t depth_revision)` | 借用当前常规阴影图集，按灯面记录顺序更新辅助深度范围。图集、深度修订与灯面布局一致时沿用；返回 0 表示当前直接使用原采样 |
+| `bool binding(VsmGpuBinding& output) const` | 返回调用期可用的物理图集、可选深度范围及寻址布局。失败清空句柄 |
 | `void reset_scene() noexcept` | 停止旧代次提交，使结果失效；保留仍在被 GPU 写入的 CPU 回读存储 |
 | `void release_gpu() noexcept` | 幂等销毁 GPU 对象；不提前释放尚在途的 CPU 地址 |
 | `uint32_t resource_count() const noexcept` | 纳入既有资源统计 |
 
-ClusteredLightingPass 只在原方法中增加必要参数，不新增平行上传入口：
+`VirtualShadowPass` 拥有深度输入签名与接收面修订。签名逐字段包含视图和深度目标、绘制范围、几何与资源身份、实际实例变换路径、材质参数与采样设置。加入、删除或移动参与深度的普通物体同样更新接收面修订，即使它不投射阴影。自定义 Shader、变形顶点与帧贴图继续逐帧提交。回读值携带提交时的接收面修订，只有已被缓存接受的同修订需求允许后续帧跳过反馈。相同修订已在途时只保留一次读取。关闭场景或重建设备时随现有资源一起失效。
 
-- `bool prepare(const RenderConfig&, uint16_t width, uint16_t height, uint32_t vsm_vectors)`：
-  vsm_vectors 是按已校验设置计算的页表与元数据分区容量（16 字节单位），0 表示该视图不用 VSM；
-  乘积、偏移和设备上限在分配前检查。
-- `bool cull(bgfx::ViewId, const CameraSettings&, const float* view_matrix, const float* projection, std::span<const ClusterLight>, std::span<const ShadowRecord>, const VsmPageBatch* vsm)`：
-  末项为本次调用借用；nullptr 明确清除本视图的 VSM 记录。一次上传组合灯、常规阴影与完整当前页表，
-  保持每个相机各自的缓冲；不得在同一 bgfx 帧中反复更新已被其他视图引用的 handle。
-  所有调用方使用当前签名。
-- `void bind(bool virtual_shadow) const`：绑定同一灯缓冲；只允许主视图不透明接收者采样虚拟页。
-  透明、反射及烘焙显式传 false，不覆盖它们的场景深度纹理槽。
+物理图集为单张可采样的 D32F 深度附件，诊断视图和光照直接读取深度。反馈计算每个线程检查相邻的 2×2 深度像素，分别计算页地址，对写入同一个位图字的需求先合并掩码。8×8 工作组对首线程选中的位图字共用一个局部掩码，组内合并后仅写回一次，其他字直接并入全局位图。屏幕边缘只读取有效像素，回读位图保持全分辨率覆盖。
 
-物理图集沿用现有 RGBA 打包深度，使用经过设备验证的 D32F 深度测试目标；
+支持所用纹理格式的计算写入时，`VirtualShadowPass` 在新页绘制完成后为物理页生成深度范围，并为常规阴影的局部灯面共用这张辅助纹理。R、G 两个 FP32 通道分别存最小与最大深度。Metal 使用 RG32F，其他后端使用 RGBA32F。每个 8×8 区块的范围包含两侧各两 texel 的滤波边界，随同页内容缓存和失效。没有烘焙光照贴图的内置不透明材质借用空闲采样槽读取范围，只有全部深度比较确定同向时才省去逐点读取。VSM 全受光仍按原浮点权重和顺序累加。范围无法确定时，VSM 执行原 5×5 滤波，局部灯执行原 4×4 滤波。[层级影图的深度范围](https://www.labri.fr/perso/guenneba/docs/SoftShadowMapping-egsr06.pdf)
+
+分簇通道的 `vsm_vectors` 是按 16 字节单位计的页表分区容量，0 表示当前视图无需 VSM。分配前核对乘积、分区偏移和设备上限。剔除入口借用当前 `VsmPageBatch`，空值清除该视图的 VSM 记录。每个视图各自拥有当帧的局部灯、常规阴影和页表缓冲。 [分簇通道签名](forward-lighting-reflections.md#运行时归属)
+
+`bind_view` 设置当前视图的灯簇、投影和 clipmap 常量。`bind` 将同一份灯缓冲交给当前提交。主视图不透明接收者按实际可用性采样 VSM。透明、反射和烘焙使用常规阴影及各自的深度输入。
+
+物理图集使用经过设备验证的 D32F 深度测试目标；
 PCF 比较后滤波、接收平面修正与页边界规则共用当前阴影实现。
 不直接对打包深度做线性插值，不让 PCF 读取相邻无关物理页。
 
@@ -329,10 +337,12 @@ RVT 为 8/9、AO 为 11、IBL 为 12..14、常规阴影为 15。
 因此首版不再额外占两张 VSM 纹理槽：
 
 - 物理 VSM 深度图使用不透明通道空闲的槽 10。
-- 页表、clipmap 元数据加入既有灯光/阴影 GPU 缓冲的独立分区，由 ClusteredLightingPass 统一布局和上传；
-  保留原灯列表及局部阴影记录，不创建另一套分簇光照。
-  页表整数编码明确，不能用浮点数近似存放大整数。
-- VsmGpuBinding 只描述本次可用的图集与寻址数据；缓冲仍归 ClusteredLightingPass。
+- 页表加入既有灯光/阴影 GPU 缓冲的独立分区，由 ClusteredLightingPass 统一布局和上传。
+  `VirtualShadowCache` 将完整页表直接写入 `VsmPageBatch.page_table`。每项以 32 位整数的位模式保存两个
+  14 位物理采样原点和驻留、计划、脏页标记。取样方共用解码，按原纹素坐标进行 PCF；CPU 按后端纹理
+  原点处理 Y 翻转。预先上传图集坐标的思路参考 [WickedEngine 的阴影图集数据](https://github.com/turanszkij/WickedEngine/blob/62d913606e8ee2aa2958e83f7bbb8c07d81ae8c9/WickedEngine/wiRenderer.cpp#L4786-L4797)。
+- 反馈计算和着色分别从对应 `VsmView` 打包同一组浮点视图 uniform。着色复用寻址得到的 clipmap 与相机深度。页表查询使用片元地址，视图常量随视图一次绑定。[Filament 的阴影视图参数](https://github.com/google/filament/blob/414602be0e255ac0045d684d7dd5299d760d0de5/filament/src/details/View.cpp#L1289-L1299)
+- VsmGpuBinding 借用本次可用的图集、深度范围与寻址数据，分簇缓冲仍归 ClusteredLightingPass。
   现有内部准备参数传入当前完整页表，并核验容量和分区偏移。
 - 透明通道的槽 10 已用于场景深度，因此首版透明接收者继续采 CSM。
   反射、烘焙与不遵守 VSM 采样契约的自定义 Shader 同样使用已有阴影。
@@ -345,8 +355,8 @@ RVT 为 8/9、AO 为 11、IBL 为 12..14、常规阴影为 15。
 1. 协调线程 poll 前期需求；收集当前已发布网格和光源，失效受影响页，形成当前有限批次。
 2. 蒙皮先完成，常规 CSM/局部阴影正常提交；页面绘制使用同一份有效顶点。
 3. 主深度/表面通道输出接收者深度；GPU 标记需求，回读只影响后续帧的计划。
-4. 绘制本帧计划的虚拟阴影页，包含全部边界；成功安排后将当前完整页表与光照缓冲提交一次。
-5. 主不透明着色按页表采 VSM，缺页/脏页采同帧 CSM；随后沿用透明和后处理。
+4. 绘制本帧计划的虚拟阴影页，包含全部边界；成功安排后将当前完整页表与光照缓冲提交一次。主视图的局部灯面在普通图集深度确定后更新辅助范围，与虚拟页范围共用纹理的不同区域。
+5. 主不透明着色先查询 VSM。虚拟页可以采样时执行该页的过滤。VSM 不可用、缺页或投影越界时才执行同帧 CSM 过滤。随后沿用透明和后处理。
 6. 调试视图在最终显示之后、截图之前绘制，反映该提交帧实际使用的 GPU 数据。
 
 `render_constants.hpp` 统一分配 view ID，并由现有提交处给出显式 view 执行顺序。

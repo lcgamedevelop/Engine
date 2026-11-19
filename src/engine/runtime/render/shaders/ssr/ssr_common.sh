@@ -2,7 +2,7 @@
 uniform vec4 u_ssr_dimensions; // full width/height, trace width/height
 uniform vec4 u_ssr_parameters; // max steps, max distance, thickness, roughness cutoff
 uniform vec4 u_ssr_frame; // originBottomLeft, homogeneousDepth, mip count, orthographic
-uniform vec4 u_ssr_reduce; // source width/height, source mip, copy depth
+uniform vec4 u_ssr_reduce; // source width/height, physical source mip, reserved
 uniform vec4 u_ssr_target; // destination width/height, BRDF LUT valid
 uniform mat4 u_ssr_view;
 uniform mat4 u_ssr_projection;

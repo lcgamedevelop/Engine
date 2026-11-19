@@ -36,9 +36,9 @@ std::uint32_t vsm_atlas_columns(std::uint32_t pages) noexcept
     return static_cast<std::uint32_t>(std::ceil(std::sqrt(static_cast<double>(pages))));
 }
 
-void vsm_pack_view(const VsmView& view, std::vector<std::array<float, 4>>& output)
+VsmViewUniforms vsm_pack_view(const VsmView& view, std::uint32_t dominant_level) noexcept
 {
-    output.assign(vsm_header_vectors, {});
+    VsmViewUniforms output{};
     for (unsigned i = 0; i < 3; ++i)
     {
         for (unsigned j = 0; j < 3; ++j)
@@ -49,27 +49,28 @@ void vsm_pack_view(const VsmView& view, std::vector<std::array<float, 4>>& outpu
     output[3] = {static_cast<float>(view.depth_max - dot(view.axes[2], view.origin)),
                  static_cast<float>(1.0 / (view.depth_max - view.depth_min)),
                  static_cast<float>(view.pages_per_axis), static_cast<float>(view.level_count)};
-    const auto columns = vsm_atlas_columns(view.physical_pages);
-    output[4] = {float(vsm_page_size), float(vsm_border), float(vsm_tile_size), float(columns)};
-    output[5] = {float(columns * vsm_tile_size), float(view.physical_pages),
-                 static_cast<float>(view.levels[0].page_world_size / vsm_page_size), 0};
-    output[6] = {view.forward[0], view.forward[1], view.forward[2], view.near_clip};
-    output[7] = {view.pixel_scale, view.orthographic ? 1.F : 0.F, view.lod_bias,
+    output[0][3] = static_cast<float>(vsm_atlas_columns(view.physical_pages) * vsm_tile_size);
+    output[1][3] = static_cast<float>(view.levels[0].page_world_size / vsm_page_size);
+    output[2][3] = static_cast<float>(dominant_level);
+    output[4] = {view.forward[0], view.forward[1], view.forward[2], view.near_clip};
+    output[5] = {view.pixel_scale, view.orthographic ? 1.F : 0.F, view.lod_bias,
                  view.shadow_distance};
     for (std::uint32_t i = 0; i < view.level_count; ++i)
     {
         const auto& level = view.levels[i];
-        output[8 + i] = {
+        output[6 + i] = {
             static_cast<float>(level.x * level.page_world_size - dot(view.axes[0], view.origin)),
             static_cast<float>(level.y * level.page_world_size - dot(view.axes[1], view.origin)),
             static_cast<float>(level.page_world_size), view.origin_bottom_left ? 1.F : -1.F};
     }
+    return output;
 }
 
 bool VirtualShadowCache::configure(const schema::VsmSettingsT& settings, const RenderConfig& config,
                                    std::uint64_t generation)
 {
-    if (generation == 0 || config.vsm_physical_pages == 0 || config.vsm_physical_pages > 4096 ||
+    if (generation == 0 || config.vsm_physical_pages == 0 ||
+        config.vsm_physical_pages > vsm_max_physical_pages ||
         settings.virtual_resolution < 4096 || settings.virtual_resolution > 32768 ||
         !std::has_single_bit(settings.virtual_resolution) ||
         !std::isfinite(settings.first_clipmap_extent) || settings.first_clipmap_extent <= 0 ||
@@ -319,6 +320,7 @@ bool VirtualShadowCache::plan(std::uint32_t budget, VsmPageBatch& output)
     output.generation = generation_;
     output.batch_id = pending_batch_ = ++batch_id_;
     output.view = view_;
+    const auto columns = vsm_atlas_columns(capacity_);
     for (const auto& key : demand_)
     {
         if (!inside(key, view_))
@@ -367,7 +369,6 @@ bool VirtualShadowCache::plan(std::uint32_t budget, VsmPageBatch& output)
         draw.slot = page.slot;
         draw.version = page.version;
         draw.view_id = vsm_page_views[output.pages.size()];
-        const auto columns = vsm_atlas_columns(capacity_);
         draw.x = static_cast<std::uint16_t>((page.slot % columns) * vsm_tile_size);
         draw.y = static_cast<std::uint16_t>((page.slot / columns) * vsm_tile_size);
         draw.size = vsm_tile_size;
@@ -391,7 +392,7 @@ bool VirtualShadowCache::plan(std::uint32_t budget, VsmPageBatch& output)
         output.pages.push_back(draw);
     }
     const auto count = view_.pages_per_axis * view_.pages_per_axis * view_.level_count;
-    output.page_table.assign(count, 0);
+    output.page_table.resize((count + 3) / 4);
     for (const auto& [key, page] : pages_)
     {
         if (!inside(key, view_))
@@ -402,10 +403,19 @@ bool VirtualShadowCache::plan(std::uint32_t budget, VsmPageBatch& output)
         const auto index =
             static_cast<std::uint32_t>(key.level * view_.pages_per_axis * view_.pages_per_axis +
                                        (key.y - level.y) * view_.pages_per_axis + key.x - level.x);
-        output.page_table[index] =
-            page.valid || page.planned ? page.slot + 1U + (page.planned ? 0x10000U : 0U) : 0x20000U;
+        auto entry = vsm_page_dirty;
+        if (page.valid || page.planned)
+        {
+            const auto column = page.slot % columns;
+            const auto row = page.slot / columns;
+            const auto sample_row = view_.origin_bottom_left ? columns - 1U - row : row;
+            const auto x = column * vsm_tile_size;
+            const auto y = sample_row * vsm_tile_size;
+            entry = vsm_page_resident | (page.planned ? vsm_page_planned : 0U) |
+                    (y << vsm_atlas_origin_bits) | x;
+        }
+        output.page_table[index / 4][index % 4] = std::bit_cast<float>(entry);
     }
-    vsm_pack_view(view_, output.gpu_data);
     std::array<std::uint32_t, vsm_max_levels> level_demand{};
     for (const auto& key : demand_)
     {
@@ -414,15 +424,9 @@ bool VirtualShadowCache::plan(std::uint32_t budget, VsmPageBatch& output)
             ++level_demand[key.level];
         }
     }
-    output.gpu_data[5][3] = static_cast<float>(
+    output.dominant_level = static_cast<std::uint32_t>(
         std::max_element(level_demand.begin(), level_demand.end()) - level_demand.begin());
 
-    output.gpu_data.resize(vsm_header_vectors + (count + 3) / 4);
-    for (std::uint32_t index = 0; index < count; ++index)
-    {
-        output.gpu_data[vsm_header_vectors + index / 4][index % 4] =
-            std::bit_cast<float>(output.page_table[index]);
-    }
     return true;
 }
 

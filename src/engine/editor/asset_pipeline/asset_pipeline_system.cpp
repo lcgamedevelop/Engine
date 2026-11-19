@@ -550,13 +550,23 @@ bool calculate_keys(std::vector<AssetRecord>& records, const std::string& common
 
 bool verify_sources(const std::vector<AssetRecord>& records, std::string& error)
 {
+    std::map<std::filesystem::path, std::pair<std::string, std::string>> snapshots;
     for (const auto& record : records)
     {
-        std::string hash;
-        auto meta = record.asset.source;
-        meta += ".meta";
-        if (!file_hash(record.asset.source, hash, error) || hash != record.source_hash ||
-            !file_hash(meta, hash, error) || hash != record.meta_hash)
+        const auto [snapshot, inserted] = snapshots.try_emplace(record.asset.source);
+        if (inserted)
+        {
+            auto meta = record.asset.source;
+            meta += ".meta";
+            if (!file_hash(record.asset.source, snapshot->second.first, error) ||
+                !file_hash(meta, snapshot->second.second, error))
+            {
+                error = "Cannot verify source snapshot: " + record.asset.path + ": " + error;
+                return false;
+            }
+        }
+        if (snapshot->second.first != record.source_hash ||
+            snapshot->second.second != record.meta_hash)
         {
             error = "source or meta changed during import; retry the build: " + record.asset.path;
             return false;

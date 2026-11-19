@@ -12,6 +12,7 @@
 - 复用现有 CPU 对象剔除、静态 LOD、材质绑定和实例化；GPU 继续细分到 Meshlet。
 - 首期覆盖主观察者的 depth、surface、opaque 通道；它们共用一次剔除结果。
   阴影、反射、烘焙捕获、透明、蒙皮、运行时变形和顶点位移继续使用当前普通路径，各自保持正确视角。
+- GPU 索引源复制、计数清零、剔除与索引合并分别使用视图 75–78，排在主观察者通道之前。平面反射及其阴影占用 3–73。
 - 首期不做 Hi-Z 遮挡剔除、虚拟几何分页或原生 Mesh Shader。不能宣称墙后物体已被遮挡剔除。
 - Meshlet 的输出是几何索引区间、可见实例及间接命令，不依赖光照模型或颜色附件。
   当前前向通道消费这些结果；将来的延迟 G-buffer 可在相同观察者、拓扑及顶点位置契约下消费。
@@ -36,13 +37,25 @@ classDiagram
         +reset_scene() void
         +release_gpu() void
         +resource_count() uint32_t
+        -descriptors_ DynamicVertexBufferHandle
+        -descriptor_layout_ vector~uint64_t~
+        -uploaded_inputs_ vector~Vec4~
+        -result_valid_ bool
+        -index_arena_ DynamicIndexBufferHandle
+        -index_region_capacity_ uint32_t
+        -index_sources_ map
+        -index_compaction_jobs_ DynamicVertexBufferHandle
+        -prepare_index_compaction() bool
     }
     class GpuMesh
+    class StaticVertexPage
     class GpuGeometry {
-        +prepare_meshlets() bool
+        +meshlets_ready(debug) bool
+        +prepare_meshlets(debug) bool
         +release_meshlets() void
+        +release_meshlet_debug() void
         +meshlet_indices(level) IndexBufferHandle
-        +meshlet_descriptors(level) VertexBufferHandle
+        +meshlet_debug_offsets(level) VertexBufferHandle
     }
     class ViewDrawList
     class MeshletDrawRange {
@@ -53,6 +66,9 @@ classDiagram
         +command_count uint32_t
         +first_instance uint32_t
         +instance_capacity uint32_t
+        +compacted_indices DynamicIndexBufferHandle
+        +whole_vertex_page bool
+        +merged_into_previous bool
     }
     class MeshletGpuStats
     class DrawBatch
@@ -69,20 +85,20 @@ classDiagram
     DrawBatch *-- MeshletDrawRange : optional indirect range
     MeshletCullPass ..> ViewDrawList : borrows and fills
     MeshletCullPass ..> GpuGeometry : borrows for dispatch
+    MeshletCullPass ..> StaticVertexPage : 借用页身份判断可合批范围
     MeshletCullPass ..> MeshletGpuStats : returns value
     RenderSystem ..> MeshletGpuStats : publishes
     RenderSystem ..> DebugDrawPass : draws temporary bounds
     DebugDrawPass ..> RenderFrameData : borrows current transforms and materials
     DebugDrawPass ..> ViewDrawList : colors current opaque LOD clusters
-    DebugDrawPass ..> GpuGeometry : borrows uploaded meshlet indices and descriptors
+    DebugDrawPass ..> GpuGeometry : 借用索引和每簇起点
     RenderSystem ..> MeshDataT : reads bounds for overlay
     MeshletCullPass ..> RenderConfig : prepare parameter
     MeshletCullPass ..> RenderFrameData : frame parameter
     MeshletCullPass ..> SceneDrawView : view parameter
 ```
 
-只有 `MeshletCullPass` 是新增的行为类，位于 `engine::render_detail`；
-其余新类型均是生成数据或渲染值数据。不新增 System、Manager、插件、资源加载器或第二套场景遍历。
+`MeshletCullPass` 属于 `engine::render_detail`，由 RenderSystem 调度。`StaticVertexPage` 是 GpuGeometry 的共享存储，由现有场景资源准备流程分配。页的所有权和释放见[渲染主图](render-system.md#私有实现边界)。
 
 图中简写方法的完整签名如下。对象引用均为主线程当前调用内借用，不保存 ECS 列或 Scene 指针。
 
@@ -104,6 +120,22 @@ classDiagram
 切场景只调用 `reset_scene()`，正常帧与空闲呈现继续 poll。
 设备退出顺序为停止新提交、`release_gpu()`、`bgfx::shutdown()` 完成、销毁 Pass 与其回读存储。
 不为清理诊断在切场景时同步等待 GPU，也不因短暂切场景无限积累回读对象。
+
+### 合并剔除调度
+
+`MeshletCullPass` 将本观察者的簇描述与输入／输出偏移组织到同一个 GPU 工作数组。单实例命令区间每组并行处理最多四条，分别由 8 个线程独立判定和写入。多实例保留一组一簇，由线程并行判定实例。超过单次 65535 组时分段。按批次消费命令，各批次内部保留原几何索引顺序和材质边界。
+
+描述数组由 Pass 拥有，完整布局键包含资源获取身份、LOD／子网格、批次与输入／输出范围；相同布局跨帧复用。单实例上传 FP32 模型矩阵和局部相机。同模型矩阵位模式、同锥体剔除条件的批次共用这份输入。多实例另上传法线矩阵，仅为多实例候选保留压紧输出。输入字节完全一致时复用上次上传，视锥仍随当前视图提交。缓存保存值，按实际需求扩容并随场景或设备释放。
+
+单实例批次在同一材质子网格内按连续索引顺序，每至多 8 个簇划分一个命令区间。命令描述记录第一个簇、簇数和输入实例区间。GPU 工作组并行判定各簇，汇总首尾保留簇并提交一个索引区间。区间内的间隙随命令保守提交，全拒绝写零实例。多实例按簇压紧可见实例。两种工作组共用描述缓冲与剔除分派，三个主通道共享结果及原索引缓冲。诊断统计实际提交的簇和三角形，含保留区间内的间隙。
+
+同一观察视图的批次布局、剔除输入字节、视锥、剔除标志及索引作业完全一致时，后续帧直接复用已生成的间接命令、实例及压紧索引区间。缓冲区重建、输入变化及诊断采样会重新分派。三个主通道在复用时仍按各自原有覆盖和顺序提交。
+
+有序合批的首项将 `whole_vertex_page` 置为真，提交时绑定该页并消费合并的间接命令。`merged_into_previous` 标记已纳入首项的后续批次。这些批次仍保留各自的可见项与剔除范围，三个主通道通过同一批次标记提交。
+
+带 Meshlet 的小型静态几何可以在同一 16 位顶点页存放位置和材质属性。两条顶点流各按页容量分配，实心深度只绑定位置。几何持有各自区间，页由场景资源弱引用。主视图中连续的单实例不透明批次在页、完整材质和覆盖状态、光照与模型／法线矩阵相同时，可按原序汇合剔除后的索引。索引在复制时加上页内顶点偏移，深度、材质表面和颜色通道借用同一间接命令。源和临时区根据候选的索引需求在预算内增长，按单位索引可消除的命令数安排作业。保留每个网格原有剔除范围，越过页、命令或索引容量时沿用单批绘制。 [The Forge 索引过滤](https://github.com/ConfettiFX/The-Forge/blob/master/Examples_3/Visibility_Buffer/src/Shaders/FSL/TriangleFiltering.comp.fsl) · [AnKi 共享几何](https://anki3d.org/gpu-driven-rendering-in-anki-a-high-level-overview/)
+
+对缺少原生可变间接绘制数的设备，内置材质使用 16 位索引的多命令单实例批次可使用共享索引缓冲。静态源区域按资源版本、LOD 和索引区间缓存，由 GPU 从已有索引缓冲复制。剔除后区间连续时，最终命令直接引用源区域。区间分散时，组内并行复制保留区间到临时区域，保留命令和三角形顺序。三种主通道借用同一缓冲与间接命令，诊断按合并后的实际非空命令计数，并沿用剔除输出的三角形计数。源区域与临时区域分别限额，超出时对应批次使用原间接区间。[GeometryFX 的 GPU 索引过滤](https://gpuopen.com/archived/geometryfx/)
 
 ## 同一 Mesh 内的生成数据
 
@@ -150,21 +182,16 @@ classDiagram
   损坏或越界数据是加载失败，不能以“未生成”掩盖。
 - 单一版本迁移：Mesh 为 `EMS2`／版本 2，Shader 为 `ESH2`／版本 2，Scene／Prefab 为版本 4；重新生成缓存与运行包；
   不保留旧格式读取。当前格式中未启用 Meshlet 生成而为空，是合法资源状态。
-- 新索引和元数据有额外 CPU／GPU 内存开销。资源统计要包含它们，不能宣称 Meshlet 会自然缩小资源。
+- 生成的索引和元数据计入 CPU 资源统计。GPU 统计按实际上传的字节和缓冲所有权计量。
 
-`GpuGeometry` 继续共享精确资源发布版本，在每个 LOD 下拥有 Meshlet 元数据 GPU 缓冲和附加索引缓冲；
-通过生成资源取得子网格 Meshlet 范围。各级专用负载必须同时存在或同时为空，拒绝部分层级缺失。`GpuMesh` 不按实例复制这部分资源。
+`GpuGeometry` 共享同一资源发布版本。每个 LOD 的普通索引与 Meshlet 索引逐项相等时，两种提交借用同一 GPU 缓冲；不同序列各存一份，由各自的索引范围读取。能完整表达的序列使用 16 位索引，保留索引顺序，末尾按 32 位原始读取对齐。Meshlet 色块和线框读取相同索引并按实际宽度解包。通过生成资源取得子网格 Meshlet 范围，各级专用负载完整有效后才可使用。`GpuMesh` 不按实例复制这些缓冲。
 准备仍走 `prepare_scope` 及现有上传字节、工作项和时间预算；单项几何原子创建，空步骤允许一个超过字节预算的几何推进，后续项延后；热重载创建候选资源，安全发布后再替换，旧帧借用不得提前失效。
 
-`GpuGeometry` 增加 `[[nodiscard]] bool prepare_meshlets()` 和
-`void release_meshlets()` 两个渲染私有生命周期方法。前者经现有准备队列按需上传全部已生成层级，
-重复调用复用有效缓冲，失败清理本次候选；后者幂等释放专用缓冲而保留普通几何。
-创建普通几何不因负载含 Meshlet 就自动上传它们；只有有效请求才触发专用准备。
-两者均在主线程的渲染准备或提交安全点调用，不由组件 setter 直接操作 GPU。
+`GpuGeometry::prepare_meshlets(debug)` 按需准备已生成层级的索引。常规剔除读取 `MeshletCullPass` 组装的共享工作数组。色块有独立的可选 GPU 缓冲，每簇仅存一个 32 位索引起点。准备按现有队列与 `meshlet_upload_bytes(debug)` 的预算推进，失败释放本次批次，已有可用索引继续有效。`meshlets_ready(debug)` 检查本次需求的完整性。`release_meshlet_debug()` 释放色块缓冲，`release_meshlets()` 释放全部专有缓冲。生命周期方法在主线程准备或提交安全点调用。
 
 两个新增只读访问器为
 `bgfx::IndexBufferHandle meshlet_indices(size_t level) const` 和
-`bgfx::VertexBufferHandle meshlet_descriptors(size_t level) const`，缺少该级数据返回无效 handle。
+`bgfx::VertexBufferHandle meshlet_debug_offsets(size_t level) const`，缺少该级数据返回无效 handle。
 它们只在渲染私有头声明；返回值不转移所有权，有效期不能超过当前几何版本。
 子网格范围读取当前 `RenderFrameData` 已借用的生成数据，不再复制一份手写持久模型。
 
@@ -270,7 +297,7 @@ depth／surface／opaque 使用相同位置与裁切语义；不依赖原始三�
 | 原模型、材质、静态 LOD | 保留，用于全场景普通绘制 |
 | 磁盘生成数据、已有运行包 | 保留，不因运行开关改写文件或重打包 |
 | CPU `MeshletDataT` | 仍属于不可变 Mesh 负载，最后资源引用释放时清理 |
-| 几何的 Meshlet GPU 描述／附加索引 | 没有其他有效场景准备或色块诊断需求时执行 `release_meshlets()`；普通 GPU 几何保持使用 |
+| 附加索引与色块索引起点 | 无其他使用需求时释放专有索引；色块缓冲随诊断关闭单独释放 |
 | Pass 的间接命令／实例压缩工作区 | 无有效 Meshlet 使用／准备范围时执行 `release_gpu()` |
 | 在途 GPU 命令与回读 | 沿 bgfx 有序销毁安全收尾；回读目标内存保留至完成或设备关闭 |
 
@@ -314,7 +341,7 @@ MCP 参数（两个方向使用同一入口，不需要节点或材质身份）�
 `DebugDrawPass::draw` 额外借用 `const RenderFrameData&` 和 `const ViewDrawList&`，
 不保存跨帧引用；`supports_meshlet_colors()` 查询 Compute 读取、至少四个 buffer binding 及四个实例数据槽。
 存储缓冲使用槽 1–3，槽 0 留给实例顶点流，避免 Metal 的顶点绑定重叠。
-色块 Shader 直接读取已有顶点、Meshlet 索引和描述缓冲，按真实索引区间确定簇身份；
+色块 Shader 读取已有顶点、Meshlet 索引和每簇的索引起点，按真实索引区间确定簇身份；
 每个对象的材质范围一次绘制，不逐簇增加提交，不逐帧 CPU 展开三角形。
 主 opaque 提交将实际是否使用实例变换记录在当前 `ViewDrawList::Item::instanced_transform`；
 诊断顶点沿用该事实选择相同矩阵计算顺序，深度相等测试只覆盖真实表面，不用深度偏移掩盖误差。
@@ -326,7 +353,7 @@ MCP 参数（两个方向使用同一入口，不需要节点或材质身份）�
 只处理主视图已有不透明、静态且位置语义适用的几何；不适用对象保持正式材质。
 色块使用现有场景深度，在独立 view 129 绘制，位于场景颜色复制之后、透明通道之前；
 包围线仍位于 view 134。色块不写深度、不修改正式材质，也不传播到阴影或反射视图。
-色块开启时通过既有准备预算上传共享 Meshlet 几何；仅开色块不创建 Compute 剔除工作区。
+色块开启时通过既有准备预算取得 Meshlet 索引并上传索引起点；剔除工作区按场景剔除需求创建。
 关闭色块且无场景剔除需求时释放附加几何缓冲；关闭诊断后正常 PBR 画面恢复。
 使用正常主视图的调试叠加位置，离开当前帧即丢弃几何借用。
 按已有调试线容量限制构造数据，超过容量只显示确定顺序的有界子集并返回 `capacity_limited`；
@@ -351,23 +378,22 @@ Meshlet 调试视图和临时 GPU 采样的控制项只登记到编辑器 MCP，
 2. 在 `ViewDrawList` 准备主视图不透明 `DrawBatch`，沿用完整几何版本、LOD、子网格、
    材质有效值、纹理、光照、镜像方向及渲染状态键；深度和表面通道复用该分组，
    仅选择各自的 Shader／状态，不另造不一致的可见列表。
-3. 每个材质批次的每个 Meshlet 由一个 Compute 工作组处理该批实例。
-   剔除后，将可见实例的模型和法线变换紧密写入该 Meshlet 预留区间；
-   复用当前 7 × vec4 实例布局。相同 Meshlet 的可见实例生成一条索引间接命令。
+3. 单实例命令区间每四条合用一个 Compute 工作组，多实例每个 Meshlet 对应一组。
+   两类工作组共用描述数组和一次剔除分派，超过单次工作组上限时分段。
+   多实例批次按簇将可见实例的模型和法线变换紧密写入预留区间，复用 7 × vec4 实例布局。
    命令的 `instanceCount` 是实际保留数，全不可见时为 0。
-   分派按设备工作组数量上限分段，各区间互不覆盖；诊断计数清零必须先行完成，
-   不用同一次 Compute 中的某个工作组为其他组清零，也不依赖跨工作组同步。
+   各工作组拥有独立的输出区间，诊断计数通过前置分派清零。
 4. `static_instancing_enabled=true` 的兼容实例可共享批次；关闭时只建立单实例批次。
    多实例批次消费 GPU 压缩后的实例缓冲；单实例的间接范围保留普通 Shader 与 MVP 运算次序，
    避免仅因开启 Meshlet 改变单物体的顶点浮点结果。这样保留真正的实例化绘制，
    不把所有实例无条件拆成逐 Meshlet × 实例的小 draw。
-5. `DrawBatch` 新增可空 `MeshletDrawRange` 值，含间接缓冲、实例缓冲的借用 handle，
+5. `DrawBatch` 新增可空 `MeshletDrawRange` 值，含间接缓冲、实例缓冲和可选压紧索引缓冲的借用 handle，
    `first_command/command_count` 与实例区间。所有字段仅当前提交帧有效；
    GPU 缓冲由 Pass 独占，清空列表不销毁缓冲。普通批次该字段为空。
 6. 每个材质批次提交一个或少量受后端限制的间接范围。CPU 不逐 Meshlet 提交 draw，
    不读回可见集决定当帧绘制。首次实现仅要求固定命令范围，零实例命令表示剔除；
    不要求 `DRAW_INDIRECT_COUNT`。
-7. Compute 生产者必须先于主视图 depth／surface／opaque 消费者。
+7. 索引复制和剔除先于压紧，压紧先于主视图 depth／surface／opaque 消费者。
    视图号集中在现有 `render_constants.hpp` 分配并核对阴影、反射、UI、捕获通道范围。
    通过 bgfx buffer access 和 view 顺序建立写入到间接读取／顶点读取的同步；
    不凭 C++ 调用顺序假定 GPU 已完成。
@@ -379,7 +405,8 @@ Meshlet 调试视图和临时 GPU 采样的控制项只登记到编辑器 MCP，
 `maximum_meshlet_candidates` 约束可见实例压缩缓冲的最坏容量，也约束命令与临时数据的派生容量。
 项目在 `settings/runtime-parallel.toml` 的 `[common.rendering]` 或平台覆盖中配置；运行包消费汇总 JSON，同其他渲染预算一起校验，允许范围为 1 到 33,554,431。
 分配前用实际候选数 × 实例步长及后端上限检查，不能只限制命令数而遗漏实例乘积。
-容量不足按稳定批次顺序让整批走原有普通／静态实例路径；不截断物体，不每帧扩容。
+超过候选预算时，按稳定批次顺序让整批走原有普通／静态实例路径，不截断物体。
+工作缓冲在预算内按需几何增长并复用，不随每帧候选数收缩或重新分配；关闭或切场景统一释放。
 普通路径是同一当前格式的必要绘制路径，不属于旧版本兼容。
 
 ## 保守正确性与平台
@@ -456,8 +483,9 @@ classDiagram
   GPU 回读完成后才有意义。首期按每 Meshlet 最多 124 个三角形，
   配置校验要求候选槽预算 × 124 不超过 uint32_t 上限，GPU 计数可使用 32 位原子，
   完成后转为公开 64 位值；不要求平台支持 64 位原子，也不能静默溢出。
-- 失败状态没有有效数值；诊断错误沿现有错误通道报告。回读完成不等于“这些像素最终可见”，
-  `visible_triangles` 仅表示通过本次剔除后进入光栅化的三角形，不包含深度遮挡结果。
+- 失败状态没有有效数值。诊断错误沿现有错误通道报告。
+  `visible_pairs`、`visible_triangles` 统计间接命令实际保留的簇实例和三角形，
+  包括单实例连续区间内部的间隙，计数发生在光栅化与深度遮挡前。
 
 默认不采样；开启 `meshlet_statistics` 且场景实际提交 Meshlet 后低频采样，至多每 250 ms 一次且在途数量有界。
 场景总开关关闭后停止新采样并失效旧结果，统计请求不反向开启场景功能。

@@ -206,8 +206,8 @@ bool DebugDrawPass::draw(const WorldSystem& world, Camera camera, std::span<cons
             const auto* data = item.lod == 0 ? mesh.data->meshlets.get()
                                              : mesh.data->lods[item.lod - 1]->meshlets.get();
             const auto indices = item.geometry->meshlet_indices(item.lod);
-            const auto descriptors = item.geometry->meshlet_descriptors(item.lod);
-            if (!data || !bgfx::isValid(indices) || !bgfx::isValid(descriptors))
+            const auto offsets = item.geometry->meshlet_debug_offsets(item.lod);
+            if (!data || !bgfx::isValid(indices) || !bgfx::isValid(offsets))
             {
                 continue;
             }
@@ -246,16 +246,16 @@ bool DebugDrawPass::draw(const WorldSystem& world, Camera camera, std::span<cons
                 std::bit_cast<float>(range.first_meshlet()),
                 std::bit_cast<float>(range.meshlet_count()),
                 std::bit_cast<float>(hash),
-                static_cast<float>(sizeof(GpuVertex) / sizeof(float)),
+                static_cast<float>(item.geometry->position_stride_bytes() / sizeof(float)),
                 static_cast<float>(item.lod),
-                0,
-                0};
+                item.geometry->index_uses_16_bits(item.lod, true) ? 1.0F : 0.0F,
+                static_cast<float>(item.geometry->first_vertex())};
             bgfx::setUniform(meshlet_parameters_, parameters.data(), 2);
             bgfx::setTransform(mesh.model.data());
             // Slot 0 is reserved for the instance stream on Metal.
-            bgfx::setBuffer(1, item.geometry->vertices, bgfx::Access::Read);
+            item.geometry->bind_position_buffer(1);
             bgfx::setBuffer(2, indices, bgfx::Access::Read);
-            bgfx::setBuffer(3, descriptors, bgfx::Access::Read);
+            bgfx::setBuffer(3, offsets, bgfx::Access::Read);
             bgfx::setVertexCount(item.count);
             if (item.instanced_transform)
             {
@@ -313,19 +313,24 @@ bool DebugDrawPass::draw(const WorldSystem& world, Camera camera, std::span<cons
             {
                 continue;
             }
-            const float parameters[] = {static_cast<float>(sizeof(GpuVertex) / sizeof(float)), 1.1F,
-                                        0, 0};
+            const bool deformed = bgfx::isValid(mesh.deformed_vertices);
+            const auto stride =
+                deformed ? sizeof(GpuVertex) : mesh.geometry->position_stride_bytes();
+            const float parameters[] = {
+                static_cast<float>(stride / sizeof(float)), 1.1F,
+                mesh.geometry->index_uses_16_bits(level) ? 1.0F : 0.0F,
+                deformed ? 0.0F : static_cast<float>(mesh.geometry->first_vertex())};
             const float color[] = {0.1F, 0.8F, 1.0F, 0.9F};
             bgfx::setUniform(parameters_, parameters);
             bgfx::setUniform(color_, color);
             bgfx::setTransform(matrix.data());
-            if (bgfx::isValid(mesh.deformed_vertices))
+            if (deformed)
             {
                 bgfx::setBuffer(0, mesh.deformed_vertices, bgfx::Access::Read);
             }
             else
             {
-                bgfx::setBuffer(0, mesh.geometry->vertices, bgfx::Access::Read);
+                mesh.geometry->bind_position_buffer(0);
             }
             bgfx::setBuffer(1, indices, bgfx::Access::Read);
             bgfx::setVertexCount(count * 6U);

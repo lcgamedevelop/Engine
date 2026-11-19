@@ -41,14 +41,6 @@ float ScreenSpaceToViewSpaceDepth( float screenDepth )
     return clamp(viewspaceDepth, 1.0e-5, 65504.0);
 }
 
-float LoadSourceDepth(ivec2 pixel)
-{
-    // SurfacePass depth has the exact viewport dimensions. Only AO intermediates are padded.
-    ivec2 maximumPixel = textureSize(s_depthSource, 0) - ivec2(1, 1);
-    return ScreenSpaceToViewSpaceDepth(texelFetch(s_depthSource,
-        clamp(pixel, ivec2(0, 0), maximumPixel), 0).x);
-}
-
 vec3 NDCToViewspace( vec2 pos, float viewspaceDepth )
 {
     vec3 ret;
@@ -109,65 +101,41 @@ void main()
 		vec2 upperLeftUV = (vec2(dtID.xy) + vec2(0.25,0.25)) * u_viewport2xPixelSize;
 #endif
 
-		ivec2 baseCoord = ivec2(dtID.xy) * 2;
-        ivec2 upperLeftPixel = baseCoord;
+        // Gather at integer texel boundaries. Each fetch supplies one side of the
+        // same 2x2 output quad and its one-texel halo, without filtering the depth.
+        vec2 texel_size = vec2_splat(1.0) / vec2(textureSize(s_depthSource, 0));
+        vec2 base = vec2(baseCoords);
+        vec4 left = textureGather(s_depthSource, (base + vec2(0.0, 1.0)) * texel_size, 0);
+        vec4 right = textureGather(s_depthSource, (base + vec2(2.0, 1.0)) * texel_size, 0);
+        vec2 earlier_row = textureGather(s_depthSource, (base + vec2(1.0, 0.0)) * texel_size, 0).wz;
+        vec2 later_row = textureGather(s_depthSource, (base + vec2(1.0, 2.0)) * texel_size, 0).xy;
 #if BGFX_SHADER_LANGUAGE_GLSL
-        upperLeftPixel.y += 1;
-#endif
-#if BGFX_SHADER_LANGUAGE_GLSL
-		float z0 = LoadSourceDepth(baseCoord + ivec2( 0, 1 ));
-		float z1 = LoadSourceDepth(baseCoord + ivec2( 1, 1 ));
-		float z2 = LoadSourceDepth(baseCoord + ivec2( 0, 0 ));
-		float z3 = LoadSourceDepth(baseCoord + ivec2( 1, 0 ));
+        left = left.wzyx;
+        right = right.wzyx;
+        vec2 top = later_row;
+        vec2 bottom = earlier_row;
 #else
-		float z0 = LoadSourceDepth(baseCoord + ivec2( 0, 0 ));
-		float z1 = LoadSourceDepth(baseCoord + ivec2( 1, 0 ));
-		float z2 = LoadSourceDepth(baseCoord + ivec2( 0, 1 ));
-		float z3 = LoadSourceDepth(baseCoord + ivec2( 1, 1 ));
+        vec2 top = earlier_row;
+        vec2 bottom = later_row;
 #endif
-		imageStore(s_target0, ivec2(dtID.xy), z0.xxxx );
-		imageStore(s_target1, ivec2(dtID.xy), z1.xxxx );
-		imageStore(s_target2, ivec2(dtID.xy), z2.xxxx );
-		imageStore(s_target3, ivec2(dtID.xy), z3.xxxx );
+        float pixZs[4][4];
+        pixZs[1][1] = ScreenSpaceToViewSpaceDepth(left.z);
+        pixZs[2][1] = ScreenSpaceToViewSpaceDepth(right.w);
+        pixZs[1][2] = ScreenSpaceToViewSpaceDepth(left.y);
+        pixZs[2][2] = ScreenSpaceToViewSpaceDepth(right.x);
+        pixZs[0][1] = ScreenSpaceToViewSpaceDepth(left.w);
+        pixZs[0][2] = ScreenSpaceToViewSpaceDepth(left.x);
+        pixZs[3][1] = ScreenSpaceToViewSpaceDepth(right.z);
+        pixZs[3][2] = ScreenSpaceToViewSpaceDepth(right.y);
+        pixZs[1][0] = ScreenSpaceToViewSpaceDepth(top.x);
+        pixZs[2][0] = ScreenSpaceToViewSpaceDepth(top.y);
+        pixZs[1][3] = ScreenSpaceToViewSpaceDepth(bottom.x);
+        pixZs[2][3] = ScreenSpaceToViewSpaceDepth(bottom.y);
 
-		float pixZs[4][4];
-
-		// middle 4
-		pixZs[1][1] = z0;
-		pixZs[2][1] = z1;
-		pixZs[1][2] = z2;
-		pixZs[2][2] = z3;
-
-#if BGFX_SHADER_LANGUAGE_GLSL
-		// left 2
-		pixZs[0][1] = LoadSourceDepth(upperLeftPixel + ivec2( -1, 0 ));
-		pixZs[0][2] = LoadSourceDepth(upperLeftPixel + ivec2( -1, -1 ));
-
-		// right 2
-		pixZs[3][1] = LoadSourceDepth(upperLeftPixel + ivec2(  2, 0 ));
-		pixZs[3][2] = LoadSourceDepth(upperLeftPixel + ivec2(  2, -1 ));
-
-		// top 2
-		pixZs[1][0] = LoadSourceDepth(upperLeftPixel + ivec2(  0, 1 ));
-		pixZs[2][0] = LoadSourceDepth(upperLeftPixel + ivec2(  1, 1 ));
-
-		// bottom 2
-		pixZs[1][3] = LoadSourceDepth(upperLeftPixel + ivec2(  0,  -2 ));
-		pixZs[2][3] = LoadSourceDepth(upperLeftPixel + ivec2(  1,  -2 ));
-#else
-		// left 2
-		pixZs[0][1] = LoadSourceDepth(upperLeftPixel + ivec2( -1, 0 ));
-		pixZs[0][2] = LoadSourceDepth(upperLeftPixel + ivec2( -1, 1 ));
-		// right 2
-		pixZs[3][1] = LoadSourceDepth(upperLeftPixel + ivec2(  2, 0 ));
-		pixZs[3][2] = LoadSourceDepth(upperLeftPixel + ivec2(  2, 1 ));
-		// top 2
-		pixZs[1][0] = LoadSourceDepth(upperLeftPixel + ivec2(  0, -1 ));
-		pixZs[2][0] = LoadSourceDepth(upperLeftPixel + ivec2(  1, -1 ));
-		// bottom 2
-		pixZs[1][3] = LoadSourceDepth(upperLeftPixel + ivec2(  0,  2 ));
-		pixZs[2][3] = LoadSourceDepth(upperLeftPixel + ivec2(  1,  2 ));
-#endif
+        imageStore(s_target0, ivec2(dtID), vec4_splat(pixZs[1][1]));
+        imageStore(s_target1, ivec2(dtID), vec4_splat(pixZs[2][1]));
+        imageStore(s_target2, ivec2(dtID), vec4_splat(pixZs[1][2]));
+        imageStore(s_target3, ivec2(dtID), vec4_splat(pixZs[2][2]));
 
 		vec4 edges0 = CalculateEdges( pixZs[1][1], pixZs[0][1], pixZs[2][1], pixZs[1][0], pixZs[1][2] );
 		vec4 edges1 = CalculateEdges( pixZs[2][1], pixZs[1][1], pixZs[3][1], pixZs[2][0], pixZs[2][2] );

@@ -2,6 +2,7 @@
 
 #include "runtime/render/render_math.hpp"
 
+#include <SDL3/SDL.h>
 #include <bx/math.h>
 
 #include <cmath>
@@ -11,7 +12,8 @@ namespace engine::render_detail
 
 bool prepare_shadow_frame(const CameraSettings& camera, const RenderSettings& settings,
                           float aspect, const float* camera_world, const float* camera_view_matrix,
-                          const std::array<float, 4>& direction, ShadowFrame& frame)
+                          const float* receiver_projection, const std::array<float, 4>& direction,
+                          ShadowFrame& frame)
 {
     const auto* caps = bgfx::getCaps();
     const float near_clip = camera.near_clip;
@@ -44,6 +46,25 @@ bool prepare_shadow_frame(const CameraSettings& camera, const RenderSettings& se
     constexpr float degrees_to_radians = 0.01745329251994329577F;
     const float slope = std::tan(camera.fov_degrees * degrees_to_radians * 0.5F);
     const bool orthographic = camera.projection == schema::Projection::orthographic;
+    const auto* projection = receiver_projection;
+    // A reflection scissor shifts the receiver view off centre. Its XY and W
+    // rows still define the inverse footprint even with an oblique depth row.
+    frame.receiver_bounds_available =
+        projection && finite_matrix(projection) && projection[0] > 0.0F && projection[5] > 0.0F &&
+        projection[1] == 0.0F && projection[4] == 0.0F && projection[3] == 0.0F &&
+        projection[7] == 0.0F && projection[11] == (orthographic ? 0.0F : -1.0F) &&
+        projection[15] == (orthographic ? 1.0F : 0.0F);
+    const auto light_space_point = [&](float x, float y, float depth)
+    {
+        std::array<float, 3> point{};
+        for (std::size_t axis = 0; axis < 3; ++axis)
+        {
+            point[axis] = camera_world[12 + axis] + camera_view_matrix[axis * 4] * x +
+                          camera_view_matrix[axis * 4 + 1] * y -
+                          camera_view_matrix[axis * 4 + 2] * depth;
+        }
+        return transform_point(frame.view.data(), point);
+    };
     for (std::uint16_t index = 0; index < cascade_count; ++index)
     {
         float slice_near = index == 0 ? near_clip : frame.splits[index - 1];
@@ -63,7 +84,9 @@ bool prepare_shadow_frame(const CameraSettings& camera, const RenderSettings& se
         }
         center = transform_point(frame.view.data(), center);
         auto& bounds = frame.bounds[index];
+        auto& receivers = frame.receiver_bounds[index];
         bounds.reset();
+        receivers.reset();
         float radius_squared = 0.0F;
         for (std::uint16_t corner = 0; corner < 8; ++corner)
         {
@@ -71,14 +94,18 @@ bool prepare_shadow_frame(const CameraSettings& camera, const RenderSettings& se
             const float half_height = orthographic ? camera.orthographic_size : depth * slope;
             const float x = ((corner & 1) != 0 ? half_height : -half_height) * aspect;
             const float y = (corner & 2) != 0 ? half_height : -half_height;
-            std::array<float, 3> point{};
-            for (std::size_t axis = 0; axis < 3; ++axis)
+            bounds.include(light_space_point(x, y, depth));
+            if (frame.receiver_bounds_available)
             {
-                point[axis] = camera_world[12 + axis] + camera_view_matrix[axis * 4] * x +
-                              camera_view_matrix[axis * 4 + 1] * y -
-                              camera_view_matrix[axis * 4 + 2] * depth;
+                const float extent = orthographic ? 1.0F : depth;
+                const float offset_x = projection[12] - projection[8] * depth;
+                const float offset_y = projection[13] - projection[9] * depth;
+                const float receiver_x =
+                    ((corner & 1 ? extent : -extent) - offset_x) / projection[0];
+                const float receiver_y =
+                    ((corner & 2 ? extent : -extent) - offset_y) / projection[5];
+                receivers.include(light_space_point(receiver_x, receiver_y, depth));
             }
-            bounds.include(transform_point(frame.view.data(), point));
             const float z = depth - center_depth;
             radius_squared = std::max(radius_squared, x * x + y * y + z * z);
         }
@@ -103,6 +130,12 @@ bool prepare_shadow_frame(const CameraSettings& camera, const RenderSettings& se
             if (!std::isfinite(bounds.minimum[axis]) || !std::isfinite(bounds.maximum[axis]) ||
                 bounds.maximum[axis] <= bounds.minimum[axis])
             {
+                SDL_LogError(SDL_LOG_CATEGORY_RENDER,
+                             "Invalid shadow bounds: cascade=%u axis=%u min=%g max=%g "
+                             "near=%g far=%g fov=%g tile=%u",
+                             static_cast<unsigned>(index), static_cast<unsigned>(axis),
+                             bounds.minimum[axis], bounds.maximum[axis], near_clip, far_clip,
+                             camera.fov_degrees, static_cast<unsigned>(frame.tile_size));
                 return false;
             }
         }

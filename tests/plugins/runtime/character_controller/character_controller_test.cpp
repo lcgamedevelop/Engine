@@ -1,10 +1,47 @@
 #include "control_fixture.hpp"
+#include "plugins/runtime/character_controller/character_visual.hpp"
+#include <array>
 #include <cmath>
 #include <limits>
 using namespace test_support;
 using namespace engine;
 namespace
 {
+bool visibility_without_character_visuals()
+{
+    ControlFixture f;
+    if (!f.initialize())
+    {
+        return false;
+    }
+    auto node = f.world.scene()->create_node("Visual");
+    auto visual = node.add_component<character::CharacterVisual>();
+    auto camera = f.view.get_component<Camera>();
+    auto settings = read_settings(visual);
+    settings.kind = schema::CharacterVisualKind::first_person;
+    // Camera filters may retain identities of meshes retired since the previous update.
+    // This fixture has no resource loader; exercise the filter contract without creating
+    // an invalid built-in MeshRenderer.
+    constexpr std::array<std::uint64_t, 1> retired{1234};
+    if (!visual.set_settings(settings) || !camera.set_hidden_meshes(retired) ||
+        !check(!camera.mesh_visible(retired[0]), "seed a previous camera visibility filter"))
+    {
+        return false;
+    }
+    if (!node.remove_component(character::CharacterVisual::component_type) ||
+        !f.visibility.tick(0) ||
+        !check(camera.mesh_visible(retired[0]),
+               "removing the final visual clears the previous camera filter"))
+    {
+        return false;
+    }
+    visual = node.add_component<character::CharacterVisual>();
+    return visual.set_settings(settings) && camera.set_hidden_meshes(retired) &&
+           f.visibility.tick(0) &&
+           check(camera.mesh_visible(retired[0]),
+                 "adding a visual after an empty frame still removes retired mesh identities");
+}
+
 bool movement_and_instances()
 {
     ControlFixture f;
@@ -326,7 +363,7 @@ int main()
 {
     return movement_and_instances() && action_buffer_and_steps() &&
                    crouch_clearance_and_configuration() && ownership_and_teleport() &&
-                   camera_adapter()
+                   camera_adapter() && visibility_without_character_visuals()
                ? 0
                : 1;
 }

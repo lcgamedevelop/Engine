@@ -1,7 +1,8 @@
 #include "rvt_cache.sh"
 void apply_rvt(inout PbrSurface surface,vec3 position,vec3 geometric_normal)
 {
-    if(u_rvt_parameters.x<0.5 || geometric_normal.y<0.25 || u_specular.w>0.5 || u_material.z>0.5) return;
+    if (u_rvt_parameters.x < 0.5 || geometric_normal.y < 0.25 || u_specular.w > 0.5 ||
+        ENGINE_PBR_LIGHTING_MODE > 0.5) return;
     vec2 uv=(position.xz-u_rvt_bounds.xy)*u_rvt_bounds.zw;
     vec2 footprint=max(abs(dFdx(uv)),abs(dFdy(uv)))*u_rvt_layout.w*u_rvt_layout.x;
     float wanted=clamp(log2(max(max(footprint.x,footprint.y),1.0)),0.0,u_rvt_parameters.y);

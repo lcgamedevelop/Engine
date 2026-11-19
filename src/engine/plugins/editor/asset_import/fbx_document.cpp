@@ -23,6 +23,8 @@ namespace
 {
 using namespace editor::asset_pipeline;
 
+constexpr std::uint64_t maximum_fbx_source_bytes = 2ULL * 1024ULL * 1024ULL * 1024ULL;
+
 bool finite_float(double value)
 {
     return std::isfinite(value) && std::abs(value) <= std::numeric_limits<float>::max();
@@ -396,9 +398,9 @@ bool load_document(const std::filesystem::path& path, FbxDocument& document, std
         return false;
     }
     std::vector<std::byte> bytes;
-    if (!VirtualFileSystem::read_file(path, bytes))
+    if (!VirtualFileSystem::read_file(path, bytes, &error, maximum_fbx_source_bytes))
     {
-        error = "Cannot read FBX source: " + PathUtils::to_utf8(path);
+        error = "Cannot read FBX source: " + PathUtils::to_utf8(path) + ": " + error;
         return false;
     }
     document.source_hash = hash_bytes(bytes);
@@ -736,6 +738,52 @@ bool convert_mesh(const FbxDocument& document, const ufbx_node& node, schema::Me
     {
         return false;
     }
+    // FBX corner indices describe attribute seams, not necessarily distinct final vertices.
+    // Compare every completed stream so exact duplicates share vertex shader work while
+    // normal/UV/tangent/color/skin discontinuities and triangle order remain unchanged.
+    std::array<ufbx_vertex_stream, 7> streams{};
+    std::size_t stream_count = 0;
+    const auto add_stream = [&](auto& values)
+    {
+        if (!values.empty())
+        {
+            streams[stream_count++] = {values.data(), values.size(), sizeof(values.front())};
+        }
+    };
+    add_stream(output.vertices);
+    add_stream(output.texcoords);
+    add_stream(output.tangents);
+    add_stream(output.colors);
+    add_stream(output.lightmap_texcoords);
+    add_stream(output.skin);
+    std::vector<std::uint32_t> remap(output.vertices.size());
+    ufbx_error index_error{};
+    const auto unique_count = ufbx_generate_indices(streams.data(), stream_count, remap.data(),
+                                                   remap.size(), nullptr, &index_error);
+    if (unique_count == 0)
+    {
+        error = "Cannot generate FBX vertex indices: " +
+                std::string(index_error.description.data, index_error.description.length);
+        return false;
+    }
+    for (auto& index : output.indices)
+    {
+        index = remap[index];
+    }
+    const auto compact = [unique_count](auto& values)
+    {
+        if (!values.empty())
+        {
+            values.resize(unique_count);
+            values.shrink_to_fit();
+        }
+    };
+    compact(output.vertices);
+    compact(output.texcoords);
+    compact(output.tangents);
+    compact(output.colors);
+    compact(output.lightmap_texcoords);
+    compact(output.skin);
     result = std::move(output);
     return true;
 }

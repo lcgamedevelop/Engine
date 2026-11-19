@@ -231,6 +231,8 @@ struct LightingBakeJob::State
     std::vector<std::shared_ptr<schema::TextureDataT>> next;
     std::vector<float> pixels;
     std::vector<float> lm_uv;
+    // lightmapper borrows this matrix until the current geometry finishes across ticks.
+    std::array<float, 16> lm_transform{};
     std::unique_ptr<lm_context, decltype(&lmDestroy)> lm{nullptr, lmDestroy};
     SceneCaptureRequest request;
     std::array<double, 27> probe_sum{};
@@ -530,6 +532,14 @@ BakeProgress LightingBakeJob::tick(std::string& error)
         const auto status = s.renderer.diffuse_capture_status();
         if (status == SceneCaptureStatus::pending)
         {
+            // The capture request changes render targets after the previous face was taken.
+            // Advance the same runtime preparation path before allowing its next submission.
+            if (s.renderer.prepare_scope({}, {}) == SceneWorkState::failed)
+            {
+                s.renderer.cancel_diffuse_capture();
+                error = "Cannot prepare diffuse capture resources";
+                return s.progress = BakeProgress::failed;
+            }
             return BakeProgress::running;
         }
         if (status != SceneCaptureStatus::complete || !s.renderer.take_diffuse_capture(image) ||
@@ -624,10 +634,9 @@ BakeProgress LightingBakeJob::tick(std::string& error)
                 s.lm_uv.push_back(static_cast<float>(uv.y()));
             }
             s.request.world_origin = {mesh.transform[12], mesh.transform[13], mesh.transform[14]};
-            float local_transform[16];
             transform_math::relative(mesh.transform.data(), s.request.world_origin,
-                                     local_transform);
-            lmSetGeometry(s.lm.get(), local_transform, LM_FLOAT, mesh.mesh->vertices.data(),
+                                     s.lm_transform.data());
+            lmSetGeometry(s.lm.get(), s.lm_transform.data(), LM_FLOAT, mesh.mesh->vertices.data(),
                           sizeof(schema::MeshVertex), LM_FLOAT,
                           reinterpret_cast<const std::byte*>(mesh.mesh->vertices.data()) +
                               3 * sizeof(float),

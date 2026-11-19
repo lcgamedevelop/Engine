@@ -1,0 +1,74 @@
+--- a/bgfx/include/bgfx/defines.h
++++ b/bgfx/include/bgfx/defines.h
+@@ -596,6 +596,10 @@
+ /// ignored for any other texture.
+ #define BGFX_ATTACHMENT_SRGB                      UINT8_C(0x08)
+ 
++/// Resolve the color attachment and allow the multisampled contents to be discarded.
++/// A later pass that reuses the multisampled surface must initialize it.
++#define BGFX_ATTACHMENT_RESOLVE_ONLY              UINT8_C(0x10)
++
+ #define BGFX_PCI_ID_NONE                          UINT16_C(0x0000) //!< Autoselect adapter.
+ #define BGFX_PCI_ID_SOFTWARE_RASTERIZER           UINT16_C(0x0001) //!< Software rasterizer.
+ #define BGFX_PCI_ID_AMD                           UINT16_C(0x1002) //!< AMD adapter.
+--- a/bgfx/src/renderer_mtl.cpp
++++ b/bgfx/src/renderer_mtl.cpp
+@@ -2629,6 +2629,24 @@
+ 			}
+ 		}
+ 
++		MTL::StoreAction colorStoreAction(FrameBufferHandle _fbh, uint32_t _index, bool _resolve) const
++		{
++			if (!_resolve)
++			{
++				return MTL::StoreActionStore;
++			}
++
++			const bool resolveOnly = true
++				&& isValid(_fbh)
++				&& _index < m_frameBuffers[_fbh.idx].m_num
++				&& 0 != (m_frameBuffers[_fbh.idx].m_colorAttachment[_index].flags & BGFX_ATTACHMENT_RESOLVE_ONLY)
++				;
++			return m_hasStoreActionStoreAndMultisampleResolve && !resolveOnly
++				? MTL::StoreActionStoreAndMultisampleResolve
++				: MTL::StoreActionMultisampleResolve
++				;
++		}
++
+ 		void setFrameBuffer(MTL::RenderPassDescriptor* _renderPassDescriptor, FrameBufferHandle _fbh, bool _msaa = true)
+ 		{
+ 			// resolve framebuffer
+@@ -6828,15 +6846,7 @@
+ 											desc->setLoadAction(MTL::LoadActionLoad);
+ 										}
+ 
+-										const MTL::StoreAction multisampleStoreAction = m_hasStoreActionStoreAndMultisampleResolve
+-											? MTL::StoreActionStoreAndMultisampleResolve
+-											: MTL::StoreActionMultisampleResolve
+-											;
+-
+-										desc->setStoreAction(NULL != desc->resolveTexture()
+-											? multisampleStoreAction
+-											: MTL::StoreActionStore
+-											);
++										desc->setStoreAction(colorStoreAction(fbh, ii, NULL != desc->resolveTexture()) );
+ 									}
+ 								}
+ 
+@@ -6876,15 +6886,7 @@
+ 									{
+ 										desc->setLoadAction(MTL::LoadActionLoad);
+ 
+-										const MTL::StoreAction multisampleStoreAction = m_hasStoreActionStoreAndMultisampleResolve
+-											? MTL::StoreActionStoreAndMultisampleResolve
+-											: MTL::StoreActionMultisampleResolve
+-											;
+-
+-										desc->setStoreAction(NULL != desc->resolveTexture()
+-											? multisampleStoreAction
+-											: MTL::StoreActionStore
+-											);
++										desc->setStoreAction(colorStoreAction(fbh, ii, NULL != desc->resolveTexture()) );
+ 									}
+ 								}
+ 

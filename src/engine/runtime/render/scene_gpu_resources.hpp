@@ -99,6 +99,7 @@ struct RenderSystem::SceneGpuResources
     std::map<std::uint64_t, render_detail::GpuMesh> retained_meshes;
     std::map<render_detail::RenderInstanceKey, std::size_t> mesh_index;
     std::map<const Resource*, std::weak_ptr<render_detail::GpuGeometry>> geometries;
+    render_detail::GpuGeometry::VertexPages static_vertex_pages;
     render_detail::SkinningPass skinning;
     render_detail::TextureTable textures;
     bgfx::UniformHandle normal_transform = BGFX_INVALID_HANDLE;
@@ -125,7 +126,6 @@ struct RenderSystem::SceneGpuResources
     bgfx::UniformHandle shadow_splits = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle shadow_params = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle shadow_settings = BGFX_INVALID_HANDLE;
-    bgfx::UniformHandle shadow_depth = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle shadow_sampler = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle shadow_fallback = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle ibl_params = BGFX_INVALID_HANDLE;
@@ -149,6 +149,7 @@ struct RenderSystem::SceneGpuResources
     std::uint32_t capture_ready_frame = 0;
     std::uint16_t capture_width = 0, capture_height = 0;
     bool capture_pending = false;
+    bool capture_prepared = false;
     bool capture_cancelled = false;
     bgfx::TextureHandle hdr_capture_readback = BGFX_INVALID_HANDLE;
     std::vector<std::uint16_t> hdr_capture_pixels;

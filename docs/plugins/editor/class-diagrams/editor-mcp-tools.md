@@ -38,6 +38,7 @@ classDiagram
 - 端点使用 EditorSystem.commands() 的既有借用构造通道 Handler，按原来的事务和身份规则执行命令。EditorCommands 不认识通道、MCP 或测试构建。
 - 通道的无重复执行、持久回执与会话校验统一复用 runtime/mcp。端点独占文件监听与项目状态发布，EditorSystem 只推进已有玩法准备和编辑业务。
 - 状态/帧/截图工具通过 runtime/mcp 的共享工具登记函数复用原生查询；编辑工具继续由现有模块登记。测试能力关闭时不登记或编译临时脚本执行，普通编辑功能保持可用。
+- 截图路径仍相对宿主注入的 `McpEndpointConfig.cache_root`，继续拒绝绝对路径、越界和符号链接。编辑器宿主可用 `ENGINE_CAPTURE_ROOT` 指定已存在的绝对归档根目录；指定目录不可用时使用 `ENGINE_CAPTURE_FALLBACK_ROOT` 指定的已存在备用根目录；两处均不可用时启动失败。Python MCP 客户端使用同一配置核对截图回执，不改变插件公开方法。
 - 等待回执发布成功再关闭编辑器的安排由端点与宿主承担，保留原有关闭时机和请求身份；编辑器核心无需为 MCP 增加依赖。其他编辑事务不因通道移动改变可撤销语义。
 - 端点关闭前在编辑器命令服务和运行宿主仍有效时重新采样状态，绕过普通心跳节流，保留最后一帧的真实故障；随后发布 closed，再由宿主关闭借用的编辑器与运行服务。
 - start_project 的受理结果包含 prepareId；启动查询和终态记录释放转发至 GameplaySession，复用 [运行时 MCP 工具契约](../../runtime/class-diagrams/mcp-runtime-test.md#状态与工具契约)。EditorMcpEndpoint 不推进启动、不复制启动状态机；命令回执不代替业务完成。普通编辑器构建可查询原生启动状态，临时脚本注入仍须测试构建。

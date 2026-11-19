@@ -23,6 +23,7 @@
 #include "runtime/world/world_system.hpp"
 
 #include <array>
+#include <bit>
 #include <cstdio>
 #include <limits>
 
@@ -97,6 +98,7 @@ bool check_virtual_shadow_cache()
     view.scope = {1, 1};
     view.width = view.height = 256;
     view.shadow_distance = 16;
+    view.origin_bottom_left = true;
     view.axes = {{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}};
     GpuMesh gpu;
     gpu.node_id = gpu.instance_id = gpu.revision = 1;
@@ -114,10 +116,27 @@ bool check_virtual_shadow_cache()
     {
         return false;
     }
-    VsmPageDemand demand{batch.view, 1, {{0, 0, 0}, {0, 3, 0}}};
+    VsmPageDemand demand{batch.view, 1, 0, {{0, 0, 0}, {0, 3, 0}}};
     cache.cancel_batch();
+    const auto matches_atlas_origin = [](const VsmPageBatch& planned)
+    {
+        const auto& page = planned.pages.front();
+        const auto& level = planned.view.levels[page.key.level];
+        const auto side = planned.view.pages_per_axis;
+        const auto row = page.key.y - level.y;
+        const auto column = page.key.x - level.x;
+        const auto index = static_cast<std::size_t>(side * side * page.key.level + row * side +
+                                                   column);
+        const auto value = std::bit_cast<std::uint32_t>(planned.page_table[index / 4][index % 4]);
+        const auto atlas_size = vsm_atlas_columns(planned.view.physical_pages) * vsm_tile_size;
+        const auto flags = vsm_page_resident | vsm_page_planned;
+        return (value & flags) == flags && (value & vsm_atlas_origin_mask) == page.x &&
+               ((value >> vsm_atlas_origin_bits) & vsm_atlas_origin_mask) ==
+                   atlas_size - page.y - page.size;
+    };
     if (!cache.request(demand) || !cache.plan(1, batch) ||
         !expect(batch.pages.size() == 1, "VSM honors the per-frame page budget") ||
+        !expect(matches_atlas_origin(batch), "VSM page table encodes bottom-left atlas sampling") ||
         !cache.publish(batch, 1) || !cache.status(status) ||
         !expect(status.fallback_pages == 1 && status.state == VsmState::warming,
                 "unrendered pages stay on complete ordinary shadows") ||

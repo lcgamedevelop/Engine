@@ -20,8 +20,9 @@ SAMPLER2D(s_ssr_odd, 7);
 
 float hierarchy_depth(vec2 uv, int mip)
 {
-    return (mip & 1) == 0 ? texture2DLod(s_ssr_even, uv, float(mip)).r
-                          : texture2DLod(s_ssr_odd, uv, float(mip)).r;
+    if (mip == 0) return texture2DLod(s_ssr_depth, uv, 0.0).r;
+    return (mip & 1) == 0 ? texture2DLod(s_ssr_even, uv, float(mip - 2)).r
+                          : texture2DLod(s_ssr_odd, uv, float(mip - 1)).r;
 }
 
 vec2 mip_dimensions(int mip)

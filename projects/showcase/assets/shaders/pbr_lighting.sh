@@ -2,21 +2,23 @@
 // bgfx and The Forge attribution is retained in fs_cube.sc and pbr_helpers.sh.
 #ifndef ENGINE_PBR_LIGHTING_SH
 #define ENGINE_PBR_LIGHTING_SH
-vec3 direct_light(uint index, vec3 world_position, vec3 world_dx, vec3 world_dy,
+vec3 direct_light(uint index, ClusterLightData light, vec3 world_position,
+                  vec3 world_dx, vec3 world_dy,
                   vec3 normal, vec3 base_normal, vec3 view_dir, vec3 base_color,
-                  float metallic, float roughness, vec3 specular_color, float smoothness)
+                  float metallic, PbrDirectTerms terms, vec3 specular_color, float smoothness)
 {
-    ClusterLightData light = load_cluster_light(index);
     vec3 light_dir = -light.direction_outer.xyz;
     float attenuation = 1.0;
+    vec3 light_offset = vec3_splat(0.0);
+    float light_distance = 0.0;
     float kind = light.kind_inner.x;
     if (kind > 0.5)
     {
-        vec3 offset = light.position_range.xyz - world_position;
-        float distance_squared = dot(offset, offset);
-        float distance = sqrt(distance_squared);
-        light_dir = offset / max(distance, 0.0001);
-        float fade = saturate(1.0 - distance / light.position_range.w);
+        light_offset = light.position_range.xyz - world_position;
+        float distance_squared = dot(light_offset, light_offset);
+        light_distance = sqrt(distance_squared);
+        light_dir = light_offset / max(light_distance, 0.0001);
+        float fade = saturate(1.0 - light_distance / light.position_range.w);
         attenuation = fade * fade / max(distance_squared, 0.01);
         if (kind > 1.5)
         {
@@ -29,18 +31,36 @@ vec3 direct_light(uint index, vec3 world_position, vec3 world_dx, vec3 world_dy,
     // not admit direct light through the opposite side of that surface. The
     // product also handles back-facing double-sided materials. This uses the
     // smooth base normal, not a per-triangle geometric normal or ray visibility.
-    if (dot(base_normal, light_dir) * dot(base_normal, normal) <= 0.0)
+    if (dot(base_normal, light_dir) * terms.base_facing <= 0.0)
     {
         return vec3_splat(0.0);
     }
     float n_dot_l = saturate(dot(normal, light_dir));
-    float n_dot_v = max(dot(normal, view_dir), 0.0001);
+    bool empirical = u_material.z > 1.5;
+    // Preserve Blinn-Phong's empirical highlight when the mapped normal faces away.
+    if (attenuation <= 0.0 || (!empirical && n_dot_l <= 0.0))
+    {
+        return vec3_splat(0.0);
+    }
+    float visibility = 1.0;
+    if (u_shadow_settings.w > 0.5 && abs(float(index) - u_shadow_settings.z) < 0.5)
+    {
+        visibility = shadow_visibility(world_position, world_dx, world_dy);
+    }
+    if (kind > 0.5)
+    {
+        visibility *= local_shadow_visibility(light, world_position, -light_offset, light_distance);
+    }
+    if (visibility <= 0.0)
+    {
+        return vec3_splat(0.0);
+    }
     vec3 halfway_sum = view_dir + light_dir;
     vec3 halfway = halfway_sum / max(length(halfway_sum), 0.0001);
     float n_dot_h = saturate(dot(normal, halfway));
     float v_dot_h = saturate(dot(view_dir, halfway));
     vec3 response;
-    if (u_material.z > 1.5)
+    if (empirical)
     {
         // 18-ibl calcLambert/calcBlinn/specPwr adapted to an empirical surface response:
         // no normalization, Fresnel or N.L multiplier on the highlight; exponent bias is 1.
@@ -55,8 +75,7 @@ vec3 direct_light(uint index, vec3 world_position, vec3 world_dx, vec3 world_dy,
     }
     else
     {
-        vec3 specular = pbr_specular(roughness, specular_color, n_dot_l, n_dot_v, n_dot_h,
-                                     v_dot_h);
+        vec3 specular = pbr_specular(terms, specular_color, n_dot_l, n_dot_h, v_dot_h);
         specular *= u_specular_options.y;
         // glTF mixes complete dielectric and metallic BRDFs. The dielectric
         // diffuse Fresnel must not be replaced by the mixed metallic F0.
@@ -74,19 +93,10 @@ vec3 direct_light(uint index, vec3 world_position, vec3 world_dx, vec3 world_dy,
         }
         // Apply the published microfacet bump-shadowing model to the diffuse
         // lobe only. IBL and specular keep their own visibility.
-        diffuse *= pbr_bump_shadowing(normalize(base_normal), normal, light_dir);
+        diffuse *= pbr_bump_shadowing(terms, light_dir);
         response = (diffuse + (u_capture_mode.x > 0.5 ? vec3_splat(0.0) : specular)) * n_dot_l;
     }
     vec3 radiance = light.color_intensity.rgb * light.color_intensity.w;
-    float visibility = 1.0;
-    if (u_shadow_settings.w > 0.5 && abs(float(index) - u_shadow_settings.z) < 0.5)
-    {
-        visibility = shadow_visibility(world_position, world_dx, world_dy);
-    }
-    if (kind > 0.5)
-    {
-        visibility *= local_shadow_visibility(index, world_position);
-    }
     return response * radiance * attenuation * visibility;
 }
 

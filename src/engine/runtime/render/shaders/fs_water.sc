@@ -10,7 +10,6 @@ $input v_world_position, v_world_normal, v_world_tangent, v_texcoord0, v_color0,
 #include <bgfx_shader.sh>
 #include "pbr_helpers.sh"
 #include "pbr_surface.sh"
-#include "shadow_helpers.sh"
 #include "csm_helpers.sh"
 #include "cluster/lighting.sh"
 #include "local_shadow_helpers.sh"
@@ -129,30 +128,29 @@ void main()
     }
     float ior_ratio = (u_water_flow.z - 1.0) / (u_water_flow.z + 1.0);
     float f0 = ior_ratio * ior_ratio;
-    float fresnel = (f0 + (1.0 - f0) * pow(1.0 - saturate(dot(normal, view_dir)), 5.0)) *
+    float normal_view = dot(normal, view_dir);
+    float fresnel = (f0 + (1.0 - f0) * pow(1.0 - saturate(normal_view), 5.0)) *
                      u_water_parameters.w;
     vec3 color = (transmitted * attenuation + surface.base_color.rgb * (vec3_splat(1.0) - attenuation)) *
                  (1.0 - fresnel) + reflection * fresnel * surface.occlusion;
-    for (uint index = 0u; index < uint(u_cluster_counts.x); ++index)
+    PbrDirectTerms direct_terms = pbr_prepare_direct(v_world_normal, normal, normal_view,
+                                                     surface.roughness);
+    for (uint index = 0u; index < uint(u_cluster_counts.w); ++index)
     {
-        if (load_cluster_light(index).kind_inner.x < 0.5)
-        {
-            color += direct_light(index, v_world_position, world_dx, world_dy, normal,
-                                  v_world_normal, view_dir, vec3_splat(0.0), surface.metallic,
-                                  surface.roughness, vec3_splat(f0), surface.smoothness);
-        }
+        ClusterLightData light = load_cluster_light(index);
+        color += direct_light(true, index, light, v_world_position, world_dx, world_dy, normal,
+                              v_world_normal, view_dir, vec3_splat(0.0), surface.metallic,
+                              direct_terms, vec3_splat(f0), surface.smoothness);
     }
     uint offset; uint count; bool overflow;
     cluster_range(gl_FragCoord.xy, surface_depth, offset, count, overflow);
     for (uint item = 0u; item < count; ++item)
     {
         uint index = cluster_light_index(offset, item, overflow);
-        if (load_cluster_light(index).kind_inner.x > 0.5)
-        {
-            color += direct_light(index, v_world_position, world_dx, world_dy, normal,
-                                  v_world_normal, view_dir, vec3_splat(0.0), surface.metallic,
-                                  surface.roughness, vec3_splat(f0), surface.smoothness);
-        }
+        ClusterLightData light = load_cluster_light(index);
+        color += direct_light(false, index, light, v_world_position, world_dx, world_dy, normal,
+                              v_world_normal, view_dir, vec3_splat(0.0), surface.metallic,
+                              direct_terms, vec3_splat(f0), surface.smoothness);
     }
     color += surface.emission;
     if (u_fog_color.w > 0.5)

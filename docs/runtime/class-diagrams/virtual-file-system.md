@@ -23,7 +23,7 @@ classDiagram
         +mounts() const MountList&
         +error() FileError
         +last_error() string_view
-        +read_file(const Path& path, ByteBuffer& output, string#42; error = nullptr) bool$
+        +read_file(const Path& path, ByteBuffer& output, string#42; error = nullptr, uint64_t maximum_bytes = 67108864) bool$
         +hash_file(const Path& path, uint64_t& hash, uint64_t& size) bool$
     }
     class ResourceMount {
@@ -58,6 +58,7 @@ MountList 为 vector<ResourceMount>，Path 为 filesystem::path，ByteBuffer 为
 - configure 校验并原子更新挂载，失败保留旧值，不扫描/打开文件。已受理操作持有自己的挂载快照，更新后不改变其来源；资源目录换代取消由上一层决定。
 - read 的 offset 相对实体起点，size 是字节数；校验加法溢出、实体范围、实际文件边界和平台 size_t 容量。成功输出独占缓冲，失败清空；精确范围未读满视为失败。零长度合法范围成功返回空缓冲。
 - read_file 是工具所需的整文件同步能力，不要求 ResourceSystem 初始化；可选 error 输出提供独立诊断，不修改实例错误状态。资源包成员统一用范围 read。hash_file 保持固定 64 KiB 缓冲的 FNV-1a 64 位整文件摘要，失败 hash/size 清零，不整包载入内存。
+- read_file 的 maximum_bytes 是本次调用的整文件字节预算，默认仍为 64 MiB；原生格式导入器按自身输入约束显式提高，不改变脚本或其他调用方的默认限制。超预算、超缓冲可表示范围、读取不完整或关闭失败均返回 false、清空输出并提供具体错误。预算为 0 时只允许空文件。
 - begin_read 只受理请求，要求操作输出为空，非空则拒绝并保留原值；合法输入失败时输出空且不会产生晚到结果。未配置返回 unavailable，暂时满额返回 busy，单项超过字节上限返回 budget_exceeded。命令错误通过 error/last_error 获取。
 - configure_async 借用已初始化 TaskSystem，在活动请求清空后才可重配。TaskSystem 负责打开和路径校验等短任务，实际传输使用 SDL 异步 I/O；不新建线程池，不让 CPU worker 主动等待传输。
 - poll_async 非阻塞收集最多 completion_budget 项完成结果，仅由所属系统推进；业务查询 FileRead 不会推动工作。宿主统一派发 TaskSystem 完成委托。

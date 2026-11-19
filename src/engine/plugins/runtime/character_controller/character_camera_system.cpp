@@ -1,4 +1,5 @@
 #include "plugins/runtime/character_controller/character_camera_system.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/scene/ecs_scene.hpp"
 #include "runtime/scene/ecs_storage.hpp"
 
@@ -69,6 +70,7 @@ bool CharacterCameraSystem::on_initialize(const EngineConfig&)
 
 bool CharacterCameraSystem::on_tick(double)
 {
+    ENGINE_PROFILE_ZONE("CharacterCamera.tick");
     if (!world_.refresh_scene_state())
     {
         return false;
@@ -82,12 +84,22 @@ bool CharacterCameraSystem::on_tick(double)
 
 bool CharacterCameraSystem::update_visibility()
 {
+    ENGINE_PROFILE_ZONE("CharacterCamera.updateVisibility");
     if (!world_.refresh_scene_state())
     {
         return false;
     }
     std::vector<std::uint64_t> hidden;
     std::vector<Camera> cameras;
+    // Without tagged character visuals or a first-person subject every mesh has the default
+    // body visibility. Clear each camera's previous filter without walking unrelated meshes.
+    const bool has_visuals =
+        flecs::world(world_.native_world())
+            .query_builder<const ecs_detail::ComponentStorage<CharacterVisual::Data>>()
+            .with<ecs_detail::Published>()
+            .with<ecs_detail::Simulating>()
+            .build()
+            .count() != 0;
     {
         const auto process = [&](Node camera_node,
                                  const ecs_detail::ComponentStorage<Camera::Data>& stored) -> bool
@@ -121,6 +133,7 @@ bool CharacterCameraSystem::update_visibility()
                 }
             }
             hidden.clear();
+            if (has_visuals || first_person_target)
             {
                 const auto process =
                     [&](Node node,

@@ -4,7 +4,7 @@
  * at 7a70927d2af7ffcc5cef9c9e8f4c821e31fcb099. BSD-2-Clause.
  * Copyright 2013-2014 Dario Manesku. See third_party/notices/bgfx.txt.
  * Changes: one atlas, camera-depth selection, overlapping split transitions,
- * distance fade and per-tap tile clamping. Packing stays in shadow_helpers.sh.
+ * distance fade and per-tap tile clamping on a native depth atlas.
  */
 
 SAMPLER2D(s_shadow_map, 15);
@@ -80,10 +80,10 @@ float shadow_cascade_visibility(int cascade, vec3 world_position, vec3 world_dx,
         {
             vec2 offset = (vec2(float(x), float(y)) - 1.5) * u_shadow_settings.y;
             vec2 sample_uv = clamp(uv + offset, minimum_uv, maximum_uv);
-            // Packed-depth textures use POINT sampling. Compare against the receiver
+            // The depth atlas uses POINT sampling. Compare against the receiver
             // plane at the actual texel centre, including the subtexel displacement.
             sample_uv = (floor(sample_uv / u_shadow_settings.y) + 0.5) * u_shadow_settings.y;
-            float depth = unpack_shadow_depth(texture2DLod(s_shadow_map, sample_uv, 0.0));
+            float depth = texture2DLod(s_shadow_map, sample_uv, 0.0).r;
             float receiver_depth = projected.z +
                 dot(depth_gradient, (sample_uv - uv) / rectangle.zw);
             visible += step(receiver_depth - u_shadow_settings.x, depth);

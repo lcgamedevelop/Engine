@@ -6,6 +6,7 @@
 
 namespace engine::render_detail
 {
+struct PlanarReflectionScissor;
 
 class PlanarReflectionPass final
 {
@@ -17,7 +18,10 @@ public:
     [[nodiscard]] bool prepare(std::uint16_t width, std::uint16_t height, std::uint8_t samples);
     [[nodiscard]] bool mirror(const float* plane_world, const float* camera_world,
                               const float* camera_projection, float clip_bias);
-    void begin(bgfx::ViewId view_id, std::uint32_t clear_color);
+    [[nodiscard]] bool begin_opaque_depth(bgfx::ViewId view_id,
+                                          const PlanarReflectionScissor& scissor);
+    void begin(bgfx::ViewId view_id, std::uint32_t clear_color, bool depth_prepared,
+               const PlanarReflectionScissor& scissor);
     void release() noexcept;
     [[nodiscard]] std::uint32_t resource_count() const noexcept;
     [[nodiscard]] bgfx::TextureHandle texture() const noexcept
@@ -33,7 +37,9 @@ private:
     bgfx::TextureHandle specular_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle depth_ = BGFX_INVALID_HANDLE;
     bgfx::FrameBufferHandle framebuffer_ = BGFX_INVALID_HANDLE;
+    bgfx::FrameBufferHandle depth_framebuffer_ = BGFX_INVALID_HANDLE;
     bgfx::ViewId attached_view_ = UINT16_MAX;
+    bgfx::ViewId attached_depth_view_ = UINT16_MAX;
     std::uint8_t samples_ = 1;
 };
 } // namespace engine::render_detail

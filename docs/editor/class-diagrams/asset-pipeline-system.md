@@ -75,6 +75,10 @@ Shader 源码依赖不进入运行依赖；普通源资源仍有实体及完整�
 
 多输出源在 `discover` 阶段枚举子资源，由管线为每个稳定 key 维护 GUID、逻辑路径和产物记录。源格式以 importer id 调度，输出资源 kind 仅控制运行时实体类型；各子资源独立增量、依赖及目录发布。已消失的子资源身份仍保留在源 meta 并参与冲突检查，重新出现时复用。格式解析见统一[资源导入插件](../../plugins/editor/class-diagrams/asset-import.md)内的[FBX](../../plugins/editor/class-diagrams/fbx-importer.md)与[USD](../../plugins/editor/class-diagrams/usd-import.md)实现；基础管线不链接具体插件。
 
+发布前校验以原生源路径为键，在本次校验内对每个源文件及其 meta 各计算一次完整哈希，再核对该源所有
+产物记录保存的预期哈希。子资源不重复读取同一大文件，也不能跳过自身的快照一致性检查；本次局部结果
+不跨构建缓存，后续构建仍重新校验。任一读取失败或内容变化均保留上一完整发布版本。
+
 导入并发配置读取 `settings/editor-import.toml` 的 `[common].import_threads`，文件和字段必需，项目显式配置为 `8`，仅接受 `1–64` 的整数；非法配置返回失败。
 
 ## 目标切换互斥

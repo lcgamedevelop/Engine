@@ -29,8 +29,10 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <filesystem>
 #include <new>
+#include <string>
 #include <system_error>
 
 namespace engine
@@ -42,12 +44,138 @@ namespace
 RenderSystem* active_renderer = nullptr;
 
 #if defined(ENGINE_ENABLE_TRACY)
-void profile_renderer_stats()
+std::size_t profile_view_group(bgfx::ViewId id)
 {
+    using namespace render_detail;
+    if (id >= 3 && id <= 72)
+    {
+        return 0;
+    }
+    if ((id >= shadow_view && id < output_clear_view) ||
+        std::find(vsm_page_views.begin(), vsm_page_views.end(), id) != vsm_page_views.end())
+    {
+        return 1;
+    }
+    if (id == ambient_occlusion_depth_view || id == opaque_depth_view)
+    {
+        return 2;
+    }
+    if (id == surface_view)
+    {
+        return 3;
+    }
+    if (id == main_view)
+    {
+        return 4;
+    }
+    if (id == ambient_occlusion_compute_view)
+    {
+        return 5;
+    }
+    if (id >= ssr_hiz_view && id <= ssr_composite_view)
+    {
+        return 6;
+    }
+    if (id == transparent_view)
+    {
+        return 7;
+    }
+    if (id >= hdr_bright_view && id <= hdr_resolve_view)
+    {
+        return 8;
+    }
+    if (id == output_present_view)
+    {
+        return 9;
+    }
+    if (id >= meshlet_index_upload_view && id <= meshlet_index_compact_view)
+    {
+        return 10;
+    }
+    if (id >= rvt_page_view - 1 && id < rvt_page_view + maximum_rvt_views)
+    {
+        return 11;
+    }
+    if (id == vsm_feedback_clear_view || id == vsm_feedback_view)
+    {
+        return 12;
+    }
+    if (id == atmosphere_transmittance_view || id == atmosphere_multiscatter_view ||
+        id == atmosphere_main_skyview || id == atmosphere_capture_skyview)
+    {
+        return 14;
+    }
+    if (id == scene_copy_view)
+    {
+        return 15;
+    }
+    if (id == skinning_view)
+    {
+        return 16;
+    }
+    return 13;
+}
+
+void profile_view_record(const char* kind, std::uint16_t id, const char* name, std::int64_t frame,
+                         std::int64_t begin, std::int64_t end, std::int64_t frequency)
+{
+    std::string escaped;
+    for (const unsigned char value : std::string_view(name))
+    {
+        if (value == '"' || value == '\\')
+        {
+            escaped.push_back('\\');
+        }
+        if (value < 0x20)
+        {
+            constexpr char hex[] = "0123456789abcdef";
+            escaped += "\\u00";
+            escaped.push_back(hex[value >> 4]);
+            escaped.push_back(hex[value & 15]);
+        }
+        else
+        {
+            escaped.push_back(static_cast<char>(value));
+        }
+    }
+    std::array<char, 2048> message{};
+    const auto count =
+        std::snprintf(message.data(), message.size(),
+                      "%s {\"viewId\":%u,\"name\":\"%s\",\"group\":%zu,\"sourceFrame\":%lld,"
+                      "\"begin\":%lld,\"end\":%lld,\"frequency\":%lld}",
+                      kind, static_cast<unsigned int>(id), escaped.c_str(), profile_view_group(id),
+                      static_cast<long long>(frame), static_cast<long long>(begin),
+                      static_cast<long long>(end), static_cast<long long>(frequency));
+    if (count > 0 && static_cast<std::size_t>(count) < message.size())
+    {
+        ENGINE_PROFILE_MESSAGE(message.data(), static_cast<std::size_t>(count));
+    }
+}
+
+void profile_renderer_stats(const RvtStatus& rvt, const VsmStatus& vsm)
+{
+    ENGINE_PROFILE_ZONE("Render.profileStats");
+    if (!ENGINE_PROFILE_CONNECTED())
+    {
+        return;
+    }
     const auto* stats = bgfx::getStats();
     if (stats == nullptr)
     {
         return;
+    }
+    if (rvt.effective)
+    {
+        ENGINE_PROFILE_PLOT("Rvt.requiredPages", static_cast<std::int64_t>(rvt.required_pages));
+        ENGINE_PROFILE_PLOT("Rvt.readyPages", static_cast<std::int64_t>(rvt.ready_pages));
+        ENGINE_PROFILE_PLOT("Rvt.residentBytes", static_cast<std::int64_t>(rvt.resident_bytes));
+    }
+    if (vsm.state != VsmState::disabled)
+    {
+        ENGINE_PROFILE_PLOT("Vsm.demandedPages", static_cast<std::int64_t>(vsm.demanded_pages));
+        ENGINE_PROFILE_PLOT("Vsm.redrawnPages", static_cast<std::int64_t>(vsm.redrawn_pages));
+        ENGINE_PROFILE_PLOT("Vsm.fallbackPages", static_cast<std::int64_t>(vsm.fallback_pages));
+        ENGINE_PROFILE_PLOT("Vsm.residentBytes", static_cast<std::int64_t>(vsm.resident_bytes));
     }
     // Stats 对应已经完成的后端帧，可能滞后于提交线程。
     // cpuTimeFrame 包含玩法与限帧等待，不能作为渲染 CPU 耗时。
@@ -76,10 +204,86 @@ void profile_renderer_stats()
     if (stats->gpuTimerFreq > 0 && stats->gpuTimeBegin > 0 &&
         stats->gpuTimeEnd >= stats->gpuTimeBegin)
     {
+        static thread_local std::int64_t last_gpu_begin = 0;
         const double milliseconds = 1000.0 / static_cast<double>(stats->gpuTimerFreq);
         ENGINE_PROFILE_PLOT("Bgfx.gpuFrameMs",
                             (stats->gpuTimeEnd - stats->gpuTimeBegin) * milliseconds);
         ENGINE_PROFILE_PLOT("Bgfx.gpuFrameNumber", static_cast<std::int64_t>(stats->gpuFrameNum));
+        if (last_gpu_begin != stats->gpuTimeBegin)
+        {
+            last_gpu_begin = stats->gpuTimeBegin;
+            profile_view_record("Render.gpuFrame", UINT16_MAX, "GPU command buffer",
+                                stats->gpuFrameNum, stats->gpuTimeBegin, stats->gpuTimeEnd,
+                                stats->gpuTimerFreq);
+        }
+    }
+    constexpr std::array cpu_names{
+        "Bgfx.cpuPlanarMs",      "Bgfx.cpuShadowMs",      "Bgfx.cpuDepthMs",
+        "Bgfx.cpuSurfaceMs",     "Bgfx.cpuOpaqueMs",      "Bgfx.cpuAoMs",
+        "Bgfx.cpuSsrMs",         "Bgfx.cpuTransparentMs", "Bgfx.cpuPostMs",
+        "Bgfx.cpuPresentMs",     "Bgfx.cpuMeshletMs",     "Bgfx.cpuRvtMs",
+        "Bgfx.cpuVsmFeedbackMs", "Bgfx.cpuOtherMs",       "Bgfx.cpuAtmosphereMs",
+        "Bgfx.cpuSceneCopyMs",   "Bgfx.cpuSkinningMs"};
+    constexpr std::array gpu_names{
+        "Bgfx.gpuPlanarMs",      "Bgfx.gpuShadowMs",      "Bgfx.gpuDepthMs",
+        "Bgfx.gpuSurfaceMs",     "Bgfx.gpuOpaqueMs",      "Bgfx.gpuAoMs",
+        "Bgfx.gpuSsrMs",         "Bgfx.gpuTransparentMs", "Bgfx.gpuPostMs",
+        "Bgfx.gpuPresentMs",     "Bgfx.gpuMeshletMs",     "Bgfx.gpuRvtMs",
+        "Bgfx.gpuVsmFeedbackMs", "Bgfx.gpuOtherMs",       "Bgfx.gpuAtmosphereMs",
+        "Bgfx.gpuSceneCopyMs",   "Bgfx.gpuSkinningMs"};
+    std::array<double, cpu_names.size()> cpu{}, gpu{};
+    std::array<bool, cpu_names.size()> cpu_valid{}, gpu_valid{};
+    static thread_local std::array<std::int64_t, 256> cpu_begin{}, gpu_begin{};
+    static thread_local std::array<std::uint32_t, 256> gpu_frame{};
+    for (std::uint16_t index = 0; stats->viewStats && index < stats->numViews; ++index)
+    {
+        const auto& view = stats->viewStats[index];
+        if (view.view >= cpu_begin.size())
+        {
+            continue;
+        }
+        const auto group = profile_view_group(view.view);
+        if (stats->cpuTimerFreq > 0 && view.cpuTimeBegin > 0 &&
+            view.cpuTimeEnd >= view.cpuTimeBegin)
+        {
+            cpu[group] += (view.cpuTimeEnd - view.cpuTimeBegin) *
+                          (1000.0 / static_cast<double>(stats->cpuTimerFreq));
+            cpu_valid[group] = true;
+            if (cpu_begin[view.view] != view.cpuTimeBegin)
+            {
+                cpu_begin[view.view] = view.cpuTimeBegin;
+                profile_view_record("Render.cpuView", view.view, view.name, -1, view.cpuTimeBegin,
+                                    view.cpuTimeEnd, stats->cpuTimerFreq);
+            }
+        }
+        if (stats->gpuTimerFreq > 0 && view.gpuTimeBegin > 0 &&
+            view.gpuTimeEnd >= view.gpuTimeBegin &&
+            (gpu_begin[view.view] != view.gpuTimeBegin || gpu_frame[view.view] != view.gpuFrameNum))
+        {
+            gpu_begin[view.view] = view.gpuTimeBegin;
+            gpu_frame[view.view] = view.gpuFrameNum;
+            profile_view_record("Render.gpuView", view.view, view.name, view.gpuFrameNum,
+                                view.gpuTimeBegin, view.gpuTimeEnd, stats->gpuTimerFreq);
+            // Grouped plots still describe one completed GPU frame only; raw records retain
+            // independently delayed views for the offline per-source-frame analysis.
+            if (view.gpuFrameNum == stats->gpuFrameNum)
+            {
+                gpu[group] += (view.gpuTimeEnd - view.gpuTimeBegin) *
+                              (1000.0 / static_cast<double>(stats->gpuTimerFreq));
+                gpu_valid[group] = true;
+            }
+        }
+    }
+    for (std::size_t group = 0; group < cpu.size(); ++group)
+    {
+        if (cpu_valid[group])
+        {
+            ENGINE_PROFILE_PLOT(cpu_names[group], cpu[group]);
+        }
+        if (gpu_valid[group])
+        {
+            ENGINE_PROFILE_PLOT(gpu_names[group], gpu[group]);
+        }
     }
     ENGINE_PROFILE_PLOT("Bgfx.drawCalls", static_cast<std::int64_t>(stats->numDraw));
     ENGINE_PROFILE_PLOT("Bgfx.computeCalls", static_cast<std::int64_t>(stats->numCompute));
@@ -222,7 +426,8 @@ bool RenderSystem::on_initialize(const EngineConfig&)
         config_.local_shadow_tile_size < 64 || config_.local_shadow_tile_size > 2048 ||
         (config_.local_shadow_tile_size & (config_.local_shadow_tile_size - 1)) != 0 ||
         config_.local_shadow_tile_size > config_.shadow_atlas_size ||
-        config_.vsm_physical_pages == 0 || config_.vsm_physical_pages > 4096 ||
+        config_.vsm_physical_pages == 0 ||
+        config_.vsm_physical_pages > render_detail::vsm_max_physical_pages ||
         config_.vsm_pages_per_frame == 0 || config_.vsm_pages_per_frame > 16 ||
         config_.maximum_local_shadow_faces > 24 || config_.maximum_planar_reflections > 2 ||
         !render_detail::valid_msaa_samples(config_.msaa_samples))
@@ -333,7 +538,7 @@ bool RenderSystem::initialize_renderer()
     }
     bgfx::setViewClear(render_detail::main_view, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
                        idle_clear_color_, 1.0F, 0);
-    bgfx::setDebug(stats_visible() ? BGFX_DEBUG_STATS : BGFX_DEBUG_NONE);
+    apply_debug_state();
     SDL_Log("Renderer initialized: %s (%u x %u)", bgfx::getRendererName(bgfx::getRendererType()),
             width_, height_);
     return true;
@@ -358,6 +563,19 @@ bool RenderSystem::viewport_size(Vec2& output) const noexcept
     }
     output = {static_cast<double>(width_), static_cast<double>(height_)};
     return true;
+}
+
+void RenderSystem::apply_debug_state()
+{
+    std::uint32_t flags = stats_visible() ? BGFX_DEBUG_STATS : BGFX_DEBUG_NONE;
+#if defined(ENGINE_ENABLE_TRACY)
+    // Stage-boundary sampling changes native pass scheduling; keep it scoped to a capture.
+    if (ENGINE_PROFILE_CONNECTED())
+    {
+        flags |= BGFX_DEBUG_PROFILER;
+    }
+#endif
+    bgfx::setDebug(flags);
 }
 
 void RenderSystem::set_stats_visible(bool visible)
@@ -410,9 +628,7 @@ bool RenderSystem::supports_msaa_samples(std::uint8_t samples) const noexcept
     {
         return true;
     }
-    const auto required = samples == 2   ? BGFX_CAPS_FORMAT_TEXTURE_FRAMEBUFFER_MSAA_X2
-                          : samples == 4 ? BGFX_CAPS_FORMAT_TEXTURE_FRAMEBUFFER_MSAA_X4
-                                         : BGFX_CAPS_FORMAT_TEXTURE_FRAMEBUFFER_MSAA_X8;
+    const auto required = render_detail::render_target_sample_capability(samples);
     for (const auto format : {bgfx::TextureFormat::RGBA16F, bgfx::TextureFormat::D32F})
     {
         if ((caps->formats[format] & required) == 0)
@@ -478,6 +694,10 @@ render_detail::FramePrepareStatus RenderSystem::prepare_frame()
         }
     }
 
+    // Collectors can connect or disconnect while the same renderer stays alive.
+#if defined(ENGINE_ENABLE_TRACY)
+    apply_debug_state();
+#endif
     std::uint32_t width = 0;
     std::uint32_t height = 0;
     bgfx::SwapChain swap_chain{};
@@ -592,7 +812,16 @@ RenderSubmitStatus RenderSystem::render(Camera camera)
     }
     for (bgfx::ViewId id = 3; id <= render_detail::surface_view; ++id)
     {
-        append(id);
+        const auto planar_depth = static_cast<bgfx::ViewId>(id + 1);
+        if (std::ranges::find(render_detail::planar_depth_views, planar_depth) !=
+            render_detail::planar_depth_views.end())
+        {
+            append(planar_depth);
+        }
+        if (id != render_detail::opaque_depth_view)
+        {
+            append(id);
+        }
     }
     append(render_detail::vsm_feedback_clear_view);
     append(render_detail::vsm_feedback_view);
@@ -600,8 +829,14 @@ RenderSubmitStatus RenderSystem::render(Camera camera)
     {
         append(id);
     }
+    append(render_detail::vsm_depth_ranges_view);
+    append(render_detail::local_shadow_depth_ranges_view);
     for (bgfx::ViewId id = render_detail::surface_view + 1; id < 256; ++id)
     {
+        if (id == render_detail::main_view)
+        {
+            append(render_detail::opaque_depth_view);
+        }
         if (id == render_detail::output_present_view)
         {
             append(render_detail::vsm_debug_view);
@@ -661,13 +896,19 @@ RenderSubmitStatus RenderSystem::render(Camera camera)
     }
     {
         ENGINE_PROFILE_ZONE("Render.frameSubmit");
-        frame_output_->present(current_settings.clear_color, false);
+        {
+            ENGINE_PROFILE_ZONE("Render.outputPresentSubmit");
+            frame_output_->present(current_settings.clear_color, false);
+        }
         if (drawn)
         {
             submit_screenshot(world_ && world_->scene() ? RenderFrameKind::scene
                                                         : RenderFrameKind::clear);
         }
-        frame_number_ = bgfx::frame();
+        {
+            ENGINE_PROFILE_ZONE("Render.bgfxFrame");
+            frame_number_ = bgfx::frame();
+        }
         if (meshlet_culling_)
         {
             meshlet_culling_->poll(frame_number_);
@@ -692,9 +933,9 @@ RenderSubmitStatus RenderSystem::render(Camera camera)
         poll_hdr_capture();
         collect_preparation(false);
     }
-    ENGINE_PROFILE_FRAME();
+    ENGINE_PROFILE_FRAME_NAMED("Render");
 #if defined(ENGINE_ENABLE_TRACY)
-    profile_renderer_stats();
+    profile_renderer_stats(rvt_status_, vsm_status_);
 #endif
     return drawn ? RenderSubmitStatus::submitted : RenderSubmitStatus::failed;
 }
@@ -737,7 +978,7 @@ RenderSubmitStatus RenderSystem::present_movie_frame(const MovieFrame& frame)
     }
     record_frame(RenderFrameKind::movie);
     collect_preparation(false);
-    ENGINE_PROFILE_FRAME();
+    ENGINE_PROFILE_FRAME_NAMED("Render");
     return RenderSubmitStatus::submitted;
 }
 
@@ -758,7 +999,10 @@ void RenderSystem::shutdown_renderer(bool drain_screenshots) noexcept
     {
         for (int attempt = 0; attempt < 16 && active_screenshot_; ++attempt)
         {
-            frame_number_ = bgfx::frame();
+            {
+                ENGINE_PROFILE_ZONE("Render.bgfxFrame");
+                frame_number_ = bgfx::frame();
+            }
             if (meshlet_culling_)
             {
                 meshlet_culling_->poll(frame_number_);

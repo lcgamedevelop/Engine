@@ -66,7 +66,7 @@ PNG 比较排除顶部 UI，每通道容差为 2/255，不容许超出容差的�
 
 ## 归档与边界
 
-结果位于 `cache/visual-tests/meshlet-culling/<run-id>/`，包括：
+采集结果位于记录根目录的 `records/validation/showcase/visual-tests/meshlet-culling/<run-id>/`。 [记录目录配置](../../../docs/runtime/performance.md)
 
 - `ordinary.png`、`meshlets.png`；
 - `orthographic-ordinary.png`、`orthographic-meshlets.png`；

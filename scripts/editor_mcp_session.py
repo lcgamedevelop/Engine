@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import struct
 import subprocess
@@ -64,6 +65,10 @@ class EditorMcpSession:
         self.server = Path(server).resolve()
         self.project = Path(project).resolve()
         self.runtime_dir = Path(runtime_dir).resolve()
+        self.capture_root = Path(os.environ.get("ENGINE_CAPTURE_ROOT", self.project / "cache")).resolve()
+        fallback = os.environ.get("ENGINE_CAPTURE_FALLBACK_ROOT")
+        if not self.capture_root.is_dir() and fallback:
+            self.capture_root = Path(fallback).resolve()
         self.receipts = Path(receipts)
         self.timeout = timeout
         self.process = None
@@ -109,9 +114,9 @@ class EditorMcpSession:
             try:
                 try:
                     relative = self.receipts.parent.resolve().relative_to(
-                        (self.project / "cache").resolve())
+                        self.capture_root)
                 except ValueError:
-                    relative = Path("visual-failures") / str(time.time_ns())
+                    relative = Path("records/validation/visual-failures") / str(time.time_ns())
                 previous_timeout = self.timeout
                 self.timeout = min(self.timeout, 8)
                 try:
@@ -240,10 +245,12 @@ class EditorMcpSession:
         return value
 
     def capture(self, relative_path, inspect_black=False, scope=None):
-        cache = (self.project / "cache").resolve()
-        expected = (cache / relative_path).resolve()
-        if not expected.is_relative_to(cache) or expected.exists():
-            raise RuntimeError("Capture path is outside the project cache or already exists")
+        capture_root = self.capture_root
+        if not capture_root.is_dir():
+            raise RuntimeError("The configured capture root is unavailable")
+        expected = (capture_root / relative_path).resolve()
+        if not expected.is_relative_to(capture_root) or expected.exists():
+            raise RuntimeError("Capture path is outside the configured capture root or already exists")
         deadline = time.monotonic() + self.timeout
         arguments = {"path": relative_path, "selection": "scene_scope" if scope else "next_frame"}
         if scope:

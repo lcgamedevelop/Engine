@@ -407,6 +407,7 @@ FrameStatus RuntimeHost::fail_runtime(std::string_view code, std::string_view me
 
 FrameStatus RuntimeHost::tick(double delta_time)
 {
+    ENGINE_PROFILE_ZONE("Host.tick");
     last_tick_status_ = tick_runtime(delta_time);
     ++tick_sequence_;
     return last_tick_status_;
@@ -423,26 +424,38 @@ FrameStatus RuntimeHost::tick_runtime(double delta_time)
     const bool presentation_was_paused = std::exchange(movie_clock_paused_, false);
     const double frame_delta = std::exchange(resume_clock_, false) ? 0.0 : delta_time;
     const double movie_delta = presentation_was_paused ? 0.0 : frame_delta;
-    if (gameplay_active_ && !engine_.tick(std::min(frame_delta, 0.1)))
     {
-        return fail_runtime("system_update_failed", "Cannot update the gameplay systems");
+        ENGINE_PROFILE_ZONE("Host.systemsTick");
+        if (gameplay_active_ && !engine_.tick(std::min(frame_delta, 0.1)))
+        {
+            return fail_runtime("system_update_failed", "Cannot update the gameplay systems");
+        }
     }
-    if (!audio_->tick(frame_delta))
     {
-        return fail_runtime("audio_update_failed", "Cannot update audio output");
+        ENGINE_PROFILE_ZONE("Host.audioTick");
+        if (!audio_->tick(frame_delta))
+        {
+            return fail_runtime("audio_update_failed", "Cannot update audio output");
+        }
     }
-    if (gameplay_ && !gameplay_->tick())
     {
-        return fail_runtime("gameplay_update_failed", "Cannot update the gameplay session");
+        ENGINE_PROFILE_ZONE("Host.gameplayTick");
+        if (gameplay_ && !gameplay_->tick())
+        {
+            return fail_runtime("gameplay_update_failed", "Cannot update the gameplay session");
+        }
     }
     // 不可呈现期间暂停整个设备，恢复首帧提交后才恢复音轨时钟。
     if (!audio_->set_paused(presentation_was_paused || !window_->can_render()))
     {
         return fail_runtime("audio_pause_failed", "Cannot update the audio pause state");
     }
-    if (movie_player_ && !movie_player_->update(movie_delta))
     {
-        return fail_runtime("movie_update_failed", "Cannot update movie playback");
+        ENGINE_PROFILE_ZONE("Host.movieTick");
+        if (movie_player_ && !movie_player_->update(movie_delta))
+        {
+            return fail_runtime("movie_update_failed", "Cannot update movie playback");
+        }
     }
     MoviePlaybackHandle movie_handle;
     MoviePlaybackStatus movie_status;
@@ -454,9 +467,12 @@ FrameStatus RuntimeHost::tick_runtime(double delta_time)
          movie_status.state == MovieState::completed) &&
         movie_player_->frame(movie_handle, movie_frame);
     // Preparing a candidate never gates presentation of the published scene.
-    if (!showing_movie && window_->can_render())
     {
-        (void)renderer_->prepare_scope({}, {});
+        ENGINE_PROFILE_ZONE("Host.preparePublishedScene");
+        if (!showing_movie && window_->can_render())
+        {
+            (void)renderer_->prepare_scope({}, {});
+        }
     }
     const auto rendered =
         showing_movie ? renderer_->present_movie_frame(movie_frame) : renderer_->render();
@@ -487,6 +503,7 @@ FrameStatus RuntimeHost::tick_runtime(double delta_time)
 
 FrameStatus RuntimeHost::poll_events(double delta_time)
 {
+    ENGINE_PROFILE_ZONE("Host.pollEvents");
     if (!initialized_ || !std::isfinite(delta_time) || delta_time < 0.0)
     {
         return FrameStatus::failed;
@@ -507,44 +524,50 @@ FrameStatus RuntimeHost::poll_events(double delta_time)
     {
         return FrameStatus::exit_requested;
     }
-    const auto completions_started = std::chrono::steady_clock::now();
-    std::size_t remaining = parallel_.completions_per_frame;
-    const std::array domains{tasks_.get(),
-                             physics_tasks_.get(),
-                             animation_tasks_.get(),
-                             navigation_tasks_.get(),
-                             background_tasks_.get(),
-                             render_tasks_.get(),
-                             movie_tasks_.get()};
-    std::size_t idle_domains = 0;
-    while (remaining != 0 && idle_domains < domains.size())
     {
-        const double elapsed =
-            std::chrono::duration<double>(std::chrono::steady_clock::now() - completions_started)
-                .count();
-        if (remaining == 0 || elapsed >= parallel_.completion_budget_seconds)
+        ENGINE_PROFILE_ZONE("Host.dispatchCompletions");
+        const auto completions_started = std::chrono::steady_clock::now();
+        std::size_t remaining = parallel_.completions_per_frame;
+        const std::array domains{tasks_.get(),
+                                 physics_tasks_.get(),
+                                 animation_tasks_.get(),
+                                 navigation_tasks_.get(),
+                                 background_tasks_.get(),
+                                 render_tasks_.get(),
+                                 movie_tasks_.get()};
+        std::size_t idle_domains = 0;
+        while (remaining != 0 && idle_domains < domains.size())
         {
-            break;
+            const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                                                 completions_started)
+                                       .count();
+            if (remaining == 0 || elapsed >= parallel_.completion_budget_seconds)
+            {
+                break;
+            }
+            auto* domain = domains[completion_domain_];
+            completion_domain_ = (completion_domain_ + 1) % domains.size();
+            const auto completed =
+                domain->dispatch_completions(1, parallel_.completion_budget_seconds - elapsed);
+            remaining -= completed;
+            idle_domains = completed == 0 ? idle_domains + 1 : 0;
         }
-        auto* domain = domains[completion_domain_];
-        completion_domain_ = (completion_domain_ + 1) % domains.size();
-        const auto completed =
-            domain->dispatch_completions(1, parallel_.completion_budget_seconds - elapsed);
-        remaining -= completed;
-        idle_domains = completed == 0 ? idle_domains + 1 : 0;
     }
     // 上一回调可能改变文档 / 可见性；没有 SDL 事件也必须刷新持续占用事实。
     if (window_->can_render() && gameplay_active_ && ui_ && !ui_->synchronize())
     {
         return fail_runtime("ui_update_failed", "Cannot synchronize runtime UI documents");
     }
-    schema::InputRoutingDataT routing;
-    routing.keyboard_claimed = gameplay_active_ && ui_ && ui_->keyboard_claimed();
-    routing.pointer_claimed = gameplay_active_ && ui_ && ui_->pointer_claimed();
-    if (!input_->begin_frame() || !input_->set_routing_state(routing) ||
-        !window_->tick(delta_time) || failed_ || !input_->tick(delta_time))
     {
-        return fail_input();
+        ENGINE_PROFILE_ZONE("Host.inputAndWindow");
+        schema::InputRoutingDataT routing;
+        routing.keyboard_claimed = gameplay_active_ && ui_ && ui_->keyboard_claimed();
+        routing.pointer_claimed = gameplay_active_ && ui_ && ui_->pointer_claimed();
+        if (!input_->begin_frame() || !input_->set_routing_state(routing) ||
+            !window_->tick(delta_time) || failed_ || !input_->tick(delta_time))
+        {
+            return fail_input();
+        }
     }
     if (window_->exit_requested())
     {

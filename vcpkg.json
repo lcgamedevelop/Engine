@@ -16,6 +16,12 @@
       "description": "Optional on-demand performance profiling client",
       "dependencies": [
         {
+          "name": "bgfx",
+          "features": [
+            "profiler"
+          ]
+        },
+        {
           "name": "tracy",
           "default-features": false,
           "features": [

@@ -4,6 +4,16 @@
 
 FbxImporter 属于统一的 `editor/asset_import` 插件，使用固定版本 ufbx 读取模型。编辑器基础管线只认识导入接口和子资源身份；运行时只读取生成后的 FlatBuffers，不包含 ufbx 或编辑器策略。
 
+FBX 源文件通过[文件类](../../../runtime/class-diagrams/virtual-file-system.md)的 read_file 显式使用 2 GiB 字节预算，
+保留一次完整字节快照供内容哈希和 ufbx 解析共同消费。普通文件及脚本调用的默认 64 MiB 限制不改变；
+超限、无法读取和文件变化的错误必须带源路径及底层原因，失败不发布部分结果。不按项目或模型名称分支处理。
+发现后校验源内容时复用文件类的分块 hash_file，结果须与解析快照的 source_hash 一致；
+哈希计算不再整文件载入内存，也不继承普通整文件读取的默认预算。
+
+共用切线生成仍采用 MikkTSpace 的逐角结果。有效源法线使切线投影退化时，使用上游返回的副切线与
+源法线恢复正交切线；两者均无可用投影时选择与源法线最不平行的确定轴生成单位正交基。
+保留原法线、UV、手性与逐角拆点；非有限输入、零法线或非法手性仍失败，不按模型特判或重算法线。
+
 ```mermaid
 classDiagram
     class AssetImporter
@@ -18,6 +28,7 @@ classDiagram
         +inspect_batch(const ImportContext& context, string& fingerprint, string& error) bool
         +scan_dependencies(ImportAsset& asset, const ImportContext& context, string& error) bool
         +convert(const ImportAsset& asset, const ImportContext& context, string& error) bool
+        +finalize_dependencies(ImportAsset& asset, const ImportContext& context, string& error) bool
         -state_: unique_ptr~State~
     }
     class AssetPipelineSystem
@@ -42,6 +53,7 @@ classDiagram
 - 插件 id 为 `fbx`，主产物为 `model`；子资源逻辑路径是源路径加 `meshes/<节点层级>`、`skeleton`、`animations/<动画名称>`。源 meta 保存主 GUID 和所有子 GUID，复制/冲突遵循基础管线规则。
 - 源文件与 meta 中的 `[[subresources]]` 构成编辑器虚拟对象包。运行时 Model v2 仅保存可实例化层级以及节点引用的 Mesh/Material；Mesh 与 Animation 分别引用所需 Skeleton，Model 不持有同源动画列表。打包按选中根及实际依赖裁剪，同源分组不形成运行时依赖。
 - `discover` 解析每个源一次；后续并行转换只读本批解析结果。骨架与动画使用生成 Schema，未建立另一份持久化模型。
+- `finalize_dependencies` 沿用基础导入器的全批转换完成契约，释放本批 FBX 解析树及材质映射快照；后续封装与发布只消费生成产物。全量复用缓存的批次同样执行，不将大模型的离线解析内存保留到编辑器关闭。
 - `.meta` 中 `sample_rate` 默认 30，只接受 1–240 的有限数值；`skeleton` 必须是字符串，空值使用本源骨架。非空时只允许不带网格的动画 FBX 引用同批导入中另一个 FBX 自身生成的 `skeleton` 子资源；不能转引骨架，也不能用此配置替换带网格 FBX 的骨架。显式参数类型错误返回失败，不回退默认值。
 - 外部动画按完整节点路径对应关节；源文件缺少目标加权骨骼或其祖先时失败，缺少非必需节点时不生成其轨道，并不限于末端。已有节点即使未打键也仍采样源局部 TRS，不自动使用目标默认姿态，不做语义或参考姿态补偿。运行时缺整条轨道的处理见[动画模块](../../../runtime/animation.md)，不能与导入时缺节点混为一谈。
 - 动画固定间隔采样始终保留源片段精确末帧；若倒数采样点与末帧编码为相同 float 时间，仅去除倒数点。其他无法严格递增的时间仍失败，避免重复关键帧或丢失末端姿态。
@@ -56,6 +68,7 @@ classDiagram
 - 私有状态在 `discover` 保存本批 FBX 文档与按源文件索引的材质映射快照，转换任务只读这些数据。`inspect_batch` 重新解析并比较映射及已有导入参数，检测发现阶段之后的修改；基础管线在发布前继续校验源与完整 meta 指纹。映射变更参与该源的增量构建，不改变主资源与子资源 GUID；失败批次不发布部分运行资源。
 - Model 节点的 `material_guids` 直接来自校验后的映射，依赖扫描使用同一解析规则，仅加入节点真正使用的材质及 Mesh。材质的 Shader/Texture 依赖由原有材质导入器维护；不在脚本实例化后修补导入配置，不新增运行时设置类型或项目专用分支。
 - 坐标统一为右手 Y 向上、米；保留根变换。网格角点拆分后保持原控制点权重，选择最高四个影响并归一化。当前生成线性蒙皮，对不支持的变形类型明确失败。
+- 顶点属性与逐角切线全部确定后，复用 ufbx 的多流索引生成进行逐字节去重，同时比较位置／法线、UV、切线、颜色、Lightmap UV 和蒙皮。只合并所有属性完全相同的顶点，保留三角形顺序、材质分区与所有接缝；不做位置容差焊接、简化或运行时转换。最终数组按唯一顶点数收敛，导入指纹变化后重新生成源缓存。
 - Joint 的默认局部 TRS 来自源节点的 `local_transform`；inverse_bind 有对应蒙皮 cluster 时由 `cluster.geometry_to_bone * inverse(node.geometry_to_world)` 计算，其中 node 是网格节点；没有对应 cluster 时取关节节点世界变换的逆。默认局部姿态不一定等于实际蒙皮绑定姿态。源材质与贴图尚未自动转换；`material_remaps` 只引用当前已登记的 Material（含 `builtin://`），未配置时使用内置 PBR。
 - 共享骨骼逆绑定的一致性按米归一化后，双向比较 `inverse(A) * B` 与 `inverse(B) * A` 是否接近单位变换，避免骨骼局部单位放大浮点误差；真实位姿冲突、非有限或奇异矩阵仍失败。
 - MCP 使用现有资源导入、打包、同步命令驱动管线，不复制 FBX 解析或骨骼转换实现。

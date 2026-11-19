@@ -917,6 +917,7 @@ bool GameplaySession::start(std::string_view entry)
 
 bool GameplaySession::tick()
 {
+    ENGINE_PROFILE_ZONE("Gameplay.tick");
     step_scene_loads({});
     if (!state_ || script_ == nullptr || !App::is_initialized())
     {

@@ -13,6 +13,7 @@
 #include "runtime/scene/light.hpp"
 #include "runtime/scene/light_probe_volume_component.hpp"
 #include "runtime/scene/mesh_renderer.hpp"
+#include "runtime/scene/planar_reflection_component.hpp"
 #include "runtime/scene/post_process_component.hpp"
 #include "runtime/scene/scene.hpp"
 #include "runtime/scene/transform.hpp"
@@ -89,6 +90,22 @@ schema::MeshDataT grid()
     lod->meshlets->meshlets.emplace_back(0, 6, schema::Vec3{}, .72F, schema::Vec3{0, 0, 1}, 0);
     lod->meshlets->submeshes.emplace_back(0, 1);
     mesh.lods.push_back(std::move(lod));
+    return mesh;
+}
+
+schema::MeshDataT triangle(const char* path, float center)
+{
+    schema::MeshDataT mesh;
+    mesh.path = path;
+    mesh.vertices.emplace_back(center - .375F, -.5F, 0, 0, 0, 1);
+    mesh.vertices.emplace_back(center + .375F, -.5F, 0, 0, 0, 1);
+    mesh.vertices.emplace_back(center, .5F, 0, 0, 0, 1);
+    mesh.indices = {0, 1, 2};
+    mesh.meshlets = std::make_unique<schema::MeshletDataT>();
+    mesh.meshlets->indices = mesh.indices;
+    mesh.meshlets->meshlets.emplace_back(0, 3, schema::Vec3{center, 0, 0}, .7F,
+                                         schema::Vec3{0, 0, 1}, 0);
+    mesh.meshlets->submeshes.emplace_back(0, 1);
     return mesh;
 }
 
@@ -545,6 +562,74 @@ int benchmark(int argc, char** argv)
     return written ? 0 : 1;
 }
 
+bool cross_mesh_indices(WindowSystem& window, RenderSystem& renderer, WorldSystem& world,
+                        const schema::MeshDataT& left, const schema::MeshDataT& right)
+{
+    world.destroy_scene();
+    auto* scene = world.create_scene("Shared meshlet index ranges");
+    if (!scene)
+    {
+        return false;
+    }
+    auto camera_node = scene->create_node("Camera");
+    auto camera = camera_node.add_component<Camera>();
+    auto post = camera_node.add_component<PostProcessComponent>();
+    auto environment = scene->create_node("Environment").add_component<EnvironmentComponent>();
+    if (!camera || !post || !environment)
+    {
+        return false;
+    }
+    CameraSettings lens;
+    lens.projection = schema::Projection::orthographic;
+    lens.orthographic_size = 3;
+    TransformSettings pose;
+    pose.position = {0, 0, 6};
+    auto effects = test_support::read_settings(post);
+    effects.ssr_enabled = true;
+    auto lighting = test_support::read_settings(environment);
+    lighting.ambient_intensity = .6F;
+    if (!camera.set_settings(lens) || !camera_node.get_component<Transform>().set_settings(pose) ||
+        !scene->set_active_camera(camera) || !post.set_settings(effects) ||
+        !environment.set_settings(lighting) || !renderer.set_msaa_samples(4))
+    {
+        return false;
+    }
+    for (const auto* geometry : {&left, &right})
+    {
+        auto mesh = scene->create_node("Triangle").add_component<MeshRenderer>();
+        if (!mesh || !mesh.set_mesh(geometry->path) ||
+            !mesh.material().set_type("builtin://materials/default-pbr"))
+        {
+            return false;
+        }
+    }
+    SceneCaptureImage direct, merged;
+    RenderViewStats direct_stats, merged_stats;
+    if (!capture(window, renderer, direct, direct_stats))
+    {
+        return false;
+    }
+    lighting.meshlet_culling_enabled = true;
+    if (!environment.set_settings(lighting) || !capture(window, renderer, merged, merged_stats) ||
+        !pixels(direct, merged, "odd-length cross-mesh ranges preserve both triangles"))
+    {
+        return false;
+    }
+    const auto views = renderer.submission_stats();
+    for (const auto id :
+         {render_detail::surface_view, render_detail::opaque_depth_view, render_detail::main_view})
+    {
+        const auto view = std::ranges::find(views, id, &RenderViewStats::view_id);
+        if (!expect(view != views.end() && view->draw_calls == 1 && view->indirect_commands == 1,
+                    "all three main views reuse one ordered cross-mesh command"))
+        {
+            return false;
+        }
+    }
+    return expect(direct_stats.draw_calls == 2 && merged_stats.meshlet_candidate_pairs == 2,
+                  "two distinct meshes and meshlet candidates share a submission");
+}
+
 int test()
 {
     EngineConfig config;
@@ -559,11 +644,14 @@ int test()
     RenderSystem renderer(window, &world, nullptr, nullptr, nullptr, render_config);
     test_support::ResourceFixture fixture;
     const auto geometry = grid();
+    const auto left_triangle = triangle("meshes/submission-left-triangle", -.625F);
+    const auto right_triangle = triangle("meshes/submission-right-triangle", .625F);
     const auto left_probes = probes("lighting/submission-left", true);
     const auto right_probes = probes("lighting/submission-right", false);
     if (!(services.initialize(config) && services.prepare_builtins()) ||
         !world.initialize(config) || !window.initialize(config) || !renderer.initialize(config) ||
-        !fixture.add(geometry) || !fixture.add(left_probes) || !fixture.add(right_probes) ||
+        !fixture.add(geometry) || !fixture.add(left_triangle) || !fixture.add(right_triangle) ||
+        !fixture.add(left_probes) || !fixture.add(right_probes) ||
         !services.publish_and_load(fixture.catalog, {{"content", fixture.root}}))
     {
         return 1;
@@ -644,12 +732,161 @@ int test()
     {
         return 1;
     }
+    auto first_material = visible.front().material();
+    SceneCaptureImage specular_workflow, metallic_workflow_restored;
+    RenderViewStats workflow_stats;
+    if (!first_material.set_v3("specularColor", {0.9F, 0.4F, 0.2F}) ||
+        !first_material.set_float("specularWorkflow", 1.0F) ||
+        !capture(window, renderer, specular_workflow, workflow_stats) ||
+        !expect(specular_workflow.rgba != instanced.rgba,
+                "a changed material workflow selects the matching PBR program") ||
+        !first_material.set_float("specularWorkflow", 0.0F) ||
+        !first_material.set_v3("specularColor", {0.04F, 0.04F, 0.04F}) ||
+        !capture(window, renderer, metallic_workflow_restored, workflow_stats) ||
+        !pixels(instanced, metallic_workflow_restored,
+                "restoring the metallic workflow restores the original color"))
+    {
+        return 1;
+    }
+    const auto has_view = [&](bgfx::ViewId id)
+    {
+        const auto views = renderer.submission_stats();
+        return std::any_of(views.begin(), views.end(),
+                           [id](const auto& view) { return view.view_id == id; });
+    };
+    auto screen_effects = test_support::read_settings(post);
+    SceneCaptureImage ssr_image, ssr_restored;
+    RenderViewStats ssr_stats;
+    if (!expect(has_view(render_detail::ambient_occlusion_depth_view) &&
+                    !has_view(render_detail::surface_view),
+                "SSR off submits shared scene depth without material surfaces"))
+    {
+        return 1;
+    }
+    screen_effects.ssr_enabled = true;
+    if (!post.set_settings(screen_effects) || !capture(window, renderer, ssr_image, ssr_stats) ||
+        !expect(has_view(render_detail::surface_view) &&
+                    !has_view(render_detail::ambient_occlusion_depth_view),
+                "Matching built-in coverage writes both surfaces and depth in one pass"))
+    {
+        return 1;
+    }
+    const auto& caps = *bgfx::getCaps();
+    if ((caps.supported & BGFX_CAPS_COMPUTE) && caps.limits.maxComputeBindings >= 8 &&
+        caps.limits.maxTextureLayers >= 4)
+    {
+        screen_effects.ao_enabled = true;
+        const auto radius = screen_effects.ao_radius;
+        if (!post.set_settings(screen_effects) || !frames(window, renderer, 4))
+        {
+            return 1;
+        }
+        const auto steady_compute = bgfx::getStats()->numCompute;
+        for (unsigned frame = 0; frame < 4; ++frame)
+        {
+            screen_effects.ao_radius = frame % 2 ? radius : radius * 0.5F;
+            if (!post.set_settings(screen_effects) || !frames(window, renderer, 1))
+            {
+                return 1;
+            }
+        }
+        if (!expect(bgfx::getStats()->numCompute > steady_compute,
+                    "AO parameter changes recompute against identical scene depth"))
+        {
+            return 1;
+        }
+        auto observer = camera_node.get_component<Transform>();
+        auto shifted_pose = camera_pose;
+        shifted_pose.position.mutate_x(.03125);
+        for (unsigned frame = 0; frame < 4; ++frame)
+        {
+            if (!observer.set_settings(frame % 2 ? camera_pose : shifted_pose) ||
+                !frames(window, renderer, 1))
+            {
+                return 1;
+            }
+        }
+        if (!expect(bgfx::getStats()->numCompute > steady_compute,
+                    "Observer changes invalidate cached ambient occlusion") ||
+            !frames(window, renderer, 4) ||
+            !expect(bgfx::getStats()->numCompute == steady_compute,
+                    "Unchanged depth and AO parameters reuse the previous result"))
+        {
+            return 1;
+        }
+        screen_effects.ao_enabled = false;
+    }
+    screen_effects.ssr_enabled = false;
+    if (!post.set_settings(screen_effects) || !capture(window, renderer, ssr_restored, ssr_stats) ||
+        !expect(!has_view(render_detail::surface_view),
+                "disabling SSR removes its material surface pass") ||
+        !pixels(instanced, ssr_restored, "disabling SSR restores the exact HDR image"))
+    {
+        return 1;
+    }
+    if (renderer.supports_msaa_samples(4))
+    {
+        auto coplanar = visible[1].node().get_component<Transform>();
+        auto cutout = visible[2].node().get_component<Transform>();
+        const auto coplanar_pose = test_support::read_settings(coplanar);
+        const auto cutout_pose = test_support::read_settings(cutout);
+        const auto front_pose =
+            test_support::read_settings(visible[0].node().get_component<Transform>());
+        auto clipped_pose = front_pose;
+        clipped_pose.position.mutate_z(front_pose.position.z() + .25);
+        SceneCaptureImage msaa_baseline, msaa_ssr, msaa_restored;
+        const auto has_opaque_depth = [&]()
+        {
+            const auto views = renderer.submission_stats();
+            return std::any_of(views.begin(), views.end(), [](const auto& view)
+                               { return view.view_id == render_detail::opaque_depth_view; });
+        };
+        const bool stencil_supported =
+            bgfx::isTextureValid(0, false, 1, bgfx::TextureFormat::D32FS8,
+                                 BGFX_TEXTURE_RT_MSAA_X4 | BGFX_TEXTURE_RT_WRITE_ONLY);
+        // Make the result depend on draw order and require the nearer cutout to discard.
+        if (!renderer.set_msaa_samples(4) || !set_instancing(meshes, false) ||
+            !coplanar.set_settings(front_pose) || !cutout.set_settings(clipped_pose) ||
+            !visible[1].material().set_v4("baseColor", {.8, .2, .1, 1}) ||
+            !visible[2].material().set_v4("baseColor", {.1, .8, .2, .25}) ||
+            !visible[2].material().set_float("alphaCutoff", .5F) ||
+            !capture(window, renderer, msaa_baseline, ssr_stats) ||
+            !expect(!has_opaque_depth(), "SSR off uses the original MSAA depth path"))
+        {
+            return 1;
+        }
+        screen_effects.ssr_enabled = true;
+        if (!post.set_settings(screen_effects) || !capture(window, renderer, msaa_ssr, ssr_stats) ||
+            !expect(has_opaque_depth() == stencil_supported,
+                    "supported MSAA depth is populated before opaque shading") ||
+            !pixels(msaa_baseline, msaa_ssr,
+                    "MSAA coverage and SSR color reuse preserve coplanar and cutout pixels"))
+        {
+            return 1;
+        }
+        screen_effects.ssr_enabled = false;
+        if (!post.set_settings(screen_effects) ||
+            !capture(window, renderer, msaa_restored, ssr_stats) ||
+            !expect(!has_opaque_depth(), "SSR off removes the MSAA depth prepass") ||
+            !pixels(msaa_baseline, msaa_restored,
+                    "MSAA target rebuild restores the exact HDR image") ||
+            !renderer.set_msaa_samples(1) || !coplanar.set_settings(coplanar_pose) ||
+            !cutout.set_settings(cutout_pose) || !set_instancing(meshes, true) ||
+            !visible[1].material().set_v4("baseColor", {.2, .6, .9, 1}) ||
+            !visible[2].material().set_v4("baseColor", {.2, .6, .9, 1}) ||
+            !visible[2].material().set_float("alphaCutoff", 0))
+        {
+            return 1;
+        }
+    }
     constexpr auto meshlet_caps = BGFX_CAPS_COMPUTE | BGFX_CAPS_DRAW_INDIRECT;
     const bool meshlet_supported = (bgfx::getCaps()->supported & meshlet_caps) == meshlet_caps &&
                                    bgfx::getCaps()->limits.maxInstanceData >= 7 &&
                                    bgfx::getCaps()->limits.maxComputeBindings >= 5;
-    const auto meshlet_pixels = [&](const SceneCaptureImage& reference, const char* message)
+    const auto meshlet_pixels = [&](const SceneCaptureImage& reference, const char* message,
+                                    bool verify_merged_singletons = false)
     {
+        const auto ordinary_compute = bgfx::getStats()->numCompute;
         auto settings = test_support::read_settings(environment);
         settings.meshlet_culling_enabled = true;
         SceneCaptureImage image;
@@ -659,7 +896,13 @@ int test()
                     "enabling before GPU preparation keeps the ordinary frame drawable") ||
             !capture(window, renderer, image, stats) || !pixels(reference, image, message) ||
             !expect(!meshlet_supported || stats.indirect_batches > 0,
-                    "compatible geometry uses actual GPU indirect submissions"))
+                    "compatible geometry uses actual GPU indirect submissions") ||
+            !expect(!verify_merged_singletons || !meshlet_supported ||
+                        (stats.indirect_commands == stats.indirect_batches &&
+                         stats.meshlet_candidate_pairs == stats.indirect_batches * 2),
+                    "consecutive singleton clusters share one command without losing candidates") ||
+            !expect(!meshlet_supported || bgfx::getStats()->numCompute <= ordinary_compute + 1,
+                    "all prepared batches share one culling dispatch"))
         {
             return false;
         }
@@ -667,6 +910,12 @@ int test()
         return environment.set_settings(settings);
     };
     if (!meshlet_pixels(instanced, "Meshlet indirect instances preserve every pixel"))
+    {
+        return 1;
+    }
+    if (!set_instancing(meshes, false) ||
+        !meshlet_pixels(culled, "merged singleton commands preserve every pixel", true) ||
+        !set_instancing(meshes, true))
     {
         return 1;
     }
@@ -831,24 +1080,101 @@ int test()
     shadow_settings.shadow_cascades = 4;
     SceneCaptureImage shadow_ordinary, shadow_instanced;
     RenderViewStats shadow_stats;
+    const auto sample_shadow_draws = [&](std::uint32_t& peak)
+    {
+        peak = 0;
+        // Include the changed frame after the upstream submission/render queue catches up.
+        for (unsigned index = 0; index < 4; ++index)
+        {
+            if (!frames(window, renderer, 1))
+            {
+                return false;
+            }
+            peak = std::max(peak, bgfx::getStats()->numDraw);
+        }
+        return true;
+    };
+    std::uint32_t ordinary_draws = 0, instanced_draws = 0;
     if (!receiver || !receiver.set_mesh(geometry.path) ||
         !receiver_node.get_component<Transform>().set_settings(receiver_pose) ||
         !light_node.get_component<Transform>().set_settings(sun_pose) ||
         !light.set_settings(shadow_settings) ||
         !visible[1].material().set_float("alphaCutoff", .5F) ||
         !visible[1].material().set_v4("baseColor", {.2, .6, .9, .25}) ||
-        !set_instancing(meshes, false) || !capture(window, renderer, shadow_ordinary, shadow_stats))
+        !set_instancing(meshes, false) || !sample_shadow_draws(ordinary_draws) ||
+        !capture(window, renderer, shadow_ordinary, shadow_stats))
     {
         return 1;
     }
-    const auto ordinary_draws = bgfx::getStats()->numDraw;
-    if (!set_instancing(meshes, true) ||
+    if (!set_instancing(meshes, true) || !sample_shadow_draws(instanced_draws) ||
         !capture(window, renderer, shadow_instanced, shadow_stats) ||
         !pixels(
             shadow_ordinary, shadow_instanced,
             "shadow batching preserves alpha clipping, mirrored culling and off-camera casters") ||
-        !expect(bgfx::getStats()->numDraw < ordinary_draws,
-                "shadow instancing reduces actual backend draws"))
+        !expect(instanced_draws < ordinary_draws, "shadow instancing reduces actual backend draws"))
+    {
+        return 1;
+    }
+    const auto cached_draws = bgfx::getStats()->numDraw;
+    const auto refreshed_shadow = [&](const char* message)
+    {
+        std::uint32_t peak = 0;
+        return sample_shadow_draws(peak) && expect(peak > cached_draws, message);
+    };
+    SceneCaptureImage ordinary_cached, ordinary_changed;
+    auto caster_pose = test_support::read_settings(visible[0].node().get_component<Transform>());
+    const auto saved_caster_pose = caster_pose;
+    caster_pose.position.mutate_x(caster_pose.position.x() + .4);
+    if (!expect(cached_draws < instanced_draws, "unchanged shadows omit backend atlas draws") ||
+        !capture(window, renderer, ordinary_cached, shadow_stats) ||
+        !pixels(shadow_instanced, ordinary_cached,
+                "cached ordinary shadows preserve every pixel") ||
+        !visible[0].node().get_component<Transform>().set_settings(caster_pose) ||
+        !refreshed_shadow("moving a caster redraws the ordinary atlas") ||
+        !capture(window, renderer, ordinary_changed, shadow_stats) ||
+        !expect(ordinary_changed.rgba != ordinary_cached.rgba,
+                "moving a caster produces a changed image") ||
+        !visible[0].node().get_component<Transform>().set_settings(saved_caster_pose) ||
+        !visible[1].material().set_float("alphaCutoff", 0) ||
+        !refreshed_shadow("changing alpha clipping redraws the ordinary atlas") ||
+        !visible[1].material().set_float("alphaCutoff", .5F))
+    {
+        return 1;
+    }
+    auto changed_sun = sun_pose;
+    changed_sun.rotation = {0, -40, 0};
+    auto changed_camera = camera_pose;
+    changed_camera.position.mutate_x(.1);
+    if (!light_node.get_component<Transform>().set_settings(changed_sun) ||
+        !refreshed_shadow("moving a light redraws the ordinary atlas") ||
+        !light_node.get_component<Transform>().set_settings(sun_pose) ||
+        !camera_node.get_component<Transform>().set_settings(changed_camera) ||
+        !refreshed_shadow("moving the camera redraws the ordinary atlas") ||
+        !camera_node.get_component<Transform>().set_settings(camera_pose))
+    {
+        return 1;
+    }
+    visible[0].set_cast_shadows(false);
+    if (!refreshed_shadow("changing a caster's shadow flag redraws the ordinary atlas"))
+    {
+        return 1;
+    }
+    visible[0].set_cast_shadows(true);
+    auto deformed = geometry.vertices;
+    std::vector<Vec4> deformed_tangents(deformed.size(), {1, 0, 0, 1});
+    deformed.front().mutate_z(.1F);
+    if (!visible[0].set_deformation(deformed, deformed_tangents) ||
+        !refreshed_shadow("deformed casters use ordinary per-frame shadow submission") ||
+        !capture(window, renderer, ordinary_changed, shadow_stats) ||
+        !expect(bgfx::getStats()->numDraw > cached_draws,
+                "unchanged dynamic buffers do not enable static atlas reuse"))
+    {
+        return 1;
+    }
+    visible[0].clear_deformation();
+    if (!capture(window, renderer, ordinary_cached, shadow_stats) ||
+        !pixels(shadow_instanced, ordinary_cached,
+                "restoring all shadow inputs reconstructs the original atlas"))
     {
         return 1;
     }
@@ -887,12 +1213,60 @@ int test()
     {
         return 1;
     }
+    if (!frames(window, renderer, 4) || !renderer.vsm_status(vsm))
+    {
+        return 1;
+    }
+    const auto steady_demand = vsm.demand_revision;
+    const auto steady_compute = bgfx::getStats()->numCompute;
+    const auto refreshed_feedback = [&](const char* message)
+    {
+        const auto previous = vsm.demand_revision;
+        for (unsigned attempt = 0; attempt < 24; ++attempt)
+        {
+            if (!frames(window, renderer, 1) || !renderer.vsm_status(vsm))
+            {
+                return false;
+            }
+            if (vsm.demand_revision > previous)
+            {
+                return true;
+            }
+        }
+        return expect(false, message);
+    };
+    if (!frames(window, renderer, 4) || !renderer.vsm_status(vsm) ||
+        !expect(vsm.demand_revision == steady_demand &&
+                    bgfx::getStats()->numCompute == steady_compute,
+                "stable receivers reuse the completed VSM feedback") ||
+        !camera_node.get_component<Transform>().set_settings(changed_camera) ||
+        !refreshed_feedback("moving the camera refreshes VSM feedback") ||
+        !camera_node.get_component<Transform>().set_settings(camera_pose) || !settle_vsm())
+    {
+        return 1;
+    }
+    receiver.set_cast_shadows(false);
+    auto moved_receiver = receiver_pose;
+    moved_receiver.position.mutate_x(0.5);
+    if (!settle_vsm() || !frames(window, renderer, 4) || !renderer.vsm_status(vsm) ||
+        !receiver_node.get_component<Transform>().set_settings(moved_receiver) ||
+        !refreshed_feedback("moving a non-caster refreshes VSM receiver feedback") ||
+        !receiver_node.get_component<Transform>().set_settings(receiver_pose))
+    {
+        return 1;
+    }
+    receiver.set_cast_shadows(true);
+    if (!settle_vsm())
+    {
+        return 1;
+    }
     const auto original_generation = vsm.generation;
     if (!camera.set_enabled(false) || !frames(window, renderer, 2) || !renderer.vsm_status(vsm) ||
         !expect(vsm.state == VsmState::disabled && !vsm.resident_pages && !vsm.resident_bytes,
                 "a scene without a drawable camera retires virtual shadow state") ||
-        !camera.set_enabled(true) || !expect(settle_vsm() && vsm.generation > original_generation,
-                                            "restoring the camera warms a new VSM generation") ||
+        !camera.set_enabled(true) ||
+        !expect(settle_vsm() && vsm.generation > original_generation,
+                "restoring the camera warms a new VSM generation") ||
         !capture(window, renderer, cached_image, shadow_stats) ||
         !pixels(virtual_image, cached_image, "restoring the camera reconstructs virtual shadows"))
     {
@@ -918,6 +1292,131 @@ int test()
         !renderer.vsm_status(vsm) ||
         !expect(vsm.state == VsmState::disabled && !vsm.resident_pages && !vsm.resident_bytes,
                 "disabling VSM releases its resident state"))
+    {
+        return 1;
+    }
+    // Both reflection shadow ranges remain live while main-view meshlet commands run.
+    for (unsigned index = 0; index < 2; ++index)
+    {
+        auto node = scene->create_node("Reflection and meshlet composition");
+        auto mesh = node.add_component<MeshRenderer>();
+        auto reflection = node.add_component<PlanarReflectionComponent>();
+        TransformSettings pose;
+        pose.position = {0, -2.0 - index, 0};
+        pose.scale = {6, .025, 6};
+        if (!mesh || !reflection || !mesh.set_mesh("builtin://meshes/cube") ||
+            !node.get_component<Transform>().set_settings(pose) ||
+            !mesh.material().set_type("builtin://materials/default-pbr") ||
+            !mesh.material().set_float("metallic", 1) ||
+            !mesh.material().set_float("roughness", .1F))
+        {
+            return 1;
+        }
+    }
+    auto water_node = scene->create_node("Transparent water with frame textures");
+    auto water = water_node.add_component<MeshRenderer>();
+    TransformSettings water_pose;
+    water_pose.position = {0, -1.75, 0};
+    water_pose.scale = {3, .025, 3};
+    if (!water || !water.set_mesh("builtin://meshes/cube") ||
+        !water_node.get_component<Transform>().set_settings(water_pose) ||
+        !water.material().set_type("builtin://materials/default-water") ||
+        !water.material().set_v2("waterFlow", {0, 0}))
+    {
+        return 1;
+    }
+    water.set_cast_shadows(true);
+    SceneCaptureImage reflected_reference;
+    if (!capture(window, renderer, reflected_reference, shadow_stats))
+    {
+        return 1;
+    }
+    camera_pose.position = {0, 3, 8};
+    camera_pose.rotation = {-20, 0, 0};
+    if (!camera_node.get_component<Transform>().set_settings(camera_pose) ||
+        !capture(window, renderer, reflected_reference, shadow_stats))
+    {
+        return 1;
+    }
+    const auto reflected_views = renderer.submission_stats();
+    if (!expect(std::any_of(reflected_views.begin(), reflected_views.end(),
+                            [](const auto& value) { return value.view_id == 33; }) &&
+                    std::any_of(reflected_views.begin(), reflected_views.end(),
+                                [](const auto& value) { return value.view_id == 72; }),
+                "both nondegenerate planar captures submit actual geometry") ||
+        !meshlet_pixels(reflected_reference,
+                        "Meshlet culling with two planar captures and CSM preserves every pixel"))
+    {
+        return 1;
+    }
+    if (!frames(window, renderer, 4))
+    {
+        return 1;
+    }
+    const auto reflected_cached_draws = bgfx::getStats()->numDraw;
+    std::uint32_t reflected_refreshed_draws = 0;
+    SceneCaptureImage reflected_restored;
+    if (!light_node.get_component<Transform>().set_settings(changed_sun) ||
+        !sample_shadow_draws(reflected_refreshed_draws) ||
+        !expect(reflected_refreshed_draws > reflected_cached_draws,
+                "main and reflected shadow regions stay cached with transparent water present") ||
+        !light_node.get_component<Transform>().set_settings(sun_pose) ||
+        !capture(window, renderer, reflected_restored, shadow_stats) ||
+        !pixels(reflected_reference, reflected_restored,
+                "restoring the light preserves the main and reflected shadow images"))
+    {
+        return 1;
+    }
+    auto point_node = scene->create_node("Shared point shadow");
+    auto point_light = point_node.add_component<Light>();
+    auto point_transform = point_node.get_component<Transform>();
+    LightSettings point_settings;
+    point_settings.kind = schema::LightKind::point;
+    point_settings.cast_shadows = true;
+    point_settings.shadow_resolution = 256;
+    point_settings.range = 18;
+    point_settings.intensity = 20;
+    TransformSettings point_pose;
+    point_pose.position = {2, 3, 2};
+    SceneCaptureImage point_reference, point_changed, point_restored;
+    std::uint32_t with_point_refreshed_draws = 0;
+    if (!point_light || !point_transform.set_settings(point_pose) ||
+        !point_light.set_settings(point_settings) ||
+        !capture(window, renderer, point_reference, shadow_stats) ||
+        !expect(point_reference.rgba != reflected_reference.rgba,
+                "the point light contributes to the reflected scene") ||
+        !light_node.get_component<Transform>().set_settings(changed_sun) ||
+        !sample_shadow_draws(with_point_refreshed_draws) ||
+        !expect(with_point_refreshed_draws == reflected_refreshed_draws,
+                "directional changes leave the shared local shadow faces cached") ||
+        !light_node.get_component<Transform>().set_settings(sun_pose) ||
+        !frames(window, renderer, 4))
+    {
+        return 1;
+    }
+    const auto point_cached_draws = bgfx::getStats()->numDraw;
+    auto moved_point = point_pose;
+    moved_point.position.mutate_x(-1);
+    if (!point_transform.set_settings(moved_point) ||
+        !sample_shadow_draws(with_point_refreshed_draws) ||
+        !expect(with_point_refreshed_draws > point_cached_draws,
+                "changing the point projection submits its shadow faces") ||
+        !capture(window, renderer, point_changed, shadow_stats) ||
+        !expect(point_changed.rgba != point_reference.rgba,
+                "the moved point light changes the image") ||
+        !point_transform.set_settings(point_pose) ||
+        !capture(window, renderer, point_restored, shadow_stats) ||
+        !pixels(point_reference, point_restored,
+                "restoring the point light restores every reflected and main pixel"))
+    {
+        return 1;
+    }
+    if (meshlet_supported && (caps.supported & BGFX_CAPS_DRAW_INDIRECT_COUNT) == 0 &&
+        caps.limits.maxBlits >= 8 && caps.limits.maxVertexStreams >= 2 &&
+        renderer.supports_msaa_samples(4) &&
+        bgfx::isTextureValid(0, false, 1, bgfx::TextureFormat::D32FS8,
+                             BGFX_TEXTURE_RT_MSAA_X4 | BGFX_TEXTURE_RT_WRITE_ONLY) &&
+        !cross_mesh_indices(window, renderer, world, left_triangle, right_triangle))
     {
         return 1;
     }

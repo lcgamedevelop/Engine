@@ -15,6 +15,54 @@
 
 namespace engine::render_detail
 {
+namespace
+{
+constexpr std::uint16_t instance_stride = 7 * 4 * sizeof(float);
+}
+
+bool can_submit_opaque_depth(const RenderFrameData& frame_data, const ViewDrawList& list)
+{
+    if (list.opaque.empty())
+    {
+        return false;
+    }
+    for (const auto& item : list.opaque)
+    {
+        const auto& material = frame_data.meshes[item.mesh].gpu->materials[item.slot];
+        if (material.frame_textures || !bgfx::isValid(material.program->depth_program))
+        {
+            return false;
+        }
+    }
+
+    std::size_t instance_count = 0;
+    for (const auto& batch : list.batches)
+    {
+        if (batch.items.size() < 2)
+        {
+            continue;
+        }
+        const auto& item = list.opaque[batch.items.front()];
+        const auto* program = frame_data.meshes[item.mesh].gpu->materials[item.slot].program;
+        if (!bgfx::isValid(program->instanced_depth_program))
+        {
+            return false;
+        }
+        if (!bgfx::isValid(batch.meshlets.commands))
+        {
+            instance_count += batch.items.size();
+        }
+    }
+    if (instance_count > UINT32_MAX / (2 * instance_stride))
+    {
+        return false;
+    }
+    // With enough space for both passes the same batches use identical instanced vertices.
+    const auto instances = static_cast<std::uint32_t>(instance_count * 2);
+    return instances == 0 ||
+           bgfx::getAvailInstanceDataBuffer(instances, instance_stride) == instances;
+}
+
 bool prepare_draw_batches(const RenderFrameData& frame_data, const ViewDrawList& list,
                           const SceneDrawView& draw, SceneDrawMode mode,
                           std::vector<DrawBatch>& batches)
@@ -93,8 +141,11 @@ bool prepare_draw_batches(const RenderFrameData& frame_data, const ViewDrawList&
             key.lod = item.lod;
             key.first = item.first;
             key.count = item.count;
+            const auto instanced_color = mode == SceneDrawMode::opaque && material.pbr_opaque
+                                             ? program->instanced_pbr_opaque_program
+                                             : program->instanced_program;
             key.program = (mode == SceneDrawMode::surface ? program->instanced_surface_program
-                                                          : program->instanced_program)
+                                                          : instanced_color)
                               .idx;
             key.lightmap = item.lightmap.idx;
             key.has_lightmap = item.has_lightmap;
@@ -134,8 +185,14 @@ bool RenderSystem::SceneGpuResources::prepare_lighting(
     render_detail::ShadowFrame& frame, std::size_t cluster_index, bgfx::ViewId base,
     const SceneCaptureRequest* capture, const render_detail::VsmPageBatch* vsm)
 {
+    const auto fail = [](const char* message)
+    {
+        SDL_LogError(SDL_LOG_CATEGORY_RENDER, "Lighting preparation failed: %s", message);
+        return false;
+    };
     std::vector<render_detail::ClusterLight> lights;
     std::vector<render_detail::LocalShadowLight> local_lights;
+    std::uint32_t directional_count = 0;
     std::uint32_t shadow_light = UINT32_MAX;
     auto light_settings = rendering;
     light_settings.directional_shadows = false;
@@ -148,13 +205,13 @@ bool RenderSystem::SceneGpuResources::prepare_lighting(
         }
         if (lights.size() >= config.maximum_lights)
         {
-            return false;
+            return fail("Light count exceeds the configured limit");
         }
         const auto& matrix = source.world;
         const float length = std::hypot(matrix[8], matrix[9], matrix[10]);
         if (!(length > 0))
         {
-            return false;
+            return fail("Light direction is degenerate");
         }
         const auto& lighting = source.settings;
         constexpr float radians = 0.01745329251994329577F;
@@ -168,13 +225,15 @@ bool RenderSystem::SceneGpuResources::prepare_lighting(
         packed.kind_inner = {static_cast<float>(lighting.kind),
                              std::cos(lighting.inner_angle * radians), 0, 0};
         lights.push_back(packed);
+        const bool directional = lighting.kind == schema::LightKind::directional;
+        directional_count += directional;
         if (lighting.cast_shadows)
         {
-            if (lighting.kind == schema::LightKind::directional)
+            if (directional)
             {
                 if (shadow_light != UINT32_MAX)
                 {
-                    return false;
+                    return fail("More than one directional light requests shadows");
                 }
                 shadow_light = index;
                 light_settings.directional_shadows = true;
@@ -188,7 +247,8 @@ bool RenderSystem::SceneGpuResources::prepare_lighting(
             }
             else
             {
-                local_lights.push_back({source.node_id, index, lighting, matrix});
+                local_lights.push_back(source);
+                local_lights.back().light_index = index;
             }
         }
     }
@@ -209,7 +269,7 @@ bool RenderSystem::SceneGpuResources::prepare_lighting(
                              [&](const auto& mesh) { return mesh.gpu->node_id == id; });
             if (found == frame_data.meshes.end())
             {
-                return false;
+                return fail("A capture mesh is absent from the prepared scene");
             }
             const auto* mesh = found->gpu;
             const auto& model = found->model;
@@ -230,33 +290,50 @@ bool RenderSystem::SceneGpuResources::prepare_lighting(
     }
     const bool csm = light_settings.directional_shadows && shadow_light < lights.size() &&
                      std::min(lens.far_clip, light_settings.shadow_distance) > lens.near_clip;
+    const float* receiver_projection =
+        draw.culling_projection ? draw.culling_projection : draw.projection;
     if (csm && !render_detail::prepare_shadow_frame(
                    lens, light_settings, static_cast<float>(draw.width) / draw.height, draw.world,
-                   draw.view, lights[shadow_light].direction_outer, frame))
+                   draw.view, receiver_projection, lights[shadow_light].direction_outer, frame))
     {
-        return false;
+        return fail("Cannot construct directional shadow cascades");
     }
     std::span<const std::uint64_t> caster_ids;
     if (capture)
     {
         caster_ids = capture->node_ids;
     }
-    if (!targets().shadow.draw(frame_data, light_settings, frame, shadow_fallback, shadow_depth,
-                               config, local_lights, lights, draw.world, base,
+    render_detail::ShadowAtlasView atlas_view;
+    if (!capture)
+    {
+        for (std::size_t index = 0; index < targets().planar.size(); ++index)
+        {
+            if (targets().planar[index].node_id != 0)
+            {
+                if (draw.reflection && index == cluster_index)
+                {
+                    atlas_view.index = atlas_view.count;
+                }
+                ++atlas_view.count;
+            }
+        }
+    }
+    if (!targets().shadow.draw(frame_data, light_settings, frame, shadow_fallback, config,
+                               local_lights, lights, draw.world, base, atlas_view,
                                capture ? &caster_ids : nullptr))
     {
-        return false;
+        return fail("Cannot submit the shadow atlas");
     }
     auto& cluster = targets().clusters[cluster_index];
     if (!cluster.prepare(config, draw.width, draw.height,
-                         vsm ? static_cast<std::uint32_t>(vsm->gpu_data.size()) : 0))
+                         vsm ? static_cast<std::uint32_t>(vsm->page_table.size()) : 0))
     {
-        return false;
+        return fail("Cannot prepare clustered lighting buffers");
     }
     if (!cluster.cull(static_cast<bgfx::ViewId>(base + 28), lens, draw.view, draw.projection,
-                      lights, frame.local_records, vsm))
+                      lights, directional_count, frame.local_records, vsm))
     {
-        return false;
+        return fail("Cannot submit clustered light culling");
     }
     draw.cluster = &cluster;
     draw.shadow = &frame;
@@ -298,6 +375,7 @@ bool RenderSystem::SceneGpuResources::draw_meshes(const render_detail::RenderFra
     const bool depth_only = mode == SceneDrawMode::depth;
     const bool capture = mode == SceneDrawMode::capture;
     const bool transparent = mode == SceneDrawMode::transparent;
+    const bool surface_writes_depth = mode == SceneDrawMode::surface && draw.surface_writes_depth;
     const bool ibl_ready =
         settings.ibl_enabled &&
         std::all_of(targets().ibl_textures.begin(), targets().ibl_textures.end(),
@@ -360,9 +438,22 @@ bool RenderSystem::SceneGpuResources::draw_meshes(const render_detail::RenderFra
     bgfx::setViewUniform(draw.id, shadow_splits, draw.shadow->splits.data());
     bgfx::setViewUniform(draw.id, shadow_params, draw.shadow->parameters.data());
     bgfx::setViewUniform(draw.id, shadow_settings, shadow_values);
-    draw.cluster->bind_view(draw.id);
+    const bool virtual_shadow_view =
+        mode == SceneDrawMode::opaque && !draw.reflection && bgfx::isValid(draw.vsm.atlas);
+    draw.cluster->bind_view(draw.id, virtual_shadow_view);
+    [[maybe_unused]] std::uint32_t coverage_draws = 0;
+    [[maybe_unused]] std::uint32_t solid_depth_draws = 0;
+    [[maybe_unused]] std::uint32_t position_stream_draws = 0;
+    [[maybe_unused]] std::uint32_t surface_material_draws = 0;
+    [[maybe_unused]] std::uint32_t vsm_depth_range_draws = 0;
+    [[maybe_unused]] std::uint32_t pbr_opaque_draws = 0;
+    [[maybe_unused]] std::int64_t avoided_uniform_bytes = 0;
     for (const auto& batch : batches)
     {
+        if (batch.meshlets.merged_into_previous)
+        {
+            continue;
+        }
         std::size_t cursor = 0;
         while (cursor < batch.items.size())
         {
@@ -370,98 +461,162 @@ bool RenderSystem::SceneGpuResources::draw_meshes(const render_detail::RenderFra
             const auto& mesh = frame_data.meshes[item.mesh];
             const auto& material = mesh.gpu->materials[item.slot];
             const auto* program = material.program;
-            if (mode == SceneDrawMode::surface && !bgfx::isValid(program->surface_program))
+            const bool coverage_depth =
+                depth_only && !material.frame_textures && bgfx::isValid(program->depth_program);
+            const bool solid_depth = coverage_depth && material.solid_depth;
+            // Only built-in programs provide the coverage variant. Its paired
+            // surface program consumes material and RVT data, without forward lighting.
+            const bool material_surface =
+                mode == SceneDrawMode::surface && bgfx::isValid(program->depth_program);
+            const bool forward_inputs = !coverage_depth && !material_surface;
+            const bool pbr_opaque = mode == SceneDrawMode::opaque && material.pbr_opaque;
+            auto regular_program = pbr_opaque ? program->pbr_opaque_program : program->program;
+            auto instanced_program =
+                pbr_opaque ? program->instanced_pbr_opaque_program : program->instanced_program;
+            if (mode == SceneDrawMode::surface)
             {
-                break;
-            }
-            const auto instanced_program = mode == SceneDrawMode::surface
-                                               ? program->instanced_surface_program
-                                               : program->instanced_program;
-            auto frame_textures = draw.textures;
-            std::array<float, 4> valid{};
-            for (std::size_t index = 0; index < frame_textures.size(); ++index)
-            {
-                valid[index] = bgfx::isValid(frame_textures[index]) ? 1.0F : 0.0F;
-                if (!bgfx::isValid(frame_textures[index]))
+                if (!bgfx::isValid(program->surface_program))
                 {
-                    frame_textures[index] = ibl_lut_fallback;
+                    break;
                 }
+                regular_program = program->surface_program;
+                instanced_program = program->instanced_surface_program;
+                surface_material_draws += material_surface;
             }
-            std::array<float, 16> planar_matrix{};
-            bx::mtxIdentity(planar_matrix.data());
-            if (!draw.reflection && !capture)
+            else if (coverage_depth)
             {
-                for (const auto& plane : targets().planar)
+                regular_program =
+                    solid_depth ? program->solid_depth_program : program->depth_program;
+                instanced_program = solid_depth ? program->instanced_solid_depth_program
+                                                : program->instanced_depth_program;
+                ++coverage_draws;
+                solid_depth_draws += solid_depth;
+                position_stream_draws +=
+                    solid_depth && !bgfx::isValid(mesh.gpu->deformed_vertices) &&
+                    item.geometry->position_stride_bytes() ==
+                        sizeof(render_detail::GpuVertex::position);
+            }
+            auto frame_textures = draw.textures;
+            if (forward_inputs && !pbr_opaque)
+            {
+                std::array<float, 4> valid{};
+                for (std::size_t index = 0; index < frame_textures.size(); ++index)
                 {
-                    if (plane.node_id == mesh.gpu->node_id && bgfx::isValid(plane.texture()))
+                    valid[index] = bgfx::isValid(frame_textures[index]) ? 1.0F : 0.0F;
+                    if (!bgfx::isValid(frame_textures[index]))
                     {
-                        frame_textures[2] = plane.texture();
-                        valid[2] = 1;
-                        planar_matrix = plane.view_projection;
-                        break;
+                        frame_textures[index] = ibl_lut_fallback;
                     }
                 }
+                std::array<float, 16> planar_matrix{};
+                bx::mtxIdentity(planar_matrix.data());
+                if (!draw.reflection && !capture)
+                {
+                    for (const auto& plane : targets().planar)
+                    {
+                        if (plane.node_id == mesh.gpu->node_id && bgfx::isValid(plane.texture()))
+                        {
+                            frame_textures[2] = plane.texture();
+                            valid[2] = 1;
+                            planar_matrix = plane.view_projection;
+                            break;
+                        }
+                    }
+                }
+                bgfx::setUniform(frame_valid, valid.data());
+                bgfx::setUniform(planar_projection, planar_matrix.data());
             }
-            if (!program->bind_material(material, frame_textures, draw.max_anisotropy))
+            if (pbr_opaque)
+            {
+                // The built-in opaque variant declares no scene color, depth or planar inputs.
+                avoided_uniform_bytes += 20 * sizeof(float);
+            }
+            if (!solid_depth &&
+                !program->bind_material(material, frame_textures, draw.max_anisotropy, pbr_opaque))
             {
                 return false;
             }
-            if (draw.rvt && bgfx::isValid(program->rvt_program) && !material.frame_textures)
+            if (!coverage_depth)
             {
-                draw.rvt->bind(mesh.rvt_role == schema::RvtRole::reader ||
-                                   mesh.rvt_role == schema::RvtRole::writer_reader,
-                               draw.world_origin);
+                if (draw.rvt && bgfx::isValid(program->rvt_program) && !material.frame_textures)
+                {
+                    draw.rvt->bind(mesh.rvt_role == schema::RvtRole::reader ||
+                                       mesh.rvt_role == schema::RvtRole::writer_reader,
+                                   draw.world_origin);
+                }
+                else
+                {
+                    render_detail::RvtPass::bind_disabled();
+                }
+                const float surface_value[]{material.cull != schema::CullMode::back ? 1.0F : 0.0F,
+                                            static_cast<float>(material.blend), 0, 0};
+                bgfx::setUniform(surface, surface_value);
             }
-            else
+            if (!solid_depth)
             {
-                render_detail::RvtPass::bind_disabled();
+                bgfx::setUniform(normal_transform, mesh.normal.data());
             }
-            bgfx::setUniform(normal_transform, mesh.normal.data());
-            bgfx::setUniform(frame_valid, valid.data());
-            bgfx::setUniform(planar_projection, planar_matrix.data());
-            bgfx::setTexture(render_detail::ambient_occlusion_stage, ao_sampler,
-                             use_ao ? targets().ambient_occlusion.texture() : shadow_fallback);
-            bgfx::setTexture(render_detail::ibl_irradiance_stage, ibl_irradiance_sampler,
-                             ibl_ready ? targets().ibl_textures[0]->handle : ibl_cube_fallback);
-            bgfx::setTexture(render_detail::ibl_prefilter_stage, ibl_prefilter_sampler,
-                             ibl_ready ? targets().ibl_textures[1]->handle : ibl_cube_fallback);
-            bgfx::setTexture(render_detail::ibl_lut_stage, ibl_lut_sampler,
-                             ibl_ready ? targets().ibl_textures[2]->handle : ibl_lut_fallback);
-            const float surface_value[]{material.cull != schema::CullMode::back ? 1.0F : 0.0F,
-                                        static_cast<float>(material.blend), 0, 0};
-            bgfx::setUniform(surface, surface_value);
-            bgfx::setTexture(render_detail::shadow_sampler_stage, shadow_sampler,
-                             bgfx::isValid(targets().shadow.texture()) ? targets().shadow.texture()
-                                                                       : shadow_fallback);
-            const auto& coefficients = item.coefficients;
-            const auto lightmap = item.lightmap;
-            const bool has_lightmap = item.has_lightmap, has_probe = item.has_probe;
-            const float lighting[]{has_lightmap ? 1.0F : 0.0F, has_probe ? 1.0F : 0.0F, 0, 0};
-            bgfx::setUniform(lighting_params, lighting);
-            bgfx::setUniform(probe_sh, coefficients.data(), 9);
-            bgfx::setTexture(6, lightmap_sampler, lightmap,
-                             draw.max_anisotropy
-                                 ? BGFX_SAMPLER_UVW_CLAMP | BGFX_SAMPLER_MIN_ANISOTROPIC |
-                                       BGFX_SAMPLER_MAG_ANISOTROPIC
-                                 : UINT32_MAX);
+            if (forward_inputs)
+            {
+                bgfx::setTexture(render_detail::ambient_occlusion_stage, ao_sampler,
+                                 use_ao ? targets().ambient_occlusion.texture() : shadow_fallback);
+                bgfx::setTexture(render_detail::ibl_irradiance_stage, ibl_irradiance_sampler,
+                                 ibl_ready ? targets().ibl_textures[0]->handle : ibl_cube_fallback);
+                bgfx::setTexture(render_detail::ibl_prefilter_stage, ibl_prefilter_sampler,
+                                 ibl_ready ? targets().ibl_textures[1]->handle : ibl_cube_fallback);
+                bgfx::setTexture(render_detail::ibl_lut_stage, ibl_lut_sampler,
+                                 ibl_ready ? targets().ibl_textures[2]->handle : ibl_lut_fallback);
+                const auto shadow_texture = targets().shadow.texture();
+                bgfx::setTexture(render_detail::shadow_sampler_stage, shadow_sampler,
+                                 bgfx::isValid(shadow_texture) ? shadow_texture : shadow_fallback);
+                const bool virtual_shadow = virtual_shadow_view && !material.frame_textures;
+                const bool depth_ranges = virtual_shadow && !item.has_lightmap &&
+                                          bgfx::isValid(program->depth_program) &&
+                                          bgfx::isValid(draw.vsm.depth_ranges);
+                vsm_depth_range_draws += depth_ranges;
+                const float lighting[]{item.has_lightmap ? 1.0F : 0.0F,
+                                       item.has_probe ? 1.0F : 0.0F, depth_ranges ? 1.0F : 0.0F,
+                                       depth_ranges ? draw.vsm.local_range_layout : 0.0F};
+                bgfx::setUniform(lighting_params, lighting);
+                if (!pbr_opaque || (!item.has_lightmap && item.has_probe))
+                {
+                    bgfx::setUniform(probe_sh, item.coefficients.data(), 9);
+                }
+                else
+                {
+                    avoided_uniform_bytes += sizeof(item.coefficients);
+                }
+                bgfx::setTexture(6, lightmap_sampler,
+                                 depth_ranges ? draw.vsm.depth_ranges : item.lightmap,
+                                 draw.max_anisotropy && !depth_ranges
+                                     ? BGFX_SAMPLER_UVW_CLAMP | BGFX_SAMPLER_MIN_ANISOTROPIC |
+                                           BGFX_SAMPLER_MAG_ANISOTROPIC
+                                     : UINT32_MAX);
+                draw.cluster->bind(virtual_shadow);
+                if (virtual_shadow)
+                {
+                    bgfx::setTexture(10, draw.vsm.sampler, draw.vsm.atlas);
+                }
+            }
             bgfx::InstanceDataBuffer instance_buffer{};
-            constexpr std::uint16_t instance_stride = 7 * 4 * sizeof(float);
             const bool indirect = bgfx::isValid(batch.meshlets.commands);
             const auto remaining = static_cast<std::uint32_t>(batch.items.size() - cursor);
             const auto available =
                 !indirect && remaining > 1 && bgfx::isValid(instanced_program)
-                    ? bgfx::getAvailInstanceDataBuffer(remaining, instance_stride)
+                    ? bgfx::getAvailInstanceDataBuffer(remaining, render_detail::instance_stride)
                     : 0;
             const auto count = available >= 2 ? available : 1U;
             if (count > 1)
             {
                 ENGINE_PROFILE_ZONE("Render.instanceData");
-                bgfx::allocInstanceDataBuffer(&instance_buffer, count, instance_stride);
+                bgfx::allocInstanceDataBuffer(&instance_buffer, count,
+                                              render_detail::instance_stride);
                 for (std::uint32_t index = 0; index < count; ++index)
                 {
                     const auto& instance =
                         frame_data.meshes[items[batch.items[cursor + index]].mesh];
-                    auto* destination = instance_buffer.data + index * instance_stride;
+                    auto* destination =
+                        instance_buffer.data + index * render_detail::instance_stride;
                     std::memcpy(destination, instance.model.data(), 16 * sizeof(float));
                     std::memcpy(destination + 16 * sizeof(float), instance.normal.data(),
                                 12 * sizeof(float));
@@ -475,7 +630,8 @@ bool RenderSystem::SceneGpuResources::draw_meshes(const render_detail::RenderFra
                                                 batch.meshlets.instance_capacity);
             }
             const auto submitted_count = indirect ? remaining : count;
-            if (mode == SceneDrawMode::opaque && draw.id == render_detail::main_view)
+            if (depth_only || surface_writes_depth ||
+                (mode == SceneDrawMode::opaque && draw.id == render_detail::main_view))
             {
                 for (std::uint32_t index = 0; index < submitted_count; ++index)
                 {
@@ -483,25 +639,29 @@ bool RenderSystem::SceneGpuResources::draw_meshes(const render_detail::RenderFra
                 }
             }
             cursor += submitted_count;
-            draw.cluster->bind(mode == SceneDrawMode::opaque && !draw.reflection &&
-                               !material.frame_textures && bgfx::isValid(draw.vsm.atlas));
-            if (mode == SceneDrawMode::opaque && !draw.reflection && !material.frame_textures &&
-                bgfx::isValid(draw.vsm.atlas))
-            {
-                bgfx::setTexture(10, draw.vsm.sampler, draw.vsm.atlas);
-            }
             bgfx::setTransform(mesh.model.data());
-            if (item.geometry == mesh.gpu->geometry.get())
+            if (batch.meshlets.whole_vertex_page)
             {
-                mesh.gpu->bind_vertices();
+                item.geometry->bind_vertices(solid_depth, true);
+            }
+            else if (item.geometry == mesh.gpu->geometry.get())
+            {
+                mesh.gpu->bind_vertices(solid_depth);
             }
             else
             {
-                bgfx::setVertexBuffer(0, item.geometry->vertices);
+                item.geometry->bind_vertices(solid_depth);
             }
             if (indirect)
             {
-                bgfx::setIndexBuffer(item.geometry->meshlet_indices(item.lod));
+                if (bgfx::isValid(batch.meshlets.compacted_indices))
+                {
+                    bgfx::setIndexBuffer(batch.meshlets.compacted_indices);
+                }
+                else
+                {
+                    bgfx::setIndexBuffer(item.geometry->meshlet_indices(item.lod));
+                }
             }
             else
             {
@@ -511,11 +671,28 @@ bool RenderSystem::SceneGpuResources::draw_meshes(const render_detail::RenderFra
             if (depth_only)
             {
                 state &= ~(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A);
+                if (draw.opaque_depth_prepared)
+                {
+                    bgfx::setStencil(BGFX_STENCIL_TEST_ALWAYS | BGFX_STENCIL_FUNC_REF(1) |
+                                     BGFX_STENCIL_FUNC_RMASK(0xff) | BGFX_STENCIL_OP_FAIL_S_KEEP |
+                                     BGFX_STENCIL_OP_FAIL_Z_KEEP | BGFX_STENCIL_OP_PASS_Z_REPLACE);
+                }
             }
             else if (mode == SceneDrawMode::surface)
             {
+                state &= ~(BGFX_STATE_WRITE_Z | BGFX_STATE_DEPTH_TEST_MASK);
+                // Equal-depth surfaces keep the original last contribution in submission order.
+                state |= surface_writes_depth ? BGFX_STATE_WRITE_Z | BGFX_STATE_DEPTH_TEST_LEQUAL
+                                              : BGFX_STATE_DEPTH_TEST_EQUAL;
+            }
+            else if (mode == SceneDrawMode::opaque && draw.opaque_depth_prepared)
+            {
+                // Consume each sample once so coplanar draws keep the original first winner.
                 state = (state & ~(BGFX_STATE_WRITE_Z | BGFX_STATE_DEPTH_TEST_MASK)) |
                         BGFX_STATE_DEPTH_TEST_EQUAL;
+                bgfx::setStencil(BGFX_STENCIL_TEST_EQUAL | BGFX_STENCIL_FUNC_REF(1) |
+                                 BGFX_STENCIL_FUNC_RMASK(0xff) | BGFX_STENCIL_OP_FAIL_S_KEEP |
+                                 BGFX_STENCIL_OP_FAIL_Z_KEEP | BGFX_STENCIL_OP_PASS_Z_ZERO);
             }
             if (draw.multisampling)
             {
@@ -523,15 +700,14 @@ bool RenderSystem::SceneGpuResources::draw_meshes(const render_detail::RenderFra
             }
             bgfx::setState(state);
             ++stats.draw_calls;
+            pbr_opaque_draws += pbr_opaque;
             if (indirect)
             {
                 ++stats.indirect_batches;
                 stats.indirect_commands += batch.meshlets.command_count;
                 // Preserve the ordinary MVP arithmetic for singleton batches. Only
                 // actual multi-instance batches consume the compacted transforms.
-                const auto selected = remaining > 1                    ? instanced_program
-                                      : mode == SceneDrawMode::surface ? program->surface_program
-                                                                       : program->program;
+                const auto selected = remaining > 1 ? instanced_program : regular_program;
                 bgfx::submit(draw.id, selected, batch.meshlets.commands,
                              batch.meshlets.first_command, batch.meshlets.command_count);
                 continue;
@@ -539,10 +715,39 @@ bool RenderSystem::SceneGpuResources::draw_meshes(const render_detail::RenderFra
             stats.direct_instances += count;
             stats.direct_triangles += static_cast<std::uint64_t>(item.count / 3) * count;
             stats.direct_instance_batches += count > 1;
-            bgfx::submit(draw.id, count > 1                        ? instanced_program
-                                  : mode == SceneDrawMode::surface ? program->surface_program
-                                                                   : program->program);
+            bgfx::submit(draw.id, count > 1 ? instanced_program : regular_program);
         }
+    }
+    if (mode == SceneDrawMode::opaque && draw.id == render_detail::main_view)
+    {
+        ENGINE_PROFILE_PLOT("Vsm.depthRangeDraws",
+                            static_cast<std::int64_t>(vsm_depth_range_draws));
+        ENGINE_PROFILE_PLOT("Render.pbrOpaqueDraws", static_cast<std::int64_t>(pbr_opaque_draws));
+        ENGINE_PROFILE_PLOT("Render.opaqueUniformBytesAvoided", avoided_uniform_bytes);
+    }
+    if (mode == SceneDrawMode::surface)
+    {
+        ENGINE_PROFILE_PLOT("Render.surfaceMaterialOnlyDraws",
+                            static_cast<std::int64_t>(surface_material_draws));
+    }
+    if (depth_only && draw.opaque_depth_prepared && draw.reflection)
+    {
+        ENGINE_PROFILE_PLOT("Render.planarDepthCoverageDraws",
+                            static_cast<std::int64_t>(coverage_draws));
+    }
+    else if (draw.id == render_detail::opaque_depth_view)
+    {
+        ENGINE_PROFILE_PLOT("Render.opaqueDepthCoverageDraws",
+                            static_cast<std::int64_t>(coverage_draws));
+        ENGINE_PROFILE_PLOT("Render.opaqueDepthPositionDraws",
+                            static_cast<std::int64_t>(solid_depth_draws));
+        ENGINE_PROFILE_PLOT("Render.opaqueDepthPositionStreamDraws",
+                            static_cast<std::int64_t>(position_stream_draws));
+    }
+    else if (draw.id == render_detail::ambient_occlusion_depth_view)
+    {
+        ENGINE_PROFILE_PLOT("Render.sceneDepthCoverageDraws",
+                            static_cast<std::int64_t>(coverage_draws));
     }
     const auto previous =
         std::find_if(view_stats.begin(), view_stats.end(),

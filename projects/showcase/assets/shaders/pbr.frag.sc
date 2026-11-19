@@ -17,7 +17,6 @@ $input v_world_position, v_world_normal, v_world_tangent, v_texcoord0, v_color0,
 #include <bgfx_shader.sh>
 #include "pbr_helpers.sh"
 #include "material_helpers.sh"
-#include "shadow_helpers.sh"
 #include "csm_helpers.sh"
 
 #include "pbr_surface.sh"
@@ -75,6 +74,8 @@ void main()
     bool unlit = u_material.z > 0.5 && u_material.z < 1.5;
     if (!unlit)
     {
+        float normal_view = dot(surface.normal, view_dir);
+        float n_dot_v = saturate(normal_view);
         vec3 ambient_color = u_ambient.rgb;
         if (u_ambient_sky.w > 0.5)
         {
@@ -92,8 +93,7 @@ void main()
             vec3 reflection = reflect(-view_dir, surface.normal);
             vec3 prefiltered = textureCubeLod(s_ibl_prefilter, reflection,
                                               surface.roughness * u_ibl_params.z).rgb;
-            vec2 lut = texture2D(s_ibl_lut, vec2(saturate(dot(surface.normal, view_dir)),
-                                               surface.roughness)).rg;
+            vec2 lut = texture2D(s_ibl_lut, vec2(n_dot_v, surface.roughness)).rg;
             environment_specular = prefiltered * (surface.specular_color * lut.x + vec3_splat(lut.y))
                                    * u_ibl_params.y;
             environment_lighting = environment_specular;
@@ -101,7 +101,6 @@ void main()
             {
                 // glTF mixes the complete dielectric and metal lobes, not their F0
                 // before the nonlinear multi-scattering approximation.
-                float n_dot_v = saturate(dot(surface.normal, view_dir));
                 vec3 dielectric = pbr_ibl_fresnel(vec3_splat(0.04), surface.roughness, n_dot_v, lut);
                 vec3 metal = pbr_ibl_fresnel(surface.base_color.rgb, surface.roughness, n_dot_v, lut);
                 diffuse_factor = (vec3_splat(1.0) - dielectric) * (1.0 - surface.metallic);
@@ -115,7 +114,6 @@ void main()
             {
                 // The SpecGloss c_diff already includes (1 - max(F0)). Apply
                 // the same view-dependent IBL Fresnel mix to that diffuse input.
-                float n_dot_v = saturate(dot(surface.normal, view_dir));
                 vec3 fresnel = pbr_ibl_fresnel(surface.specular_color, surface.roughness,
                                                n_dot_v, lut);
                 diffuse_factor = (vec3_splat(1.0) - fresnel) * surface.diffuse_weight;
@@ -127,7 +125,6 @@ void main()
             // Diffuse-only ambient/lightmap/probe still loses energy to the
             // dielectric interface, even when its reflected radiance is absent.
             // This fallback uses Three.js' approximate DFG, not a baked LUT.
-            float n_dot_v = saturate(dot(surface.normal, view_dir));
             vec2 lut = pbr_dfg_approx(n_dot_v, surface.roughness);
             vec3 f0 = u_specular.w > 0.5 ? surface.specular_color : vec3_splat(0.04);
             vec3 fresnel = clamp(pbr_ibl_fresnel(f0, surface.roughness, n_dot_v, lut),
@@ -155,29 +152,27 @@ void main()
         environment_specular *= indirect_occlusion;
         reflection_attenuation = indirect_occlusion;
         float view_depth = max(-mul(u_view, vec4(v_world_position, 1.0)).z, 0.0);
+        PbrDirectTerms direct_terms = pbr_prepare_direct(v_world_normal, surface.normal,
+                                                        normal_view, surface.roughness);
         // Directional lights are global; the cluster list only stores bounded local lights.
-        for (uint index = 0u; index < uint(u_cluster_counts.x); ++index)
+        for (uint index = 0u; index < uint(u_cluster_counts.w); ++index)
         {
-            if (load_cluster_light(index).kind_inner.x < 0.5)
-            {
-                color += direct_light(index, v_world_position, world_dx, world_dy,
-                                      surface.normal, v_world_normal, view_dir, surface.base_color.rgb,
-                                      surface.metallic, surface.roughness, surface.specular_color,
-                                      surface.smoothness);
-            }
+            ClusterLightData light = load_cluster_light(index);
+            color += direct_light(index, light, v_world_position, world_dx, world_dy,
+                                  surface.normal, v_world_normal, view_dir, surface.base_color.rgb,
+                                  surface.metallic, direct_terms, surface.specular_color,
+                                  surface.smoothness);
         }
         uint offset; uint count; bool overflow;
         cluster_range(gl_FragCoord.xy, view_depth, offset, count, overflow);
         for (uint item = 0u; item < count; ++item)
         {
             uint index = cluster_light_index(offset, item, overflow);
-            if (load_cluster_light(index).kind_inner.x > 0.5)
-            {
-                color += direct_light(index, v_world_position, world_dx, world_dy,
-                                      surface.normal, v_world_normal, view_dir, surface.base_color.rgb,
-                                      surface.metallic, surface.roughness, surface.specular_color,
-                                      surface.smoothness);
-            }
+            ClusterLightData light = load_cluster_light(index);
+            color += direct_light(index, light, v_world_position, world_dx, world_dy,
+                                  surface.normal, v_world_normal, view_dir, surface.base_color.rgb,
+                                  surface.metallic, direct_terms, surface.specular_color,
+                                  surface.smoothness);
         }
     }
     color += surface.emission;

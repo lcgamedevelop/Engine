@@ -22,6 +22,11 @@ vcpkg_extract_source_archive(
     webgpu-external-device.patch
     webgpu-emscripten.patch
     webgpu-readback-yield.patch
+    profiler-option.patch
+    metal-profiler-scopes.patch
+    metal-counter-validity.patch
+    metal-compute-timing.patch
+    metal-resolve-only-attachments.patch
 )
 file(COPY "${CMAKE_CURRENT_LIST_DIR}/windows-utf8.manifest"
      DESTINATION "${SOURCE_PATH}/cmake")
@@ -47,6 +52,11 @@ vcpkg_check_features(
     wgsl BGFX_SHADERC_WGSL
 )
 
+set(BGFX_INTERNAL_PROFILER 0)
+if("profiler" IN_LIST FEATURES)
+  set(BGFX_INTERNAL_PROFILER 1)
+endif()
+
 
 
 if(VCPKG_LIBRARY_LINKAGE STREQUAL dynamic)
@@ -60,6 +70,7 @@ vcpkg_cmake_configure(
   OPTIONS
     -DBGFX_LIBRARY_TYPE=${BGFX_LIBRARY_TYPE}
     -DBGFX_AMALGAMATED=ON
+    -DBGFX_CONFIG_PROFILER=${BGFX_INTERNAL_PROFILER}
     -DBGFX_BUILD_EXAMPLES=OFF
     -DBGFX_OPENGLES_VERSION=30
     -DBGFX_CONFIG_RENDERER_WEBGPU=${VCPKG_TARGET_IS_EMSCRIPTEN}

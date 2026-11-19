@@ -14,7 +14,12 @@ import statistics
 import subprocess
 import sys
 
+from analysis_views import frame_breakdown, native_view_timings
+from analysis_metal import metal_encoder_timings
+
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts"))
+from record_storage import record_output
 
 
 def read_rows(path: Path, delimiter: str = "\t") -> list[dict[str, str]]:
@@ -141,9 +146,7 @@ def messages_window(args, messages: list[dict], zones: list[dict]) -> tuple[int,
 
 
 def analyze(args) -> Path:
-    output = args.output_dir.resolve()
-    if not output.is_relative_to((ROOT / "build").resolve()):
-        raise ValueError("Analysis artifacts must be under the repository build/ directory")
+    output = record_output(args.output_dir)
     if output.exists() and any(output.iterdir()):
         raise ValueError("Output directory is not empty; select a new analysis directory to preserve earlier results")
     trace = args.trace.resolve(strict=True)
@@ -257,8 +260,22 @@ def analyze(args) -> Path:
                         "plot statistics are sample-weighted; bgfx samples may be delayed",
                         "percentiles use linear interpolation with no outlier removal",
                         "host-work percentages across multiple threads can exceed 100%"]}
+    result["cpu_frames"] = frame_breakdown(selected, own, args.frame_zone, end - start)
+    result["renderer_views"] = native_view_timings(messages, start, end, statistics_of)
+    if args.metal_tables:
+        result["metal_encoders"] = metal_encoder_timings(args.metal_tables, statistics_of)
+    result["coverage"] = {
+        "observed_zone_names": sorted({row["name"] for row in selected}),
+        "bgfx_callback_events": sum(row["name"].startswith("bgfx/") for row in selected),
+        "gpu_time_is_exclusive_work": False,
+    }
+    result["frame_intervals"] = [{"index": int(row["index"]),
+        "start_ns": int(row["start_ns"]), "duration_ms": int(row["duration_ns"]) / 1e6}
+        for row in frames if int(row["start_ns"]) >= start and int(row["end_ns"]) <= end]
     path = output / "summary.json"
     path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    from trace_report import write_reports
+    write_reports([path], output / "report.html")
     return path
 
 
@@ -268,6 +285,8 @@ def main() -> int:
     parser.add_argument("--csvexport", type=Path, required=True)
     parser.add_argument("--frameexport", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True, help="Empty directory under the repository build/ directory")
+    parser.add_argument("--metal-tables", type=Path,
+                        help="Process-scoped Xcode Metal encoder and GPU interval XML exports")
     parser.add_argument("--start-ns", type=int)
     parser.add_argument("--end-ns", type=int)
     parser.add_argument("--message-prefix", help="Tracy message prefix followed by a JSON object, for example Rocket range sample")

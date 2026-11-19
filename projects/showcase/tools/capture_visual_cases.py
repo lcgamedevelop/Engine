@@ -2,7 +2,7 @@
 """Capture each showcase menu case from the active Release editor session.
 
 The menu's registered cases are the source of truth. Screenshots and MCP receipts
-stay in the project's ignored cache; this is a visual record, not a functional test.
+stay in the configured record storage; this is a visual record, not a functional test.
 """
 
 from __future__ import annotations
@@ -21,6 +21,9 @@ import uuid
 ROOT = Path(__file__).resolve().parents[3]
 PROJECT = ROOT / "projects" / "showcase"
 sys.path.insert(0, str(PROJECT / "tests"))
+sys.path.insert(0, str(ROOT / "scripts"))
+from record_storage import record_path
+
 from mcp_interaction_test import (EditorMcpSession, click, execute, get_status, lifecycle,
                                   require, wait_for)
 
@@ -55,7 +58,7 @@ def main():
     parser.add_argument("--timeout", type=float, default=180)
     args = parser.parse_args()
     run_name = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8]
-    output = PROJECT / "cache" / "scene-captures" / run_name
+    output = record_path("records/validation/showcase/scene-captures") / run_name
     output.mkdir(parents=True)
     runtime = output / "runtime"
     runtime.mkdir()
@@ -123,7 +126,7 @@ def main():
                     scene = session.call("get_scene", {"limit": 0})
                     entry["totalNodes"] = scene.get("totalNodes")
                     entry["sceneId"] = (scene.get("scene") or {}).get("sceneId")
-                    relative = (output / f"{case['id']}.png").relative_to(PROJECT / "cache")
+                    relative = (output / f"{case['id']}.png").relative_to(session.capture_root)
                     attempts = session.capture_scene(str(relative))
                     entry["captureAttempts"] = attempts
                     entry["capture"] = attempts[-1]
@@ -144,7 +147,7 @@ def main():
                     if "capture" not in entry:
                         try:
                             relative = (output / f"{case['id']}-failure.png").relative_to(
-                                PROJECT / "cache")
+                                session.capture_root)
                             entry["failureCapture"] = session.capture(str(relative), inspect_black=True)
                         except Exception as capture_error:
                             entry["failureCaptureError"] = str(capture_error)

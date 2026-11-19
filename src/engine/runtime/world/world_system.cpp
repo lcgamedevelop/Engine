@@ -99,12 +99,13 @@ void WorldSystem::destroy_scene() noexcept
         return;
     }
     retirement_.clear();
-    scopes_.clear();
+    // Component cleanup can query/release scopes. Remove owners from lookup first;
+    // unique_ptr/container destruction must not expose a partially retired scene.
+    auto retiring_scopes = std::exchange(scopes_, {});
+    auto retiring_scenes = std::exchange(scenes_, {});
     scene_ = nullptr;
-    while (!scenes_.empty())
-    {
-        scenes_.pop_back();
-    }
+    retiring_scopes.clear();
+    retiring_scenes.clear();
     paused_ = false;
 }
 
@@ -354,6 +355,7 @@ bool WorldSystem::on_initialize(const EngineConfig&)
 
 bool WorldSystem::on_tick(double delta_time)
 {
+    ENGINE_PROFILE_ZONE("World.tick");
     if (!can_modify() || !std::isfinite(delta_time) || delta_time < 0.0)
     {
         return false;
@@ -422,6 +424,7 @@ bool WorldSystem::on_tick(double delta_time)
 
 bool WorldSystem::refresh_scene_state()
 {
+    ENGINE_PROFILE_ZONE("World.refreshSceneState");
     if (!world_ || !state_query_)
     {
         return false;

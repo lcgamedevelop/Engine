@@ -42,17 +42,25 @@ void AddSample( float ssaoValue, float edgeValue, inout float sum, inout float s
     sumWeight += weight;
 }
 
-vec2 SampleBlurred( ivec2 inPos, vec2 coord )
+vec2 SampleBlurred( ivec2 inPos, vec2 coord, int layer )
 {
-    float packedEdges   = texelFetch(s_blurInput, ivec3(inPos.xy,0.0), 0 ).y;
+    float packedEdges   = texelFetch(s_blurInput, ivec3(inPos.xy, layer), 0 ).y;
     vec4 edgesLRTB    = UnpackEdges( packedEdges );
 
 #if BGFX_SHADER_LANGUAGE_GLSL
-    vec4 valuesUL     = textureGather(s_blurInput, vec3(coord - u_halfViewportPixelSize * 0.5 + vec2(0.0,u_halfViewportPixelSize.y), 0.0), 0).wzyx;
-    vec4 valuesBR     = textureGather(s_blurInput, vec3(coord + u_halfViewportPixelSize * 0.5 + vec2(0.0,-u_halfViewportPixelSize.y), 0.0), 0).wzyx;
+    vec4 valuesUL = textureGather(
+        s_blurInput,
+        vec3(coord - u_halfViewportPixelSize * 0.5 + vec2(0.0, u_halfViewportPixelSize.y),
+             float(layer)), 0).wzyx;
+    vec4 valuesBR = textureGather(
+        s_blurInput,
+        vec3(coord + u_halfViewportPixelSize * 0.5 + vec2(0.0, -u_halfViewportPixelSize.y),
+             float(layer)), 0).wzyx;
 #else
-    vec4 valuesUL     = textureGather(s_blurInput, vec3(coord - u_halfViewportPixelSize * 0.5, 0.0), 0);
-    vec4 valuesBR     = textureGather(s_blurInput, vec3(coord + u_halfViewportPixelSize * 0.5, 0.0), 0);
+    vec4 valuesUL = textureGather(
+        s_blurInput, vec3(coord - u_halfViewportPixelSize * 0.5, float(layer)), 0);
+    vec4 valuesBR = textureGather(
+        s_blurInput, vec3(coord + u_halfViewportPixelSize * 0.5, float(layer)), 0);
 #endif
 
     float ssaoValue     = valuesUL.y;
@@ -81,10 +89,12 @@ vec2 SampleBlurred( ivec2 inPos, vec2 coord )
 NUM_THREADS(8, 8, 1)
 void main()
 {
-	uvec2 dtID = uvec2(gl_GlobalInvocationID.xy) + uvec2(u_assao_rect.xy);
-	if (all(lessThan(dtID.xy, u_assao_rect.zw) ) )
-	{
-		vec2 inUV = (dtID.xy+vec2(0.5,0.5)) * u_halfViewportPixelSize;
-	    imageStore(s_target, ivec3(dtID.xy, u_layer), SampleBlurred( ivec2(dtID.xy), inUV ).xyyy);
-	}
+    uvec2 dtID = uvec2(gl_GlobalInvocationID.xy) + uvec2(u_assao_rect.xy);
+    if (all(lessThan(dtID.xy, u_assao_rect.zw)))
+    {
+        vec2 inUV = (dtID.xy + vec2(0.5, 0.5)) * u_halfViewportPixelSize;
+        int layer = int(gl_GlobalInvocationID.z);
+        imageStore(s_target, ivec3(dtID.xy, layer),
+                   SampleBlurred(ivec2(dtID.xy), inUV, layer).xyyy);
+    }
 }

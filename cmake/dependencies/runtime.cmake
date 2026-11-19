@@ -13,6 +13,11 @@ find_package(flatbuffers CONFIG REQUIRED GLOBAL)
 find_package(basisu CONFIG REQUIRED GLOBAL)
 if(ENGINE_ENABLE_TRACY)
     find_package(Tracy CONFIG REQUIRED GLOBAL)
+    get_target_property(_bgfx_profile_definitions bgfx::bgfx INTERFACE_COMPILE_DEFINITIONS)
+    if(NOT "BGFX_CONFIG_PROFILER=1" IN_LIST _bgfx_profile_definitions)
+        message(FATAL_ERROR
+            "Tracy builds require the bgfx profiler feature; rebuild the selected vcpkg manifest")
+    endif()
 endif()
 
 if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/ozz-animation/CMakeLists.txt")

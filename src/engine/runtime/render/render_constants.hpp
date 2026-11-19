@@ -22,12 +22,20 @@ inline constexpr std::array<bgfx::ViewId, 16> vsm_page_views = {
 inline constexpr bgfx::ViewId vsm_feedback_clear_view = 212;
 inline constexpr bgfx::ViewId vsm_feedback_view = 213;
 inline constexpr bgfx::ViewId vsm_debug_view = 214;
+inline constexpr bgfx::ViewId local_shadow_depth_ranges_view = 190;
+inline constexpr bgfx::ViewId vsm_depth_ranges_view = 191;
 
 inline constexpr std::uint16_t skinning_view = 0;
 inline constexpr std::uint16_t atmosphere_transmittance_view = 1;
 inline constexpr std::uint16_t atmosphere_multiscatter_view = 2;
-inline constexpr std::uint16_t meshlet_clear_view = 3;
-inline constexpr std::uint16_t meshlet_cull_view = 4;
+// Planar reflections occupy 3..73; the depth views are ordered before their color views.
+inline constexpr std::array<bgfx::ViewId, 2> planar_depth_views = {34, 73};
+inline constexpr std::uint16_t meshlet_index_upload_view = 75;
+inline constexpr std::uint16_t meshlet_clear_view = 76;
+inline constexpr std::uint16_t meshlet_cull_view = 77;
+inline constexpr std::uint16_t meshlet_index_compact_view = 78;
+// Explicitly ordered immediately before the main view.
+inline constexpr std::uint16_t opaque_depth_view = 79;
 inline constexpr std::uint16_t atmosphere_main_skyview = 109;
 inline constexpr std::uint16_t atmosphere_capture_skyview = 239;
 inline constexpr std::uint16_t shadow_view = 80;
