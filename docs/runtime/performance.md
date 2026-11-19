@@ -45,7 +45,7 @@ Metal 阶段计数器只接受当前校准采样区间内、完整且有序的�
 3. 一个 trace 只采一轮明确负载。计时期间不并行构建、导入、截图、测试或离线分析；慢帧保留，不事后删异常值制造收益。
 4. 对同一窗口查看 self / inclusive、主线程工作与等待、GPU、实际工作量和内存。优先处理当前模块的热点，其他模块只记录。
 5. 固定负载比较一对结果；只在波动、失败或未解释退化时追加。没有分阶段采样时，只报告整体耗时，不能宣称具体函数的加速比例。
-6. 原始产物放忽略的 `build/performance/<run>/`，失败结果不覆盖。结束时正常停止本次项目和进程；当前摘要更新到[测试文档](../testing.md)，不追加会话流水账。
+6. 原始产物放独立记录根目录的 `records/performance/raw/<run>/`，失败结果不覆盖；每轮保留截图、文档快照、源码补丁、参数、版本指纹和完整采样资料。记录根目录由 `ENGINE_RECORDS_ROOT` 或忽略的 `.cache/record-storage.json` 显式配置；每轮开始先检查外置卷；不可用时使用显式配置的 `fallbackRoot` 内置备用目录，两处使用相同分类且不写回旧记录目录。结束时正常停止本次项目和进程；当前摘要更新到[测试文档](../testing.md)，不追加会话流水账。
 
 ## 工具使用
 
@@ -79,13 +79,17 @@ cmake --build build/performance-tools/analyze --target tracy-csvexport tracy-fra
 
 采集 metadata 至少记录提交、二进制 SHA256、设备/驱动、后端、Release/Tracy 开关、项目/场景、资源版本及操作参数；PID 和本机绝对路径只保留在本地产物。
 
+命令中的 `ENGINE_RECORDS_ROOT` 需先设为已有的独立记录根目录。本机配置文件使用 `root`、`fallbackRoot` 和可选的 `requiredMount` 字段；根目录以 `.engine-records-root` 文件标识，供记录入口检查；暂存目录为该根目录的 `scratch/`。每轮固定选定根目录，下一轮重新检查外置卷。配置不会修改资源导入缓存或编译缓存的位置。
+
+启动编辑器或其他独立记录程序时，可使用 `python3 scripts/record_storage.py -- <program> <arguments>`，先选择外置或内置备用目录，再把同一根目录传给子进程。直接启动编辑器时，需显式设置相同的 `ENGINE_CAPTURE_ROOT` 与 `ENGINE_CAPTURE_FALLBACK_ROOT`；已启动的宿主在该轮内保持其截图根目录。项目自带的渲染运行入口自动执行这一步。
+
 macOS/Linux 采集示例，`--pid` 为已核对的同机引擎 PID，不能用远端设备 PID：
 
 ```sh
 python3 scripts/performance/capture.py \
   --capture build/performance-tools/capture/capture/tracy-capture \
-  --output build/performance/before-6 \
-  --metadata build/performance/metadata.json \
+  --output "$ENGINE_RECORDS_ROOT/records/performance/raw/before-6" \
+  --metadata "$ENGINE_RECORDS_ROOT/records/performance/raw/metadata.json" \
   --pid <engine-pid> --seconds 35
 ```
 
@@ -93,10 +97,10 @@ python3 scripts/performance/capture.py \
 
 ```sh
 python3 scripts/performance/summarize_trace.py \
-  --trace build/performance/before-6/capture.tracy \
+  --trace "$ENGINE_RECORDS_ROOT/records/performance/raw/before-6/capture.tracy" \
   --csvexport build/performance-tools/analyze/csvexport/tracy-csvexport \
   --frameexport build/performance-tools/analyze/tracy-frameexport \
-  --output-dir build/performance/before-6/analysis \
+  --output-dir "$ENGINE_RECORDS_ROOT/records/performance/raw/before-6/analysis" \
   --message-prefix "Rocket range sample " --start-field fired --start-value 1 \
   --complete-field complete --frame-zone Host.frame
 ```
@@ -107,9 +111,9 @@ python3 scripts/performance/summarize_trace.py \
 
 ```sh
 python3 scripts/performance/trace_report.py \
-  --analysis build/performance/before-6/analysis/summary.json \
-  --analysis build/performance/after-6/analysis/summary.json \
-  --output build/performance/comparison.html
+  --analysis "$ENGINE_RECORDS_ROOT/records/performance/raw/before-6/analysis/summary.json" \
+  --analysis "$ENGINE_RECORDS_ROOT/records/performance/raw/after-6/analysis/summary.json" \
+  --output "$ENGINE_RECORDS_ROOT/records/performance/reports/comparison.html"
 ```
 
 多轮采样可以按输入顺序重复传入 `--label`，为每份摘要指定中文显示名，例如区分优化前、优化后或已撤回的试验；标签数量必须与 `--analysis` 一致。标签只影响报告，不改写原始 trace、计数或版本指纹。

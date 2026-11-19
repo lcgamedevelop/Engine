@@ -4,6 +4,10 @@ import html
 import json
 from pathlib import Path
 import re
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from record_storage import record_output
 
 
 def escape(value):
@@ -230,4 +234,5 @@ if __name__=='__main__':
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--label',action='append',help='Display label, once per analysis file')
     args=parser.parse_args()
+    args.output = record_output(args.output)
     print(write_reports(args.analysis,args.output,args.label))

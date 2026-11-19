@@ -18,6 +18,8 @@ from analysis_views import frame_breakdown, native_view_timings
 from analysis_metal import metal_encoder_timings
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts"))
+from record_storage import record_output
 
 
 def read_rows(path: Path, delimiter: str = "\t") -> list[dict[str, str]]:
@@ -144,9 +146,7 @@ def messages_window(args, messages: list[dict], zones: list[dict]) -> tuple[int,
 
 
 def analyze(args) -> Path:
-    output = args.output_dir.resolve()
-    if not output.is_relative_to((ROOT / "build").resolve()):
-        raise ValueError("Analysis artifacts must be under the repository build/ directory")
+    output = record_output(args.output_dir)
     if output.exists() and any(output.iterdir()):
         raise ValueError("Output directory is not empty; select a new analysis directory to preserve earlier results")
     trace = args.trace.resolve(strict=True)

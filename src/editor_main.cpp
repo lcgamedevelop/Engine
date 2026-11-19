@@ -130,6 +130,7 @@
 #include <charconv>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -158,6 +159,29 @@ int run_editor(const fs::path& project_root, engine::editor::EditorEnvironment& 
                const engine::EngineConfig& config, std::uint64_t frame_limit,
                const engine::RuntimeParallelConfig& parallel)
 {
+    fs::path capture_root = project_root / "cache";
+    if (const char* configured = std::getenv("ENGINE_CAPTURE_ROOT");
+        configured != nullptr && *configured != '\0')
+    {
+        capture_root = PathUtils::from_utf8(configured);
+        std::error_code error;
+        if (!capture_root.is_absolute() || !fs::is_directory(capture_root, error) || error)
+        {
+            const char* fallback = std::getenv("ENGINE_CAPTURE_FALLBACK_ROOT");
+            if (fallback == nullptr || *fallback == '\0')
+            {
+                LogSystem::write(LogLevel::error, "Configured frame capture root is unavailable");
+                return 1;
+            }
+            capture_root = PathUtils::from_utf8(fallback);
+            error.clear();
+            if (!capture_root.is_absolute() || !fs::is_directory(capture_root, error) || error)
+            {
+                LogSystem::write(LogLevel::error, "Fallback frame capture root is unavailable");
+                return 1;
+            }
+        }
+    }
     engine::ThreadSystem threads(parallel.threads);
 #if ENGINE_HAS_ASSET_PIPELINE
     engine::TaskSystem tasks(threads, {"Editor", 8, engine::TaskPriority::low});
@@ -462,9 +486,8 @@ int run_editor(const fs::path& project_root, engine::editor::EditorEnvironment& 
             return 1;
         }
 #if ENGINE_HAS_MCP_ENDPOINT
-        if (!mcp_endpoint.initialize(
-                *editor, runtime,
-                {project_root / "cache", engine::App::persistent_data_path(), {}}))
+        if (!mcp_endpoint.initialize(*editor, runtime,
+                                     {capture_root, engine::App::persistent_data_path(), {}}))
         {
             LogSystem::write(LogLevel::error, mcp_endpoint.last_error());
             return 1;
@@ -567,7 +590,7 @@ int run_editor(const fs::path& project_root, engine::editor::EditorEnvironment& 
         if (editor->commands() != nullptr && runtime.renderer() != nullptr)
         {
             render_commands = std::make_unique<engine::editor::RenderCommands>(
-                *runtime.renderer(), *runtime.world(), project_root / "cache");
+                *runtime.renderer(), *runtime.world(), capture_root);
             if (!render_commands->register_commands(*editor->commands(), *editor->scene_commands()))
             {
                 LogSystem::write(LogLevel::error, "Cannot register render commands");

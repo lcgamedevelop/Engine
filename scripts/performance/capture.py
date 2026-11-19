@@ -15,6 +15,9 @@ import subprocess
 import sys
 import time
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from record_storage import record_output
+
 
 def utc_now():
     return datetime.now(timezone.utc).isoformat()
@@ -44,7 +47,7 @@ def write_report(path, report):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--capture", type=Path, required=True, help="Official capture tool matching the client version")
-    parser.add_argument("--output", type=Path, required=True, help="New directory, preferably build/performance/<run>")
+    parser.add_argument("--output", type=Path, required=True, help="New directory under the selected record storage")
     parser.add_argument("--metadata", type=Path, required=True, help="JSON metadata for device, project, scene, revision and operation settings")
     parser.add_argument("--seconds", type=int, default=35, help="Sampling duration in seconds after connection")
     parser.add_argument("--address", default="127.0.0.1")
@@ -72,7 +75,7 @@ def main():
         if not isinstance(metadata, dict):
             raise ValueError("metadata must be a JSON object")
         identity = process_sample(args.pid)[0] if args.pid else None
-        output = args.output.resolve()
+        output = record_output(args.output)
         output.mkdir(parents=True, exist_ok=False)
         report_path = output / "capture.json"
         trace = output / "capture.tracy"
