@@ -748,11 +748,7 @@ bool RenderSystem::SceneGpuResources::prepare_capture(const SceneCaptureRequest&
                 bgfx::copy(vertices.data(),
                            static_cast<std::uint32_t>(vertices.size() * sizeof(vertices[0]))),
                 render_detail::GpuGeometry::vertex_layout());
-            geometry->indices = bgfx::createIndexBuffer(
-                bgfx::copy(data.indices.data(), static_cast<std::uint32_t>(
-                                                    data.indices.size() * sizeof(data.indices[0]))),
-                BGFX_BUFFER_INDEX32);
-            if (!bgfx::isValid(geometry->vertices) || !bgfx::isValid(geometry->indices))
+            if (!bgfx::isValid(geometry->vertices) || !geometry->create_base_indices(data.indices))
             {
                 return false;
             }

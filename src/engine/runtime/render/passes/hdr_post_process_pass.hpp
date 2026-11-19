@@ -25,9 +25,10 @@ public:
     HdrPostProcessPass& operator=(HdrPostProcessPass&&) = delete;
 
     [[nodiscard]] bool prepare(std::uint16_t width, std::uint16_t height, bool bloom_enabled,
-                               std::uint8_t samples);
+                               std::uint8_t samples, bool ssr_enabled);
+    [[nodiscard]] bool begin_opaque_depth(const float* view, const float* projection);
     // clear_color 沿用显示空间 RGBA8 语义，解码为线性值后参与统一曝光和色调映射。
-    void begin_scene(std::uint32_t clear_color);
+    void begin_scene(std::uint32_t clear_color, bool depth_prepared);
     [[nodiscard]] bgfx::FrameBufferHandle scene_framebuffer() const noexcept;
     [[nodiscard]] bgfx::TextureHandle opaque_color() const noexcept
     {
@@ -39,7 +40,7 @@ public:
     }
     [[nodiscard]] bgfx::TextureHandle scene_color() const noexcept
     {
-        return final_color_;
+        return reuse_opaque_color_ ? color_ : final_color_;
     }
     void begin_transparency(bgfx::TextureHandle frozen_scene, const float* view,
                             const float* projection);
@@ -65,6 +66,7 @@ private:
     bgfx::TextureHandle final_color_ = BGFX_INVALID_HANDLE;
     bgfx::FrameBufferHandle final_framebuffer_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle depth_ = BGFX_INVALID_HANDLE;
+    bgfx::FrameBufferHandle depth_framebuffer_ = BGFX_INVALID_HANDLE;
     bgfx::FrameBufferHandle framebuffer_ = BGFX_INVALID_HANDLE;
     std::array<bgfx::TextureHandle, 2> bloom_colors_ = {{BGFX_INVALID_HANDLE, BGFX_INVALID_HANDLE}};
     std::array<bgfx::FrameBufferHandle, 2> bloom_framebuffers_ = {
@@ -72,6 +74,7 @@ private:
     std::uint16_t width_ = 0;
     std::uint16_t height_ = 0;
     std::uint8_t samples_ = 1;
+    bool reuse_opaque_color_ = false;
     std::array<std::uint16_t, 2> bloom_widths_{};
     std::array<std::uint16_t, 2> bloom_heights_{};
 };

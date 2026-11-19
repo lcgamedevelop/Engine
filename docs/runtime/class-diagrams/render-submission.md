@@ -4,7 +4,7 @@
 
 状态：最小契约已获用户评审并接入实现。真实构建、像素和提交计数的验收结果集中在[测试文档](../../testing.md)。
 
-GPU 细粒度剔除与间接提交见 [Meshlet](meshlet-culling.md)；主视图的不透明批次在收集后准备一次，depth／surface／opaque 共用分组及间接区间。
+主视图的不透明批次在收集后准备一次，深度、材质表面和不透明颜色共用分组、间接命令及可用的有序跨网格索引区间。各通道使用自己的覆盖和输出状态。 [Meshlet 剔除与索引合并](meshlet-culling.md)
 
 **2026-11-08：** [提交管线优化设计](#提交管线优化设计)已按确认契约实现，[对比测试记录](../../testing.md#渲染性能基线)集中维护实际结果。Shader / PSO 预热不在本批范围。
 
@@ -149,6 +149,7 @@ classDiagram
         <<private struct>>
         +slot_identity uint64_t
         +content_hash size_t
+        +pbr_opaque bool
     }
     class RenderFrameData {
         <<private struct>>
@@ -172,6 +173,8 @@ classDiagram
         +items vector~size_t~
         +cursor size_t
     }
+    class MeshletDrawRange
+    class PassTargets
     class SceneDrawView
     class ShadowPass
     class RenderViewStats
@@ -189,7 +192,8 @@ classDiagram
     SceneGpuResources *-- GpuMesh
     SceneGpuResources *-- GpuProgram
     SceneGpuResources *-- GpuTexture
-    SceneGpuResources *-- ShadowPass
+    SceneGpuResources *-- PassTargets
+    PassTargets *-- ShadowPass
     GpuMesh o-- GpuGeometry : 已有共享几何
     GpuMesh *-- MaterialBinding : 每材质槽的派生绑定
     GpuProgram ..> Material : 准备绑定时读取
@@ -203,6 +207,7 @@ classDiagram
     ViewDrawList --> RenderFrameData : 本次视图期间借用
     ViewDrawList ..> SceneDrawView : 按实际观察者构建
     DrawBatch *-- DrawBatchKey
+    DrawBatch *-- MeshletDrawRange : 三个主通道消费的间接区间
     DrawBatch ..> ViewDrawList : 索引本视图绘制项
     SceneGpuResources ..> DrawBatch : 按Pass生成及提交
     ShadowPass ..> RenderFrameData : 使用共同投射物输入
@@ -220,24 +225,35 @@ ComponentStorage、NodeRuntime 与 WorldTransform 引用[场景 ECS 列](ecs-sce
 | RenderFrameData | 已发布网格的身份、模型/法线矩阵、更新后的边界、几何与材质绑定借用；灯、探针及其变换的只读记录 | 一次 render 的稳定结构阶段；退出即失效，工作数组容量可以复用 |
 | ViewDrawList | 帧数据索引、视图可见性、实际 LOD/子网格范围、透明子网格深度、捕获筛选结果；保存值，不复制完整材质或几何 | 同一观察视图的深度/表面/颜色/透明使用；观察者或矩阵不同则独立构建 |
 | DrawBatchKey | 实际 Program/顶点语义、几何版本与索引区间、LOD、完整有效状态、规范化材质绑定编号、Lightmap/Probe 或当前 Pass 实际使用的照明绑定 | 当前 Pass 内比较，不能把主颜色的键直接用于阴影 |
-| DrawBatch | 完整键和有序绘制项索引；瞬态容量不足时按游标分块 | 当前 Pass 提交；不跨帧保存 bgfx 瞬态地址 |
+| DrawBatch | 完整键、有序绘制项索引及可用的 MeshletDrawRange。瞬态容量不足时按游标分块 | 主视图三通道复用同一组值。反射、透明、捕获及阴影根据各自的视图与覆盖准备批次 |
 
 `MaterialBinding` 的数值按 GpuProgram 的 uniform 布局保存为 `std::vector<std::array<float, 4>>`，采样器按同一声明顺序保存来源、真实纹理身份和标志；GpuUniform 继续只拥有声明与句柄，删除其旧 `values` 临时字段，避免再维护一份材质数值。标准阴影的 alpha/UV 绑定在同次解析中生成。
 
+`GpuProgram` 拥有随引擎目标预编译的内置不透明 PBR 颜色程序及对应实例程序。在准备材质绑定时，用完整有效参数判断是否为不透明混合、金属度／粗糙度模型、普通 UV 采样。匹配时在主相机和镜像相机的不透明颜色通道使用特化程序。该程序编入普通 UV 采样，烘焙标志恒为零。材质求值与环境光使用绑定已确认的光照模式。直接光沿用通用代码的材质条件与计算顺序。材质修改后随原槽重建流程重新选择。[Filament 的材质常量与变体](https://github.com/google/filament/blob/414602be0e255ac0045d684d7dd5299d760d0de5/docs/Materials.md.html#general-constants) · [Apple 的 Shader 常量特化说明](https://developer.apple.com/videos/play/wwdc2023/10127/?time=253)
+
+深度、阴影、材质表面预通道与烘焙使用各自的程序。通用烘焙程序通过视图常量启用烘焙输出。相机颜色与烘焙通道共用材质采样、裁切和光照实现，按所属通道分别输出。
+
+不透明相机变体的金属度／粗糙度表面求值在编译时省去 Specular-Glossiness 贴图采样。金属度和基础色决定反射率，直接光和环境反射沿用现行计算。`GpuProgram` 创建时合并相机片元程序、普通顶点程序和实例顶点程序的反射输入，在提交该相机变体时只绑定对应材质输入。材质定义及其他绘制的绑定由所有程序的输入共同校验。[Khronos 的材质工作流](https://github.com/KhronosGroup/glTF-Tutorials/blob/main/gltfTutorial/gltfTutorial_010_Materials.md)
+
+内置 PBR 材质在有效裁切阈值为零时，深度预通道复用实心阴影的顶点变换和空片元程序。普通绘制只读顶点位置，实例绘制沿用对应实例矩阵的乘法顺序。两者均省去深度绘制的材质输入与法线矩阵绑定。带裁切的材质使用原覆盖程序，以 base color 纹理及色值求 alpha。颜色通道继续消费既有的深度和模板覆盖。[WickedEngine 的深度预通道布局](https://github.com/turanszkij/WickedEngine/blob/62d913606e8ee2aa2958e83f7bbb8c07d81ae8c9/WickedEngine/shaders/objectHF.hlsli#L62-L71)
+
+内置不透明 PBR 颜色变体省去场景颜色、深度、平面反射的参数准备与 uniform 写入。只有实际采样探针的批次提交九组球谐系数，使用 Lightmap 的批次执行原有优先级。自定义着色和使用帧纹理的绘制维持其完整参数契约。
+
 `content_hash` 仅用于快速定位；共享绑定编号必须在完整数值、类型、纹理与 Shader 版本相等后分配。`DrawBatchKey::binding` 是颜色 Pass 的完整材质规范化编号；阴影不比较颜色编号，直接比较其实际 alpha/UV/纹理字段。哈希冲突不能合并对象；不得直接哈希含未初始化 padding 的 struct。动态帧纹理按既有 sampler source 在视图提交时补齐，不能把上一帧颜色、深度或平面反射句柄固化进跨帧缓存。
 
-普通阴影在同一次 `draw` 中先组织级联和局部灯的页描述，再一次调用已有 `draw_pages`。该调用只构造一次投影物世界边界，各页继续独立裁剪、组批、清理与提交；页顺序、矩阵、atlas 区域、alpha 裁切及捕获筛选不改变，不跨帧缓存投影物或 ECS 借用。
+普通阴影在同一次 `draw` 中组织级联和局部灯的页描述，再把发生变化的页交给 `draw_pages`。该调用只构造一次投射物边界，各页独立裁剪、组批、清理与提交。投射物和 ECS 借用在本次提交结束时释放。
 
 ### 普通阴影 atlas 复用
 
-`ShadowPass` 在原有 atlas 内只保留最后一次完整绘制结果，不增加 GPU 目标、场景开关或另一套阴影调度。它拥有两个 `vector<uint64_t>` 值数组及有效标记：当前调用生成候选签名，与上次成功绘制的完整签名逐值比较。签名不借用 ECS、材质或资源地址，不使用可能碰撞的散列代替相等。
+`ShadowPass` 保存当前深度 atlas 中每个有效区域的绘制原点、投影矩阵、尺寸和生产视图。投射物签名逐值比较，包含世界代次、目标、筛选后的几何版本、变换与边界、实例化状态、剔面和 alpha 裁切输入。运行时匹配双精度世界变换，离线捕获匹配实际提交的模型矩阵。变形、动态帧纹理或无法确定的裁切资源触发重绘。缓存记录只保存值。
 
-- 输入包括世界代次、各页的实际 view id、矩阵与 atlas 区域、筛选后的投影物身份、几何资源获取身份、模型矩阵及边界、实例化状态，以及每个材质槽的剔面、混合、alpha 裁切、UV 和裁切纹理版本。`MaterialBinding` 在原绑定准备中额外复制裁切纹理的 `ResourceHandle` 值；它不增加资源引用，由原 `GpuTexture` 继续保活。
-- 相同输入复用颜色 atlas，不清理、不 touch、不再次提交这些阴影视图；本次 `ShadowFrame` 的矩阵和局部灯绑定仍正常计算。不同输入整批重绘，成功后才发布新签名；不能将旧 atlas 的部分区域视为另一观察者的有效结果。
-- 蒙皮、CPU/GPU 变形以及动态帧纹理保守地逐帧重绘。资源、投影物、相机、灯或捕获选择变化均参与失效；`release`、目标重建和直接向本 atlas 调用 `draw_pages` 清除有效性。VSM 使用自己的 atlas 和现有页缓存，不共享普通 atlas 的有效标记。
-- 反射、捕获与多相机继续按原视图顺序执行。共享 atlas 被另一组页覆盖后，只能复用最后一组完整匹配的输入，不能按 view id 单独保存多份有效标记。缓存只减少相同输入的重复工作，不降低分辨率、级联数或阴影质量。
+- 级联和局部灯单独检查每个页。图集位置、尺寸和投影完全相同的页在多个视图间共用，包括多个视图顺序写入同一区域的布局。每个消费者继续读自己原来的采样矩形。分辨率、投影、灯的挑选顺序及各视图预算沿用原值。
+- 点光和聚光页在未变更的图集位置复用。镜头坐标原点变化时，按光源世界位置、朝向、实际视图旋转、深度投影和投射物判断是否复用。绘制和受光着色沿用原观察者坐标及采样矩阵。级联和离线捕获的缓存同时匹配绘制原点。[Flax 按光源状态管理阴影复用](https://github.com/FlaxEngine/FlaxEngine/blob/ded00bc8689ed427ae84f82065d23a9224a2bac5/Source/Engine/Renderer/Lighting/ShadowsPass.cpp#L908-L970)
+- 只清理和提交需更新的页，成功提交后记录其位置与投影。任意普通阴影写入使重叠的记录失效，换场景或重建 atlas 清空记录。按反射、主视图及捕获的 GPU 顺序消费；捕获使用自己的投影物筛选。VSM 继续管理自己的深度 atlas。
+- 普通阴影和 VSM 页复用同一投射物提交。实心投射物使用原顶点阶段与空片元程序，只写深度。裁切投射物使用原有 UV、采样器、alpha 与阈值。
+- 普通阴影可将几何未变、世界矩阵精确相同、剔面一致的实心非实例化投射物打包。同一份缓冲只有 12 字节 FP32 位置和 16 位索引，按投射物空间位置排序；只接收原索引范围完整连续的对象。各页继续逐对象裁剪，直接合并连续可见范围，用原模型视图投影矩阵和剔面状态绘制。缓存归 `ShadowPass`，按投射物签名失效。签名跨连续两次主视图提交保持一致、且有页待画时才上传，驻留上限 16 MiB。按状态组织阴影提交参考 [SpartanEngine 的阴影切片批次](https://github.com/PanosK92/SpartanEngine/blob/d1ccb5efcec2f06c4715200b01df5afc9d6f980b/source/rendering/Renderer_Passes_Geometry.cpp#L651-L787)。
 
-设计参考开源 [The Forge](https://github.com/ConfettiFX/The-Forge) 的 `09_LightShadowPlayground` 中就绪/更新批次分离，以及 [Ant](https://github.com/ejoy/ant) 的 `shadow_system.lua` 按变化更新矩阵。这里仅复用其减少未变化工作这一思路；不移植 ASM 框架，也不把 Ant 的矩阵更新判断描述为完整 atlas 缓存。间接绘制命令压紧仍受当前几何与材质绑定方式限制，独立于本优化。
+复用其他观察视图已有页的设计参考 Flax，投影物变化导致内容失效的边界参考 O3DE，实心和裁切阴影按 WickedEngine 的思路选择实际需要的片元程序。 [Flax 阴影页关联](https://github.com/FlaxEngine/FlaxEngine/blob/ded00bc8689ed427ae84f82065d23a9224a2bac5/Source/Engine/Renderer/Lighting/ShadowsPass.cpp#L1623-L1645) · [O3DE 阴影失效](https://github.com/o3de/o3de/blob/f9cf6109955246c88df90e475b50826d425a36e1/Gems/Atom/Feature/Common/Code/Source/CoreLights/ShadowmapPass.cpp#L166-L189) · [WickedEngine 阴影片元选择](https://github.com/turanszkij/WickedEngine/blob/62d913606e8ee2aa2958e83f7bbb8c07d81ae8c9/WickedEngine/wiRenderer.cpp#L660-L685)
 
 `RenderFrameData` 是派生快照，ECS 仍是唯一持久场景状态。几何、程序和纹理继续由既有 GPU 拥有者管理；帧数据不借用可跨结构修改的 ECS 列地址。所有 GPU/材质借用在 `prepare_scope` 完成后建立，在本次同步提交结束前使用完；资源回收、绑定表修改和结构发布不得插入这段消费过程。扩展回调沿用现有只读提交边界。
 
@@ -280,6 +296,7 @@ flowchart LR
     S --> D[主视图深度与表面]
     D --> A[已启用的 AO]
     D --> O[不透明颜色]
+    Z[可复用的 MSAA 深度] --> O
     A --> O
     M --> O
     O --> R[已启用的 SSR]
@@ -290,6 +307,8 @@ flowchart LR
 ```
 
 图表示已有算法的数据关系；以现行 bgfx view 顺序和附件语义为准。AO、SSR、Bloom 未开启时跳过对应步骤，但深度/表面可能仍被透明或其他消费者使用，不能仅凭一个开关删除共享输入。反射、捕获与主视图独立拥有需要同时存活的目标。
+
+SSR 与 MSAA 同时开启时，HDR 通道在合成后复用不透明颜色附件。内置材质覆盖和顶点提交一致时，可先写入主视图实际使用的 MSAA 深度，再按深度和模板测试限制着色范围。[HDR 通道](render-system.md#hdr-与-bloom-通道) · [WickedEngine 深度附件读取](https://github.com/turanszkij/WickedEngine/blob/62d913606e8ee2aa2958e83f7bbb8c07d81ae8c9/WickedEngine/wiRenderPath3D.cpp#L1503-L1526)
 
 必需目标的创建纳入 `prepare_scope` 的既有预算与失败契约，稳定尺寸和设置下不在逐对象/逐 Pass 提交循环重复分配。实际读写、MSAA resolve、尺寸变更和并行在途帧须满足现有 bgfx 生命周期；CPU 一帧结束不构成 GPU 已完成的证明。跨 Pass 临时目标池与完整渲染图是否值得加入，等本批目标数量、显存和耗时证据再单独评审。
 

@@ -253,6 +253,7 @@ void RenderSystem::SceneGpuResources::release() noexcept
     meshes.clear();
     mesh_index.clear();
     geometries.clear();
+    static_vertex_pages.clear();
     skinning.release();
     textures.clear();
 }
@@ -349,6 +350,10 @@ std::uint32_t RenderSystem::SceneGpuResources::resource_count() const noexcept
             count += geometry->resource_count();
         }
     }
+    for (const auto& page : static_vertex_pages)
+    {
+        count += page.expired() ? 0U : 2U;
+    }
     for (const auto& [source, texture] : textures)
     {
         count += static_cast<std::uint32_t>(bgfx::isValid(texture.handle));
@@ -358,8 +363,16 @@ std::uint32_t RenderSystem::SceneGpuResources::resource_count() const noexcept
         count += static_cast<std::uint32_t>(bgfx::isValid(program.vertex_shader)) +
                  static_cast<std::uint32_t>(bgfx::isValid(program.fragment_shader)) +
                  static_cast<std::uint32_t>(bgfx::isValid(program.program)) +
+                 static_cast<std::uint32_t>(bgfx::isValid(program.pbr_opaque_shader)) +
+                 static_cast<std::uint32_t>(bgfx::isValid(program.pbr_opaque_program)) +
+                 static_cast<std::uint32_t>(bgfx::isValid(program.instanced_pbr_opaque_program)) +
                  static_cast<std::uint32_t>(bgfx::isValid(program.surface_shader)) +
                  static_cast<std::uint32_t>(bgfx::isValid(program.surface_program)) +
+                 static_cast<std::uint32_t>(bgfx::isValid(program.depth_shader)) +
+                 static_cast<std::uint32_t>(bgfx::isValid(program.depth_program)) +
+                 static_cast<std::uint32_t>(bgfx::isValid(program.instanced_depth_program)) +
+                 static_cast<std::uint32_t>(bgfx::isValid(program.solid_depth_program)) +
+                 static_cast<std::uint32_t>(bgfx::isValid(program.instanced_solid_depth_program)) +
                  static_cast<std::uint32_t>(bgfx::isValid(program.instanced_vertex_shader)) +
                  static_cast<std::uint32_t>(bgfx::isValid(program.instanced_program)) +
                  static_cast<std::uint32_t>(bgfx::isValid(program.instanced_surface_program));

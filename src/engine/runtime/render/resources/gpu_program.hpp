@@ -36,7 +36,7 @@ struct GpuProgram
                                         MaterialBinding& output) const;
     [[nodiscard]] bool bind_material(const MaterialBinding& material,
                                      std::span<const bgfx::TextureHandle> frame_textures,
-                                     bool max_anisotropy) const;
+                                     bool max_anisotropy, bool pbr_opaque = false) const;
     [[nodiscard]] bool supports_instancing() const noexcept
     {
         return bgfx::isValid(instanced_program);
@@ -49,8 +49,16 @@ struct GpuProgram
     bgfx::ShaderHandle vertex_shader = BGFX_INVALID_HANDLE;
     bgfx::ShaderHandle fragment_shader = BGFX_INVALID_HANDLE;
     bgfx::ProgramHandle program = BGFX_INVALID_HANDLE;
+    bgfx::ShaderHandle pbr_opaque_shader = BGFX_INVALID_HANDLE;
+    bgfx::ProgramHandle pbr_opaque_program = BGFX_INVALID_HANDLE;
+    bgfx::ProgramHandle instanced_pbr_opaque_program = BGFX_INVALID_HANDLE;
     bgfx::ShaderHandle surface_shader = BGFX_INVALID_HANDLE;
     bgfx::ProgramHandle surface_program = BGFX_INVALID_HANDLE;
+    bgfx::ShaderHandle depth_shader = BGFX_INVALID_HANDLE;
+    bgfx::ProgramHandle depth_program = BGFX_INVALID_HANDLE;
+    bgfx::ProgramHandle instanced_depth_program = BGFX_INVALID_HANDLE;
+    bgfx::ProgramHandle solid_depth_program = BGFX_INVALID_HANDLE;
+    bgfx::ProgramHandle instanced_solid_depth_program = BGFX_INVALID_HANDLE;
     bgfx::ShaderHandle rvt_shader = BGFX_INVALID_HANDLE;
     bgfx::ProgramHandle rvt_program = BGFX_INVALID_HANDLE;
     bgfx::ShaderHandle instanced_vertex_shader = BGFX_INVALID_HANDLE;

@@ -328,12 +328,16 @@ bool RenderSystem::SceneGpuResources::collect_frame(WorldSystem& world, const Ve
                 return;
             }
             transform_math::relative(matrix, origin, value.world.data());
+            value.world_position = {matrix[12], matrix[13], matrix[14]};
             output.lights.push_back(value);
         });
     if (!valid)
     {
         return fail();
     }
+    // Keep the contribution order within each group, including overflow fallback.
+    std::stable_partition(output.lights.begin(), output.lights.end(), [](const auto& light)
+                          { return light.settings.kind == schema::LightKind::directional; });
     output.world_epoch = world.epoch();
     return true;
 }
@@ -362,6 +366,11 @@ bool RenderSystem::SceneGpuResources::collect_view(const render_detail::RenderFr
         draw.frustum_culling_enabled &&
         render_detail::build_frustum_planes(draw.view, draw.projection,
                                             bgfx::getCaps()->homogeneousDepth, planes);
+    render_detail::FrustumPlanes cropped_planes{};
+    const bool cropped_frustum_ready =
+        frustum_ready && draw.culling_projection &&
+        render_detail::build_frustum_planes(draw.view, draw.culling_projection,
+                                            bgfx::getCaps()->homogeneousDepth, cropped_planes);
     culling_applied = culling_applied || frustum_ready;
     const bool filter_visibility = static_cast<bool>(draw.visibility);
     std::span<const std::uint64_t> hidden_meshes;
@@ -449,6 +458,22 @@ bool RenderSystem::SceneGpuResources::collect_view(const render_detail::RenderFr
             }
             selected_lods[key] = item.lod;
         }
+        // Keep LOD history based on the full reflected view. Cull after choosing the level.
+        if (cropped_frustum_ready &&
+            !render_detail::aabb_visible(cropped_planes, mesh.model.data(), gpu.minimum,
+                                         gpu.maximum) &&
+            std::all_of(gpu.materials.begin(), gpu.materials.end(),
+                        [](const auto& material)
+                        {
+                            return material.blend != schema::BlendMode::opaque ||
+                                   (material.program &&
+                                    material.program->definition.meshlet_culling_compatible);
+                        }))
+        {
+            --stats.visible_meshes;
+            ++stats.culled_meshes;
+            continue;
+        }
         const auto collect = [&](std::uint32_t first, std::uint32_t count, std::size_t slot)
         {
             if (slot >= gpu.materials.size() || !gpu.materials[slot].program)
@@ -456,7 +481,8 @@ bool RenderSystem::SceneGpuResources::collect_view(const render_detail::RenderFr
                 return false;
             }
             const auto& material = gpu.materials[slot];
-            if (draw.reflection && material.frame_textures)
+            if (draw.reflection &&
+                (material.frame_textures || material.blend != schema::BlendMode::opaque))
             {
                 return true;
             }

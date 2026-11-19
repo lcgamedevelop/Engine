@@ -99,6 +99,7 @@ struct RenderSystem::SceneGpuResources
     std::map<std::uint64_t, render_detail::GpuMesh> retained_meshes;
     std::map<render_detail::RenderInstanceKey, std::size_t> mesh_index;
     std::map<const Resource*, std::weak_ptr<render_detail::GpuGeometry>> geometries;
+    render_detail::GpuGeometry::VertexPages static_vertex_pages;
     render_detail::SkinningPass skinning;
     render_detail::TextureTable textures;
     bgfx::UniformHandle normal_transform = BGFX_INVALID_HANDLE;

@@ -35,6 +35,8 @@ struct MaterialBinding
     schema::BlendMode blend{};
     bool frame_textures = false;
     bool unlit = false;
+    bool pbr_opaque = false;
+    bool solid_depth = false;
     bool shadow_valid = false;
     std::array<float, 4> shadow_alpha{0, 1, 0, 0};
     std::array<float, 4> shadow_uv{1, 1, 0, 0};

@@ -25,7 +25,7 @@ public:
                               bgfx::TextureHandle scene_color, bgfx::TextureHandle ibl_specular,
                               bgfx::TextureHandle depth, bgfx::TextureHandle normal_roughness,
                               bgfx::TextureHandle specular, bgfx::TextureHandle brdf_lut,
-                              const RenderSettings& settings);
+                              const RenderSettings& settings, std::uint64_t depth_revision);
     [[nodiscard]] bgfx::TextureHandle texture() const noexcept;
     void release() noexcept;
     [[nodiscard]] std::uint32_t resource_count() const noexcept;
@@ -34,13 +34,15 @@ private:
     std::array<bgfx::ProgramHandle, 3> programs_;
     std::array<bgfx::UniformHandle, 8> samplers_;
     std::array<bgfx::UniformHandle, 8> uniforms_;
+    // Each chain starts at its first reduced level. Level zero is the borrowed scene depth.
     std::array<bgfx::TextureHandle, 2> hierarchy_;
-    std::array<bgfx::FrameBufferHandle, 12> hierarchy_frames_;
+    std::array<bgfx::FrameBufferHandle, 11> hierarchy_frames_;
     bgfx::TextureHandle reflection_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle color_ = BGFX_INVALID_HANDLE;
     bgfx::FrameBufferHandle reflection_frame_ = BGFX_INVALID_HANDLE;
     bgfx::FrameBufferHandle color_frame_ = BGFX_INVALID_HANDLE;
     bgfx::VertexBufferHandle fullscreen_ = BGFX_INVALID_HANDLE;
+    std::uint64_t cached_depth_revision_ = 0;
     std::uint16_t width_ = 0;
     std::uint16_t height_ = 0;
     std::uint16_t trace_width_ = 0;

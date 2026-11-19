@@ -56,7 +56,7 @@ std::size_t profile_view_group(bgfx::ViewId id)
     {
         return 1;
     }
-    if (id == ambient_occlusion_depth_view)
+    if (id == ambient_occlusion_depth_view || id == opaque_depth_view)
     {
         return 2;
     }
@@ -88,7 +88,7 @@ std::size_t profile_view_group(bgfx::ViewId id)
     {
         return 9;
     }
-    if (id == meshlet_clear_view || id == meshlet_cull_view)
+    if (id >= meshlet_index_upload_view && id <= meshlet_index_compact_view)
     {
         return 10;
     }
@@ -426,7 +426,8 @@ bool RenderSystem::on_initialize(const EngineConfig&)
         config_.local_shadow_tile_size < 64 || config_.local_shadow_tile_size > 2048 ||
         (config_.local_shadow_tile_size & (config_.local_shadow_tile_size - 1)) != 0 ||
         config_.local_shadow_tile_size > config_.shadow_atlas_size ||
-        config_.vsm_physical_pages == 0 || config_.vsm_physical_pages > 4096 ||
+        config_.vsm_physical_pages == 0 ||
+        config_.vsm_physical_pages > render_detail::vsm_max_physical_pages ||
         config_.vsm_pages_per_frame == 0 || config_.vsm_pages_per_frame > 16 ||
         config_.maximum_local_shadow_faces > 24 || config_.maximum_planar_reflections > 2 ||
         !render_detail::valid_msaa_samples(config_.msaa_samples))
@@ -627,9 +628,7 @@ bool RenderSystem::supports_msaa_samples(std::uint8_t samples) const noexcept
     {
         return true;
     }
-    const auto required = samples == 2   ? BGFX_CAPS_FORMAT_TEXTURE_FRAMEBUFFER_MSAA_X2
-                          : samples == 4 ? BGFX_CAPS_FORMAT_TEXTURE_FRAMEBUFFER_MSAA_X4
-                                         : BGFX_CAPS_FORMAT_TEXTURE_FRAMEBUFFER_MSAA_X8;
+    const auto required = render_detail::render_target_sample_capability(samples);
     for (const auto format : {bgfx::TextureFormat::RGBA16F, bgfx::TextureFormat::D32F})
     {
         if ((caps->formats[format] & required) == 0)
@@ -813,7 +812,16 @@ RenderSubmitStatus RenderSystem::render(Camera camera)
     }
     for (bgfx::ViewId id = 3; id <= render_detail::surface_view; ++id)
     {
-        append(id);
+        const auto planar_depth = static_cast<bgfx::ViewId>(id + 1);
+        if (std::ranges::find(render_detail::planar_depth_views, planar_depth) !=
+            render_detail::planar_depth_views.end())
+        {
+            append(planar_depth);
+        }
+        if (id != render_detail::opaque_depth_view)
+        {
+            append(id);
+        }
     }
     append(render_detail::vsm_feedback_clear_view);
     append(render_detail::vsm_feedback_view);
@@ -821,8 +829,14 @@ RenderSubmitStatus RenderSystem::render(Camera camera)
     {
         append(id);
     }
+    append(render_detail::vsm_depth_ranges_view);
+    append(render_detail::local_shadow_depth_ranges_view);
     for (bgfx::ViewId id = render_detail::surface_view + 1; id < 256; ++id)
     {
+        if (id == render_detail::main_view)
+        {
+            append(render_detail::opaque_depth_view);
+        }
         if (id == render_detail::output_present_view)
         {
             append(render_detail::vsm_debug_view);

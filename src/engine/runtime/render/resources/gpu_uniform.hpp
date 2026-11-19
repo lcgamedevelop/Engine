@@ -12,6 +12,7 @@ struct GpuUniform
 {
     std::string name;
     bgfx::UniformHandle handle = BGFX_INVALID_HANDLE;
+    bool used_by_pbr_opaque = false;
 };
 
 } // namespace engine::render_detail

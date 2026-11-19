@@ -37,9 +37,18 @@ NUM_THREADS(64, 1, 1)
 void main()
 {
     uint cluster = gl_GlobalInvocationID.x;
-    if (cluster >= uint(u_cluster_counts.w)) return;
     uint nx = uint(u_cluster_grid.x);
     uint ny = uint(u_cluster_grid.y);
+    if (cluster >= nx * ny * uint(u_cluster_grid.z)) return;
+    uint capacity = uint(u_cluster_counts.y);
+    uint base = cluster * (1u + (capacity + 1u) / 2u);
+    uint first_light = uint(u_cluster_counts.w);
+    uint light_count = uint(u_cluster_counts.x);
+    if (first_light == light_count)
+    {
+        b_cluster_output[base] = 0u;
+        return;
+    }
     uint x = cluster % nx;
     uint y = (cluster / nx) % ny;
     uint z = cluster / (nx * ny);
@@ -59,14 +68,11 @@ void main()
         minimum = min(minimum, corner_position);
         maximum = max(maximum, corner_position);
     }
-    uint capacity = uint(u_cluster_counts.y);
-    uint base = cluster * (capacity + 1u);
     uint count = 0u;
-    for (uint index = 0u; index < uint(u_cluster_counts.x); ++index)
+    uint low_index = 0u;
+    for (uint index = first_light; index < light_count; ++index)
     {
         int light_base = int(index) * 4;
-        vec4 kind = b_cluster_lights[light_base + 3];
-        if (kind.x < 0.5) continue;
         vec4 position_range = b_cluster_lights[light_base];
         vec3 position = mul(u_cluster_view, vec4(position_range.xyz, 1.0)).xyz;
         vec3 closest = clamp(position, minimum, maximum);
@@ -79,8 +85,21 @@ void main()
             b_cluster_output[base] = 0xffffffffu;
             return;
         }
-        b_cluster_output[base + 1u + count] = index;
+        // One work item owns the entire cluster record. Keep an unmatched low
+        // index in a register and write complete pairs without a buffer read.
+        if ((count & 1u) == 0u)
+        {
+            low_index = index;
+        }
+        else
+        {
+            b_cluster_output[base + 1u + count / 2u] = low_index | (index << 16u);
+        }
         ++count;
+    }
+    if ((count & 1u) != 0u)
+    {
+        b_cluster_output[base + 1u + count / 2u] = low_index;
     }
     b_cluster_output[base] = count;
 }

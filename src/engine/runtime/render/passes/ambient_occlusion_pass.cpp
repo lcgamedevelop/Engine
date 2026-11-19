@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <limits>
 
 namespace engine::render_detail
@@ -306,7 +307,8 @@ bool AmbientOcclusionPass::prepare(std::uint16_t width, std::uint16_t height)
 }
 
 bool AmbientOcclusionPass::compute(const CameraSettings& camera, const RenderSettings& settings,
-                                   const float* projection, bgfx::TextureHandle source_depth)
+                                   const float* projection, bgfx::TextureHandle source_depth,
+                                   std::uint64_t depth_revision)
 {
     ENGINE_PROFILE_ZONE("Render.aoComputeSubmit");
     AoUniforms uniforms;
@@ -317,6 +319,19 @@ bool AmbientOcclusionPass::compute(const CameraSettings& camera, const RenderSet
         SDL_LogError(SDL_LOG_CATEGORY_RENDER, "ASSAO projection or settings are invalid");
         return false;
     }
+    const bool reuse = depth_revision != 0 && depth_revision == cached_depth_revision_ &&
+                       std::equal(uniforms.begin(), uniforms.end(), cached_uniforms_.begin(),
+                                  [](const auto& current, const auto& cached)
+                                  {
+                                      return std::memcmp(current.data(), cached.data(),
+                                                         sizeof(float) * current.size()) == 0;
+                                  });
+    ENGINE_PROFILE_PLOT("Render.aoDepthReused", static_cast<std::int64_t>(reuse));
+    if (reuse)
+    {
+        return true;
+    }
+    cached_uniforms_ = uniforms;
     const auto half_width = static_cast<std::uint16_t>(width_ / 2);
     const auto half_height = static_cast<std::uint16_t>(height_ / 2);
     const std::uint32_t half_groups_x = (half_width + 7U) / 8U;
@@ -392,6 +407,7 @@ bool AmbientOcclusionPass::compute(const CameraSettings& camera, const RenderSet
     bgfx::setImage(0, ao_, 0, bgfx::Access::Write, bgfx::TextureFormat::R8);
     bgfx::dispatch(ambient_occlusion_compute_view, programs_[apply_program],
                    (viewport_width_ + 7U) / 8U, (viewport_height_ + 7U) / 8U);
+    cached_depth_revision_ = depth_revision;
     return true;
 }
 
@@ -425,6 +441,7 @@ std::uint32_t AmbientOcclusionPass::resource_count() const noexcept
 
 void AmbientOcclusionPass::release_textures() noexcept
 {
+    cached_depth_revision_ = 0;
     for (auto* handle : {&normals_, &blur_results_, &final_results_, &ao_})
     {
         if (bgfx::isValid(*handle))

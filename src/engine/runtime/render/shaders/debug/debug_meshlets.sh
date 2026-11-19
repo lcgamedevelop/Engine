@@ -5,7 +5,8 @@
 // Slot 0 is reserved for the instance stream on Metal.
 BUFFER_RAW_RO(positions, 1);
 BUFFER_RAW_RO(indices, 2);
-BUFFER_RO(clusters, vec4, 3);
+#include "debug_indices.sh"
+BUFFER_RAW_RO(clusterOffsets, 3);
 uniform vec4 u_debug_meshlet_parameters[2];
 
 void main()
@@ -18,7 +19,7 @@ void main()
     while (first + 1u < end)
     {
         uint middle = first + (end - first) / 2u;
-        uint offset = floatBitsToUint(clusters[middle * 3u + 2u].x);
+        uint offset = rawLoadUint(clusterOffsets, middle);
         if (offset <= index)
         {
             first = middle;
@@ -28,8 +29,9 @@ void main()
             end = middle;
         }
     }
-    uint vertex = rawLoadUint(indices, index);
-    uint position = vertex * uint(u_debug_meshlet_parameters[1].x);
+    uint vertex = geometryIndex(index, u_debug_meshlet_parameters[1].z > 0.5);
+    uint position = (vertex + uint(u_debug_meshlet_parameters[1].w)) *
+                    uint(u_debug_meshlet_parameters[1].x);
     vec3 local = vec3(rawLoadFloat(positions, position), rawLoadFloat(positions, position + 1u),
                       rawLoadFloat(positions, position + 2u));
 #if defined(MESHLET_DEBUG_INSTANCED)

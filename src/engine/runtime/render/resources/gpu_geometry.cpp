@@ -8,31 +8,292 @@
 #include "runtime/world/world_system.hpp"
 
 #include <algorithm>
-#include <bit>
 #include <cmath>
+#include <cstddef>
+#include <cstring>
 #include <limits>
 
 namespace engine::render_detail
 {
+namespace
+{
+enum class VertexStorage
+{
+    aligned,
+    static_float,
+    static_white
+};
+
+bgfx::VertexLayout make_vertex_layout(VertexStorage storage, bool include_position = true)
+{
+    bgfx::VertexLayout layout;
+    layout.begin();
+    if (include_position)
+    {
+        layout.add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float);
+    }
+    layout.add(bgfx::Attrib::Normal, 3, bgfx::AttribType::Float)
+        .add(bgfx::Attrib::Tangent, 4, bgfx::AttribType::Float)
+        .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float);
+    const bool white = storage == VertexStorage::static_white;
+    layout
+        .add(bgfx::Attrib::Color0, 4, white ? bgfx::AttribType::Uint8 : bgfx::AttribType::Float,
+             white)
+        .add(bgfx::Attrib::TexCoord1, 2, bgfx::AttribType::Float);
+    if (storage == VertexStorage::aligned)
+    {
+        layout.skip(sizeof(GpuVertex::padding));
+    }
+    layout.end();
+    return layout;
+}
+
+void write_static_vertices(std::span<const GpuVertex> vertices, VertexStorage storage,
+                           std::uint8_t* positions, std::size_t position_stride,
+                           std::uint8_t* attributes, std::size_t attribute_stride,
+                           std::size_t attribute_size)
+{
+    constexpr auto position_bytes = sizeof(GpuVertex::position);
+    for (std::size_t index = 0; index < vertices.size(); ++index)
+    {
+        const auto& vertex = vertices[index];
+        const auto* source = reinterpret_cast<const std::uint8_t*>(&vertex);
+        auto* attribute = attributes + index * attribute_stride;
+        std::memcpy(positions + index * position_stride, source, position_bytes);
+        if (storage == VertexStorage::static_white)
+        {
+            constexpr auto prefix = offsetof(GpuVertex, color) - position_bytes;
+            constexpr std::size_t rgba8_bytes = 4;
+            std::memcpy(attribute, source + position_bytes, prefix);
+            std::memset(attribute + prefix, 0xff, rgba8_bytes);
+            std::memcpy(attribute + prefix + rgba8_bytes, vertex.lightmap_texcoord,
+                        sizeof(vertex.lightmap_texcoord));
+        }
+        else
+        {
+            std::memcpy(attribute, source + position_bytes, attribute_size);
+        }
+    }
+}
+
+bgfx::VertexLayout position_layout()
+{
+    bgfx::VertexLayout layout;
+    layout.begin().add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float).end();
+    return layout;
+}
+
+const bgfx::Memory* copy_vertex_data(std::span<const GpuVertex> vertices, VertexStorage storage,
+                                     std::uint16_t stride, std::uint32_t attribute_offset)
+{
+    if (storage == VertexStorage::aligned)
+    {
+        return bgfx::copy(vertices.data(), static_cast<std::uint32_t>(vertices.size() * stride));
+    }
+    constexpr auto position_bytes = sizeof(GpuVertex::position);
+    const bool separate = attribute_offset != 0;
+    const auto attribute_bytes = stride - position_bytes;
+    const auto bytes =
+        separate ? attribute_offset + vertices.size() * attribute_bytes : vertices.size() * stride;
+    const auto* memory = bgfx::alloc(static_cast<std::uint32_t>(bytes));
+    if (separate)
+    {
+        const auto end = vertices.size() * position_bytes;
+        std::memset(memory->data + end, 0, attribute_offset - end);
+    }
+    write_static_vertices(vertices, storage, memory->data, separate ? position_bytes : stride,
+                          memory->data + (separate ? attribute_offset : position_bytes),
+                          separate ? attribute_bytes : stride, attribute_bytes);
+    return memory;
+}
+} // namespace
+
+GpuGeometry::StaticVertexPage::~StaticVertexPage() noexcept
+{
+    for (const auto buffer : {positions, attributes})
+    {
+        if (bgfx::isValid(buffer))
+        {
+            bgfx::destroy(buffer);
+        }
+    }
+}
+
+bool GpuGeometry::StaticVertexPage::create()
+{
+    const auto layout = make_vertex_layout(
+        white ? VertexStorage::static_white : VertexStorage::static_float, false);
+    positions =
+        bgfx::createDynamicVertexBuffer(capacity, position_layout(), BGFX_BUFFER_COMPUTE_READ);
+    if (!bgfx::isValid(positions))
+    {
+        return false;
+    }
+    // The read-only flag requests a dedicated bgfx allocation for this persistent stream.
+    attributes = bgfx::createDynamicVertexBuffer(capacity, layout, BGFX_BUFFER_COMPUTE_READ);
+    attribute_stride_ = layout.getStride();
+    return bgfx::isValid(attributes);
+}
+
+bool GpuGeometry::StaticVertexPage::store(std::span<const GpuVertex> vertices, std::uint32_t& first)
+{
+    const auto range = std::ranges::find_if(free_ranges_, [&](const auto& free)
+                                            { return free.count >= vertices.size(); });
+    if (range == free_ranges_.end())
+    {
+        return false;
+    }
+    first = range->first;
+    const auto count = static_cast<std::uint32_t>(vertices.size());
+    constexpr auto position_stride = sizeof(GpuVertex::position);
+    const auto* points = bgfx::alloc(static_cast<std::uint32_t>(count * position_stride));
+    const auto* values = bgfx::alloc(count * attribute_stride_);
+    write_static_vertices(
+        vertices, white ? VertexStorage::static_white : VertexStorage::static_float, points->data,
+        position_stride, values->data, attribute_stride_, attribute_stride_);
+    bgfx::update(positions, first, points);
+    bgfx::update(attributes, first, values);
+    range->first += count;
+    range->count -= count;
+    if (!range->count)
+    {
+        free_ranges_.erase(range);
+    }
+    return true;
+}
+
+void GpuGeometry::StaticVertexPage::release_range(std::uint32_t first, std::uint32_t count) noexcept
+{
+    auto next = std::ranges::lower_bound(free_ranges_, first, {}, &Range::first);
+    if (next != free_ranges_.end() && next->first == first + count)
+    {
+        count += next->count;
+        next = free_ranges_.erase(next);
+    }
+    if (next != free_ranges_.begin() && (next - 1)->first + (next - 1)->count == first)
+    {
+        (next - 1)->count += count;
+    }
+    else
+    {
+        free_ranges_.insert(next, {first, count});
+    }
+}
+
+std::uint64_t GpuGeometry::StaticVertexPage::byte_size() const noexcept
+{
+    return std::uint64_t{capacity} * (sizeof(GpuVertex::position) + attribute_stride_);
+}
 
 GpuGeometry::~GpuGeometry() noexcept
 {
     release();
 }
 
+bool GpuGeometry::IndexBuffer::upload(std::span<const std::uint32_t> source)
+{
+    if (source.empty() || source.size() > UINT32_MAX / sizeof(std::uint16_t))
+    {
+        return false;
+    }
+    const bool compact = *std::ranges::max_element(source) <= UINT16_MAX;
+    // Debug shaders read uint32 words, including the final pair of packed indices.
+    const std::uint64_t padded_count = source.size() + (compact && source.size() % 2 != 0);
+    const auto element_size = compact ? sizeof(std::uint16_t) : sizeof(std::uint32_t);
+    const auto byte_count = padded_count * element_size;
+    if (byte_count > UINT32_MAX)
+    {
+        return false;
+    }
+    const auto size = static_cast<std::uint32_t>(byte_count);
+    const bgfx::Memory* memory;
+    if (compact)
+    {
+        memory = bgfx::alloc(size);
+        auto* packed = reinterpret_cast<std::uint16_t*>(memory->data);
+        std::ranges::transform(source, packed, [](std::uint32_t index)
+                               { return static_cast<std::uint16_t>(index); });
+        if (padded_count != source.size())
+        {
+            packed[source.size()] = 0;
+        }
+    }
+    else
+    {
+        memory = bgfx::copy(source.data(), size);
+    }
+    handle = bgfx::createIndexBuffer(memory, BGFX_BUFFER_COMPUTE_READ |
+                                                 (compact ? 0 : BGFX_BUFFER_INDEX32));
+    if (!bgfx::isValid(handle))
+    {
+        return false;
+    }
+    bytes = size;
+    count = static_cast<std::uint32_t>(source.size());
+    index16 = compact;
+    return true;
+}
+
+void GpuGeometry::IndexBuffer::release() noexcept
+{
+    if (bgfx::isValid(handle))
+    {
+        bgfx::destroy(handle);
+    }
+    *this = {};
+}
+
+bool GpuGeometry::create_base_indices(std::span<const std::uint32_t> source)
+{
+    return !bgfx::isValid(indices_.handle) && indices_.upload(source);
+}
+
 bgfx::VertexLayout GpuGeometry::vertex_layout()
 {
-    bgfx::VertexLayout layout;
-    layout.begin()
-        .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
-        .add(bgfx::Attrib::Normal, 3, bgfx::AttribType::Float)
-        .add(bgfx::Attrib::Tangent, 4, bgfx::AttribType::Float)
-        .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
-        .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Float)
-        .add(bgfx::Attrib::TexCoord1, 2, bgfx::AttribType::Float)
-        .skip(2 * sizeof(float))
-        .end();
-    return layout;
+    return make_vertex_layout(VertexStorage::aligned);
+}
+
+bool GpuGeometry::vertices_ready() const noexcept
+{
+    return page_ || bgfx::isValid(vertices);
+}
+
+void GpuGeometry::bind_vertices(bool positions_only, bool whole_page) const
+{
+    if (page_)
+    {
+        const auto first = whole_page ? 0U : first_vertex_;
+        const auto count = whole_page ? StaticVertexPage::capacity : vertex_count;
+        bgfx::setVertexBuffer(0, page_->positions, first, count);
+        if (!positions_only)
+        {
+            bgfx::setVertexBuffer(1, page_->attributes, first, count);
+        }
+        return;
+    }
+    bgfx::setVertexBuffer(0, vertices, 0, vertex_count);
+    if (!positions_only && bgfx::isValid(attributes_layout_))
+    {
+        bgfx::setVertexBuffer(1, vertices, first_attribute_vertex_, vertex_count,
+                              attributes_layout_);
+    }
+}
+
+void GpuGeometry::bind_position_buffer(std::uint8_t stage) const
+{
+    if (page_)
+    {
+        bgfx::setBuffer(stage, page_->positions, bgfx::Access::Read);
+    }
+    else
+    {
+        bgfx::setBuffer(stage, vertices, bgfx::Access::Read);
+    }
+}
+
+std::uint16_t GpuGeometry::position_buffer_index() const noexcept
+{
+    return page_ ? page_->positions.idx : vertices.idx;
 }
 
 bool GpuGeometry::pack_vertices(const schema::MeshDataT& data,
@@ -105,7 +366,29 @@ bgfx::VertexLayout GpuGeometry::vector_layout()
     return layout;
 }
 
-bool GpuGeometry::create(const MeshRenderer& renderer)
+bool GpuGeometry::store_vertices(VertexPages& pages, std::span<const GpuVertex> packed, bool white)
+{
+    std::erase_if(pages, [](const auto& page) { return page.expired(); });
+    for (const auto& candidate : pages)
+    {
+        auto page = candidate.lock();
+        if (page && page->white == white && page->store(packed, first_vertex_))
+        {
+            page_ = std::move(page);
+            return true;
+        }
+    }
+    auto page = std::make_shared<StaticVertexPage>(white);
+    if (!page->create() || !page->store(packed, first_vertex_))
+    {
+        return false;
+    }
+    pages.emplace_back(page);
+    page_ = std::move(page);
+    return true;
+}
+
+bool GpuGeometry::create(const MeshRenderer& renderer, VertexPages* pages)
 {
     ENGINE_PROFILE_ZONE("Render.geometryCreate");
     release();
@@ -117,10 +400,13 @@ bool GpuGeometry::create(const MeshRenderer& renderer)
     {
         return false;
     }
-    const auto vertex_bytes = packed.size() * sizeof(GpuVertex);
-    const auto index_bytes = data->indices.size() * sizeof(std::uint32_t);
-    if (vertex_bytes > std::numeric_limits<std::uint32_t>::max() ||
-        index_bytes > std::numeric_limits<std::uint32_t>::max())
+    const auto storage = !data->skin.empty()    ? VertexStorage::aligned
+                         : data->colors.empty() ? VertexStorage::static_white
+                                                : VertexStorage::static_float;
+    auto layout = make_vertex_layout(storage);
+    const auto stride = layout.getStride();
+    const auto vertex_bytes = std::uint64_t{packed.size()} * stride;
+    if (vertex_bytes > std::numeric_limits<std::uint32_t>::max())
     {
         return false;
     }
@@ -187,29 +473,55 @@ bool GpuGeometry::create(const MeshRenderer& renderer)
     {
         // 这里只采集 CPU 拷贝与提交；GPU 执行时间由 GPU 时间戳表示。
         ENGINE_PROFILE_ZONE("Render.geometryBuffersSubmit");
-        vertices = bgfx::createVertexBuffer(
-            bgfx::copy(packed.data(), static_cast<std::uint32_t>(vertex_bytes)), vertex_layout(),
-            BGFX_BUFFER_COMPUTE_READ);
-        indices = bgfx::createIndexBuffer(
-            bgfx::copy(data->indices.data(), static_cast<std::uint32_t>(index_bytes)),
-            BGFX_BUFFER_INDEX32 | BGFX_BUFFER_COMPUTE_READ);
+        vertex_count = static_cast<std::uint32_t>(packed.size());
+        const auto* caps = bgfx::getCaps();
+        const bool split_streams = storage != VertexStorage::aligned && !packed.empty() &&
+                                   caps->limits.maxVertexStreams >= 2;
+        const bool use_page =
+            split_streams && pages && data->meshlets &&
+            packed.size() <= StaticVertexPage::capacity &&
+            store_vertices(*pages, packed, storage == VertexStorage::static_white);
+        std::uint32_t attribute_offset = 0;
+        if (!use_page && split_streams)
+        {
+            const auto attributes = make_vertex_layout(storage, false);
+            const auto attribute_stride = attributes.getStride();
+            const auto position_bytes = packed.size() * sizeof(GpuVertex::position);
+            const auto first = (position_bytes + attribute_stride - 1) / attribute_stride;
+            const auto offset = first * attribute_stride;
+            const auto padding = offset - position_bytes;
+            if (vertex_bytes + padding <= std::numeric_limits<std::uint32_t>::max())
+            {
+                attributes_layout_ = bgfx::createVertexLayout(attributes);
+            }
+            if (bgfx::isValid(attributes_layout_))
+            {
+                layout = position_layout();
+                attribute_offset = static_cast<std::uint32_t>(offset);
+                first_attribute_vertex_ = static_cast<std::uint32_t>(first);
+                vertex_padding_ = static_cast<std::uint16_t>(padding);
+            }
+        }
+        if (!use_page)
+        {
+            vertices = bgfx::createVertexBuffer(
+                copy_vertex_data(packed, storage, stride, attribute_offset), layout,
+                BGFX_BUFFER_COMPUTE_READ);
+        }
+        if (!vertices_ready() || !create_base_indices(data->indices))
+        {
+            release();
+            return false;
+        }
     }
-    if (!bgfx::isValid(vertices) || !bgfx::isValid(indices))
-    {
-        return false;
-    }
-    index_count_ = static_cast<std::uint32_t>(data->indices.size());
     submeshes_ = data->submeshes;
     for (const auto& level : data->lods)
     {
         Lod lod;
-        lod.index_count = static_cast<std::uint32_t>(level->indices.size());
         lod.submeshes = level->submeshes;
-        lod.indices = bgfx::createIndexBuffer(
-            bgfx::copy(level->indices.data(), lod.index_count * sizeof(std::uint32_t)),
-            BGFX_BUFFER_INDEX32 | BGFX_BUFFER_COMPUTE_READ);
-        if (!bgfx::isValid(lod.indices))
+        if (!lod.indices.upload(level->indices))
         {
+            release();
             return false;
         }
         lods_.push_back(std::move(lod));
@@ -219,7 +531,7 @@ bool GpuGeometry::create(const MeshRenderer& renderer)
         release();
         return false;
     }
-    vertex_count = static_cast<std::uint32_t>(packed.size());
+    vertex_stride_ = stride;
     return true;
 }
 
@@ -283,24 +595,50 @@ std::uint32_t GpuGeometry::resource_count() const noexcept
     std::uint32_t meshlet_count = 0;
     for (const auto& buffers : meshlets_)
     {
-        meshlet_count += bgfx::isValid(buffers.indices) + bgfx::isValid(buffers.descriptors);
+        meshlet_count +=
+            bgfx::isValid(buffers.indices.handle) + bgfx::isValid(buffers.debug_offsets);
     }
     return meshlet_count + static_cast<std::uint32_t>(bgfx::isValid(vertices)) +
-           static_cast<std::uint32_t>(bgfx::isValid(indices)) +
+           static_cast<std::uint32_t>(bgfx::isValid(indices_.handle)) +
            static_cast<std::uint32_t>(bgfx::isValid(influences)) +
            static_cast<std::uint32_t>(lods_.size());
 }
 
+const GpuGeometry::IndexBuffer* GpuGeometry::index_storage(std::size_t level) const noexcept
+{
+    return level == 0 ? &indices_ : level <= lods_.size() ? &lods_[level - 1].indices : nullptr;
+}
+
 bgfx::IndexBufferHandle GpuGeometry::index_buffer(std::size_t level) const noexcept
 {
-    return level == 0              ? indices
-           : level <= lods_.size() ? lods_[level - 1].indices
-                                   : bgfx::IndexBufferHandle{bgfx::kInvalidHandle};
+    const auto* storage = index_storage(level);
+    return storage ? storage->handle : bgfx::IndexBufferHandle{bgfx::kInvalidHandle};
 }
 
 std::uint32_t GpuGeometry::index_count(std::size_t level) const noexcept
 {
-    return level == 0 ? index_count_ : level <= lods_.size() ? lods_[level - 1].index_count : 0;
+    const auto* storage = index_storage(level);
+    return storage ? storage->count : 0;
+}
+
+bool GpuGeometry::index_uses_16_bits(std::size_t level, bool meshlet) const noexcept
+{
+    const auto* storage = meshlet ? meshlet_index_storage(level) : index_storage(level);
+    return storage && storage->index16;
+}
+
+std::uint64_t GpuGeometry::index_buffer_bytes() const noexcept
+{
+    std::uint64_t bytes = indices_.bytes;
+    for (const auto& lod : lods_)
+    {
+        bytes += lod.indices.bytes;
+    }
+    for (const auto& buffers : meshlets_)
+    {
+        bytes += buffers.indices.bytes;
+    }
+    return bytes;
 }
 
 std::span<const schema::MeshSubmesh> GpuGeometry::submeshes(std::size_t level) const noexcept
@@ -323,14 +661,10 @@ void GpuGeometry::release() noexcept
     release_meshlets();
     for (auto& lod : lods_)
     {
-        if (bgfx::isValid(lod.indices))
-        {
-            bgfx::destroy(lod.indices);
-        }
+        lod.indices.release();
     }
     lods_.clear();
     submeshes_.clear();
-    index_count_ = 0;
     for (auto* handle : {&vertices, &influences})
     {
         if (bgfx::isValid(*handle))
@@ -339,19 +673,62 @@ void GpuGeometry::release() noexcept
             *handle = BGFX_INVALID_HANDLE;
         }
     }
-    if (bgfx::isValid(indices))
+    if (bgfx::isValid(attributes_layout_))
     {
-        bgfx::destroy(indices);
-        indices = BGFX_INVALID_HANDLE;
+        bgfx::destroy(attributes_layout_);
+        attributes_layout_ = BGFX_INVALID_HANDLE;
     }
+    if (page_)
+    {
+        page_->release_range(first_vertex_, vertex_count);
+        page_.reset();
+    }
+    first_vertex_ = 0;
+    indices_.release();
     resource.reset();
     joint_bounds_.clear();
     vertex_count = 0;
+    first_attribute_vertex_ = 0;
+    vertex_stride_ = sizeof(GpuVertex);
+    vertex_padding_ = 0;
 }
 
-bool GpuGeometry::prepare_meshlets()
+std::uint64_t GpuGeometry::meshlet_upload_bytes(bool debug) const noexcept
 {
-    if (!meshlets_.empty())
+    const auto* mesh = resource.data<MeshResource>();
+    if (!mesh)
+    {
+        return 0;
+    }
+    const auto bytes = [&](const auto& regular, const schema::MeshletDataT* meshlets)
+    {
+        if (!meshlets)
+        {
+            return std::uint64_t{0};
+        }
+        const auto index_bytes = meshlets_.empty() && meshlets->indices != regular
+                                     ? meshlets->indices.size() * sizeof(std::uint32_t)
+                                     : 0;
+        const auto debug_bytes =
+            debug && !meshlet_debug_ready_ ? meshlets->meshlets.size() * sizeof(std::uint32_t) : 0;
+        return static_cast<std::uint64_t>(index_bytes) + debug_bytes;
+    };
+    auto total = bytes(mesh->indices, mesh->meshlets.get());
+    for (const auto& lod : mesh->lods)
+    {
+        total += bytes(lod->indices, lod->meshlets.get());
+    }
+    return total;
+}
+
+bool GpuGeometry::meshlets_ready(bool debug) const noexcept
+{
+    return !meshlets_.empty() && (!debug || meshlet_debug_ready_);
+}
+
+bool GpuGeometry::prepare_meshlets(bool debug)
+{
+    if (meshlets_ready(debug))
     {
         return true;
     }
@@ -360,6 +737,7 @@ bool GpuGeometry::prepare_meshlets()
     {
         return false;
     }
+    const bool needs_indices = meshlets_.empty();
     meshlets_.resize(data->lods.size() + 1);
     for (std::size_t level = 0; level < meshlets_.size(); ++level)
     {
@@ -369,68 +747,94 @@ bool GpuGeometry::prepare_meshlets()
         {
             continue;
         }
-        std::vector<std::array<float, 4>> descriptors;
-        descriptors.reserve(source->meshlets.size() * 3);
-        for (const auto& cluster : source->meshlets)
-        {
-            descriptors.push_back({static_cast<float>(cluster.center().x()),
-                                   static_cast<float>(cluster.center().y()),
-                                   static_cast<float>(cluster.center().z()), cluster.radius()});
-            descriptors.push_back({static_cast<float>(cluster.cone_axis().x()),
-                                   static_cast<float>(cluster.cone_axis().y()),
-                                   static_cast<float>(cluster.cone_axis().z()),
-                                   cluster.cone_cutoff()});
-            descriptors.push_back({std::bit_cast<float>(cluster.first_index()),
-                                   std::bit_cast<float>(cluster.index_count()), 0, 0});
-        }
-        if (descriptors.size() > UINT32_MAX / sizeof(descriptors[0]))
+        auto& buffers = meshlets_[level];
+        const auto& regular = level == 0 ? data->indices : data->lods[level - 1]->indices;
+        if (needs_indices && source->indices != regular && !buffers.indices.upload(source->indices))
         {
             release_meshlets();
             return false;
         }
-        auto& buffers = meshlets_[level];
-        buffers.indices = bgfx::createIndexBuffer(
-            bgfx::copy(source->indices.data(),
-                       static_cast<std::uint32_t>(source->indices.size() * sizeof(std::uint32_t))),
-            BGFX_BUFFER_INDEX32 | BGFX_BUFFER_COMPUTE_READ);
-        buffers.descriptors = bgfx::createVertexBuffer(
-            bgfx::copy(descriptors.data(),
-                       static_cast<std::uint32_t>(descriptors.size() * sizeof(descriptors[0]))),
-            vector_layout(), BGFX_BUFFER_COMPUTE_READ);
-        if (!bgfx::isValid(buffers.indices) || !bgfx::isValid(buffers.descriptors))
+        buffers.ready = true;
+    }
+    if (!debug)
+    {
+        return true;
+    }
+
+    bgfx::VertexLayout layout;
+    layout.begin().add(bgfx::Attrib::TexCoord0, 1, bgfx::AttribType::Float).end();
+    for (std::size_t level = 0; level < meshlets_.size(); ++level)
+    {
+        const auto* source =
+            level == 0 ? data->meshlets.get() : data->lods[level - 1]->meshlets.get();
+        if (!source)
         {
-            release_meshlets();
+            continue;
+        }
+        const auto size = source->meshlets.size() * sizeof(std::uint32_t);
+        if (size > UINT32_MAX)
+        {
+            release_meshlet_debug();
+            return false;
+        }
+        const auto* memory = bgfx::alloc(static_cast<std::uint32_t>(size));
+        auto* offsets = reinterpret_cast<std::uint32_t*>(memory->data);
+        std::ranges::transform(source->meshlets, offsets,
+                               [](const auto& cluster) { return cluster.first_index(); });
+        auto& handle = meshlets_[level].debug_offsets;
+        handle = bgfx::createVertexBuffer(memory, layout, BGFX_BUFFER_COMPUTE_READ);
+        if (!bgfx::isValid(handle))
+        {
+            release_meshlet_debug();
             return false;
         }
     }
+    meshlet_debug_ready_ = true;
     return true;
+}
+
+void GpuGeometry::release_meshlet_debug() noexcept
+{
+    for (auto& buffers : meshlets_)
+    {
+        if (bgfx::isValid(buffers.debug_offsets))
+        {
+            bgfx::destroy(buffers.debug_offsets);
+            buffers.debug_offsets = BGFX_INVALID_HANDLE;
+        }
+    }
+    meshlet_debug_ready_ = false;
 }
 
 void GpuGeometry::release_meshlets() noexcept
 {
+    release_meshlet_debug();
     for (auto& buffers : meshlets_)
     {
-        if (bgfx::isValid(buffers.indices))
-        {
-            bgfx::destroy(buffers.indices);
-        }
-        if (bgfx::isValid(buffers.descriptors))
-        {
-            bgfx::destroy(buffers.descriptors);
-        }
+        buffers.indices.release();
     }
     meshlets_.clear();
 }
 
-bgfx::IndexBufferHandle GpuGeometry::meshlet_indices(std::size_t level) const noexcept
+const GpuGeometry::IndexBuffer* GpuGeometry::meshlet_index_storage(std::size_t level) const noexcept
 {
-    return level < meshlets_.size() ? meshlets_[level].indices
-                                    : bgfx::IndexBufferHandle{bgfx::kInvalidHandle};
+    if (level >= meshlets_.size() || !meshlets_[level].ready)
+    {
+        return nullptr;
+    }
+    const auto& storage = meshlets_[level].indices;
+    return bgfx::isValid(storage.handle) ? &storage : index_storage(level);
 }
 
-bgfx::VertexBufferHandle GpuGeometry::meshlet_descriptors(std::size_t level) const noexcept
+bgfx::IndexBufferHandle GpuGeometry::meshlet_indices(std::size_t level) const noexcept
 {
-    return level < meshlets_.size() ? meshlets_[level].descriptors
+    const auto* storage = meshlet_index_storage(level);
+    return storage ? storage->handle : bgfx::IndexBufferHandle{bgfx::kInvalidHandle};
+}
+
+bgfx::VertexBufferHandle GpuGeometry::meshlet_debug_offsets(std::size_t level) const noexcept
+{
+    return level < meshlets_.size() ? meshlets_[level].debug_offsets
                                     : bgfx::VertexBufferHandle{bgfx::kInvalidHandle};
 }
 

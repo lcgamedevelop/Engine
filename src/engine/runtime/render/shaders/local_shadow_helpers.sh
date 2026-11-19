@@ -40,13 +40,13 @@ vec3 point_shadow_ray(uint face, vec2 ndc)
     return normalize(forward + right * ndc.x + up * ndc.y);
 }
 
-float local_shadow_visibility(ClusterLightData light, vec3 world_position)
+float local_shadow_visibility(ClusterLightData light, vec3 world_position,
+                              vec3 receiver_offset, float radial_distance)
 {
     if (light.kind_inner.z < 0.5) return 1.0;
     uint first = uint(light.kind_inner.z) - 1u;
     bool is_point = light.kind_inner.w > 1.5;
-    vec3 direction = world_position - light.position_range.xyz;
-    uint face = is_point ? point_shadow_face(direction) : 0u;
+    uint face = is_point ? point_shadow_face(receiver_offset) : 0u;
     uint record = first + face;
     vec4 position = local_shadow_project(record, world_position);
     if (position.w <= 0.0) return 1.0;
@@ -58,15 +58,45 @@ float local_shadow_visibility(ClusterLightData light, vec3 world_position)
     vec4 parameters = b_light_data[base + 5];
     vec2 texel_step = parameters.y / rectangle.zw;
     vec2 half_texel = vec2_splat(parameters.y * 0.5);
-    float radial_distance = 0.0;
     float depth_scale = 0.0;
     float depth_offset = 0.0;
     if (is_point)
     {
-        radial_distance = length(direction);
-        depth_scale = parameters.w / (parameters.w - parameters.z);
-        depth_offset = depth_scale * parameters.z / radial_distance;
+        depth_scale = parameters.z;
+        depth_offset = parameters.w / radial_distance;
     }
+#if defined(ENGINE_VSM_DEPTH_RANGES)
+    if (u_lighting_params.w > 0.0)
+    {
+        vec2 low = projected.xy - 1.5 * texel_step;
+        vec2 high = projected.xy + 1.5 * texel_step;
+        if (all(greaterThan(low, vec2_splat(0.000001))) &&
+            all(lessThan(high, vec2_splat(0.999999))))
+        {
+            uint packed_layout = uint(u_lighting_params.w);
+            ivec2 tile = ivec2(int(record) % 6, int(record) / 6) * int(packed_layout >> 12u) +
+                         ivec2(0, int(packed_layout & 4095u));
+            ivec2 block = ivec2(projected.xy * (rectangle.zw / parameters.y) / 8.0);
+            vec2 range = texelFetch(s_lightmap, tile + block, 0).rg;
+            float receiver_min = projected.z;
+            float receiver_max = projected.z;
+            if (is_point)
+            {
+                // Bound the original radial depth over the entire tap rectangle.
+                vec2 low_ndc = 2.0 * low - 1.0;
+                vec2 high_ndc = 2.0 * high - 1.0;
+                vec2 near_axis = max(vec2_splat(0.0), max(low_ndc, -high_ndc));
+                vec2 far_axis = max(abs(low_ndc), abs(high_ndc));
+                receiver_min = depth_scale - depth_offset * sqrt(1.0 + dot(far_axis, far_axis));
+                receiver_max = depth_scale - depth_offset * sqrt(1.0 + dot(near_axis, near_axis));
+            }
+            float margin = 0.000001 *
+                           (1.0 + abs(parameters.x) + abs(depth_scale) + abs(depth_offset));
+            if (range.y < receiver_min - parameters.x - margin) return 0.0;
+            if (range.x >= receiver_max - parameters.x + margin) return 1.0;
+        }
+    }
+#endif
     float visible = 0.0;
     for (int x = 0; x < 4; ++x)
     {

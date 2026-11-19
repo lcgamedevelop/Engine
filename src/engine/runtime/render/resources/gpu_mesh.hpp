@@ -37,7 +37,7 @@ struct GpuMesh
     [[nodiscard]] bool create(const MeshRenderer& renderer, std::shared_ptr<GpuGeometry> source);
     [[nodiscard]] bool update_deformation(const MeshRendererRuntime& runtime,
                                           SkinningPass& skinning);
-    void bind_vertices() const;
+    void bind_vertices(bool positions_only = false) const;
     void release() noexcept;
 
     std::uint64_t node_id = 0;

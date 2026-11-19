@@ -1,8 +1,7 @@
 #include <bgfx_shader.sh>
 #include "pbr_helpers.sh"
 
-// Exercise the actual shared direct-light implementation with a controlled
-// directional, point and spot lights, without requiring any production capture API.
+// Exercise the shared BRDF with controlled directional, point and spot lights.
 uniform vec4 u_test_parameters; // roughness, metallic, intensity, angle radians
 uniform vec4 u_test_base_color;
 uniform vec4 u_test_light; // type, distance, range, spotlight cosine
@@ -18,7 +17,7 @@ struct ClusterLightData
     vec4 color_intensity;
     vec4 kind_inner;
 };
-ClusterLightData load_cluster_light(uint index)
+ClusterLightData test_light()
 {
     ClusterLightData light;
     vec3 toward_light = vec3(sin(u_test_parameters.w), 0.0, cos(u_test_parameters.w));
@@ -32,16 +31,24 @@ ClusterLightData load_cluster_light(uint index)
     return light;
 }
 float shadow_visibility(vec3 position, vec3 world_dx, vec3 world_dy) { return 1.0; }
-float local_shadow_visibility(uint index, vec3 position) { return 1.0; }
+float local_shadow_visibility(ClusterLightData light, vec3 position, vec3 light_offset,
+                              float light_distance)
+{
+    return 1.0;
+}
 #include "pbr_lighting.sh"
 void main()
 {
     vec3 normal = vec3(0.0, 0.0, 1.0);
     vec3 base_color = u_test_base_color.rgb;
     vec3 f0 = mix(vec3_splat(0.04), base_color, u_test_parameters.y);
-    vec3 color = direct_light(0u, vec3_splat(0.0), vec3_splat(0.0), vec3_splat(0.0),
-                              normal, normal, normal,
-                              base_color, u_test_parameters.y, u_test_parameters.x,
-                              f0, 0.0);
+    ClusterLightData light = test_light();
+    vec3 origin = vec3_splat(0.0);
+    PbrDirectTerms direct_terms = pbr_prepare_direct(normal, normal, 1.0, u_test_parameters.x);
+    vec3 color = light.kind_inner.x < 0.5
+        ? direct_light(true, 0u, light, origin, origin, origin, normal, normal, normal,
+                       base_color, u_test_parameters.y, direct_terms, f0, 0.0)
+        : direct_light(false, 0u, light, origin, origin, origin, normal, normal, normal,
+                       base_color, u_test_parameters.y, direct_terms, f0, 0.0);
     gl_FragColor = vec4(color, 1.0);
 }

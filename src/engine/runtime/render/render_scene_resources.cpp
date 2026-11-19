@@ -536,7 +536,10 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
                     if (!geometry)
                     {
                         geometry = std::make_shared<render_detail::GpuGeometry>();
-                        if (!geometry->create(renderer))
+                        auto* pages = render_detail::meshlet_index_compaction_supported()
+                                          ? &resources.static_vertex_pages
+                                          : nullptr;
+                        if (!geometry->create(renderer, pages))
                         {
                             return fail("Cannot create GPU geometry");
                         }
@@ -1053,10 +1056,10 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
         {
             meshlet_culling_->reset_scene();
         }
-        const bool meshlet_geometry_demand =
-            meshlet_demand ||
-            (debug_requests_[static_cast<std::size_t>(RenderFeature::meshlet_colors)] &&
-             render_detail::DebugDrawPass::supports_meshlet_colors());
+        const bool meshlet_debug =
+            debug_requests_[static_cast<std::size_t>(RenderFeature::meshlet_colors)] &&
+            render_detail::DebugDrawPass::supports_meshlet_colors();
+        const bool meshlet_geometry_demand = meshlet_demand || meshlet_debug;
         for (auto& [source, weak] : resources.geometries)
         {
             (void)source;
@@ -1067,25 +1070,16 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
                     geometry->release_meshlets();
                     continue;
                 }
+                if (!meshlet_debug && geometry->meshlets_ready(true))
+                {
+                    geometry->release_meshlet_debug();
+                }
                 const auto* mesh = geometry->resource.data<MeshResource>();
-                if (!mesh || !mesh->meshlets || bgfx::isValid(geometry->meshlet_indices(0)))
+                if (!mesh || !mesh->meshlets || geometry->meshlets_ready(meshlet_debug))
                 {
                     continue;
                 }
-                std::uint64_t bytes = 0;
-                const auto count_bytes = [&bytes](const schema::MeshletDataT& data)
-                {
-                    bytes += data.indices.size() * sizeof(std::uint32_t) +
-                             data.meshlets.size() * 3 * 4 * sizeof(float);
-                };
-                count_bytes(*mesh->meshlets);
-                for (const auto& lod : mesh->lods)
-                {
-                    if (lod->meshlets)
-                    {
-                        count_bytes(*lod->meshlets);
-                    }
-                }
+                const auto bytes = geometry->meshlet_upload_bytes(meshlet_debug);
                 // Geometry creation is atomic. One oversized item can advance an otherwise
                 // empty step; subsequent items wait for the next existing upload budget.
                 if (!budget() ||
@@ -1096,7 +1090,7 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
                     output = state.progress;
                     return state.status;
                 }
-                if (!geometry->prepare_meshlets())
+                if (!geometry->prepare_meshlets(meshlet_debug))
                 {
                     return fail("Cannot prepare meshlet geometry buffers");
                 }
@@ -1235,9 +1229,9 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
                                          width, height, rendering.ssr_enabled);
                 break;
             case 2:
-                ready =
-                    !drawable || resources.targets().hdr_post_process.prepare(
-                                     width, height, rendering.bloom_enabled, config_.msaa_samples);
+                ready = !drawable || resources.targets().hdr_post_process.prepare(
+                                         width, height, rendering.bloom_enabled,
+                                         config_.msaa_samples, rendering.ssr_enabled);
                 break;
             case 3:
                 if (drawable && rendering.ao_enabled)
@@ -1409,14 +1403,12 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
                         bytes(data->skin) + bytes(data->mesh_to_skeleton) +
                         bytes(data->lightmap_texcoords);
             meshlet_cpu += meshlet_bytes(data->meshlets.get());
-            geometry_gpu += static_cast<std::uint64_t>(geometry->vertex_count) *
-                                sizeof(render_detail::GpuVertex) +
-                            static_cast<std::uint64_t>(geometry->index_count()) * 4;
+            geometry_gpu += geometry->vertex_buffer_bytes() + geometry->index_buffer_bytes();
             const auto gpu_meshlets = [&](const schema::MeshletDataT* value, std::size_t level)
             {
-                if (value && bgfx::isValid(geometry->meshlet_indices(level)))
+                if (value && bgfx::isValid(geometry->meshlet_debug_offsets(level)))
                 {
-                    geometry_gpu += value->indices.size() * 4 + value->meshlets.size() * 48;
+                    geometry_gpu += value->meshlets.size() * sizeof(std::uint32_t);
                 }
             };
             gpu_meshlets(data->meshlets.get(), 0);
@@ -1425,10 +1417,19 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
                 const auto& lod = *data->lods[level];
                 mesh_cpu += bytes(lod.indices) + bytes(lod.submeshes);
                 meshlet_cpu += meshlet_bytes(lod.meshlets.get());
-                geometry_gpu += static_cast<std::uint64_t>(geometry->index_count(level + 1)) * 4;
                 gpu_meshlets(lod.meshlets.get(), level + 1);
             }
         }
+        std::uint64_t vertex_page_bytes = 0;
+        for (const auto& page : resources.static_vertex_pages)
+        {
+            if (const auto storage = page.lock())
+            {
+                vertex_page_bytes += storage->byte_size();
+            }
+        }
+        geometry_gpu += vertex_page_bytes;
+        ENGINE_PROFILE_PLOT("Render.staticVertexPageBytes", static_cast<double>(vertex_page_bytes));
         for (const auto& [source, texture] : resources.textures)
         {
             (void)source;

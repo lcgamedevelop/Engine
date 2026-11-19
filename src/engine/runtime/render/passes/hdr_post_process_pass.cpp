@@ -180,7 +180,7 @@ bool HdrPostProcessPass::initialize_resources()
 }
 
 bool HdrPostProcessPass::prepare(std::uint16_t width, std::uint16_t height, bool bloom_enabled,
-                                 std::uint8_t samples)
+                                 std::uint8_t samples, bool ssr_enabled)
 {
     ENGINE_PROFILE_ZONE("Render.hdrPrepare");
     const auto* caps = bgfx::getCaps();
@@ -195,28 +195,61 @@ bool HdrPostProcessPass::prepare(std::uint16_t width, std::uint16_t height, bool
         release();
         return false;
     }
-    if (width_ != width || height_ != height || samples_ != samples || !bgfx::isValid(framebuffer_))
+    const bool reuse_opaque_color = ssr_enabled && samples > 1;
+    if (width_ != width || height_ != height || samples_ != samples ||
+        reuse_opaque_color_ != reuse_opaque_color || !bgfx::isValid(framebuffer_))
     {
         release_targets();
         width_ = width;
         height_ = height;
         samples_ = samples;
+        reuse_opaque_color_ = reuse_opaque_color;
         const auto scene_color_flags = render_target_flags(samples) | linear_clamp;
         color_ = bgfx::createTexture2D(width, height, false, 1, bgfx::TextureFormat::RGBA16F,
                                        scene_color_flags);
         specular_ = bgfx::createTexture2D(width, height, false, 1, bgfx::TextureFormat::RGBA16F,
                                           scene_color_flags);
-        final_color_ =
-            bgfx::createTexture2D(width, height, false, 1, bgfx::TextureFormat::RGBA16F,
-                                  scene_color_flags | (samples == 1 ? BGFX_TEXTURE_BLIT_DST : 0));
-        depth_ = bgfx::createTexture2D(width, height, false, 1, bgfx::TextureFormat::D32F,
-                                       render_target_flags(samples) | BGFX_TEXTURE_RT_WRITE_ONLY);
-        if (bgfx::isValid(color_) && bgfx::isValid(depth_) && bgfx::isValid(specular_) &&
-            bgfx::isValid(final_color_))
+        if (!reuse_opaque_color_)
         {
-            const std::array attachments = {color_, specular_, depth_};
-            framebuffer_ = bgfx::createFrameBuffer(3, attachments.data(), false);
-            const std::array final_attachments = {final_color_, depth_};
+            final_color_ = bgfx::createTexture2D(
+                width, height, false, 1, bgfx::TextureFormat::RGBA16F,
+                scene_color_flags | (samples == 1 ? BGFX_TEXTURE_BLIT_DST : 0));
+        }
+        const auto depth_flags = render_target_flags(samples) | BGFX_TEXTURE_RT_WRITE_ONLY;
+        if (reuse_opaque_color_ &&
+            bgfx::isTextureValid(0, false, 1, bgfx::TextureFormat::D32FS8, depth_flags))
+        {
+            depth_ = bgfx::createTexture2D(width, height, false, 1, bgfx::TextureFormat::D32FS8,
+                                           depth_flags);
+            if (bgfx::isValid(depth_))
+            {
+                depth_framebuffer_ = bgfx::createFrameBuffer(1, &depth_, false);
+                if (!bgfx::isValid(depth_framebuffer_))
+                {
+                    bgfx::destroy(depth_);
+                    depth_ = BGFX_INVALID_HANDLE;
+                }
+            }
+        }
+        if (!bgfx::isValid(depth_))
+        {
+            depth_ = bgfx::createTexture2D(width, height, false, 1, bgfx::TextureFormat::D32F,
+                                           depth_flags);
+        }
+        if (bgfx::isValid(color_) && bgfx::isValid(depth_) && bgfx::isValid(specular_) &&
+            bgfx::isValid(scene_color()))
+        {
+            std::array<bgfx::Attachment, 3> attachments{};
+            // SSR reads both resolves. Transparency initializes the reused color samples.
+            const auto opaque_attachment_flags =
+                reuse_opaque_color_ ? BGFX_ATTACHMENT_RESOLVE_ONLY : BGFX_ATTACHMENT_NONE;
+            attachments[0].init(color_, bgfx::Access::Write, 0, 1, 0, opaque_attachment_flags);
+            attachments[1].init(specular_, bgfx::Access::Write, 0, 1, 0, opaque_attachment_flags);
+            attachments[2].init(depth_, bgfx::Access::Write, 0, 1, 0, BGFX_ATTACHMENT_NONE);
+            framebuffer_ = bgfx::createFrameBuffer(static_cast<std::uint8_t>(attachments.size()),
+                                                   attachments.data(), false);
+            // SSR has finished reading the opaque colors by the time this view writes them.
+            const std::array final_attachments = {scene_color(), depth_};
             final_framebuffer_ = bgfx::createFrameBuffer(2, final_attachments.data(), false);
         }
         if (!bgfx::isValid(framebuffer_) || !bgfx::isValid(final_framebuffer_))
@@ -261,7 +294,22 @@ bool HdrPostProcessPass::prepare(std::uint16_t width, std::uint16_t height, bool
     return true;
 }
 
-void HdrPostProcessPass::begin_scene(std::uint32_t clear_color)
+bool HdrPostProcessPass::begin_opaque_depth(const float* view, const float* projection)
+{
+    if (!bgfx::isValid(depth_framebuffer_))
+    {
+        return false;
+    }
+    bgfx::setViewName(opaque_depth_view, "Opaque depth prepass");
+    bgfx::setViewFrameBuffer(opaque_depth_view, depth_framebuffer_);
+    bgfx::setViewRect(opaque_depth_view, 0, 0, width_, height_);
+    bgfx::setViewTransform(opaque_depth_view, view, projection);
+    bgfx::setViewClear(opaque_depth_view, BGFX_CLEAR_DEPTH | BGFX_CLEAR_STENCIL, 0, 1.0F, 0);
+    bgfx::touch(opaque_depth_view);
+    return true;
+}
+
+void HdrPostProcessPass::begin_scene(std::uint32_t clear_color, bool depth_prepared)
 {
     std::array<float, 4> clear{};
     for (std::size_t index = 0; index < 4; ++index)
@@ -280,7 +328,8 @@ void HdrPostProcessPass::begin_scene(std::uint32_t clear_color)
     bgfx::setViewName(main_view, "Opaque scene and environment specular");
     bgfx::setViewFrameBuffer(main_view, framebuffer_);
     bgfx::setViewRect(main_view, 0, 0, width_, height_);
-    bgfx::setViewClear(main_view, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 1.0F, 0, clear_palette, 1);
+    const auto clear_flags = BGFX_CLEAR_COLOR | (depth_prepared ? 0 : BGFX_CLEAR_DEPTH);
+    bgfx::setViewClear(main_view, clear_flags, 1.0F, 0, clear_palette, 1);
     bgfx::touch(main_view);
 }
 
@@ -298,7 +347,7 @@ void HdrPostProcessPass::begin_transparency(bgfx::TextureHandle frozen_scene, co
     {
         // A previous multisampled frame may have attached this view to its old target.
         bgfx::setViewFrameBuffer(scene_copy_view, BGFX_INVALID_HANDLE);
-        bgfx::blit(scene_copy_view, bgfx::TextureRegion{.handle = final_color_},
+        bgfx::blit(scene_copy_view, bgfx::TextureRegion{.handle = scene_color()},
                    bgfx::TextureRegion{.handle = frozen_scene});
     }
     else
@@ -307,6 +356,10 @@ void HdrPostProcessPass::begin_transparency(bgfx::TextureHandle frozen_scene, co
         // Populate every color sample through a draw, preserving the opaque MSAA depth.
         set_post_view(scene_copy_view, "Initialize transparent MSAA scene", final_framebuffer_,
                       width_, height_);
+        if (reuse_opaque_color_)
+        {
+            bgfx::setViewClear(scene_copy_view, BGFX_CLEAR_COLOR, 0, 1.0F, 0);
+        }
         bgfx::setTexture(0, samplers_[0], frozen_scene, linear_clamp);
         bgfx::setVertexBuffer(0, fullscreen_);
         bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_MSAA);
@@ -360,14 +413,14 @@ bool HdrPostProcessPass::resolve(const RenderSettings& settings)
                        settings.bloom_radius / bloom_heights_[1], 0.0F, 0.0F};
         set_post_view(hdr_bright_view, "Bloom bright extraction", bloom_framebuffers_[0],
                       bloom_widths_[0], bloom_heights_[0]);
-        submit(hdr_bright_view, 0, final_color_, {1.0F / width_, 1.0F / height_, 0.0F, 0.0F});
+        submit(hdr_bright_view, 0, scene_color(), {1.0F / width_, 1.0F / height_, 0.0F, 0.0F});
         set_post_view(hdr_blur_view, "Bloom vertical blur", bloom_framebuffers_[1],
                       bloom_widths_[1], bloom_heights_[1]);
         submit(hdr_blur_view, 1, bloom_colors_[0], bloom_texel);
     }
     set_post_view(hdr_resolve_view, "HDR resolve and bloom horizontal blur", BGFX_INVALID_HANDLE,
                   width_, height_);
-    submit(hdr_resolve_view, 2, final_color_, bloom_texel);
+    submit(hdr_resolve_view, 2, scene_color(), bloom_texel);
     return true;
 }
 
@@ -383,6 +436,7 @@ std::uint32_t HdrPostProcessPass::resource_count() const noexcept
                           static_cast<std::uint32_t>(bgfx::isValid(final_color_)) +
                           static_cast<std::uint32_t>(bgfx::isValid(final_framebuffer_)) +
                           static_cast<std::uint32_t>(bgfx::isValid(depth_)) +
+                          static_cast<std::uint32_t>(bgfx::isValid(depth_framebuffer_)) +
                           static_cast<std::uint32_t>(bgfx::isValid(framebuffer_));
     for (auto handle : programs_)
     {
@@ -427,6 +481,12 @@ void HdrPostProcessPass::release_bloom() noexcept
 void HdrPostProcessPass::release_targets() noexcept
 {
     release_bloom();
+    if (bgfx::isValid(depth_framebuffer_))
+    {
+        bgfx::setViewFrameBuffer(opaque_depth_view, BGFX_INVALID_HANDLE);
+        bgfx::destroy(depth_framebuffer_);
+        depth_framebuffer_ = BGFX_INVALID_HANDLE;
+    }
     if (bgfx::isValid(framebuffer_))
     {
         bgfx::setViewFrameBuffer(main_view, BGFX_INVALID_HANDLE);
@@ -454,6 +514,7 @@ void HdrPostProcessPass::release_targets() noexcept
     width_ = 0;
     height_ = 0;
     samples_ = 1;
+    reuse_opaque_color_ = false;
 }
 
 void HdrPostProcessPass::release() noexcept

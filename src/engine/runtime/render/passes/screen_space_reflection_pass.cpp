@@ -1,5 +1,6 @@
 #include "runtime/render/passes/screen_space_reflection_pass.hpp"
 
+#include "runtime/performance/profiling.hpp"
 #include "runtime/render/render_math.hpp"
 #include "runtime/render/render_settings.hpp"
 
@@ -22,6 +23,12 @@ constexpr bgfx::ViewId trace_view = 126;
 constexpr bgfx::ViewId composite_view = 127;
 constexpr std::uint32_t point_clamp = BGFX_SAMPLER_UVW_CLAMP | BGFX_SAMPLER_MIN_POINT |
                                       BGFX_SAMPLER_MAG_POINT | BGFX_SAMPLER_MIP_POINT;
+
+constexpr std::uint16_t hierarchy_mip(std::uint16_t level)
+{
+    // Logical odd and even levels start at physical mip zero in their respective chains.
+    return static_cast<std::uint16_t>((level - 1u) & ~1u);
+}
 
 bool valid_settings(const RenderSettings& settings)
 {
@@ -148,10 +155,6 @@ bool ScreenSpaceReflectionPass::prepare(std::uint16_t width, std::uint16_t heigh
         .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
         .end();
     fullscreen_ = bgfx::createVertexBuffer(bgfx::copy(vertices.data(), sizeof(vertices)), layout);
-    for (auto& texture : hierarchy_)
-    {
-        texture = bgfx::createTexture2D(width, height, true, 1, bgfx::TextureFormat::R32F, flags);
-    }
     reflection_ = bgfx::createTexture2D(trace_width, trace_height, false, 1,
                                         bgfx::TextureFormat::RGBA16F, flags);
     color_ = bgfx::createTexture2D(width, height, false, 1, bgfx::TextureFormat::RGBA16F, flags);
@@ -168,10 +171,6 @@ bool ScreenSpaceReflectionPass::prepare(std::uint16_t width, std::uint16_t heigh
     {
         valid = valid && bgfx::isValid(value);
     }
-    for (auto value : hierarchy_)
-    {
-        valid = valid && bgfx::isValid(value);
-    }
     if (!valid)
     {
         release();
@@ -179,27 +178,40 @@ bool ScreenSpaceReflectionPass::prepare(std::uint16_t width, std::uint16_t heigh
     }
     auto mip_width = width;
     auto mip_height = height;
-    for (std::uint16_t index = 0; index < hierarchy_frames_.size(); ++index)
+    levels_ = 1;
+    for (auto& target : hierarchy_frames_)
     {
-        bgfx::Attachment attachment;
-        attachment.init(hierarchy_[index % 2], bgfx::Access::Write, 0, 1, index,
-                        BGFX_ATTACHMENT_NONE);
-        hierarchy_frames_[index] = bgfx::createFrameBuffer(1, &attachment, false);
-        ++levels_;
         if (mip_width == 1 && mip_height == 1)
         {
             break;
         }
         mip_width = std::max<std::uint16_t>(1, mip_width / 2);
         mip_height = std::max<std::uint16_t>(1, mip_height / 2);
+        auto& texture = hierarchy_[levels_ % 2];
+        if (levels_ <= 2)
+        {
+            texture = bgfx::createTexture2D(mip_width, mip_height, true, 1,
+                                            bgfx::TextureFormat::R32F, flags);
+            if (!bgfx::isValid(texture))
+            {
+                release();
+                return false;
+            }
+        }
+        bgfx::Attachment attachment;
+        attachment.init(texture, bgfx::Access::Write, 0, 1, hierarchy_mip(levels_),
+                        BGFX_ATTACHMENT_NONE);
+        target = bgfx::createFrameBuffer(1, &attachment, false);
+        if (!bgfx::isValid(target))
+        {
+            release();
+            return false;
+        }
+        ++levels_;
     }
     reflection_frame_ = bgfx::createFrameBuffer(1, &reflection_, false);
     color_frame_ = bgfx::createFrameBuffer(1, &color_, false);
     valid = bgfx::isValid(reflection_frame_) && bgfx::isValid(color_frame_);
-    for (std::uint16_t index = 0; index < levels_; ++index)
-    {
-        valid = valid && bgfx::isValid(hierarchy_frames_[index]);
-    }
     if (!valid)
     {
         release();
@@ -212,7 +224,7 @@ bool ScreenSpaceReflectionPass::render(const float* view, const float* projectio
                                        bgfx::TextureHandle ibl_specular, bgfx::TextureHandle depth,
                                        bgfx::TextureHandle normal_roughness,
                                        bgfx::TextureHandle specular, bgfx::TextureHandle brdf_lut,
-                                       const RenderSettings& settings)
+                                       const RenderSettings& settings, std::uint64_t depth_revision)
 {
     if (!settings.ssr_enabled || !valid_settings(settings) || !bgfx::isValid(color_frame_) ||
         view == nullptr || projection == nullptr || !finite_matrix(view) ||
@@ -261,29 +273,32 @@ bool ScreenSpaceReflectionPass::render(const float* view, const float* projectio
         bgfx::setVertexBuffer(0, fullscreen_);
         bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A);
     };
-    for (std::uint16_t level = 0; level < levels_; ++level)
+    const bool reuse_depth = depth_revision != 0 && depth_revision == cached_depth_revision_;
+    ENGINE_PROFILE_PLOT("Render.ssrDepthReused", static_cast<std::int64_t>(reuse_depth));
+    for (std::uint16_t level = 1; !reuse_depth && level < levels_; ++level)
     {
         const auto mip_width = std::max<std::uint16_t>(1, width_ >> level);
         const auto mip_height = std::max<std::uint16_t>(1, height_ >> level);
-        const auto previous_width =
-            std::max<std::uint16_t>(1, width_ >> (level == 0 ? 0 : level - 1));
-        const auto previous_height =
-            std::max<std::uint16_t>(1, height_ >> (level == 0 ? 0 : level - 1));
+        const auto source_level = static_cast<std::uint16_t>(level - 1);
+        const auto previous_width = std::max<std::uint16_t>(1, width_ >> source_level);
+        const auto previous_height = std::max<std::uint16_t>(1, height_ >> source_level);
         const float reduce[] = {
             static_cast<float>(previous_width), static_cast<float>(previous_height),
-            static_cast<float>(level == 0 ? 0 : level - 1), level == 0 ? 1.0F : 0.0F};
+            static_cast<float>(source_level == 0 ? 0 : hierarchy_mip(source_level)), 0};
         const float target[] = {static_cast<float>(mip_width), static_cast<float>(mip_height), 0,
                                 0};
         const auto depth_view = static_cast<bgfx::ViewId>(first_depth_view + level);
-        set_view(depth_view, "SSR depth hierarchy", hierarchy_frames_[level], mip_width,
+        set_view(depth_view, "SSR depth hierarchy", hierarchy_frames_[source_level], mip_width,
                  mip_height);
-        bind_common();
         bgfx::setUniform(uniforms_[3], reduce);
         bgfx::setUniform(uniforms_[4], target);
-        bgfx::setTexture(2, samplers_[2], level == 0 ? depth : hierarchy_[(level - 1) % 2],
+        bgfx::setTexture(2, samplers_[2], source_level == 0 ? depth : hierarchy_[source_level % 2],
                          point_clamp);
+        bgfx::setVertexBuffer(0, fullscreen_);
+        bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A);
         bgfx::submit(depth_view, programs_[0]);
     }
+    cached_depth_revision_ = depth_revision;
     set_view(trace_view, "SSR trace", reflection_frame_, trace_width_, trace_height_);
     bind_common();
     for (std::uint8_t index = 0; index < inputs.size(); ++index)
@@ -291,8 +306,8 @@ bool ScreenSpaceReflectionPass::render(const float* view, const float* projectio
         bgfx::setTexture(index, samplers_[index], inputs[index],
                          index == 0 || index == 5 ? BGFX_SAMPLER_UVW_CLAMP : point_clamp);
     }
-    bgfx::setTexture(6, samplers_[6], hierarchy_[0], point_clamp);
-    bgfx::setTexture(7, samplers_[7], hierarchy_[1], point_clamp);
+    bgfx::setTexture(6, samplers_[6], levels_ > 2 ? hierarchy_[0] : depth, point_clamp);
+    bgfx::setTexture(7, samplers_[7], levels_ > 1 ? hierarchy_[1] : depth, point_clamp);
     bgfx::submit(trace_view, programs_[1]);
     set_view(composite_view, "SSR composite", color_frame_, width_, height_);
     bind_common();
@@ -313,7 +328,8 @@ bgfx::TextureHandle ScreenSpaceReflectionPass::texture() const noexcept
 
 void ScreenSpaceReflectionPass::release() noexcept
 {
-    for (std::uint16_t index = 0; index < levels_; ++index)
+    cached_depth_revision_ = 0;
+    for (std::uint16_t index = 1; index < levels_; ++index)
     {
         bgfx::setViewFrameBuffer(first_depth_view + index, BGFX_INVALID_HANDLE);
     }

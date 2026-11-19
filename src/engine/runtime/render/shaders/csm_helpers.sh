@@ -20,6 +20,24 @@ uniform vec4 u_shadow_params;
 // Depth bias, reciprocal atlas size, directional light index, enabled.
 uniform vec4 u_shadow_settings;
 
+#if defined(ENGINE_VSM_DEPTH_RANGES)
+float fully_lit_pcf(vec2 fraction)
+{
+    float visible = 0.0;
+    // Accumulate in the same order as the filtered samples.
+    for (int x = 0; x < 5; ++x)
+    {
+        float weight_x = x == 0 ? 1.0 - fraction.x : (x == 4 ? fraction.x : 1.0);
+        visible += weight_x * (1.0 - fraction.y);
+        visible += weight_x;
+        visible += weight_x;
+        visible += weight_x;
+        visible += weight_x * fraction.y;
+    }
+    return visible / 16.0;
+}
+#endif
+
 float shadow_filter(vec3 projected, vec3 dx, vec3 dy, vec4 rectangle,
                      float inverse_size, float bias, float border, bool virtual_map)
 {
@@ -41,6 +59,20 @@ float shadow_filter(vec3 projected, vec3 dx, vec3 dy, vec4 rectangle,
     vec2 footprint = uv / inverse_size - 2.0;
     vec2 first_texel = floor(footprint);
     vec2 fraction = fract(footprint);
+#if defined(ENGINE_VSM_DEPTH_RANGES)
+    if (virtual_map && u_lighting_params.z > 0.5)
+    {
+        ivec2 block = ivec2(first_texel + 2.0) / 8;
+        vec2 range = texelFetch(s_lightmap, block, 0).rg;
+        // The outer sample centres lie less than three texels from this receiver.
+        vec2 reach = vec2_splat(3.0 * inverse_size) / rectangle.zw;
+        float span = dot(abs(depth_gradient), reach);
+        float roundoff = 0.000001 * (1.0 + span + abs(bias));
+        float receiver = projected.z - bias;
+        if (range.y < receiver - span - roundoff) return 0.0;
+        if (range.x >= receiver + span + roundoff) return fully_lit_pcf(fraction);
+    }
+#endif
     float visible = 0.0;
     for (int x = 0; x < 5; ++x)
     {

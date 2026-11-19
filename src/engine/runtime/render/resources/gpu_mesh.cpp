@@ -50,7 +50,7 @@ GpuMesh& GpuMesh::operator=(GpuMesh&& other) noexcept
 bool GpuMesh::create(const MeshRenderer& renderer, std::shared_ptr<GpuGeometry> source)
 {
     release();
-    if (source == nullptr || !bgfx::isValid(source->vertices) || !bgfx::isValid(source->indices))
+    if (source == nullptr || !source->vertices_ready() || !bgfx::isValid(source->index_buffer()))
     {
         return false;
     }
@@ -161,7 +161,7 @@ bool GpuMesh::update_deformation(const MeshRendererRuntime& runtime, SkinningPas
     return true;
 }
 
-void GpuMesh::bind_vertices() const
+void GpuMesh::bind_vertices(bool positions_only) const
 {
     if (bgfx::isValid(deformed_vertices))
     {
@@ -169,7 +169,7 @@ void GpuMesh::bind_vertices() const
     }
     else
     {
-        bgfx::setVertexBuffer(0, geometry->vertices);
+        geometry->bind_vertices(positions_only);
     }
 }
 

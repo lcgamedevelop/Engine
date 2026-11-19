@@ -4,11 +4,17 @@
 
 #include <array>
 #include <cstdint>
+#include <span>
+#include <vector>
 
 namespace engine::render_detail
 {
 
-// 两阶段深度/表面输出保证无SSR程序的前景物件也能遮挡后方的表面数据。
+struct SceneDrawView;
+struct RenderFrameData;
+struct ViewDrawList;
+
+// 拥有屏幕空间效果共用的单采样深度与材质表面附件。
 class SurfacePass final
 {
 public:
@@ -18,7 +24,16 @@ public:
     SurfacePass& operator=(const SurfacePass&) = delete;
 
     [[nodiscard]] bool prepare(std::uint16_t width, std::uint16_t height, bool material_surface);
-    void begin(const float* view, const float* projection);
+    [[nodiscard]] bool can_combine_depth(const RenderFrameData& frame,
+                                         const ViewDrawList& list) const;
+    void begin(const float* view, const float* projection, bool combined_depth);
+    [[nodiscard]] std::uint64_t identify_depth(const SceneDrawView& draw,
+                                               const RenderFrameData& frame,
+                                               const ViewDrawList& list);
+    [[nodiscard]] std::span<const std::uint64_t> depth_inputs() const noexcept
+    {
+        return depth_inputs_;
+    }
     [[nodiscard]] bgfx::TextureHandle depth() const noexcept;
     [[nodiscard]] bgfx::TextureHandle normal_roughness() const noexcept;
     [[nodiscard]] bgfx::TextureHandle specular() const noexcept;
@@ -29,6 +44,8 @@ private:
     std::array<bgfx::TextureHandle, 3> targets_{
         {BGFX_INVALID_HANDLE, BGFX_INVALID_HANDLE, BGFX_INVALID_HANDLE}};
     bgfx::FrameBufferHandle framebuffer_ = BGFX_INVALID_HANDLE;
+    std::vector<std::uint64_t> depth_inputs_, candidate_inputs_;
+    std::uint64_t depth_revision_ = 0;
     std::uint16_t width_ = 0;
     std::uint16_t height_ = 0;
     bool material_surface_ = false;

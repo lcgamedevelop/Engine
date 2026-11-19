@@ -3,8 +3,16 @@
 #include "runtime/performance/profiling.hpp"
 #include "runtime/render/render_constants.hpp"
 #include "runtime/render/resources/gpu_texture.hpp"
+#include "runtime/render/vsm/vsm_types.hpp"
 #include "runtime/resource/resource.hpp"
 #include "runtime/scene/material.hpp"
+
+#include "fs_cube_depth.bin.h"
+#include "fs_cube_pbr_opaque.bin.h"
+#include "fs_shadow_solid.bin.h"
+#include "fs_terrain_depth.bin.h"
+#include "vs_shadow_instanced.bin.h"
+#include "vs_shadow_position.bin.h"
 
 #include <SDL3/SDL_log.h>
 
@@ -32,9 +40,23 @@ GpuProgram::GpuProgram(GpuProgram&& other) noexcept
       fragment_shader(
           std::exchange(other.fragment_shader, bgfx::ShaderHandle{bgfx::kInvalidHandle})),
       program(std::exchange(other.program, bgfx::ProgramHandle{bgfx::kInvalidHandle})),
+      pbr_opaque_shader(
+          std::exchange(other.pbr_opaque_shader, bgfx::ShaderHandle{bgfx::kInvalidHandle})),
+      pbr_opaque_program(
+          std::exchange(other.pbr_opaque_program, bgfx::ProgramHandle{bgfx::kInvalidHandle})),
+      instanced_pbr_opaque_program(std::exchange(other.instanced_pbr_opaque_program,
+                                                 bgfx::ProgramHandle{bgfx::kInvalidHandle})),
       surface_shader(std::exchange(other.surface_shader, bgfx::ShaderHandle{bgfx::kInvalidHandle})),
       surface_program(
           std::exchange(other.surface_program, bgfx::ProgramHandle{bgfx::kInvalidHandle})),
+      depth_shader(std::exchange(other.depth_shader, bgfx::ShaderHandle{bgfx::kInvalidHandle})),
+      depth_program(std::exchange(other.depth_program, bgfx::ProgramHandle{bgfx::kInvalidHandle})),
+      instanced_depth_program(
+          std::exchange(other.instanced_depth_program, bgfx::ProgramHandle{bgfx::kInvalidHandle})),
+      solid_depth_program(
+          std::exchange(other.solid_depth_program, bgfx::ProgramHandle{bgfx::kInvalidHandle})),
+      instanced_solid_depth_program(std::exchange(other.instanced_solid_depth_program,
+                                                 bgfx::ProgramHandle{bgfx::kInvalidHandle})),
       rvt_shader(std::exchange(other.rvt_shader, bgfx::ShaderHandle{bgfx::kInvalidHandle})),
       rvt_program(std::exchange(other.rvt_program, bgfx::ProgramHandle{bgfx::kInvalidHandle})),
       instanced_vertex_shader(
@@ -60,10 +82,25 @@ GpuProgram& GpuProgram::operator=(GpuProgram&& other) noexcept
         fragment_shader =
             std::exchange(other.fragment_shader, bgfx::ShaderHandle{bgfx::kInvalidHandle});
         program = std::exchange(other.program, bgfx::ProgramHandle{bgfx::kInvalidHandle});
+        pbr_opaque_shader =
+            std::exchange(other.pbr_opaque_shader, bgfx::ShaderHandle{bgfx::kInvalidHandle});
+        pbr_opaque_program =
+            std::exchange(other.pbr_opaque_program, bgfx::ProgramHandle{bgfx::kInvalidHandle});
+        instanced_pbr_opaque_program = std::exchange(other.instanced_pbr_opaque_program,
+                                                    bgfx::ProgramHandle{bgfx::kInvalidHandle});
         surface_shader =
             std::exchange(other.surface_shader, bgfx::ShaderHandle{bgfx::kInvalidHandle});
         surface_program =
             std::exchange(other.surface_program, bgfx::ProgramHandle{bgfx::kInvalidHandle});
+        depth_shader = std::exchange(other.depth_shader, bgfx::ShaderHandle{bgfx::kInvalidHandle});
+        depth_program =
+            std::exchange(other.depth_program, bgfx::ProgramHandle{bgfx::kInvalidHandle});
+        instanced_depth_program =
+            std::exchange(other.instanced_depth_program, bgfx::ProgramHandle{bgfx::kInvalidHandle});
+        solid_depth_program =
+            std::exchange(other.solid_depth_program, bgfx::ProgramHandle{bgfx::kInvalidHandle});
+        instanced_solid_depth_program = std::exchange(other.instanced_solid_depth_program,
+                                                      bgfx::ProgramHandle{bgfx::kInvalidHandle});
         rvt_shader = std::exchange(other.rvt_shader, bgfx::ShaderHandle{bgfx::kInvalidHandle});
         rvt_program = std::exchange(other.rvt_program, bgfx::ProgramHandle{bgfx::kInvalidHandle});
         instanced_vertex_shader =
@@ -153,15 +190,101 @@ bool GpuProgram::create(const schema::ShaderDataT& shader)
             }
         }
     }
+    const bool builtin_pbr = path == "builtin://shaders/pbr";
+    if (builtin_pbr)
+    {
+        pbr_opaque_shader =
+            bgfx::createShader(bgfx::copy(fs_cube_pbr_opaque, sizeof(fs_cube_pbr_opaque)));
+        if (!bgfx::isValid(pbr_opaque_shader))
+        {
+            return false;
+        }
+        pbr_opaque_program = bgfx::createProgram(vertex_shader, pbr_opaque_shader);
+        if (bgfx::isValid(instanced_vertex_shader))
+        {
+            instanced_pbr_opaque_program =
+                bgfx::createProgram(instanced_vertex_shader, pbr_opaque_shader);
+        }
+        if (!bgfx::isValid(pbr_opaque_program) ||
+            (bgfx::isValid(instanced_vertex_shader) &&
+             !bgfx::isValid(instanced_pbr_opaque_program)))
+        {
+            SDL_LogError(SDL_LOG_CATEGORY_RENDER, "Cannot link opaque PBR program: %s",
+                         path.c_str());
+            return false;
+        }
+        // These shaders use the same position transforms as the built-in PBR vertices.
+        const auto solid_fragment =
+            bgfx::createShader(bgfx::copy(fs_shadow_solid, sizeof(fs_shadow_solid)));
+        if (!bgfx::isValid(solid_fragment))
+        {
+            return false;
+        }
+        const auto link_solid_depth = [&](const std::uint8_t* code, std::uint32_t bytes)
+        {
+            const auto vertex = bgfx::createShader(bgfx::copy(code, bytes));
+            if (!bgfx::isValid(vertex))
+            {
+                return bgfx::ProgramHandle{bgfx::kInvalidHandle};
+            }
+            const auto linked = bgfx::createProgram(vertex, solid_fragment);
+            bgfx::destroy(vertex);
+            return linked;
+        };
+        solid_depth_program = link_solid_depth(vs_shadow_position, sizeof(vs_shadow_position));
+        if (bgfx::isValid(instanced_vertex_shader))
+        {
+            instanced_solid_depth_program =
+                link_solid_depth(vs_shadow_instanced, sizeof(vs_shadow_instanced));
+        }
+        bgfx::destroy(solid_fragment);
+        if (!bgfx::isValid(solid_depth_program) ||
+            (bgfx::isValid(instanced_vertex_shader) &&
+             !bgfx::isValid(instanced_solid_depth_program)))
+        {
+            SDL_LogError(SDL_LOG_CATEGORY_RENDER, "Cannot link solid depth program: %s",
+                         path.c_str());
+            return false;
+        }
+    }
+    const bool terrain = path == "builtin://shaders/terrain-pbr";
+    if (terrain || builtin_pbr || path == "builtin://shaders/unlit" ||
+        path == "builtin://shaders/blinn-phong")
+    {
+        const auto* code = terrain ? fs_terrain_depth : fs_cube_depth;
+        const auto size = terrain ? sizeof(fs_terrain_depth) : sizeof(fs_cube_depth);
+        depth_shader = bgfx::createShader(bgfx::copy(code, static_cast<std::uint32_t>(size)));
+        if (!bgfx::isValid(depth_shader))
+        {
+            return false;
+        }
+        depth_program = bgfx::createProgram(vertex_shader, depth_shader);
+        if (bgfx::isValid(instanced_vertex_shader))
+        {
+            instanced_depth_program = bgfx::createProgram(instanced_vertex_shader, depth_shader);
+        }
+        if (!bgfx::isValid(depth_program) ||
+            (bgfx::isValid(instanced_vertex_shader) && !bgfx::isValid(instanced_depth_program)))
+        {
+            SDL_LogError(SDL_LOG_CATEGORY_RENDER, "Cannot link depth coverage program: %s",
+                         path.c_str());
+            return false;
+        }
+    }
     // 反射与定义双向匹配，避免遗漏参数继承上一对象的 uniform 值。
     std::vector<bgfx::UniformInfo> reflected;
-    for (auto stage :
-         {vertex_shader, fragment_shader, surface_shader, instanced_vertex_shader, rvt_shader})
+    std::vector<std::string> opaque_inputs;
+    for (auto stage : {vertex_shader, fragment_shader, surface_shader, instanced_vertex_shader,
+                       rvt_shader, depth_shader, pbr_opaque_shader})
     {
         if (!bgfx::isValid(stage))
         {
             continue;
         }
+        const bool opaque_stage = builtin_pbr &&
+                                  (stage.idx == pbr_opaque_shader.idx ||
+                                   stage.idx == vertex_shader.idx ||
+                                   stage.idx == instanced_vertex_shader.idx);
         const auto count = bgfx::getShaderUniforms(stage);
         std::vector<bgfx::UniformHandle> handles(count);
         bgfx::getShaderUniforms(stage, handles.data(), count);
@@ -177,9 +300,9 @@ bool GpuProgram::create(const schema::ShaderDataT& shader)
                 name == "u_fog_color" || name == "u_fog_range" || name == "u_shadow_matrices" ||
                 name == "u_shadow_rects" || name == "u_shadow_splits" ||
                 name == "u_shadow_params" || name == "u_shadow_settings" ||
-                name == "u_vsm_layout" || name == "s_virtual_shadow" || name == "s_shadow_map" ||
-                name == "u_ibl_params" || name == "s_ibl_irradiance" || name == "s_ibl_prefilter" ||
-                name == "s_ibl_lut" || name == "s_ambient_occlusion" ||
+                name == "u_vsm_layout" || name == "u_vsm_view" || name == "s_virtual_shadow" ||
+                name == "s_shadow_map" || name == "u_ibl_params" || name == "s_ibl_irradiance" ||
+                name == "s_ibl_prefilter" || name == "s_ibl_lut" || name == "s_ambient_occlusion" ||
                 name == "u_ambient_occlusion" || name == "u_cluster_grid" ||
                 name == "u_cluster_camera" || name == "u_cluster_counts" ||
                 name == "u_cluster_viewport" || name == "u_frame_inputs" ||
@@ -200,7 +323,8 @@ bool GpuProgram::create(const schema::ShaderDataT& shader)
                                       ? bgfx::UniformType::Sampler
                                       : bgfx::UniformType::Vec4;
                 const auto expected_count =
-                    name == "u_probe_sh" ? 9
+                    name == "u_probe_sh"   ? 9
+                    : name == "u_vsm_view" ? vsm_view_vectors
                     : name == "u_shadow_matrices" || name == "u_shadow_rects"
                         ? maximum_shadow_cascades
                         : 1;
@@ -231,6 +355,10 @@ bool GpuProgram::create(const schema::ShaderDataT& shader)
                 return false;
             }
             reflected.push_back(info);
+            if (opaque_stage)
+            {
+                opaque_inputs.emplace_back(name);
+            }
         }
     }
     const auto declared = [&reflected](const std::string& name)
@@ -238,6 +366,8 @@ bool GpuProgram::create(const schema::ShaderDataT& shader)
         return std::any_of(reflected.begin(), reflected.end(),
                            [&name](const auto& info) { return name == info.name; });
     };
+    const auto used_by_pbr_opaque = [&opaque_inputs](std::string_view name)
+    { return std::ranges::find(opaque_inputs, name) != opaque_inputs.end(); };
     for (const auto& parameter : shader.parameters)
     {
         if (std::any_of(uniforms.begin(), uniforms.end(), [&parameter](const auto& uniform)
@@ -254,6 +384,7 @@ bool GpuProgram::create(const schema::ShaderDataT& shader)
         }
         GpuUniform uniform;
         uniform.name = parameter->uniform_name;
+        uniform.used_by_pbr_opaque = used_by_pbr_opaque(uniform.name);
         uniform.handle = bgfx::createUniform(uniform.name.c_str(), bgfx::UniformType::Vec4);
         uniforms.push_back(std::move(uniform));
         if (!bgfx::isValid(uniforms.back().handle))
@@ -278,6 +409,7 @@ bool GpuProgram::create(const schema::ShaderDataT& shader)
         sampler.uniform_name = item->uniform_name;
         sampler.stage = item->stage;
         sampler.source = item->source;
+        sampler.used_by_pbr_opaque = used_by_pbr_opaque(sampler.uniform_name);
         sampler.handle =
             bgfx::createUniform(item->uniform_name.c_str(), bgfx::UniformType::Sampler);
         samplers.push_back(std::move(sampler));
@@ -326,6 +458,26 @@ void GpuProgram::release() noexcept
     {
         bgfx::destroy(surface_shader);
         surface_shader = BGFX_INVALID_HANDLE;
+    }
+    for (auto* handle : {&depth_program, &instanced_depth_program, &solid_depth_program,
+                         &instanced_solid_depth_program, &pbr_opaque_program,
+                         &instanced_pbr_opaque_program})
+    {
+        if (bgfx::isValid(*handle))
+        {
+            bgfx::destroy(*handle);
+            *handle = BGFX_INVALID_HANDLE;
+        }
+    }
+    if (bgfx::isValid(depth_shader))
+    {
+        bgfx::destroy(depth_shader);
+        depth_shader = BGFX_INVALID_HANDLE;
+    }
+    if (bgfx::isValid(pbr_opaque_shader))
+    {
+        bgfx::destroy(pbr_opaque_shader);
+        pbr_opaque_shader = BGFX_INVALID_HANDLE;
     }
     if (bgfx::isValid(program))
     {
@@ -458,12 +610,26 @@ bool GpuProgram::prepare_material(const Material& material, const TextureTable& 
         }
         binding.samplers.push_back(value);
     }
+    binding.pbr_opaque = bgfx::isValid(pbr_opaque_program) &&
+                         binding.blend == schema::BlendMode::opaque && !binding.frame_textures;
     for (std::size_t index = 0; index < uniforms.size(); ++index)
     {
-        if (uniforms[index].name == "u_material")
+        const auto& name = uniforms[index].name;
+        if (name == "u_material")
         {
             const float mode = binding.values[index][2];
             binding.unlit = mode > .5F && mode < 1.5F;
+            binding.pbr_opaque = binding.pbr_opaque && mode == 0.0F;
+            binding.solid_depth =
+                bgfx::isValid(solid_depth_program) && binding.values[index][3] == 0.0F;
+        }
+        else if (binding.pbr_opaque && name == "u_specular")
+        {
+            binding.pbr_opaque = binding.values[index][3] == 0.0F;
+        }
+        else if (binding.pbr_opaque && name == "u_hex_tiling")
+        {
+            binding.pbr_opaque = binding.values[index][0] == 0.0F;
         }
     }
     // 阴影约定只在阴影使用时报告不支持，普通颜色绘制不受影响。
@@ -555,7 +721,7 @@ bool GpuProgram::prepare_material(const Material& material, const TextureTable& 
 
 bool GpuProgram::bind_material(const MaterialBinding& material,
                                std::span<const bgfx::TextureHandle> frame_textures,
-                               bool max_anisotropy) const
+                               bool max_anisotropy, bool pbr_opaque) const
 {
     if (material.program != this || material.values.size() != uniforms.size() ||
         material.samplers.size() != samplers.size())
@@ -564,11 +730,19 @@ bool GpuProgram::bind_material(const MaterialBinding& material,
     }
     for (std::size_t index = 0; index < uniforms.size(); ++index)
     {
-        bgfx::setUniform(uniforms[index].handle, material.values[index].data());
+        const auto& uniform = uniforms[index];
+        if (!pbr_opaque || uniform.used_by_pbr_opaque)
+        {
+            bgfx::setUniform(uniform.handle, material.values[index].data());
+        }
     }
     for (std::size_t index = 0; index < samplers.size(); ++index)
     {
         const auto& sampler = samplers[index];
+        if (pbr_opaque && !sampler.used_by_pbr_opaque)
+        {
+            continue;
+        }
         const auto& value = material.samplers[index];
         bgfx::TextureHandle texture{value.texture};
         std::uint32_t flags = UINT32_MAX;

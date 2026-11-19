@@ -41,11 +41,12 @@ classDiagram
         +release() void
         +resource_count() uint32_t
         +collect_ibl(const Scene* scene, RenderPreparation& preparation) bool
-        +draw_meshes(const RenderFrameData& frame, const ViewDrawList& list, const RenderSettings& settings, const SceneDrawView& view, SceneDrawMode mode) bool
+        +draw_meshes(const RenderFrameData& frame, ViewDrawList& list, const RenderSettings& settings, const SceneDrawView& view, SceneDrawMode mode) bool
         +view_stats vector~RenderViewStats~
     }
     class SceneDrawView
     class SceneDrawMode
+    class PassTargets
     class RenderViewStats
     SceneGpuResources ..> SceneDrawView : 提交期间借用
     SceneGpuResources ..> SceneDrawMode : 本次提交模式
@@ -69,7 +70,13 @@ classDiagram
         +supports_instancing() bool
         +create(const ShaderDataT& shader) bool
         +prepare_material(const Material& material, const TextureTable& textures, MaterialBinding& output) bool
-        +bind_material(const MaterialBinding& material, span~const TextureHandle~ frame_textures, bool max_anisotropy) bool
+        +bind_material(const MaterialBinding& material, span~const TextureHandle~ frame_textures, bool max_anisotropy, bool pbr_opaque) bool
+        +depth_program ProgramHandle
+        +instanced_depth_program ProgramHandle
+        +solid_depth_program ProgramHandle
+        +instanced_solid_depth_program ProgramHandle
+        +pbr_opaque_program ProgramHandle
+        +instanced_pbr_opaque_program ProgramHandle
         +release() void
     }
     class GpuMesh {
@@ -77,14 +84,42 @@ classDiagram
         +maximum Vec3
         +create(const MeshRenderer& renderer, shared_ptr~GpuGeometry~ geometry) bool
         +update_deformation(const MeshRendererRuntime& runtime, SkinningPass& skinning) bool
-        +bind_vertices() void
+        +bind_vertices(positions_only) void
         +release() void
     }
     class GpuGeometry {
-        +create(const MeshRenderer& renderer) bool
+        +create(const MeshRenderer& renderer, VertexPages* pages) bool
+        +create_base_indices(span~const uint32_t~ source) bool
+        +index_buffer(level) IndexBufferHandle
+        +index_uses_16_bits(level, meshlet) bool
+        +index_buffer_bytes() uint64_t
+        +vertices_ready() bool
+        +bind_vertices(positions_only, whole_page) void
+        +bind_position_buffer(stage) void
+        +position_buffer_index() uint16_t
+        +first_vertex() uint32_t
+        +vertex_page() const StaticVertexPage*
+        +position_stride_bytes() uint16_t
+        +vertex_buffer_bytes() uint64_t
         +skinning_bounds(...) bool
         +release() void
         +resource_count() uint32_t
+    }
+    class StaticVertexPage {
+        <<GpuGeometry nested struct>>
+        +create() bool
+        +store(vertices, first) bool
+        +release_range(first, count) void
+        +byte_size() uint64_t
+        +positions DynamicVertexBufferHandle
+        +attributes DynamicVertexBufferHandle
+        -free_ranges_ Range[]
+    }
+    class IndexBuffer {
+        -handle IndexBufferHandle
+        -bytes uint32_t
+        -count uint32_t
+        -index16 bool
     }
     class SkinningPass {
         +prepare() bool
@@ -112,15 +147,19 @@ classDiagram
     SceneGpuResources *-- GpuProgram
     SceneGpuResources *-- GpuMesh
     SceneGpuResources ..> GpuGeometry : 按Resource身份弱缓存
+    SceneGpuResources ..> StaticVertexPage : 按顶点布局弱缓存
     SceneGpuResources *-- SkinningPass
     GpuMesh o-- GpuGeometry : 实例共享不可变几何
+    GpuGeometry *-- IndexBuffer : 独占普通层级和确有差异的索引
+    GpuGeometry o-- StaticVertexPage : 持有不可变顶点区间
     GpuGeometry o-- Resource : 保留当前CPU资源版本
     GpuGeometry ..> MeshRenderer : 创建期间借用
     GpuMesh ..> SkinningPass : 提交本实例蒙皮
     SkinningPass ..> GpuGeometry : dispatch期间借用源几何
-    SceneGpuResources *-- ShadowPass
-    SceneGpuResources *-- AmbientOcclusionPass
-    SceneGpuResources *-- HdrPostProcessPass
+    SceneGpuResources *-- PassTargets : 按场景拥有目标
+    PassTargets *-- ShadowPass
+    PassTargets *-- AmbientOcclusionPass
+    PassTargets *-- HdrPostProcessPass
     SceneGpuResources ..> Scene : 准备IBL期间借用
     GpuTexture o-- Resource : 共享CPU资源
     PreparedTexture o-- Resource : 独立准备时持有不可变源
@@ -163,18 +202,39 @@ classDiagram
         +prepare(uint16_t size) bool
         +draw(...) bool
         +texture() bgfx::TextureHandle
+        +local_depth_revision() uint64
         +resource_count() uint32_t
         +release() void
     }
     class Scene
     class RenderSettings
-    class ShadowFrame
+    class ShadowFrame {
+        +bounds array~ShadowBounds~
+        +receiver_bounds array~ShadowBounds~
+        +receiver_bounds_available bool
+    }
+    class LocalShadowLight {
+        +world array~float~
+        +world_position Vec3
+    }
+    class CachedPage {
+        +caster_origin Vec3
+        +local_projection optional~LocalProjection~
+    }
+    class LocalProjection {
+        +position Vec3
+        +direction array~float~
+        +up array~float~
+    }
     class GpuMesh
     class GpuTexture
     class Material
     ShadowPass ..> RenderFrameData : 从公共帧取完整投射物
     ShadowPass ..> RenderSettings : 调用期间借用
     ShadowPass ..> ShadowFrame : 填写调用方帧数据
+    ShadowPass ..> LocalShadowLight : 使用实际光源位置和视图相对变换
+    ShadowPass *-- CachedPage : 保存实际绘制状态
+    CachedPage *-- LocalProjection : 保存与镜头无关的光源投影
     ShadowPass ..> GpuMesh : 借用上传后的几何
     ShadowPass ..> GpuTexture : 借用材质纹理
     ShadowPass ..> MaterialBinding : 借用预解析阴影参数
@@ -191,7 +251,9 @@ bool draw(const RenderFrameData& frame_data, const RenderSettings& settings,
           const std::span<const std::uint64_t>* caster_ids = nullptr);
 ```
 
-`ShadowPass` 独占可采样的 D32F 深度图集、Framebuffer、Shader/Program 及 alpha 裁切和 UV Uniform。`prepare()` 按分辨率准备资源，`draw()` 组织逐级阴影绘制，`texture()` 返回借用的深度纹理句柄。阴影页仅写硬件深度，按页清除远深度，采样侧保留原 PCF 取样与偏移。对象不可复制或移动，析构兜底释放。`release()` 支持重复调用。两个只读查询为 `const noexcept`，释放为 `noexcept`，状态与句柄返回值标注 `[[nodiscard]]`。AO 和 HDR/Bloom 的完整接口见本文后续独立图。
+`ShadowPass` 独占可采样的 D32F 深度图集、Framebuffer、Shader/Program 及 alpha 裁切和 UV Uniform。`prepare()` 按分辨率准备资源，`draw()` 组织逐级阴影绘制，`texture()` 返回借用的深度纹理句柄。局部灯面重写或图集释放时更新 `local_depth_revision()`，供按当前图集派生的深度范围失效。阴影页仅写硬件深度，按页清除远深度，采样侧保留原 PCF 取样与偏移。对象不可复制或移动，析构兜底释放。`release()` 支持重复调用。只读查询为 `const noexcept`，释放为 `noexcept`，状态、句柄和数值返回值标注 `[[nodiscard]]`。AO 和 HDR/Bloom 的完整接口见本文后续独立图。
+
+`prepare_shadow_frame` 由调用方借用受光投影，记录含级联混合区的光空间受光范围，另行保留原稳定图集范围。平面反射有可验证的水面采样范围时，按该矩形构造偏心受光投影。主视图与平面反射在已知内置采样规则时使用扩展了 PCF 边缘的受光范围筛选投射物。完整页投影及深度范围仍用于光栅化。局部灯、VSM、离线捕获及未知采样规则使用完整页。常规页缓存只有在投影和投射物相同、既有筛选范围覆盖新范围时才复用。分离筛选与栅格投影参考 [Flax 的级联阴影准备](https://github.com/FlaxEngine/FlaxEngine/blob/ded00bc8689ed427ae84f82065d23a9224a2bac5/Source/Engine/Renderer/Lighting/ShadowsPass.cpp#L1110-L1220)。
 
 ### 提交管线私有契约
 
@@ -201,22 +263,42 @@ bool draw(const RenderFrameData& frame_data, const RenderSettings& settings,
 classDiagram
     class SceneGpuResources {
         <<private>>
-        +collect_frame(WorldSystem& world, RenderFrameData& output) bool
+        +collect_frame(WorldSystem& world, const Vec3& origin, RenderFrameData& output) bool
         +collect_view(const RenderFrameData& frame, const SceneDrawView& view, ViewDrawList& output) bool
-        +draw_meshes(const RenderFrameData& frame, const ViewDrawList& items, const RenderSettings& settings, const SceneDrawView& view, SceneDrawMode mode) bool
+        +draw_meshes(const RenderFrameData& frame, ViewDrawList& items, const RenderSettings& settings, const SceneDrawView& view, SceneDrawMode mode) bool
         +prepare_lighting(...) bool
     }
     class GpuProgram {
         <<private>>
         +prepare_material(const Material& material, const TextureTable& textures, MaterialBinding& output) bool
-        +bind_material(const MaterialBinding& binding, span~const TextureHandle~ frame_textures, bool max_anisotropy) bool
+        +bind_material(const MaterialBinding& binding, span~const TextureHandle~ frame_textures, bool max_anisotropy, bool pbr_opaque) bool
     }
     class ShadowPass {
         <<private>>
         +draw(...) bool
-        -cached_pages_ map~ViewId, CachedPages~
+        -cached_pages_ vector~CachedPage~
+        -caster_signature_ vector~uint64_t~
         -candidate_signature_ vector~uint64_t~
+        -solid_batches_ vector~SolidBatch~
+        -solid_inputs_seen_ bool
+        -prepare_solid_batches(frame) void
     }
+    class SolidBatch {
+        <<private value>>
+        +VertexBufferHandle positions
+        +IndexBufferHandle indices
+        +uint64 state
+        +vector~SolidRange~ ranges
+    }
+    class SolidRange {
+        <<private value>>
+        +size_t source
+        +uint32 first
+        +uint32 count
+        +uint32 original_draws
+    }
+    ShadowPass *-- SolidBatch : 拥有位置和索引缓冲
+    SolidBatch *-- SolidRange : 保存时序签名对应的源序号和索引范围
     class ShadowAtlasView {
         +uint16_t index
         +uint16_t count
@@ -243,7 +325,7 @@ classDiagram
     class ClusterLight
     SceneGpuResources ..> WorldSystem : collect_frame 期间借用
     SceneGpuResources ..> RenderFrameData : 填写或只读借用
-    SceneGpuResources ..> ViewDrawList : 填写或只读借用
+    SceneGpuResources ..> ViewDrawList : 填写可见项并记录提交状态
     SceneGpuResources ..> SceneDrawView : 观察者和提交状态
     SceneGpuResources ..> SceneDrawMode : 当前Pass
     SceneGpuResources ..> RenderSettings : 当前效果快照
@@ -278,7 +360,8 @@ classDiagram
                                     const CameraSettings& lens,
                                     render_detail::ShadowFrame& frame,
                                     std::size_t cluster_index, bgfx::ViewId base,
-                                    const SceneCaptureRequest* capture);
+                                    const SceneCaptureRequest* capture,
+                                    const render_detail::VsmPageBatch* vsm);
 
 // ShadowPass
 [[nodiscard]] bool draw(const RenderFrameData& frame_data, const RenderSettings& settings,
@@ -650,7 +733,11 @@ C++ 限定符：构造为 `explicit` 且 `noexcept`，`world` 默认为 `nullptr
 
 ## 几何、纹理与照明
 
-- 几何支持 UV0、切线、顶点色和子网格；GPU 顶点以明确 float 布局组装，不依赖 FlatBuffers struct 的内存布局。网格按所属节点完整 ID 与 mesh_revision 更新，仅改变的几何重新上传。
+静态 `GpuGeometry` 上传不含蒙皮的顶点时去掉末尾对齐填充。显式顶点颜色保持 FP32，每顶点 72 字节。缺省白色使用 RGBA8 UNORM 精确表达，每顶点 60 字节。位置、法线、切线、UV 和 Lightmap UV 保持原 FP32 值，索引保持原顺序。蒙皮输入、动态变形顶点及离线捕获使用 80 字节对齐布局。紧凑颜色属性可参照 [WickedEngine 的顶点颜色流](https://github.com/turanszkij/WickedEngine/blob/62d913606e8ee2aa2958e83f7bbb8c07d81ae8c9/WickedEngine/wiScene_Components.cpp#L1142-L1162) 与 [meshoptimizer 的顶点量化](https://meshoptimizer.org/#vertex-quantization)。
+
+支持两个顶点流时，静态几何在同一 GPU 缓冲内存储连续的 FP32 位置和含法线、切线、颜色及两套 UV 的第二个区间。两段共用同一顶点编号、索引和生命周期。使用实心位置程序的深度绘制只绑定 12 字节步长的位置流。需要材质属性的绘制绑定两个区间。色块和线框从位置区间读取，容量统计包含对齐字节。仅支持单顶点流的设备使用交错布局。[WickedEngine 的独立位置区间](https://github.com/turanszkij/WickedEngine/blob/62d913606e8ee2aa2958e83f7bbb8c07d81ae8c9/WickedEngine/wiScene_Components.cpp#L1004-L1058) · [meshoptimizer 的分流说明](https://meshoptimizer.org/#deinterleaved-geometry)
+
+- 几何支持 UV0、切线、顶点色和子网格。GPU 顶点按明确的属性格式和步长组装，源资源由 FlatBuffers 定义。网格按所属节点完整 ID 与 mesh_revision 更新，仅改变的几何重新上传。
 - 每个子网格按材质槽独立提交，空子网格表绘制完整索引与槽 0。所有材质槽遵循相同 Shader 与命名参数规则。
 - 主 pass 与阴影 pass 共用材质面剔除状态和 alpha 裁切语义；cast_shadows=false 的组件不进入阴影边界拟合和投射，仍保留主绘制。UV 变换、基础色和纹理 alpha 在两个 pass 保持一致。
 - 纹理来自内部获取所保活的不可变 TextureData；协调线程取得数据后交给 worker，不在 worker 访问加载器，Basis Universal 转码后上传全部 mip。auto 按实际 GPU 能力与 Basis 转码器支持情况选择 BC7、ASTC 4x4、ETC2 或 RGBA8；显式请求不支持的格式返回失败。sRGB 只用于颜色纹理，法线及 ORM 使用线性采样。
@@ -687,16 +774,18 @@ classDiagram
     class RenderSettings
     class CameraSettings
     class SceneGpuResources
+    class PassTargets
     class AmbientOcclusionPass {
         <<渲染私有实现>>
         +prepare(uint16_t width, uint16_t height) bool
-        +compute(const CameraSettings& camera, const RenderSettings& settings, const float* projection, bgfx::TextureHandle source_depth) bool
+        +compute(const CameraSettings& camera, const RenderSettings& settings, const float* projection, bgfx::TextureHandle source_depth, uint64_t depth_revision) bool
         +texture() bgfx::TextureHandle
         +resource_count() const uint32_t
         +release() void
     }
     RenderSystem *-- SceneGpuResources : 独占
-    SceneGpuResources *-- AmbientOcclusionPass : 独占GPU资源
+    SceneGpuResources *-- PassTargets
+    PassTargets *-- AmbientOcclusionPass : 独占GPU资源
     AmbientOcclusionPass ..> CameraSettings : 本帧投影参数
     AmbientOcclusionPass ..> RenderSettings : 本帧AO参数
 ```
@@ -705,9 +794,11 @@ AmbientOcclusionPass 位于渲染私有实现目录，借用 SurfacePass 提供�
 
 ASSAO Q2 逐相生成四层可见度。两次边缘模糊各用一次三维 Compute 分派，四相在 Z 维各自读取和写入对应层。中间数组与最终数组轮流读写，每次模糊保留 RG8 量化和原采样寻址。
 
-AO 默认关闭，由活动场景相机的 PostProcessDataT.ao_enabled 控制，可随时关闭并保留半径、强度与淡出参数。只有参数随场景保存；遮蔽结果每帧在 GPU 计算，不产生贴图源文件、meta 或 GUID 资源，不加入烘焙任务。预览隐藏镜头不持有另一份 AO 配置。
+深度准备以四次 Gather 读取每组 2×2 输出及其相邻深度，按原位点线性化并重建法线。边界采样沿用源深度的夹取规则。
 
-算法适配固定 bgfx commit `7a70927d2af7ffcc5cef9c9e8f4c821e31fcb099` 的 `39-assao`，固定 Q2 与两次边缘保持模糊。主视图中 AO 深度/表面/计算分别为 110/111/112，主场景为 113，UI 为 200；其他分区由 `render_constants.hpp` 统一定义。预通道复用材质原有程序，仅开启深度写入，关闭颜色输出，给 AO 绑定白色回退并关闭采样；因此保留项目天空、自定义顶点、alpha 裁切和动态变形行为。普通 unlit 物体仍提供遮挡，天空的自定义远平面语义保持。
+AO 默认关闭，由活动场景相机的 PostProcessDataT.ao_enabled 控制，可随时关闭并保留半径、强度与淡出参数。已有结果只在深度修订号和全部 ASSAO 参数一致时复用，目标重建、深度输入未知或参数变更时在 GPU 重新计算。只有参数随场景保存，结果由所属通道管理。预览隐藏镜头不持有另一份 AO 配置。
+
+算法适配固定 bgfx commit `7a70927d2af7ffcc5cef9c9e8f4c821e31fcb099` 的 `39-assao`，固定 Q2 与两次边缘保持模糊。主视图中 AO 深度/表面/计算分别为 110/111/112，主场景为 113，UI 为 200。其他分区由 `render_constants.hpp` 统一定义。已知覆盖规则的内置材质可提交专用深度程序，其他材质提交原程序。深度通道只写深度。使用原材质程序计算覆盖时，按该程序的输入契约绑定资源，AO 使用白色回退。顶点位置、alpha 裁切、动态变形和远平面规则依然由对应材质及几何决定。
 
 内部 AO 视口向上对齐 16 并采用真实窗口宽高比的投影，计算结果按归一化屏幕坐标采样；透视与正交分别重建位置和采样半径。主场景只将线性 AO 乘入环境光和 IBL，不影响直接光、自发光、天空或 UI。系统保留 sampler 11，IBL 为 12..14，阴影为 15，项目材质使用 0..4，其他帧输入占用 5..10；资源校验、导入与 Shader 反射使用同一约定。功能启用后缺少所需计算或纹理能力时返回失败，不将未执行的 AO 报告为成功。
 
@@ -716,10 +807,12 @@ AO 默认关闭，由活动场景相机的 PostProcessDataT.ao_enabled 控制，
 ```mermaid
 classDiagram
     class SceneGpuResources
+    class PassTargets
     class HdrPostProcessPass {
         <<private implementation>>
-        +prepare(uint16_t width, uint16_t height, bool bloom_enabled, uint8_t samples) bool
-        +begin_scene(uint32_t clear_color) void
+        +prepare(uint16_t width, uint16_t height, bool bloom_enabled, uint8_t samples, bool ssr_enabled) bool
+        +begin_opaque_depth(const float* view, const float* projection) bool
+        +begin_scene(uint32_t clear_color, bool depth_prepared) void
         +scene_framebuffer() bgfx::FrameBufferHandle
         +opaque_color() bgfx::TextureHandle
         +opaque_specular() bgfx::TextureHandle
@@ -731,10 +824,19 @@ classDiagram
     }
     class RenderSettings
     class bgfx
-    SceneGpuResources *-- HdrPostProcessPass : 独占 GPU 资源及生命周期
+    SceneGpuResources *-- PassTargets
+    PassTargets *-- HdrPostProcessPass : 独占 GPU 资源及生命周期
     HdrPostProcessPass ..> RenderSettings : 借用当前帧参数
     HdrPostProcessPass ..> bgfx : 私有使用
 ```
+
+SSR 合成结果独立保存，合成完成后不透明颜色附件可由多重采样透明通道复用。透明通道仍先把合成结果写入全部颜色样本，再共享同一深度附件进行混合。SSR 关闭时，透明通道使用专用颜色附件以保留折射的输入。
+
+SSR 只读取 HDR 不透明颜色和镜面贡献的单采样解析纹理。开启 SSR 的多重采样路径为这两项颜色附件声明只保留解析结果，Metal 在原有解析结束后丢弃逐样本结果。后续透明通道开始时先清除颜色并填充全部样本，继续使用不透明阶段保留的深度。该提示由后端消费，其他后端可保守保留逐样本数据。[Filament 的 Metal MSAA 解析](https://github.com/google/filament/blob/414602be0e255ac0045d684d7dd5299d760d0de5/filament/backend/src/metal/MetalHandles.mm#L1252-L1274)
+
+在开启 SSR 的多重采样路径上，主视图可先填充 HDR 场景的深度附件，再仅对通过等深测试的样本着色。深度预通道和不透明颜色通道使用相同的几何、采样和已知的内置材质覆盖。模板值记录有效样本，颜色通道着色后清除该值，维持等深情况下原有的先绘制者优先。无法保证两次覆盖相同时，使用单次不透明绘制。AO、SSR 和 VSM 继续消费独立的单采样深度。
+
+`GpuProgram` 用原顶点阶段和内置覆盖片元建立普通与实例深度程序。基础材质沿用 Base Color、顶点 alpha、UV 变换、去平铺采样和裁切阈值，地形只需输出深度。单采样及多重采样的深度绘制都可使用对应程序。自定义 Shader 继续用其正式程序生成覆盖。
 
 相机 `PostProcessDataT` 与渲染快照增加 `hdr_enabled`、`bloom_enabled`，默认均关闭；Bloom 依赖 HDR，提交 `bloom_enabled=true` 且 `hdr_enabled=false` 返回失败。亮部阈值默认 1、范围 `[0,100]`，强度默认 0.15、范围 `[0,10]`，模糊半径倍数默认 1、范围 `[0.25,4]`，均要求有限。HDR / Bloom 参数随组件持久化，不进入 Engine。管线始终使用线性场景目标，HDR 开关控制最终曝光与色调映射；SDR 按材质映射权重保持原有外观。
 

@@ -14,11 +14,20 @@
 classDiagram
     class RenderSystem
     class SceneGpuResources
+    class PassTargets
     class ClusteredLightingPass {
         <<private final>>
+        +prepare(config, width, height, vsm_vectors) bool
+        +cull(view, camera, view_matrix, projection, lights, directional_count, shadows, vsm) bool
+        +bind_view(view, virtual_shadow) void
+        +bind(virtual_shadow) void
     }
     class SurfacePass {
         <<private final>>
+        +can_combine_depth(frame, list) bool
+        +begin(view, projection, combined_depth) void
+        +identify_depth(draw, frame, list) uint64_t
+        +depth_inputs() span~const uint64_t~
     }
     class ScreenSpaceReflectionPass {
         <<private final>>
@@ -29,13 +38,18 @@ classDiagram
     class ShadowPass
     class HdrPostProcessPass
     RenderSystem *-- SceneGpuResources : 独占帧资源
-    SceneGpuResources *-- ClusteredLightingPass : 灯数据和分簇索引
-    SceneGpuResources *-- SurfacePass : 深度和材质表面数据
-    SceneGpuResources *-- ScreenSpaceReflectionPass : 深度层级和反射合成
-    SceneGpuResources *-- PlanarReflectionPass : 按节点身份拥有镜像目标
-    SceneGpuResources *-- ShadowPass : 扩展已有阴影通道
-    SceneGpuResources *-- HdrPostProcessPass : 扩展已有颜色目标
+    SceneGpuResources *-- PassTargets : 按场景拥有目标
+    PassTargets *-- ClusteredLightingPass : 各观察视图独立的灯数据
+    PassTargets *-- SurfacePass : 深度和材质表面数据
+    PassTargets *-- ScreenSpaceReflectionPass : 深度层级和反射合成
+    PassTargets *-- PlanarReflectionPass : 按节点身份拥有镜像目标
+    PassTargets *-- ShadowPass : 常规阴影图集
+    PassTargets *-- HdrPostProcessPass : 线性颜色及后处理目标
 ```
+
+单采样深度提交后，`SurfacePass` 以实际观察矩阵、绘制覆盖、几何与材质版本比较深度输入，给完全相同的输入保留修订号。变形或覆盖规则未知时返回零。SSR 直接借用该 D32F 深度作为第 0 级，两条 R32F 纹理链分别从第 1 级和第 2 级开始，交替读写以保留独立的源和目标。SSR 仅在修订号匹配时复用已生成的粗级，追踪及合成始终消费当帧的深度、颜色和材质数据。目标重建后重新生成粗级。
+
+当所有批次的深度、表面覆盖一致且实例缓冲空间充足时，`SurfacePass` 在同一视图写入单采样深度、法线、粗糙度与镜面数据。共面片元按原有表面提交顺序保留最后一次写入。任一批次的覆盖未知、缺少表面程序或实例缓冲空间不足时，整个视图先写深度，再绘制支持表面输出的批次。AO、SSR、VSM 反馈和透明折射均读取这张单采样深度，主颜色使用 MSAA 深度与模板。[Flax 的 G-buffer 提交](https://github.com/FlaxEngine/FlaxEngine/blob/ded00bc8689ed427ae84f82065d23a9224a2bac5/Source/Engine/Renderer/GBufferPass.cpp#L212-L239)
 
 沿用 `RenderSystem` 和已有 `passes/`，不增加渲染管理器或另一套图形后端。以上私有通道只拥有 GPU 资源，不拥有 Scene、Node 或 Component；输入只在帧提交期间借用。初始化失败清理已创建部分；窗口尺寸改变时重新准备受影响目标，关闭效果、已无存活使用者或关闭设备时释放。GPU 拥有者不可复制，析构兜底。
 
@@ -43,7 +57,9 @@ classDiagram
 
 - 分簇通道接收当前视图/投影、近远裁面和只读灯数据，上传灯/阴影记录并 dispatch 簇索引；不持有灯组件指针。
 - 表面通道绘制材质自己的可选表面程序，输出可采样深度、法线/粗糙度及 F0/有效标记；AO 复用深度，SSR 不能用几何法线冒充法线贴图的结果。只有活动相机开启 SSR 时才分配法线/F0 附件并提交材质表面绘制；关闭时保留独立深度附件供 AO、透明深度读取与 VSM 反馈使用，释放表面专用附件。
+- 内置深度覆盖和材质表面程序提交各自消费的帧级输入。深度覆盖使用顶点变换和材质覆盖，表面程序还读取 RVT 和材质法线等。项目 Shader 仍按其已声明的帧级资源契约绑定。
 - SSR 通道借用当帧不透明线性颜色及表面输入，输出独立反射结果和合成颜色；不读取自身输出。
+- Metal 以一次 Gather 查询双边合成覆盖的四个反射置信度。四点均为零且原镜面贡献为有限值时，合成保留原颜色钳制，省去深度与法线读取。存在反射贡献时使用原双边滤波。[GPUOpen Gather4 指南](https://gpuopen.com/learn/rdna-performance-guide/#general)
 - 支持 SSR 的不透明主程序同时以第二个 MRT 保存实际已加入颜色、可由表面 F0 重建的 IBL 线性 split-sum 子项（RGB）及其材质遮蔽、AO、雾等合成衰减（A）。合成扣除这部分并以相同权重加入 SSR；无法由现有表面数据重建的非线性及多次散射环境贡献留在主颜色中。
 - 平面通道借用当前反射组件及镜头，生成镜像视图，提交同一套场景绘制；按组件身份拥有纹理，不通过共享 Material 保存场景节点引用。
 
@@ -74,12 +90,17 @@ classDiagram
 
 预算接入已有汇总运行设置：编辑器读取项目 TOML，宿主传入 `RenderConfig`，运行包不引入 TOML。参数须校验乘积、设备资源上限及视图编号上限；不能依赖分配失败才判定非法预算。
 
-- 分簇采用全视锥 XY 网格和深度分层。透明物体按自身深度取簇，不按不透明深度范围剔除灯。方向灯独立于局部灯剔除。
-- 单簇超预算标记为溢出，该簇遍历完整灯列表，保证不漏光；零灯帧清空计数。超出全局 `maximum_lights` 返回失败并给出原因，不静默截断。
+- 分簇采用全视锥 XY 网格和深度分层。透明物体按自身深度取簇，不按不透明深度范围剔除灯。帧收集将方向光稳定分组到灯缓冲前部，GPU 按范围求值，分簇只遍历后部的局部灯。两组各自保留原来的累加顺序，阴影索引使用分组后的灯序号。范围组织参考 [WickedEngine 的分类型灯区间](https://github.com/turanszkij/WickedEngine/blob/62d913606e8ee2aa2958e83f7bbb8c07d81ae8c9/WickedEngine/wiRenderer.cpp#L5226-L5235)。
+- 每个簇存一个 32 位计数或完整列表标记，接着每个 32 位字存两个 16 位灯编号。有多盏局部灯时，槽数取当前局部灯数量与预算上限的较小值。计算通道依原灯序写入编号，计算和片元通过同一视图常量取得步长。灯数增长超过已分配容量时才扩大索引缓冲。灯、阴影和 VSM 记录直接写入 GPU 上传缓冲。紧凑索引的布局思路参考 [Filament 的 Froxel 索引](https://github.com/google/filament/blob/414602be0e255ac0045d684d7dd5299d760d0de5/filament/src/Froxelizer.h#L148-L170)。
+- 零盏或一盏局部灯时，每簇只存一个字。计算仍剔除范围外的局部灯，保留唯一灯的簇使用完整列表标记。多灯单簇超过上限时也使用此标记，并依序遍历全部局部灯。超出全局 `maximum_lights` 返回失败并给出原因。
 - `Light::set_settings()` 与 TS `Light.SetShadows(enabled, resolution, bias)` 保持签名，扩展为三种灯都可投影。CSM 参数仅对方向灯有效，仍最多一个方向光投影。
 - CSM、聚光单面和点光六面写同一 atlas。点光六面分别使用 90 度投影，统一深度编码；PCF 处理 tile 边界与立方体面接缝。复用现有蒙皮、alpha 裁切和投射物可见性规则。
 - 直接光按片元判定贡献。距离或锥角衰减为零时跳过阴影采样与 BRDF，标准 PBR 也按入射余弦剔除无贡献片元。完全遮挡时跳过 BRDF。Blinn-Phong 保留既有高光语义。提前退出的阶段划分参考 [Filament 的逐光源求值](https://github.com/google/filament/blob/5ce4cbf19051729d74db9ba33ad5bd04cf6b4f37/shaders/src/surface_light_punctual.fs#L178-L225)。
+- 方向光与簇内点光、聚光在调用处选定各自的阴影求值，共用材质响应。方向光路径处理 CSM 和 VSM，局部灯路径处理各灯面的深度。组织方式参考 [Filament 的方向光求值](https://github.com/google/filament/blob/5ce4cbf19051729d74db9ba33ad5bd04cf6b4f37/shaders/src/surface_light_directional.fs#L30-L75)。
+- 局部灯的入射方向、衰减和点光阴影共用一次片元距离计算。点光六面的深度记录保存准备阶段预计算的投影比例和分子，在片元中只除以接收距离。矩阵、图集位置、采样偏移和点光跨面投影沿用原契约。[WickedEngine 局部光向量复用](https://github.com/turanszkij/WickedEngine/blob/62d913606e8ee2aa2958e83f7bbb8c07d81ae8c9/WickedEngine/shaders/lightingHF.hlsli#L179-L220)
+- 确定最终表面法线和粗糙度后，每个受光片元计算一次 GGX 视线项及漫反射法线修正的公共值，各方向光和局部灯使用同一份值继续计算入射光。视线余弦也供 IBL 使用。计算组织参考 [Filament 的表面视线参数](https://github.com/google/filament/blob/414602be0e255ac0045d684d7dd5299d760d0de5/shaders/src/surface_shading_parameters.fs#L60-L71)。
 - 点光 PCF 保持 16 个采样及同半径深度比较。落在当前立方体面内的采样由 UV 和近远裁面直接计算透视深度；跨面采样继续解析相邻面并按其矩阵投影。场景和资源格式沿用原契约。
+- 常规阴影图集的局部灯深度重写或图集释放时，`ShadowPass` 更新内部分代。主不透明着色可复用 VSM 辅助范围纹理的独立区块，按灯面记录索引读取带边界的最小和最大深度。仅当比较区间能证明全部 16 个结果一致时直接返回。跨面、边界和混合结果继续执行完整 PCF。
 - 阴影页绘制与缓存签名仅使用参与投影的不透明材质，含 alpha 裁切。透明水面的帧纹理不影响阴影页复用，级联拟合后的投影矩阵仍参与缓存比较。
 - CSM 的 `shadow_resolution` 仍表示其完整区域边长。局部灯每面有效边长为 `min(shadow_resolution, local_shadow_tile_size)`。atlas 先保留 CSM，再分配局部区域；空间不足或超面数时按镜头距离和稳定节点 ID 选择，输出明确的预算不足诊断。不能把没有得到 atlas 的灯标成有阴影。
 - 平面反射超数量预算时按可见距离和稳定身份选择，未捕获的面退回 IBL，不能复用其他反射面的纹理。正交镜头平视镜面时可能产生退化的斜裁剪投影；投影必须可逆，否则不发布该捕获，继续普通场景与 IBL 绘制。
@@ -122,6 +143,8 @@ classDiagram
 SSR 参数扩展现有 `PostProcessData` 和渲染设置快照；`set_settings()` 整体校验后提交。分辨率比例 `[0.25,1]`，步数 `[8,256]`，距离 `(0,100000]`，厚度 `(0,10]`，粗糙度截止值 `[0,1]`。SSR 使用确定性层级深度遍历，尚不包含随机射线、运动矢量和时序降噪。法线、粗糙度和 F0 来自真实材质；有效命中替换 IBL 的线性 split-sum 子项，未命中保留 IBL，其他环境近似项也保持不变。
 
 平面组件挂在拥有 MeshRenderer 的普通节点上，局部 XZ 平面和 +Y 法线经 Transform 定义反射平面；无需在节点里增加专用字段。开关使用已有 Component.enabled；比例范围同 SSR，裁剪偏移 `[0,1]`。同一节点的子网格共用该平面。首版按平面捕获不透明/裁切建筑及蒙皮角色，排除反射面和依赖场景颜色的透明对象，关闭递归反射；反射镜头独立计算可见性、灯簇和方向光阴影范围，不能拿主镜头可见列表代替。
+
+内置水面的反射捕获按接收网格投影范围限制深度、天空和颜色绘制。范围包含水面 UV 扰动和过滤边界，反射纹理尺寸、投影及各灯簇保持原配置。开启视锥剔除时，位置符合 Meshlet Shader 契约且包围盒完全在范围外的物体可从反射提交中剔除，LOD 继续按完整镜像视图选择。自定义采样、动态变形接收网格和跨镜像眼平面的网格使用完整捕获。[SIGGRAPH 平面反射的可见体积](https://opengl.org/archives/resources/code/samples/sig99/advanced99/notes/node161.html) · [Doom 3 的子视图裁剪](https://github.com/id-Software/DOOM-3/blob/a9c49da5afb18201d31e3f0a429a037e56ce2b9a/neo/renderer/tr_subview.cpp#L448-L496)。
 
 ## 材质和 Shader
 
@@ -181,6 +204,10 @@ Material 的混合方法完整签名见[材质](material.md)；MeshRenderer 的�
 透明按子网格视空间深度稳定排序，使用顺序提交，开启深度测试、关闭深度写入。alpha_blend 使用直通 alpha，premultiplied 的输出必须已预乘；内置表面和水 Shader 根据 `u_surface.y` 的混合模式（0 不透明、1 直通、2 预乘）完成输出转换。透明面不进入不透明预通道；默认不投射实体阴影。首版不支持相交透明面的逐像素排序或多层折射。
 
 固定流程：蒙皮 → 每个镜像各自的阴影/分簇/捕获 → 主镜头阴影与分簇 → 表面预通道/AO → 不透明线性颜色及镜面贡献 MRT → SSR → 冻结颜色快照 → 排序透明/水 → 现有特效扩展 → HDR/Bloom/最终输出 → UI。需要屏幕采样时准备线性中间目标，即使没有开启 Bloom；是否使用中间目标与是否开 Bloom 分离。
+
+平面反射可以在着色前把可见网格的深度写入同一张 MSAA 深度模板附件。`PlanarReflectionPass` 管理附件和深度、颜色视图，`SceneGpuResources` 两次提交共用镜像矩阵、批次和材质覆盖。模板保留同深度的首个着色结果。目标支持 32 位浮点深度模板、各批次的深度覆盖等价且两次提交的实例空间均充足时使用预通道，其余捕获保持原来的深度写入。反射目标的分辨率、采样数和着色不变。[WickedEngine 反射深度预通道](https://github.com/turanszkij/WickedEngine/blob/62d913606e8ee2aa2958e83f7bbb8c07d81ae8c9/WickedEngine/wiRenderPath3D.cpp#L1194-L1258)
+
+捕获只向水面提供 RGBA16F 的反射颜色。平台支持相应采样数时，第二个颜色附件使用只写 R8，供共用 Shader 的 MRT 接口使用。主视图 SSR 仍读取完整精度的镜面贡献。
 
 场景颜色快照与透明颜色输出不是同一纹理；可采样场景深度与透明 framebuffer 的深度附件也分离，禁止读写反馈。每个镜像和主镜头的阴影、分簇、颜色提交为完整有序组。ShadowPass 使用既有 atlas 容量布置各视图的阴影页，容量足够时维持各自的区域与缓存。区域重叠时按既有视图顺序写入，并使所有被覆盖的缓存项失效。每组灯/阴影记录及簇 buffer 保留独立内容，不能同帧反复 CPU 更新同一 handle 导致所有视图读到最后一份。所有 view ID 统一在 `render_constants.hpp` 分区；主渲染在 144 前完成，144–191 保留给烘焙的阴影和分簇，UI 200、编辑器 IBL 240/241、漫反射捕获 242/243。入参预算须确保所有组都放得下，不能复用同一 view ID 提交不同相机状态。
 

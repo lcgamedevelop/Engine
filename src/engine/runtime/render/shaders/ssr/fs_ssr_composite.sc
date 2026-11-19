@@ -16,6 +16,22 @@ void main()
         gl_FragColor = scene;
         return;
     }
+#if BGFX_SHADER_LANGUAGE_METAL
+    // Query the four bilateral taps at a coordinate between their texel centres.
+    vec2 tap_origin = floor(v_texcoord0 * u_ssr_dimensions.zw - 0.5);
+    vec2 gather_uv = (tap_origin + vec2_splat(1.0)) / u_ssr_dimensions.zw;
+    vec4 tap_confidence = textureGather(s_ssr_specular, gather_uv, 3);
+    if (all(equal(tap_confidence, vec4_splat(0.0))))
+    {
+        vec3 old_specular = texture2D(s_ssr_ibl, v_texcoord0).rgb;
+        // A non-finite contribution multiplied by zero still follows the full path.
+        if (all(lessThanEqual(abs(old_specular), vec3_splat(65504.0))))
+        {
+            gl_FragColor = vec4(clamp(scene.rgb, vec3_splat(0.0), vec3_splat(65504.0)), scene.a);
+            return;
+        }
+    }
+#endif
     vec3 normal = texture2D(s_ssr_normal, v_texcoord0).xyz;
     float depth = texture2D(s_ssr_depth, v_texcoord0).r;
     float linear_depth = ssr_view_position(v_texcoord0, depth).z;

@@ -30,13 +30,34 @@ bool PlanarReflectionPass::prepare(std::uint16_t new_width, std::uint16_t new_he
     {
         return false;
     }
-    const auto flags = render_target_flags(samples) | BGFX_SAMPLER_UVW_CLAMP;
-    color_ =
-        bgfx::createTexture2D(new_width, new_height, false, 1, bgfx::TextureFormat::RGBA16F, flags);
-    specular_ =
-        bgfx::createTexture2D(new_width, new_height, false, 1, bgfx::TextureFormat::RGBA16F, flags);
-    depth_ = bgfx::createTexture2D(new_width, new_height, false, 1, bgfx::TextureFormat::D32F,
-                                   render_target_flags(samples) | BGFX_TEXTURE_RT_WRITE_ONLY);
+    const auto flags = render_target_flags(samples);
+    const auto write_only = flags | BGFX_TEXTURE_RT_WRITE_ONLY;
+    const auto sample_capability = render_target_sample_capability(samples);
+    color_ = bgfx::createTexture2D(new_width, new_height, false, 1, bgfx::TextureFormat::RGBA16F,
+                                   flags | BGFX_SAMPLER_UVW_CLAMP);
+    // Only the first color is sampled. Keep the shared PBR output layout at a lower storage cost.
+    if ((caps->formats[bgfx::TextureFormat::R8] & sample_capability) != 0)
+    {
+        specular_ = bgfx::createTexture2D(new_width, new_height, false, 1, bgfx::TextureFormat::R8,
+                                          write_only);
+    }
+    if (!bgfx::isValid(specular_))
+    {
+        specular_ = bgfx::createTexture2D(new_width, new_height, false, 1,
+                                          bgfx::TextureFormat::RGBA16F,
+                                          flags | BGFX_SAMPLER_UVW_CLAMP);
+    }
+    if (samples > 1 && (caps->formats[bgfx::TextureFormat::D32FS8] & sample_capability) != 0)
+    {
+        depth_ = bgfx::createTexture2D(new_width, new_height, false, 1, bgfx::TextureFormat::D32FS8,
+                                       write_only);
+    }
+    const bool stencil = bgfx::isValid(depth_);
+    if (!bgfx::isValid(depth_))
+    {
+        depth_ = bgfx::createTexture2D(new_width, new_height, false, 1, bgfx::TextureFormat::D32F,
+                                       write_only);
+    }
     if (bgfx::isValid(color_) && bgfx::isValid(specular_) && bgfx::isValid(depth_))
     {
         const std::array attachments = {color_, specular_, depth_};
@@ -46,6 +67,10 @@ bool PlanarReflectionPass::prepare(std::uint16_t new_width, std::uint16_t new_he
     {
         release();
         return false;
+    }
+    if (stencil)
+    {
+        depth_framebuffer_ = bgfx::createFrameBuffer(1, &depth_, false);
     }
     width = new_width;
     height = new_height;
@@ -62,7 +87,26 @@ bool PlanarReflectionPass::mirror(const float* plane_world, const float* camera_
                                   caps->homogeneousDepth, world, view, projection, view_projection);
 }
 
-void PlanarReflectionPass::begin(bgfx::ViewId view_id, std::uint32_t clear_color)
+bool PlanarReflectionPass::begin_opaque_depth(bgfx::ViewId view_id,
+                                              const PlanarReflectionScissor& scissor)
+{
+    if (!bgfx::isValid(depth_framebuffer_))
+    {
+        return false;
+    }
+    attached_depth_view_ = view_id;
+    bgfx::setViewName(view_id, "Planar reflection depth prepass");
+    bgfx::setViewFrameBuffer(view_id, depth_framebuffer_);
+    bgfx::setViewRect(view_id, 0, 0, width, height);
+    bgfx::setViewScissor(view_id, scissor.x, scissor.y, scissor.width, scissor.height);
+    bgfx::setViewTransform(view_id, view.data(), projection.data());
+    bgfx::setViewClear(view_id, BGFX_CLEAR_DEPTH | BGFX_CLEAR_STENCIL, 0, 1.0F, 0);
+    bgfx::touch(view_id);
+    return true;
+}
+
+void PlanarReflectionPass::begin(bgfx::ViewId view_id, std::uint32_t clear_color,
+                                 bool depth_prepared, const PlanarReflectionScissor& scissor)
 {
     attached_view_ = view_id;
     // Each view has its own palette slot; subsequent views cannot change this clear.
@@ -78,7 +122,9 @@ void PlanarReflectionPass::begin(bgfx::ViewId view_id, std::uint32_t clear_color
     bgfx::setViewName(view_id, "Planar reflection capture");
     bgfx::setViewFrameBuffer(view_id, framebuffer_);
     bgfx::setViewRect(view_id, 0, 0, width, height);
-    bgfx::setViewClear(view_id, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 1.0F, 0, palette, 1);
+    bgfx::setViewScissor(view_id, scissor.x, scissor.y, scissor.width, scissor.height);
+    const auto clear_flags = BGFX_CLEAR_COLOR | (depth_prepared ? 0 : BGFX_CLEAR_DEPTH);
+    bgfx::setViewClear(view_id, clear_flags, 1.0F, 0, palette, 1);
     bgfx::setViewTransform(view_id, view.data(), projection.data());
     bgfx::touch(view_id);
 }
@@ -94,6 +140,15 @@ void PlanarReflectionPass::release() noexcept
         bgfx::destroy(framebuffer_);
         framebuffer_ = BGFX_INVALID_HANDLE;
     }
+    if (bgfx::isValid(depth_framebuffer_))
+    {
+        if (attached_depth_view_ != UINT16_MAX)
+        {
+            bgfx::setViewFrameBuffer(attached_depth_view_, BGFX_INVALID_HANDLE);
+        }
+        bgfx::destroy(depth_framebuffer_);
+        depth_framebuffer_ = BGFX_INVALID_HANDLE;
+    }
     for (auto* handle : {&color_, &specular_, &depth_})
     {
         if (bgfx::isValid(*handle))
@@ -105,6 +160,7 @@ void PlanarReflectionPass::release() noexcept
     width = height = 0;
     node_id = 0;
     attached_view_ = UINT16_MAX;
+    attached_depth_view_ = UINT16_MAX;
     samples_ = 1;
 }
 std::uint32_t PlanarReflectionPass::resource_count() const noexcept
@@ -112,6 +168,7 @@ std::uint32_t PlanarReflectionPass::resource_count() const noexcept
     return static_cast<std::uint32_t>(bgfx::isValid(color_)) +
            static_cast<std::uint32_t>(bgfx::isValid(specular_)) +
            static_cast<std::uint32_t>(bgfx::isValid(depth_)) +
-           static_cast<std::uint32_t>(bgfx::isValid(framebuffer_));
+           static_cast<std::uint32_t>(bgfx::isValid(framebuffer_)) +
+           static_cast<std::uint32_t>(bgfx::isValid(depth_framebuffer_));
 }
 } // namespace engine::render_detail

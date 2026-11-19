@@ -107,7 +107,7 @@ CI 仍仅手动触发，默认执行基础集合；跨平台或完整功能验�
 | `tests/support/`、`tests/fixtures/` | 共用夹具 |
 | `projects/showcase/tests/` | 公开项目自身的行为 |
 
-可视测试应保留实际画面，方便复现与检查。`engine.window_render` 每次运行自动将原始 GPU 截图保存到构建目录的 `test-artifacts/window-render/<时间戳>/`；设置 `ENGINE_RENDER_TEST_ARTIFACTS` 可指定本次目录。`engine.font_ui_render` 默认保存到测试工作目录的 `test-artifacts/font-ui/<时间戳>/`，可用第二个命令行参数指定目录；临时源项目销毁时保留这些图。公开范例的菜单场景及交互截图入口见 [showcase 文档](../projects/showcase/docs/index.md)。纯逻辑测试没有画面，不生成截图。
+可视测试应保留实际画面，方便复现与检查。`engine.window_render` 每次运行自动将原始 GPU 截图保存到构建目录的 `test-artifacts/window-render/<时间戳>/`；设置 `ENGINE_RENDER_TEST_ARTIFACTS` 可指定已存在的归档根目录，每次运行仍创建独立时间戳子目录；指定目录不可用时使用 `ENGINE_RENDER_TEST_ARTIFACTS_FALLBACK` 指定的已存在备用根目录；两者均不可用时失败。`engine.font_ui_render` 默认保存到测试工作目录的 `test-artifacts/font-ui/<时间戳>/`，可用第二个命令行参数指定目录；临时源项目销毁时保留这些图。公开范例的菜单场景及交互截图入口见 [showcase 文档](../projects/showcase/docs/index.md)。纯逻辑测试没有画面，不生成截图。
 
 登记入口为 [tests/CMakeLists.txt](../tests/CMakeLists.txt)。不为测试修改正式接口可见性，不提交运行结果或生成资源。
 
@@ -139,9 +139,9 @@ macOS arm64 的受影响 Debug / Release 目标编译通过；Release 的 `engin
 
 ## 手动集成与 GPU 验证
 
-- `engine.render_submission`：剔除、实例化、材质/Probe 分组、LOD、瞬态缓冲不足和阴影像素回归；普通阴影覆盖静态 atlas 复用的实际提交减少、严格像素一致，以及相机、灯、投影物、裁切材质、投影开关变化后的重绘和动态变形不缓存。另覆盖 SSR 关闭不提交材质表面、开启后准备附件、再次关闭恢复完全相同的 HDR，以及两个平面反射、CSM 与 Meshlet 组合。
+- `engine.render_submission`：剔除、实例化、材质/Probe 分组、LOD、瞬态缓冲不足和阴影像素回归。阴影覆盖实际提交减少、实心和裁切投影、相机及投影物变化后的重绘、动态变形，以及两个平面反射中方向光和点光独立刷新与 HDR 像素还原。开启 SSR 后验证材质表面提交，支持 4× MSAA 时还验证不透明深度预通道的设备能力、共面遮挡、alpha 裁切和颜色附件复用的逐像素 HDR 对照。关闭 SSR 后检查通道退出及图像恢复。另覆盖两个平面反射、CSM 与 Meshlet 组合。
 - `engine.scene_hdr_capture` / `engine.scene_hdr_transparency` / `engine.hdr_extension_capture`：按实际修改选择对应捕获或透明链路。
-- `engine.window_render`：窗口、GPU 资源、多效果与生命周期集成，耗时较长，不作为所有渲染修改的默认补充项。
+- `engine.window_render`：窗口、GPU 资源、多效果与生命周期集成。关闭 SSR 的夹具按深度和不透明颜色通道校验绘制次数。预览扩展用相机旋转校验视图矩阵，用 `world_origin` 校验平移。耗时较长，不作为所有渲染修改的默认补充项。
 - `editor.scene_bake_core_loader`：实际 GPU IBL、纹理捕获、多面立方体 UV2 与跨帧照明积分；连续取走结果后不重新准备就渲染时必须延后读回，准备完成后再返回独立、非空的像素结果，覆盖编辑器逐面烘焙的调用顺序和 lightmapper 借用输入的生命周期。同一用例还以单工作项和 256 字节上传预算重绑新的 Lightmap，验证 GPU 上传未完成时帧继续提交、最终就绪并可清除。
 - `editor.effects_pipeline`：正式粒子资源及依赖导入、增量和失败原子性；场景经通用保存器写出后须能重新导入，并保留特效组件的启用、可见性状态。
 - `tests/plugins/editor/scene_bake/` 的独立 Python GPU 脚本：仅在修改相应烘焙算法时选取，不全部执行。
@@ -163,7 +163,7 @@ macOS arm64 的受影响 Debug / Release 目标编译通过；Release 的 `engin
 
 窗口用例归档 169 张 PNG，字体/UI 用例归档 13 张 PNG，公开范例 14 个菜单入口各保留一张目标场景帧；真实 UI 交互另有 3 张、独立运行态 MCP 有 1 张，共 200 张实际画面。原始 CTest 报告、按用例合并的最新结果、图像清单、指纹与自包含预览位于忽略的 `build/test-audit/<run>/`，原图仍在各测试或项目缓存目录，`run.json` / 项目结果保留配置和归属信息。纯逻辑用例没有图形输出，不生成截图。
 
-公开项目实际交互检查启动 prepareId 与 Run 归属、终态释放不影响玩法、同一 Gameplay/Model 的临时脚本、停止重启后的旧身份拒绝、菜单点击、文字输入与跨场景 UI 保留；独立测试运行包验证相同启动结果契约、临时脚本、UI 场景截图及正常退出。全部菜单入口完成进入、目标范围截图和返回，采集方法见[范例验证入口](../projects/showcase/docs/index.md#验证)，原图和回执位于项目 `cache/scene-captures/`、`cache/mcp-interaction/` 与 `cache/runtime-mcp/`。
+公开项目实际交互检查启动 prepareId 与 Run 归属、终态释放不影响玩法、同一 Gameplay/Model 的临时脚本、停止重启后的旧身份拒绝、菜单点击、文字输入与跨场景 UI 保留；独立测试运行包验证相同启动结果契约、临时脚本、UI 场景截图及正常退出。全部菜单入口完成进入、目标范围截图和返回，采集方法见[范例验证入口](../projects/showcase/docs/index.md#验证)，截图归档使用独立记录根目录的 `records/validation/showcase/`；采样和目录配置见[性能采样](runtime/performance.md)。
 
 当前方向光阴影连续性及材质/反射像素回归通过；抽查原图并浏览全部联系表，未发现本轮加载变更引入的黑屏。SSR 对照夹具仍有阶梯状反射条带，相关 PNG 与此前已审阅图逐字节一致；现有用例检查反射命中和材质权重，不代表反射质量已经完整验收。该限制保留在当前记录，本轮不扩展反射算法。
 
@@ -193,7 +193,7 @@ macOS arm64 的受影响 Debug / Release 目标编译通过；Release 的 `engin
 
 私有真实资源沿同一导入和渲染链路检查。等待普通画面连续稳定后，普通／Meshlet／关闭后恢复三张完整截图逐像素一致，最大通道差值为 0。独立色块视图也完成稳定帧截图，关闭后完整 PBR 截图逐像素恢复；色块启停没有改变场景剔除开关。该镜头未开启视锥剔除，因此本次只证明真实资源的路径与画面一致性，不将其用于视锥剔除效果或性能结论；公开用例另有透视、正交视锥覆盖。私有资产、源 meta、回执及截图全部留在私有项目自身的忽略目录。
 
-公开结果与完整回执保存在项目 `cache/visual-tests/meshlet-culling/<run-id>/`，私有结果在自身 `cache/meshlet-validation/`；使用同目录自包含 `review.html` 查看截图。操作入口和夹具说明统一见[项目文档](../projects/showcase/docs/meshlet-culling.md)。上述结果仅覆盖本机 Metal，不包含 Windows、Android、iOS、WebGPU 或性能测量，也不代表所有场景的视觉质量验收。资源只接受当前格式，旧缓存与运行包须从源资源重新生成。
+公开采集及回执写入记录根目录的 `records/validation/showcase/visual-tests/meshlet-culling/<run-id>/`。私有项目通过独立记录目录保存结果。操作入口和夹具说明见[项目文档](../projects/showcase/docs/meshlet-culling.md)。上述画面和功能验证覆盖本机 Metal。运行包使用由当前源资源生成的格式。
 
 ## 方向光虚拟阴影
 
@@ -203,7 +203,7 @@ CPU 检查覆盖固定页预算、未发布批次取消、过期反馈拒绝、�
 
 公开标准场景通过实际菜单进入，并用同一运行实例的 MCP 检查静态零重绘、移动箱体、六种调试模式、非法级别拒绝、关闭/重开和返回菜单清理。归档 10 张 PNG，包含普通画面、移动后画面、虚拟深度/图集/页表等诊断及关闭/恢复对照。固定镜头最终 425 个需求页全部就绪，缺页为 0。真实资源本机验证另归档 3 张截图，覆盖 VSM、实时诊断及 VSM/RVT 同时显示；三张回执均包含实际场景帧的 `vsmReady=true`，RVT 同时开启时也为 ready。私有资源、脚本和截图只保存在私有项目忽略目录。
 
-公开结果在 `projects/showcase/cache/visual-tests/virtual-shadows/<run-id>/`；`result.json` 和 `receipts.jsonl` 保留实际提交帧及 VSM 修订。调用方式见[公开 VSM 场景](../projects/showcase/docs/virtual-shadows.md)，运行契约见[VSM 类图](runtime/class-diagrams/virtual-shadow-maps.md)。CPU 状态 ready 不能替代截图帧证据；镜头还在移动时允许继续预热，不把缺页的 CSM 底图算作已就绪的 VSM。
+公开采集写入记录根目录的 `records/validation/showcase/visual-tests/virtual-shadows/<run-id>/`。`result.json` 和 `receipts.jsonl` 保留实际提交帧及 VSM 修订。移动后需等需求页就绪，并在截图回执核对实际使用的 VSM。 [公开 VSM 场景](../projects/showcase/docs/virtual-shadows.md) · [VSM 类图](runtime/class-diagrams/virtual-shadow-maps.md)
 
 6 个受影响 Shader 另通过 SPIR-V 与 WGSL 编译；这不是 Windows／Android／iOS／浏览器的实际运行验收。设备恢复及全部蒙皮、地形变形、破坏组合尚未逐项实机验证。首版限主视图的一盏方向光，透明、反射、烘焙和缺页沿用 CSM；未实现 SMRT、局部灯 VSM 或静动双缓存，也未测量性能收益。
 
@@ -232,6 +232,24 @@ Release 的 13 项 CTest 全部通过（9.06 秒）：`engine.character_motor`�
 Meshlet 剔除分派和单实例连续区间合并通过 macOS Debug／Release 构建、Release `engine.render_submission` 和 Vulkan SPIR-V Shader 编译。回归验证多批次共用一次 Compute、相邻簇共用命令且候选数完整，覆盖多实例压紧、LOD 变化、预算回退和阴影／反射组合的严格 HDR 对照。固定机位三张 PNG 与修改前逐像素一致，实际每通道命令槽由 33217 降至 4748。时间线确认主线程场景提交与渲染线程重叠，Metal 的深度与不透明命令在同一线程串行编码。完整帧中位数降低，该次 P95 未降低。
 
 Metal 时间戳仅记录当前采样区间的有效阶段，采集器断开后停止阶段计数。未连接采集器时，临时 MCP 脚本另行记录玩法帧间隔并核对独立墙钟。时间线、截帧和工作缓冲容量等数据见对应本地报告，实窗结果覆盖本机 Metal 的代表场景。
+
+固定深度的 AO 和 SSR 层级复用由 `engine.render_submission` 校验，覆盖机位及 AO 参数失效、恢复稳定输入后的重复帧，以及切换 SSR 的 HDR 像素对照。3456×2234 原生全屏、4× MSAA、全部用例效果开启的本机对照中，固定机位每帧 Compute 调用由 16 降为 5，绘制由 4683 降为 4671。固定机位的 P50／P95 从 33.68／36.36 ms 降至 30.53／32.54 ms。移动时两个通道重新使用当帧输入，P50 从 51.21 ms 变为 51.36 ms。相同机位截图逐像素一致。
+
+VSM 反馈工作组内归并通过 macOS Debug／Release 构建和 Release `engine.render_submission`，反馈 Shader 通过 Metal、SPIR-V 与 WGSL 编译。沿用上述全开设置的同一移动轨迹，Metal 反馈通道中位数从 3.50 ms 降至 0.90 ms，整帧 P50／P95 从 51.36／51.89 ms 降至 49.68／50.29 ms。回到固定机位后的截图逐像素一致，需求页仍为 400 个且全部就绪。
+
+普通级联按受光范围筛选投射物，继续以原投影和深度范围生成阴影。`engine.window_render` 验证了镜头外投射物仍能遮挡可见受光面，斜面 PCF 阴影边缘回归通过。相同全开移动轨迹的整帧 P50／P95 从 49.68／50.29 ms 降至 47.03／47.57 ms，绘制提交中位数由 17121 降至约 13170。固定参考机位和偏移机位的两组前后截图均逐像素一致。
+
+方向光与局部灯分别编译阴影求值，Metal、SPIR-V 和 WGSL 的不透明、地形与水面 Shader 编译通过。`engine.pbr_hdr_direct_light` 使用共享 Shader 校验方向光、点光和聚光，`engine.window_render` 与 `engine.render_submission` 覆盖阴影和反射。相同全开移动轨迹的主视图不透明片元中位数从 17.92 ms 降至 15.88 ms，整帧 P50／P95 从 47.03／47.57 ms 降至 44.20／44.80 ms。静止偏移机位的整帧 P50 从 30.36 ms 降至 27.67 ms，两组对照截图的 RGBA 像素一致。
+
+平面反射复用 MSAA 深度模板，未被采样的颜色附件使用只写 R8。`engine.window_render` 验证支持对应采样数的设备实际提交了反射深度，水面仍反射镜像场景。macOS Metal Debug／Release 构建及 Release 渲染与性能分析用例通过。在同条件对照中，移动反射片元中位数从 6.19 ms 降至 3.94 ms，整帧 P50／P95 从 44.20／44.80 ms 变为 43.72／44.71 ms，GPU 占用中位数减少约 53.8 MiB。静止偏移整帧 P50 从 27.67 ms 降至 26.14 ms，两组前后截图的 RGBA 像素相同。
+
+方向光和局部灯按连续区间求值，VSM 页表直接编码物理采样坐标。`engine.window_render` 比对正常簇与溢出时的累加像素，`engine.render_foundation` 校验底左原点采样坐标，`engine.render_submission` 覆盖实际阴影和反射。内置和受影响的 Showcase Shader 完成 Metal、SPIR-V 与 WGSL 编译。相同全开移动轨迹的主视图不透明片元中位数从 15.87 降至 15.22 ms，整帧 P50／P95 从 43.72／44.71 降至 42.86／43.58 ms。静止偏移 P50 从 26.14 降至 25.35 ms，P95 从 27.44 变为 27.98 ms，两组截图的 RGBA 像素相同。
+
+合并单采样深度与 SSR 材质表面提交通过 macOS Debug／Release 构建与 Release 渲染、性能分析用例。`engine.render_submission` 校验通道提交、裁切和共面遮挡及 SSR 开关切换。相同全开移动轨迹中，这两个通道的每帧绘制由 1874 次减至 937 次，整帧 P50／P95 从 42.86／43.58 ms 降至 42.05／42.84 ms。静止偏移 P50／P95 从 25.35／27.98 ms 变为 25.48／29.64 ms。两组截图的 RGBA 像素相同。
+
+VSM 页深度范围计算及不透明 Shader 完成 Metal、SPIR-V 和 WGSL 编译。Release `engine.render_submission` 覆盖页缓存、移动后反馈、投射物变更与重建的像素对照。相同原生全屏全开采样中，移动主视图不透明片元中位数从 15.22 ms 降至 13.95 ms，整帧 P50／P95 从 42.05／42.84 ms 降至 41.01／41.87 ms。静止偏移 P50／P95 从 25.48／29.64 ms 降至 24.42／26.97 ms。两张对照图逐像素一致，VSM 纹理占用增加 2.33 MiB。两组计时区间的 VSM 页和深度范围均已预热。
+
+不透明 PBR 的普通 UV 版本通过 macOS Debug／Release 构建和 Metal、SPIR-V、WGSL Shader 编译。Release `engine.render_submission` 和 `engine.window_render` 分别验证材质工作流切换、六边形去平铺开启和恢复后的画面。相同原生全屏全开采样中，移动整帧 P50／P95 从 41.01／41.87 ms 降至 39.64／40.39 ms，不透明片元中位数从 13.95 降至 12.92 ms。静止偏移 P50／P95 从 24.42／26.97 ms 降至 23.09／24.92 ms。两张对照图逐像素一致，预热后的静止、移动组每帧使用新程序的绘制中位数分别为 923、938。
 
 2026-11-08，Windows x64 / Release / DirectX 12 / QuickJS，RTX 4070 Laptop，驱动 `31.0.15.4601`；1280×720、MSAA 1、VSync 关闭、Tracy OFF。优化前源码为 `5070daf9`，实现和当时完整夹具见 `ec7d74d7`。
 

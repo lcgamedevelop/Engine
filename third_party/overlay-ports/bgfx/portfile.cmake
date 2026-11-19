@@ -26,6 +26,7 @@ vcpkg_extract_source_archive(
     metal-profiler-scopes.patch
     metal-counter-validity.patch
     metal-compute-timing.patch
+    metal-resolve-only-attachments.patch
 )
 file(COPY "${CMAKE_CURRENT_LIST_DIR}/windows-utf8.manifest"
      DESTINATION "${SOURCE_PATH}/cmake")

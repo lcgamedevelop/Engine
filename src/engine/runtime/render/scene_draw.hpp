@@ -37,6 +37,7 @@ struct SceneDrawView
     const float* world = nullptr;
     const float* view = nullptr;
     const float* projection = nullptr;
+    const float* culling_projection = nullptr;
     Camera visibility = {};
     // Stable camera/component identities keep hysteresis while temporary view ids are reused.
     std::array<std::uint64_t, 2> lod_observer{};
@@ -50,6 +51,8 @@ struct SceneDrawView
     bool reflection = false;
     bool frustum_culling_enabled = false;
     bool multisampling = false;
+    bool opaque_depth_prepared = false;
+    bool surface_writes_depth = false;
     bool max_anisotropy = false;
     const SceneCaptureRequest* capture = nullptr;
     std::array<bgfx::TextureHandle, 3> textures = {
@@ -58,6 +61,8 @@ struct SceneDrawView
 struct RenderFrameData;
 struct ViewDrawList;
 struct DrawBatch;
+[[nodiscard]] bool can_submit_opaque_depth(const RenderFrameData& frame_data,
+                                           const ViewDrawList& list);
 [[nodiscard]] bool prepare_draw_batches(const RenderFrameData& frame_data, const ViewDrawList& list,
                                         const SceneDrawView& draw, SceneDrawMode mode,
                                         std::vector<DrawBatch>& batches);

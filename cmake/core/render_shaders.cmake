@@ -288,22 +288,22 @@ function(engine_embed_meshlet_shaders target)
         message(FATAL_ERROR "Initialize render shader tools before embedding meshlet shaders")
     endif()
     engine_render_shader_profile(_platform _profile)
-    foreach(_name cs_meshlet_cull cs_meshlet_clear)
-    set(_source "${PROJECT_SOURCE_DIR}/src/engine/runtime/render/shaders/meshlet/${_name}.sc")
-    set(_output "${CMAKE_CURRENT_BINARY_DIR}/generated/render")
-    set(_header "${_output}/${_name}.bin.h")
-    add_custom_command(
-        OUTPUT "${_header}"
-        COMMAND "${CMAKE_COMMAND}" -E make_directory "${_output}"
-        COMMAND "${ENGINE_SHADERC_EXECUTABLE}" -f "${_source}" -o "${_header}"
-                --type compute --platform "${_platform}" --profile "${_profile}"
-                -i "${ENGINE_BGFX_SHADER_INCLUDE_DIR}" --bin2c ${_name}
-        DEPENDS "${_source}" "${ENGINE_BGFX_SHADER_INCLUDE_DIR}/bgfx_compute.sh"
-                "${ENGINE_BGFX_SHADER_INCLUDE_DIR}/bgfx_shader.sh" "${ENGINE_SHADERC_EXECUTABLE}"
-        COMMENT "Compiling embedded ${_platform}/${_profile} meshlet shaders"
-        VERBATIM)
-    target_sources(${target} PRIVATE "${_header}")
-    target_include_directories(${target} PRIVATE "${_output}")
+    foreach(_name cs_meshlet_cull cs_meshlet_clear cs_meshlet_compact_indices)
+        set(_source "${PROJECT_SOURCE_DIR}/src/engine/runtime/render/shaders/meshlet/${_name}.sc")
+        set(_output "${CMAKE_CURRENT_BINARY_DIR}/generated/render")
+        set(_header "${_output}/${_name}.bin.h")
+        add_custom_command(
+            OUTPUT "${_header}"
+            COMMAND "${CMAKE_COMMAND}" -E make_directory "${_output}"
+            COMMAND "${ENGINE_SHADERC_EXECUTABLE}" -f "${_source}" -o "${_header}"
+                    --type compute --platform "${_platform}" --profile "${_profile}"
+                    -i "${ENGINE_BGFX_SHADER_INCLUDE_DIR}" --bin2c ${_name}
+            DEPENDS "${_source}" "${ENGINE_BGFX_SHADER_INCLUDE_DIR}/bgfx_compute.sh"
+                    "${ENGINE_BGFX_SHADER_INCLUDE_DIR}/bgfx_shader.sh" "${ENGINE_SHADERC_EXECUTABLE}"
+            COMMENT "Compiling embedded ${_platform}/${_profile} meshlet shaders"
+            VERBATIM)
+        target_sources(${target} PRIVATE "${_header}")
+        target_include_directories(${target} PRIVATE "${_output}")
     endforeach()
 endfunction()
 
@@ -394,7 +394,7 @@ function(engine_embed_vsm_shaders target)
     engine_render_shader_profile(_platform _profile)
     set(_source "${PROJECT_SOURCE_DIR}/src/engine/runtime/render/shaders/vsm")
     set(_output "${CMAKE_CURRENT_BINARY_DIR}/generated/render")
-    foreach(_name cs_vsm_clear cs_vsm_feedback)
+    foreach(_name cs_vsm_clear cs_vsm_feedback cs_vsm_depth_ranges)
         set(_header "${_output}/${_name}.bin.h")
         add_custom_command(OUTPUT "${_header}"
             COMMAND "${CMAKE_COMMAND}" -E make_directory "${_output}"

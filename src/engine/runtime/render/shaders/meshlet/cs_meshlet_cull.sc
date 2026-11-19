@@ -7,17 +7,17 @@ BUFFER_RO(meshletInputs, vec4, 1);
 BUFFER_WO(meshletInstances, vec4, 2);
 BUFFER_WO(meshletCommands, uvec4, 3);
 BUFFER_RW(meshletCounters, uint, 4);
-// First command, frustum enabled, orthographic, sample counters.
+// First workgroup and singleton command count in uint bits, then the dispatch flags.
 uniform vec4 u_meshlet_parameters;
 uniform vec4 u_meshlet_planes[6];
 SHARED uint visibleCount;
 SHARED uint clusterVisible[32];
 
-bool meshlet_visible(uint record, uint source)
+bool meshlet_visible(uint record, uint source, uint cameraOffset, uint flags)
 {
     vec4 sphere = meshletDescriptors[record];
     vec4 cone = meshletDescriptors[record + 1u];
-    if (u_meshlet_parameters.y > 0.5)
+    if ((flags & 1u) != 0u)
     {
         vec4 column0 = meshletInputs[source];
         vec4 column1 = meshletInputs[source + 1u];
@@ -37,10 +37,10 @@ bool meshlet_visible(uint record, uint source)
             }
         }
     }
-    vec4 camera = meshletInputs[source + 7u];
+    vec4 camera = meshletInputs[source + cameraOffset];
     if (camera.w > 0.5 && cone.w < 1.0)
     {
-        bool orthographic = u_meshlet_parameters.z > 0.5;
+        bool orthographic = (flags & 2u) != 0u;
         vec3 direction = orthographic ? camera.xyz : sphere.xyz - camera.xyz;
         float radius = orthographic ? 0.0 : sphere.w;
         float threshold = cone.w * length(direction) + radius;
@@ -50,11 +50,11 @@ bool meshlet_visible(uint record, uint source)
 }
 
 void emit_draw(uint command, uint firstIndex, uint indexCount, uint instances,
-               uint firstInstance, uint retainedPairs)
+               uint firstInstance, uint retainedPairs, uint flags)
 {
     drawIndexedIndirect(meshletCommands, command, indexCount, instances, firstIndex, 0u,
                         firstInstance);
-    if (u_meshlet_parameters.w > 0.5 && instances > 0u)
+    if ((flags & 4u) != 0u && instances > 0u)
     {
         atomicAdd(meshletCounters[0], retainedPairs);
         atomicAdd(meshletCounters[1], 1u);
@@ -66,23 +66,34 @@ NUM_THREADS(32, 1, 1)
 void main()
 {
     uint lane = gl_LocalInvocationID.x;
-    uint command = floatBitsToUint(u_meshlet_parameters.x) + gl_WorkGroupID.x;
-    // First cluster record, cluster count, first input instance, instance count.
-    uvec4 work = floatBitsToUint(meshletDescriptors[command]);
-    if (work.w == 1u)
+    uint group = floatBitsToUint(u_meshlet_parameters.x) + gl_WorkGroupID.x;
+    uint singletonCommands = floatBitsToUint(u_meshlet_parameters.y);
+    uint singletonGroups = (singletonCommands + 3u) / 4u;
+    uint flags = uint(u_meshlet_parameters.z);
+    if (group < singletonGroups)
     {
-        if (lane < work.y)
+        // Each eight-lane segment owns a different singleton command.
+        uint command = group * 4u + lane / 8u;
+        uint clusterLane = lane % 8u;
+        uvec4 work = uvec4(0u, 0u, 0u, 0u);
+        if (command < singletonCommands)
         {
-            clusterVisible[lane] = meshlet_visible(work.x + lane * 3u, work.z * 8u) ? 1u : 0u;
+            work = floatBitsToUint(meshletDescriptors[command]);
         }
+        uint visible = 0u;
+        if (clusterLane < work.y)
+        {
+            visible = meshlet_visible(work.x + clusterLane * 3u, work.z, 4u, flags) ? 1u : 0u;
+        }
+        clusterVisible[lane] = visible;
         barrier();
-        if (lane == 0u)
+        if (clusterLane == 0u && command < singletonCommands)
         {
             uint first = work.y;
             uint last = 0u;
             for (uint cluster = 0u; cluster < work.y; ++cluster)
             {
-                if (clusterVisible[cluster] > 0u)
+                if (clusterVisible[lane + cluster] > 0u)
                 {
                     first = min(first, cluster);
                     last = cluster;
@@ -90,7 +101,7 @@ void main()
             }
             if (first == work.y)
             {
-                emit_draw(command, 0u, 0u, 0u, 0u, 0u);
+                emit_draw(command, 0u, 0u, 0u, 0u, 0u, flags);
             }
             else
             {
@@ -98,12 +109,15 @@ void main()
                 uvec4 begin = floatBitsToUint(meshletDescriptors[work.x + first * 3u + 2u]);
                 uvec4 end = floatBitsToUint(meshletDescriptors[work.x + last * 3u + 2u]);
                 emit_draw(command, begin.x, end.x + end.y - begin.x, 1u, begin.z,
-                          last - first + 1u);
+                          last - first + 1u, flags);
             }
         }
         return;
     }
 
+    uint command = singletonCommands + group - singletonGroups;
+    // First cluster record, cluster count, first input vector, instance count.
+    uvec4 work = floatBitsToUint(meshletDescriptors[command]);
     uvec4 indices = floatBitsToUint(meshletDescriptors[work.x + 2u]);
     if (lane == 0u)
     {
@@ -112,8 +126,8 @@ void main()
     barrier();
     for (uint instance = lane; instance < work.w; instance += 32u)
     {
-        uint source = (work.z + instance) * 8u;
-        if (meshlet_visible(work.x, source))
+        uint source = work.z + instance * 8u;
+        if (meshlet_visible(work.x, source, 7u, flags))
         {
             uint slot;
             atomicFetchAndAdd(visibleCount, 1u, slot);
@@ -127,6 +141,6 @@ void main()
     barrier();
     if (lane == 0u)
     {
-        emit_draw(command, indices.x, indices.y, visibleCount, indices.z, visibleCount);
+        emit_draw(command, indices.x, indices.y, visibleCount, indices.z, visibleCount, flags);
     }
 }

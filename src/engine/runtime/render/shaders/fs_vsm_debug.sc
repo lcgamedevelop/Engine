@@ -20,28 +20,24 @@ void main()
     }
     else
     {
-        int level = int(clamp(u_vsm_debug.z < 0.0 ? vsm_data(5).w : u_vsm_debug.z,
-                              0.0, vsm_data(3).w - 1.0));
-        float n = vsm_data(3).z;
+        int level = int(clamp(u_vsm_debug.z < 0.0 ? u_vsm_view[2].w : u_vsm_debug.z,
+                              0.0, u_vsm_view[3].w - 1.0));
+        float n = u_vsm_view[3].z;
         uv.y = 1.0 - uv.y;
         uint address = uint(level) * uint(n * n) + uint(uv.y * n) * uint(n) + uint(uv.x * n);
-        vec4 packed = vsm_data(24 + int(address / 4u));
-        uint entry = floatBitsToUint(packed[int(address % 4u)]);
-        uint slot = entry & 65535u;
-        if ((entry & 131072u) != 0u) color = vec3(1.0, 0.15, 0.12);
-        if (slot > 0u)
+        uint entry = vsm_entry(address);
+        if ((entry & vsm_page_dirty) != 0u) color = vec3(1.0, 0.15, 0.12);
+        if ((entry & vsm_page_resident) != 0u)
         {
-            --slot;
             if (u_vsm_debug.x > 1.5)
-                color = (entry & 65536u) != 0u ? vec3(1.0, 0.7, 0.12) : vec3(0.15, 0.65, 0.35);
+                color = (entry & vsm_page_planned) != 0u ? vec3(1.0, 0.7, 0.12)
+                                                        : vec3(0.15, 0.65, 0.35);
             else
             {
-                vec4 atlas = vsm_data(4);
                 vec2 local = fract(uv * n);
-                vec2 tile = vec2(float(slot % uint(atlas.w)), float(slot / uint(atlas.w))) * atlas.z;
-                if (vsm_data(8 + level).w < 0.0) local.y = 1.0 - local.y;
-                else tile.y = vsm_data(5).x - tile.y - atlas.z;
-                vec2 sample_uv = (tile + atlas.y + local * atlas.x) / vsm_data(5).x;
+                vec2 tile = vsm_atlas_origin(entry);
+                if (u_vsm_view[vsm_first_clipmap + level].w < 0.0) local.y = 1.0 - local.y;
+                vec2 sample_uv = (tile + vsm_page_border + local * vsm_page_size) / u_vsm_view[0].w;
                 color = vec3_splat(texture2DLod(s_virtual_shadow, sample_uv, 0.0).r);
             }
         }

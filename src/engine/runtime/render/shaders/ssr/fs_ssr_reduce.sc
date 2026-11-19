@@ -5,11 +5,6 @@ SAMPLER2D(s_ssr_depth, 2);
 
 void main()
 {
-    if (u_ssr_reduce.w > 0.5)
-    {
-        gl_FragColor = vec4_splat(texture2D(s_ssr_depth, v_texcoord0).r);
-        return;
-    }
     vec2 destination = floor(v_texcoord0 * u_ssr_target.xy);
     vec2 first = floor(destination * u_ssr_reduce.xy / u_ssr_target.xy);
     vec2 end = ceil((destination + vec2_splat(1.0)) * u_ssr_reduce.xy / u_ssr_target.xy);

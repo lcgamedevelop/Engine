@@ -1,11 +1,13 @@
 #include <bgfx_compute.sh>
 BUFFER_RW(vsmDemands, uint, 4);
-BUFFER_RO(b_light_data, vec4, 5);
 SAMPLER2D(s_vsm_receiver_depth, 0);
 uniform vec4 u_vsm_feedback;
 uniform mat4 u_vsm_inverse;
+#define ENGINE_VSM_FEEDBACK 1
 #include "vsm_address.sh"
 const uint invalid_receiver_page = 0xffffffffu;
+SHARED uint group_word;
+SHARED uint group_mask;
 
 uint receiver_page(vec2 pixel)
 {
@@ -18,25 +20,33 @@ uint receiver_page(vec2 pixel)
     if (u_vsm_feedback.z > 0.5) depth = depth * 2.0 - 1.0;
     vec4 receiver = mul(u_vsm_inverse, vec4(ndc, depth, 1.0));
     if (abs(receiver.w) < 0.000001) return invalid_receiver_page;
-    int level;
     vec2 coordinate;
     uint address;
-    return vsm_address(receiver.xyz / receiver.w, level, coordinate, address)
+    vec4 grid;
+    float camera_depth;
+    return vsm_address(receiver.xyz / receiver.w, coordinate, address, grid, camera_depth)
         ? address : invalid_receiver_page;
 }
 
-NUM_THREADS(8, 8, 1)
-void main()
+void mark_demand(uint word, uint mask)
 {
-    vec2 pixel = vec2(gl_GlobalInvocationID.xy * 2u);
-    uvec4 pages = uvec4(receiver_page(pixel), receiver_page(pixel + vec2(1.0, 0.0)),
-                       receiver_page(pixel + vec2(0.0, 1.0)),
-                       receiver_page(pixel + vec2(1.0, 1.0)));
+    if (word == group_word)
+    {
+        atomicOr(group_mask, mask);
+    }
+    else
+    {
+        atomicOr(vsmDemands[word], mask);
+    }
+}
+
+void mark_receivers(uvec4 pages)
+{
     if (pages.x == pages.y && pages.x == pages.z && pages.x == pages.w)
     {
         if (pages.x != invalid_receiver_page)
         {
-            atomicOr(vsmDemands[pages.x / 32u], 1u << (pages.x % 32u));
+            mark_demand(pages.x / 32u, 1u << (pages.x % 32u));
         }
         return;
     }
@@ -56,6 +66,28 @@ void main()
                 pages[neighbor] = invalid_receiver_page;
             }
         }
-        atomicOr(vsmDemands[word], mask);
+        mark_demand(word, mask);
+    }
+}
+
+NUM_THREADS(8, 8, 1)
+void main()
+{
+    vec2 pixel = vec2(gl_GlobalInvocationID.xy * 2u);
+    uvec4 pages = uvec4(receiver_page(pixel), receiver_page(pixel + vec2(1.0, 0.0)),
+                       receiver_page(pixel + vec2(0.0, 1.0)),
+                       receiver_page(pixel + vec2(1.0, 1.0)));
+    bool leader = all(equal(gl_LocalInvocationID.xy, uvec2(0u)));
+    if (leader)
+    {
+        group_word = min(min(pages.x, pages.y), min(pages.z, pages.w)) / 32u;
+        group_mask = 0u;
+    }
+    barrier();
+    mark_receivers(pages);
+    barrier();
+    if (leader && group_mask != 0u)
+    {
+        atomicOr(vsmDemands[group_word], group_mask);
     }
 }

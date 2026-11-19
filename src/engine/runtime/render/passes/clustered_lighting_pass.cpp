@@ -1,6 +1,4 @@
 #include "runtime/render/passes/clustered_lighting_pass.hpp"
-#include "runtime/render/vsm/vsm_types.hpp"
-
 #include "runtime/performance/profiling.hpp"
 #include "runtime/render/render_math.hpp"
 #include "runtime/render/render_system.hpp"
@@ -14,7 +12,6 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
-#include <vector>
 
 namespace engine::render_detail
 {
@@ -46,12 +43,15 @@ bool ClusteredLightingPass::prepare(const RenderConfig& config, std::uint16_t wi
     const auto y = (static_cast<std::uint32_t>(height) + config.cluster_tile_size - 1) /
                    config.cluster_tile_size;
     const std::uint64_t count = std::uint64_t{x} * y * config.cluster_depth_slices;
-    const std::uint64_t indices = count * (std::uint64_t{config.maximum_cluster_lights} + 1);
+    // Each cluster stores a count followed by two light indices per 32-bit word.
+    const std::uint64_t words_per_cluster =
+        1 + (std::uint64_t{config.maximum_cluster_lights} + 1) / 2;
+    const std::uint64_t cluster_words = count * words_per_cluster;
     const std::uint64_t vectors = std::uint64_t{config.maximum_lights} * 4 +
                                   std::uint64_t{config.maximum_local_shadow_faces} * 6 +
                                   vsm_vectors;
     // Uniform counters are exactly representable, and buffer byte sizes fit bgfx's API.
-    if (count == 0 || count > 16777216 || indices > UINT32_MAX / sizeof(std::uint32_t) ||
+    if (count == 0 || count > 16777216 || cluster_words > UINT32_MAX / sizeof(std::uint32_t) ||
         vectors > UINT32_MAX / (sizeof(float) * 4) || (count + 63) / 64 > 65535)
     {
         return false;
@@ -72,14 +72,20 @@ bool ClusteredLightingPass::prepare(const RenderConfig& config, std::uint16_t wi
     layout.begin().add(bgfx::Attrib::TexCoord0, 4, bgfx::AttribType::Float).end();
     lights_ = bgfx::createDynamicVertexBuffer(static_cast<std::uint32_t>(vectors), layout,
                                               BGFX_BUFFER_COMPUTE_READ);
+    // Prepare one count word per cluster before the view's actual lights are available.
     clusters_ = bgfx::createDynamicIndexBuffer(
-        static_cast<std::uint32_t>(indices), BGFX_BUFFER_INDEX32 | BGFX_BUFFER_COMPUTE_READ_WRITE);
+        static_cast<std::uint32_t>(count), BGFX_BUFFER_INDEX32 | BGFX_BUFFER_COMPUTE_READ_WRITE);
     shader_ = bgfx::createShader(bgfx::copy(cs_cluster_cull, sizeof(cs_cluster_cull)));
     if (bgfx::isValid(shader_))
     {
         program_ = bgfx::createProgram(shader_, false);
     }
     vsm_layout_ = bgfx::createUniform("u_vsm_layout", bgfx::UniformType::Vec4);
+    if (vsm_vectors != 0)
+    {
+        vsm_view_uniform_ = bgfx::createUniform("u_vsm_view", bgfx::UniformFreq::View,
+                                                bgfx::UniformType::Vec4, vsm_view_vectors);
+    }
     grid_uniform_ =
         bgfx::createUniform("u_cluster_grid", bgfx::UniformFreq::View, bgfx::UniformType::Vec4);
     camera_uniform_ =
@@ -95,7 +101,8 @@ bool ClusteredLightingPass::prepare(const RenderConfig& config, std::uint16_t wi
         !bgfx::isValid(program_) || !bgfx::isValid(grid_uniform_) ||
         !bgfx::isValid(camera_uniform_) || !bgfx::isValid(counts_uniform_) ||
         !bgfx::isValid(viewport_uniform_) || !bgfx::isValid(view_uniform_) ||
-        !bgfx::isValid(inverse_projection_uniform_))
+        !bgfx::isValid(inverse_projection_uniform_) ||
+        (vsm_vectors != 0 && !bgfx::isValid(vsm_view_uniform_)))
     {
         release();
         return false;
@@ -104,6 +111,7 @@ bool ClusteredLightingPass::prepare(const RenderConfig& config, std::uint16_t wi
     viewport_ = {static_cast<float>(width), static_cast<float>(height), 1.0F / width,
                  1.0F / height};
     cluster_count_ = static_cast<std::uint32_t>(count);
+    cluster_buffer_words_ = cluster_count_;
     maximum_lights_ = config.maximum_lights;
     vsm_vectors_ = vsm_vectors;
     maximum_cluster_lights_ = config.maximum_cluster_lights;
@@ -114,6 +122,7 @@ bool ClusteredLightingPass::prepare(const RenderConfig& config, std::uint16_t wi
 bool ClusteredLightingPass::cull(bgfx::ViewId view, const CameraSettings& camera,
                                  const float* view_matrix, const float* projection,
                                  std::span<const ClusterLight> lights,
+                                 std::uint32_t directional_count,
                                  std::span<const ShadowRecord> shadows, const VsmPageBatch* vsm)
 {
     ENGINE_PROFILE_ZONE("Render.clusterSubmit");
@@ -122,7 +131,8 @@ bool ClusteredLightingPass::cull(bgfx::ViewId view, const CameraSettings& camera
         !finite_matrix(view_matrix) || !finite_matrix(projection) ||
         !std::isfinite(camera.near_clip) || !std::isfinite(camera.far_clip) ||
         camera.near_clip <= 0.0F || camera.far_clip <= camera.near_clip ||
-        lights.size() > maximum_lights_ || shadows.size() > maximum_shadow_faces_)
+        directional_count > lights.size() || lights.size() > maximum_lights_ ||
+        shadows.size() > maximum_shadow_faces_)
     {
         return false;
     }
@@ -132,37 +142,64 @@ bool ClusteredLightingPass::cull(bgfx::ViewId view, const CameraSettings& camera
     {
         return false;
     }
-    if (vsm && vsm->gpu_data.size() > vsm_vectors_)
+    if (vsm && (vsm->page_table.empty() || vsm->page_table.size() > vsm_vectors_))
     {
         return false;
     }
-    const auto vsm_bytes = vsm ? vsm->gpu_data.size() * sizeof(std::array<float, 4>) : 0;
+    const auto local_count = lights.size() - directional_count;
+    // A one-light cluster is either empty or contains the entire local list.
+    // Its count word can use the existing full-list marker without storing an index.
+    const auto capacity =
+        local_count <= 1 ? 0 : std::min(local_count, std::size_t{maximum_cluster_lights_});
+    // The configured upper bound on this product was checked during prepare().
+    const auto cluster_words =
+        static_cast<std::uint32_t>(cluster_count_ * (1 + (capacity + 1) / 2));
+    if (cluster_words > cluster_buffer_words_)
+    {
+        const auto replacement = bgfx::createDynamicIndexBuffer(
+            cluster_words, BGFX_BUFFER_INDEX32 | BGFX_BUFFER_COMPUTE_READ_WRITE);
+        if (!bgfx::isValid(replacement))
+        {
+            return false;
+        }
+        bgfx::destroy(clusters_);
+        clusters_ = replacement;
+        cluster_buffer_words_ = cluster_words;
+    }
+    const auto vsm_bytes = vsm ? vsm->page_table.size() * sizeof(std::array<float, 4>) : 0;
     const auto light_bytes = lights.size_bytes();
     const auto shadow_bytes = shadows.size_bytes();
-    // An empty scene still uploads a valid record; the compute pass clears every count.
-    std::vector<std::uint8_t> bytes(
-        std::max<std::size_t>(16, light_bytes + shadow_bytes + vsm_bytes));
+    const auto payload_bytes = light_bytes + shadow_bytes + vsm_bytes;
+    const auto* upload = bgfx::alloc(
+        static_cast<std::uint32_t>(std::max<std::size_t>(16, payload_bytes)));
+    if (payload_bytes == 0)
+    {
+        // The empty scene still supplies a valid buffer binding.
+        std::memset(upload->data, 0, upload->size);
+    }
     if (light_bytes != 0)
     {
-        std::memcpy(bytes.data(), lights.data(), light_bytes);
+        std::memcpy(upload->data, lights.data(), light_bytes);
     }
     if (shadow_bytes != 0)
     {
-        std::memcpy(bytes.data() + light_bytes, shadows.data(), shadow_bytes);
+        std::memcpy(upload->data + light_bytes, shadows.data(), shadow_bytes);
     }
     vsm_parameters_ = {float((light_bytes + shadow_bytes) / 16), vsm ? 1.F : 0.F,
-                       vsm && vsm->diagnostics ? float(vsm->debug_options.mode) + 1.F : 0.F,
-                       vsm ? float(vsm->debug_options.clipmap_level) : -1.F};
+                       vsm && vsm->diagnostics ? float(vsm->debug_options.mode) + 1.F : 0.F, 0.F};
     if (vsm_bytes)
     {
-        std::memcpy(bytes.data() + light_bytes + shadow_bytes, vsm->gpu_data.data(), vsm_bytes);
+        vsm_view_ = vsm_pack_view(vsm->view, vsm->dominant_level);
+        std::memcpy(upload->data + light_bytes + shadow_bytes, vsm->page_table.data(), vsm_bytes);
     }
-    bgfx::update(lights_, 0, bgfx::copy(bytes.data(), static_cast<std::uint32_t>(bytes.size())));
+    bgfx::update(lights_, 0, upload);
     const auto* caps = bgfx::getCaps();
     camera_ = {camera.near_clip, camera.far_clip, caps->homogeneousDepth ? 1.0F : 0.0F,
                caps->originBottomLeft ? 1.0F : 0.0F};
-    counts_ = {static_cast<float>(lights.size()), static_cast<float>(maximum_cluster_lights_),
-               static_cast<float>(lights.size() * 4), static_cast<float>(cluster_count_)};
+    counts_ = {static_cast<float>(lights.size()), static_cast<float>(capacity),
+               static_cast<float>(lights.size() * 4), static_cast<float>(directional_count)};
+    ENGINE_PROFILE_PLOT("Render.clusterIndexBytes",
+                        static_cast<std::int64_t>(cluster_buffer_words_ * sizeof(std::uint32_t)));
     bgfx::setViewName(view, "Clustered lighting");
     bgfx::setViewMode(view, bgfx::ViewMode::Sequential);
     bgfx::setViewUniform(view, grid_uniform_, grid_.data());
@@ -178,7 +215,7 @@ bool ClusteredLightingPass::cull(bgfx::ViewId view, const CameraSettings& camera
     return true;
 }
 
-void ClusteredLightingPass::bind_view(bgfx::ViewId view) const
+void ClusteredLightingPass::bind_view(bgfx::ViewId view, bool virtual_shadow) const
 {
     if (!ready_)
     {
@@ -188,6 +225,10 @@ void ClusteredLightingPass::bind_view(bgfx::ViewId view) const
     bgfx::setViewUniform(view, camera_uniform_, camera_.data());
     bgfx::setViewUniform(view, counts_uniform_, counts_.data());
     bgfx::setViewUniform(view, viewport_uniform_, viewport_.data());
+    if (virtual_shadow && vsm_parameters_[1] > 0.5F)
+    {
+        bgfx::setViewUniform(view, vsm_view_uniform_, vsm_view_.data(), vsm_view_vectors);
+    }
 }
 
 void ClusteredLightingPass::bind(bool virtual_shadow) const
@@ -224,8 +265,9 @@ void ClusteredLightingPass::release() noexcept
     {
         bgfx::destroy(shader_);
     }
-    for (auto uniform : {grid_uniform_, camera_uniform_, counts_uniform_, viewport_uniform_,
-                         view_uniform_, inverse_projection_uniform_, vsm_layout_})
+    for (auto uniform :
+         {grid_uniform_, camera_uniform_, counts_uniform_, viewport_uniform_, view_uniform_,
+          inverse_projection_uniform_, vsm_layout_, vsm_view_uniform_})
     {
         if (bgfx::isValid(uniform))
         {
@@ -238,11 +280,11 @@ void ClusteredLightingPass::release() noexcept
     shader_ = BGFX_INVALID_HANDLE;
     grid_uniform_ = camera_uniform_ = counts_uniform_ = view_uniform_ =
         inverse_projection_uniform_ = BGFX_INVALID_HANDLE;
-    viewport_uniform_ = vsm_layout_ = BGFX_INVALID_HANDLE;
+    viewport_uniform_ = vsm_layout_ = vsm_view_uniform_ = BGFX_INVALID_HANDLE;
     vsm_vectors_ = 0;
     vsm_parameters_ = {};
     grid_ = {};
-    cluster_count_ = maximum_lights_ = 0;
+    cluster_count_ = cluster_buffer_words_ = maximum_lights_ = 0;
     maximum_cluster_lights_ = maximum_shadow_faces_ = 0;
     ready_ = false;
 }
@@ -258,6 +300,7 @@ std::uint32_t ClusteredLightingPass::resource_count() const noexcept
            static_cast<std::uint32_t>(bgfx::isValid(counts_uniform_)) +
            static_cast<std::uint32_t>(bgfx::isValid(viewport_uniform_)) +
            static_cast<std::uint32_t>(bgfx::isValid(vsm_layout_)) +
+           static_cast<std::uint32_t>(bgfx::isValid(vsm_view_uniform_)) +
            static_cast<std::uint32_t>(bgfx::isValid(view_uniform_)) +
            static_cast<std::uint32_t>(bgfx::isValid(inverse_projection_uniform_));
 }

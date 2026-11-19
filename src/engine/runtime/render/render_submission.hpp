@@ -66,6 +66,9 @@ struct MeshletDrawRange
     bgfx::DynamicVertexBufferHandle instances = BGFX_INVALID_HANDLE;
     std::uint32_t first_command = 0, command_count = 0;
     std::uint32_t first_instance = 0, instance_capacity = 0;
+    bgfx::DynamicIndexBufferHandle compacted_indices = BGFX_INVALID_HANDLE;
+    bool whole_vertex_page = false;
+    bool merged_into_previous = false;
 };
 
 struct DrawBatch
