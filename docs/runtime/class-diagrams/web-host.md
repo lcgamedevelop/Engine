@@ -4,6 +4,8 @@
 
 [类图索引](../../class-diagrams/index.md) · [Web 导出](../../editor/class-diagrams/web-export.md) · [运行宿主](runtime-host.md) · [渲染系统](render-system.md)
 
+Wasm 构建分配线性内存与主线程启动栈，应用 worker 使用同样大小的独立栈。页面启动时预热应用 worker，日志、资源及其他 pthread worker 随模块的实际任务创建，并使用各自的默认栈。各容量由[构建配置](../../building.md#webgpu-游戏导出)提供。
+
 ## 最小改动与目录
 
 Web 适配不新增核心公开类、System 或项目脚本接口；既有平台参数增加 `web` 取值。新增两个 C++ 私有数据结构：`RuntimeAppState` 保存当前游戏入口已有的跨帧状态，`WebSurfaceState` 保活异步设备申请。存储增加一个私有文件发布函数；浏览器入口、存储桥和导出器使用模块函数。浏览器启动状态只记录页面装载与关闭，不复制 Gameplay、Scene、资源或任务状态。
@@ -226,8 +228,10 @@ classDiagram
 | --- | --- |
 | Canvas 或设备申请尚未就绪 | prepare 成功且 available=false；沿通用呈现链返回 deferred |
 | 设备与 Canvas 就绪 | 填入 WebGPU 后端、平台句柄及已就绪设备，再初始化已适配的 bgfx |
-| Canvas 像素尺寸改变 | 通过 SurfaceChange reset；DOM 替换或 worker 转交不作为普通 resize |
+| Canvas CSS 尺寸或设备像素比改变 | SDL 更新高 DPI 后备缓冲，由 SurfaceChange reset；DOM 替换或 worker 转交属于新一代启动 |
 | 申请失败、验证错误或实际设备丢失 | 返回 failed，宿主锁存原生故障并结束在途请求 |
+
+页面用 CSS 决定 Canvas 布局与宽高比。SDL 以 CSS 像素提供逻辑尺寸和输入坐标，以实际像素尺寸提供 WebGPU 渲染目标。
 
 暂缓不产生成功帧，也不丢弃候选或活动场景。首次设备申请期间，已受理的[范围准备](render-readiness.md)保持 working／queued，不创建 GPU 对象；实际申请失败才锁存领域错误。设备丢失在首版视为本次运行失败，完成清理后由页面显式重启，不自动降级后端或循环申请。
 

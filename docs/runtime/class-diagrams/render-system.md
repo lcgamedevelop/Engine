@@ -617,6 +617,8 @@ classDiagram
         +uint64_t upload_bytes_per_step = 8388608
         +uint8_t msaa_samples = 1
         +bool max_anisotropy = false
+        +uint32_t transient_vertex_bytes = 0
+        +uint32_t transient_index_bytes = 0
     }
     class WorldSystem
     class Scene
@@ -729,6 +731,7 @@ classDiagram
 ### MSAA 与材质各向异性过滤
 
 - 仅在现有 `RenderConfig`、`RenderSystem` 增加设备画质参数与查询，不增加 Manager、场景组件或另一份持久设置模型。`msaa_samples` 接受 `1/2/4/8`，`1` 表示关闭；`max_anisotropy` 为最大各向异性过滤开关。默认分别为 `1`、`false`，项目设置业务决定何时读取、保存和提交用户选择。
+- `transient_vertex_bytes` 和 `transient_index_bytes` 传给 bgfx 作为临时几何容量。0 选择 bgfx 的默认容量。这两个值在建立渲染设备时应用。
 - `supports_msaa_samples(samples)` / `supports_max_anisotropy()` 查询当前设备和本渲染链真正可用的能力；图形设备未就绪返回 `false`。MSAA 必须同时满足实际采样数、RGBA16F 颜色目标与 D32F 深度目标能力；上游仅有“格式支持 MSAA”标记不能证明某一采样档位可用。底层沿用 bgfx 已有后端能力检测，补齐其实际档位输出，不自行猜测设备档位、不依赖 bgfx 的静默降级。
 - 两个 setter 均为主线程调用、`[[nodiscard]] bool`；无效档位、设备未就绪或不支持的请求返回 `false`，保留此前设置。成功仅表示接受请求，下一次可绘制帧统一应用；getter 返回最近接受的请求。重复设置同值不重建目标。临时关闭 GPU 保留请求，恢复后重新校验，不支持则明确失败。
 - MSAA 必须应用到实际离屏几何渲染：主场景 RGBA16F 颜色、镜面贡献及匹配深度，透明/水体合成的颜色与深度，以及平面反射颜色与深度。几何提交启用 MSAA rasterization。颜色由 bgfx 原生 resolve 提供给 SSR、折射、Bloom 和最终输出，不能只切换 backbuffer reset flag。

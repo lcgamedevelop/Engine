@@ -29,7 +29,6 @@ void TextureResourceCodec::initialize_transcoder()
 bool TextureResourceCodec::validate(const schema::TextureDataT& data)
 {
     ENGINE_PROFILE_FUNCTION();
-    initialize_transcoder();
     if (data.schema_version != 3 || !valid_path(data.path) || data.width == 0 || data.height == 0 ||
         data.width > 16384 || data.height > 16384 || data.mip_count == 0 ||
         data.format < schema::TextureFormat::MIN || data.format > schema::TextureFormat::MAX ||

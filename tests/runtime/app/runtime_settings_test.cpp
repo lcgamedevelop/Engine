@@ -95,6 +95,8 @@ int main(int argc, char* argv[])
         R"({"parallel":{"completion_budget_seconds":2}})",
         R"({"parallel":{"navigation_tile_threshold":1025}})",
         R"({"parallel":{"rendering":{"texture_batch_size":65}}})",
+        R"({"parallel":{"physics_limits":{"maximum_bodies":0,"maximum_body_pairs":2048,"maximum_contact_constraints":512,"temporary_allocator_bytes":1048576}}})",
+        R"({"parallel":{"rendering":{"transient_vertex_bytes":-1}}})",
         R"({"parallel":{"rendering":{"vsm_physical_pages":0}}})",
         R"({"parallel":{"rendering":{"vsm_pages_per_frame":17}}})",
         R"({"parallel":{"rendering":{"prepare_items_per_step":0}}})",
@@ -150,6 +152,28 @@ int main(int argc, char* argv[])
                     settings.parallel.rendering.maximum_local_shadow_faces == 0 &&
                     settings.parallel.rendering.maximum_planar_reflections == 0,
                 "explicit upper bounds and disabled optional captures are accepted"))
+    {
+        return 1;
+    }
+    auto& budgets = candidate["parallel"];
+    budgets["physics_limits"] = {{"maximum_bodies", 256},
+                                 {"maximum_body_pairs", 2048},
+                                 {"maximum_contact_constraints", 512},
+                                 {"temporary_allocator_bytes", 1048576}};
+    budgets["rendering"]["transient_vertex_bytes"] = 2097152;
+    budgets["rendering"]["transient_index_bytes"] = 524288;
+    if (!expect(engine::decode_runtime_settings(candidate.dump(), settings, error) &&
+                    settings.parallel.physics_limits.maximum_bodies == 256 &&
+                    settings.parallel.physics_limits.maximum_body_pairs == 2048 &&
+                    settings.parallel.physics_limits.maximum_contact_constraints == 512 &&
+                    settings.parallel.physics_limits.temporary_allocator_bytes == 1048576 &&
+                    settings.parallel.rendering.transient_vertex_bytes == 2097152 &&
+                    settings.parallel.rendering.transient_index_bytes == 524288 &&
+                    engine::decode_runtime_settings(source.dump(), settings, error) &&
+                    settings.parallel.physics_limits.maximum_bodies == 4096 &&
+                    settings.parallel.rendering.transient_vertex_bytes == 0 &&
+                    settings.parallel.rendering.transient_index_bytes == 0,
+                "optional physics and transient rendering budgets override subsystem defaults"))
     {
         return 1;
     }

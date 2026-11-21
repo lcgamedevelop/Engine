@@ -70,6 +70,7 @@ class DesktopExportTest(unittest.TestCase):
             kind="runtime",
             platform=platform,
             app_bundle=app_bundle,
+            strip_runtime_symbols=False,
             product="game_runtime",
             output=self.destination,
             manifest=Path("settings/editor-resource-build.toml"),
@@ -83,14 +84,22 @@ class DesktopExportTest(unittest.TestCase):
         for platform, app_bundle in (("windows", False), ("macos", False), ("macos", True)):
             with self.subTest(platform=platform, app_bundle=app_bundle):
                 args = self.export_arguments(platform, app_bundle)
+                args.strip_runtime_symbols = platform == "macos"
                 (self.source / "catalog.bin").write_bytes(catalog_fixture([self.entry], platform))
                 with (
                     mock.patch.object(desktop, "ROOT", self.root),
                     mock.patch.object(desktop, "build_resources", return_value=self.source),
-                    mock.patch.object(desktop.subprocess, "run"),
+                    mock.patch.object(desktop.subprocess, "run") as run,
                     mock.patch("builtins.print"),
                 ):
                     desktop.export(args)
+                if platform == "macos":
+                    command = run.call_args_list[0].args[0]
+                    self.assertEqual(command[:4], ["xcrun", "strip", "-S", "-x"])
+                    self.assertEqual(Path(command[4]).name, args.product)
+                    self.assertEqual(args.executable.read_bytes(), b"fixture executable")
+                else:
+                    run.assert_not_called()
                 base = self.destination
                 if app_bundle:
                     bundle = base / "game_runtime.app"

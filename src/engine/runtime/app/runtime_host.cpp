@@ -196,7 +196,8 @@ bool RuntimeHost::initialize_gameplay(const EngineConfig& config,
 #endif
 
     auto world = std::make_unique<WorldSystem>(loader_, parallel_.scene_restore);
-    auto physics_system = std::make_unique<PhysicsSystem>(world.get(), physics_tasks_.get());
+    auto physics_system =
+        std::make_unique<PhysicsSystem>(world.get(), physics_tasks_.get(), parallel_.physics_limits);
     physics_ = physics_system.get();
     std::unique_ptr<System> physics = std::move(physics_system);
     auto navigation_system = std::make_unique<NavigationSystem>(

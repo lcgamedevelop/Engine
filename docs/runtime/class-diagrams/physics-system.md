@@ -8,7 +8,7 @@
 classDiagram
     class PhysicsSystem {
         <<final>>
-        +PhysicsSystem(WorldSystem#42; world, TaskSystem#42; tasks)
+        +PhysicsSystem(WorldSystem#42; world, TaskSystem#42; tasks, const PhysicsConfig& config)
         +~PhysicsSystem()
         +clear() void
         +body_count() size_t
@@ -33,6 +33,12 @@ classDiagram
     class System
     class WorldSystem
     class TaskSystem
+    class PhysicsConfig {
+        +uint32_t maximum_bodies = 4096
+        +uint32_t maximum_body_pairs = 65536
+        +uint32_t maximum_contact_constraints = 16384
+        +uint32_t temporary_allocator_bytes = 10485760
+    }
     class Scene
     class Collider
     class RigidBody
@@ -113,6 +119,7 @@ classDiagram
     System <|-- PhysicsSystem
     PhysicsSystem --> WorldSystem : 可空借用
     PhysicsSystem --> TaskSystem : 可空借用且先初始化后关闭
+    PhysicsSystem *-- PhysicsConfig : 启动时使用的容量预算
     PhysicsSystem *-- PhysicsState : 独占实现
     PhysicsState ..> Jolt : 私有实现依赖
     PhysicsState *-- PhysicsJobs : 拥有任务及完成跟踪
@@ -151,6 +158,8 @@ classDiagram
 ```
 
 借用的世界必须先初始化并保持有效；无世界时仍可初始化和关闭空碰撞世界，传入尚未初始化的世界返回失败。`clear()` 和 `body_count()` 为 `noexcept`；状态返回值不可忽略。对象禁用、删除及普通场景卸载在下一次更新同步；常驻节点保留原 Scene、组件和 Jolt 实例，完整关闭由宿主显式清理。系统遍历 `WorldSystem::scenes()` 的已发布节点，恢复候选不参与模拟。固定步进与变换限制见[物理模块](../physics.md)。
+
+Jolt 初始化使用调用方指定的刚体、接触及临时分配容量。临时分配预留用尽后仍使用 Jolt 的堆分配回退。项目可按平台提供预算，使用通用构造参数时采用图中默认容量。
 
 物理任务复用 Jolt v5.6.0 官方 `JobSystemWithBarrier` 与 `FixedSizeFreeList`，只桥接任务对象创建、释放和 `TaskSystem::enqueue`。任务域与引擎其他域共享 oneTBB worker；不创建物理专用线程池。任务域先初始化并存活到物理关闭后；不传任务域时由 Barrier 在调用线程串行执行，传入未初始化域则初始化失败。域的并发额度控制后台执行数，Jolt 的并发数另计参与 Barrier 的调用线程。包装在途数由原子预留限制为域并发额度与额外存储容量的较小值；满额直接留给已登记的官方 Barrier，投递被拒绝则释放桥接引用及预留。不在当前 Jolt Job 内递归运行后继，保留上游每任务 BodyAccess 作用域约束。
 

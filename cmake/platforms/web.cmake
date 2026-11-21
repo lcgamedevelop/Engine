@@ -35,9 +35,25 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
 
 set(ENGINE_EXPORT_PROJECT "${PROJECT_SOURCE_DIR}/projects/showcase" CACHE PATH "Exported project")
 set(ENGINE_EXPORT_PRODUCT "engine-showcase" CACHE STRING "Project application identity")
+set(ENGINE_WEB_INITIAL_MEMORY_MIB 32 CACHE STRING "Initial WebAssembly linear memory in MiB")
+set(ENGINE_WEB_MAIN_STACK_KIB 1024 CACHE STRING "Web main and application thread stack in KiB")
+set(ENGINE_WEB_WORKER_STACK_KIB 512 CACHE STRING "Default Web pthread stack in KiB")
 if(NOT ENGINE_EXPORT_PRODUCT MATCHES "^[a-z][a-z0-9_-]*$")
     message(FATAL_ERROR "ENGINE_EXPORT_PRODUCT must be a lowercase application identity")
 endif()
+if(NOT ENGINE_WEB_INITIAL_MEMORY_MIB MATCHES "^[1-9][0-9]*$" OR
+   ENGINE_WEB_INITIAL_MEMORY_MIB GREATER 2048)
+    message(FATAL_ERROR "ENGINE_WEB_INITIAL_MEMORY_MIB must be an integer from 1 to 2048")
+endif()
+foreach(_web_stack ENGINE_WEB_MAIN_STACK_KIB ENGINE_WEB_WORKER_STACK_KIB)
+    if(NOT ${_web_stack} MATCHES "^[1-9][0-9]*$" OR ${_web_stack} GREATER 2097152)
+        message(FATAL_ERROR "${_web_stack} must be an integer from 1 to 2097152")
+    endif()
+endforeach()
+math(EXPR _web_initial_memory "${ENGINE_WEB_INITIAL_MEMORY_MIB} * 1048576")
+math(EXPR _web_main_stack "${ENGINE_WEB_MAIN_STACK_KIB} * 1024")
+math(EXPR _web_worker_stack "${ENGINE_WEB_WORKER_STACK_KIB} * 1024")
+
 function(engine_add_web_runtime target)
     add_executable(${target} platforms/web/main.cpp platforms/web/clock.cpp src/runtime_entry.cpp
         ${ARGN})
@@ -76,14 +92,16 @@ function(engine_add_web_runtime target)
     target_compile_options(${target} PRIVATE --use-port=emdawnwebgpu
         -Wno-dollar-in-identifier-extension)
     # SDL 在创建浏览器窗口时替换 requestFullscreen 回调，调试构建也需要可写的导出。
+    # 主循环在应用 worker，浏览器线程继续处理按需创建 worker 的请求。
     target_link_options(${target} PRIVATE
         "--js-library=${_web_support}/src/lib/libidbfs.js"
         "-Wl,--wrap=__wasi_clock_time_get"
         "-sMODULARIZE=1" "-sEXPORT_ES6=1" "-sINVOKE_RUN=0" "-sEXIT_RUNTIME=0"
         "-sPROXY_TO_PTHREAD=1" "-sOFFSCREENCANVAS_SUPPORT=1"
-        "-sOFFSCREENCANVASES_TO_PTHREAD=#canvas" "-sPTHREAD_POOL_SIZE=8"
-        "-sALLOW_MEMORY_GROWTH=1" "-sINITIAL_MEMORY=134217728" "-sMAXIMUM_MEMORY=2147483648"
-        "-sSTACK_SIZE=4194304" "-sDEFAULT_PTHREAD_STACK_SIZE=2097152"
+        "-sOFFSCREENCANVASES_TO_PTHREAD=#canvas" "-sPTHREAD_POOL_SIZE=1"
+        "-sALLOW_MEMORY_GROWTH=1" "-sINITIAL_MEMORY=${_web_initial_memory}"
+        "-sMAXIMUM_MEMORY=2147483648"
+        "-sSTACK_SIZE=${_web_main_stack}" "-sDEFAULT_PTHREAD_STACK_SIZE=${_web_worker_stack}"
         "-sEXPORTED_FUNCTIONS=[${_web_exports}]"
         "-sEXPORTED_RUNTIME_METHODS=['FS','IDBFS','callMain','PThread','requestFullscreen']")
 endfunction()

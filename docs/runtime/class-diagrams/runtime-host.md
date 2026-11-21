@@ -57,6 +57,7 @@ classDiagram
         +AnimationConfig animation_sampling
         +SceneRestoreConfig scene_restore
         +RenderConfig rendering
+        +PhysicsConfig physics_limits
         +size_t navigation_tile_threshold
         +size_t completions_per_frame
         +double completion_budget_seconds
@@ -67,6 +68,7 @@ classDiagram
     class AnimationConfig
     class SceneRestoreConfig
     class RenderConfig
+    class PhysicsConfig
     class WindowSystem
     class InputSystem
     class GameplaySession
@@ -130,6 +132,7 @@ classDiagram
     RuntimeParallelConfig *-- AnimationConfig
     RuntimeParallelConfig *-- SceneRestoreConfig
     RuntimeParallelConfig *-- RenderConfig
+    RuntimeParallelConfig *-- PhysicsConfig
     RuntimeHost *-- ThreadSystem : 独立宿主拥有预算
     RuntimeHost --> ThreadSystem : 编辑器提供时借用预算
     RuntimeHost --> Engine : 借用进程框架并装配根系统
@@ -179,6 +182,8 @@ classDiagram
 ## 并行配置
 
 `RuntimeParallelConfig` 是运行宿主装配参数，预算值完整保存在项目配置中。编辑器读取项目源 TOML 后直接传递类型配置；打包链导出聚合 `settings/runtime.json`，原生宿主读取 RuntimeSettings 的 engine / parallel 后再传入本对象。RuntimeHost 不解析项目 TOML，EngineConfig 与完整并行设置均由调用者显式提供，不以 `parallel = {}` 补预算。线程上限、各域并发/优先级/积压额度、资源在途数量与字节、动画批量及完成委托每帧预算由配置确定；核心不按调用方身份选择策略。宿主中域并发为 0 表示采用实际进程 worker 预算，传入 TaskSystem 前解析为正整数。线程预算只在启动时确定，借用进程 ThreadSystem 时沿用其预算。
+
+`runtime-parallel.toml` 支持可选的 `physics_limits` 表和 `rendering.transient_vertex_bytes`、`rendering.transient_index_bytes`。可以在 `[platform.web.physics_limits]` 和 `[platform.web.rendering]` 中指定 Web 容量；省略时分别采用物理和渲染配置默认值。
 
 各任务域优先级由配置显式指定；各域共享 oneTBB workers，额度不是独占核心。物理和动画关键计算仍在当前帧 join，保持输入/事件/骨骼时序；文件范围读取由文件域负责，单项解码交给资源解析域，依赖组织由资源图域负责。每帧按数量和总时间预算派发完成委托，然后推进场景与绘制。完成派发按任务域轮转，每次每域至多取一项；保留跨帧游标，预算耗尽后下帧从下一域继续，防止持续繁忙的运行域饿死部署及其他任务域。预算为零不派发，所有域均无就绪项时立即结束，不等待队列。单个委托仍须自行控制耗时，时间预算不抢占正在执行的委托。
 

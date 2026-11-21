@@ -7,6 +7,7 @@
 #include "runtime/system/system.hpp"
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <span>
 #include <vector>
@@ -25,13 +26,22 @@ struct MeshDataT;
 struct ColliderDataT;
 } // namespace schema
 
+struct PhysicsConfig
+{
+    std::uint32_t maximum_bodies = 4096;
+    std::uint32_t maximum_body_pairs = 65536;
+    std::uint32_t maximum_contact_constraints = 16384;
+    std::uint32_t temporary_allocator_bytes = 10U * 1024U * 1024U;
+};
+
 class PhysicsSystem final : public System
 {
 public:
     // 可空借用；世界须存活到系统关闭。空世界用于独立初始化与链接验证。
     // tasks 可空；非空时先初始化，并在物理关闭后再关闭，复用其后台并发额度。
     // tick 在本帧完成求解与结果提交；查询、修改及关闭仍由主线程步进外调用。
-    explicit PhysicsSystem(WorldSystem* world = nullptr, TaskSystem* tasks = nullptr) noexcept;
+    explicit PhysicsSystem(WorldSystem* world = nullptr, TaskSystem* tasks = nullptr,
+                           const PhysicsConfig& config = {}) noexcept;
     ~PhysicsSystem() noexcept override;
 
     // 初始化之前设置；借用覆盖物理系统整个运行期。
@@ -96,6 +106,7 @@ private:
     struct State;
     WorldSystem* world_ = nullptr;
     TaskSystem* tasks_ = nullptr;
+    PhysicsConfig config_;
     CharacterMotorDriver* character_driver_ = nullptr;
     std::unique_ptr<State> state_;
 };

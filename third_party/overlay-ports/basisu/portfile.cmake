@@ -11,6 +11,7 @@ vcpkg_from_github(
         export-cmake-config.diff
         android-library.patch
         quiet-library-output.patch
+        defer-astc-tables.patch
 )
 file(REMOVE_RECURSE "${SOURCE_PATH}/zstd")
 

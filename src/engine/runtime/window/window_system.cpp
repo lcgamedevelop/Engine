@@ -364,10 +364,7 @@ bool WindowSystem::on_initialize(const EngineConfig& config)
     }
     watching_events_ = true;
 
-    SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE;
-#if !defined(SDL_PLATFORM_EMSCRIPTEN)
-    flags |= SDL_WINDOW_HIGH_PIXEL_DENSITY;
-#endif
+    SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
 #if defined(SDL_PLATFORM_MACOS) || defined(SDL_PLATFORM_IOS)
     flags |= SDL_WINDOW_METAL;
 #elif defined(SDL_PLATFORM_ANDROID)

@@ -83,6 +83,8 @@ struct RenderConfig
     // 1 关闭 MSAA；只接受 1、2、4、8。设备不支持时初始化明确失败。
     std::uint8_t msaa_samples = 1;
     bool max_anisotropy = false;
+    std::uint32_t transient_vertex_bytes = 0;
+    std::uint32_t transient_index_bytes = 0;
 };
 
 class RenderSystem final : public System

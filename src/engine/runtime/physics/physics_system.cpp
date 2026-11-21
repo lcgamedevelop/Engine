@@ -77,7 +77,6 @@ namespace
 {
 
 constexpr double fixed_step = 1.0 / 60.0;
-constexpr std::size_t maximum_bodies = 4096;
 constexpr unsigned int maximum_steps = 8;
 constexpr JPH::ObjectLayer static_layer = 0;
 constexpr JPH::ObjectLayer moving_layer = 1;
@@ -1218,7 +1217,7 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
     BroadPhaseFilter broad_filter;
     ObjectFilter object_filter;
     // 官方临时栈分配器，超过预留空间仍用官方 malloc fallback，不限制场景规模。
-    JPH::TempAllocatorImplWithMallocFallback allocator{10U * 1024U * 1024U};
+    JPH::TempAllocatorImplWithMallocFallback allocator;
     physics_detail::PhysicsJobs jobs;
     JPH::PhysicsSystem physics;
     std::map<std::uint64_t, Entry> bodies;
@@ -1243,6 +1242,11 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
     std::map<ContactPair, ContactSample> previous_contacts;
     std::map<ContactPair, ContactSample> touched_contacts;
     std::vector<PhysicsContactEvent> contacts;
+
+    explicit State(std::uint32_t temporary_allocator_bytes) : allocator(temporary_allocator_bytes)
+    {
+        ENGINE_PROFILE_FUNCTION();
+    }
 
     ~State() override
     {
@@ -2293,8 +2297,9 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
     }
 };
 
-PhysicsSystem::PhysicsSystem(WorldSystem* world, TaskSystem* tasks) noexcept
-    : world_(world), tasks_(tasks)
+PhysicsSystem::PhysicsSystem(WorldSystem* world, TaskSystem* tasks,
+                             const PhysicsConfig& config) noexcept
+    : world_(world), tasks_(tasks), config_(config)
 {
     ENGINE_PROFILE_FUNCTION();
 }
@@ -2320,7 +2325,10 @@ bool PhysicsSystem::on_initialize(const EngineConfig&)
 {
     ENGINE_PROFILE_FUNCTION();
     if ((world_ != nullptr && world_->native_world() == nullptr) ||
-        (tasks_ != nullptr && !tasks_->is_initialized()))
+        (tasks_ != nullptr && !tasks_->is_initialized()) || config_.maximum_bodies == 0 ||
+        config_.maximum_bodies > JPH::PhysicsSystem::cMaxBodiesLimit ||
+        config_.maximum_body_pairs == 0 || config_.maximum_contact_constraints == 0 ||
+        config_.temporary_allocator_bytes == 0)
     {
         return false;
     }
@@ -2330,15 +2338,16 @@ bool PhysicsSystem::on_initialize(const EngineConfig&)
                    stderr);
         return false;
     }
-    state_.reset(new (std::nothrow) State());
+    state_.reset(new (std::nothrow) State(config_.temporary_allocator_bytes));
     if (!state_)
     {
         release_jolt();
         return false;
     }
     state_->jobs.initialize(JPH::cMaxPhysicsJobs, JPH::cMaxPhysicsBarriers, tasks_);
-    state_->physics.Init(static_cast<JPH::uint>(maximum_bodies), 0, 65536, 16384, state_->layers,
-                         state_->broad_filter, state_->object_filter);
+    state_->physics.Init(config_.maximum_bodies, 0, config_.maximum_body_pairs,
+                         config_.maximum_contact_constraints, state_->layers, state_->broad_filter,
+                         state_->object_filter);
     state_->physics.SetGravity(JPH::Vec3(0.0F, -9.81F, 0.0F));
     state_->physics.SetContactListener(state_.get());
     if (world_)
@@ -3045,7 +3054,7 @@ bool PhysicsSystem::on_tick(double delta_time)
             clear();
             return false;
         }
-        if (snapshots.size() + character_snapshots.size() > maximum_bodies ||
+        if (snapshots.size() + character_snapshots.size() > config_.maximum_bodies ||
             !state_->synchronize(snapshots) || !state_->synchronize_characters(character_snapshots))
         {
             clear();

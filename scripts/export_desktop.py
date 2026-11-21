@@ -73,6 +73,8 @@ def macos_bundle(args, stage):
 def export(args):
     if not re.fullmatch(r"[a-z][a-z0-9_-]*", args.product):
         raise ValueError("Product name must be a lowercase English identifier")
+    if args.strip_runtime_symbols and (args.platform != "macos" or args.kind != "runtime"):
+        raise ValueError("Symbol stripping is available for macOS runtime exports")
     args.executable = plain_path(args.executable)
     sources = [args.executable]
     if args.icu:
@@ -95,8 +97,11 @@ def export(args):
         executable = args.product + (".exe" if args.platform == "windows" else "")
         base = bundle / "Contents/Resources" if bundle else stage
         resources = base / "assets"
+        binary = bundle / "Contents/MacOS" / executable if bundle else stage / executable
         if bundle is None:
-            shutil.copy2(args.executable, stage / executable)
+            shutil.copy2(args.executable, binary)
+        if args.strip_runtime_symbols:
+            subprocess.run(["xcrun", "strip", "-S", "-x", str(binary)], check=True)
         if args.icu:
             shutil.copy2(args.icu, base / "icudtl.dat")
         for origin, relative in args.support_file:
@@ -128,7 +133,7 @@ def export(args):
             subprocess.run(
                 [
                     args.cmake,
-                    "-DENGINE_EXECUTABLE=" + str(stage / executable),
+                    "-DENGINE_EXECUTABLE=" + str(binary),
                     "-DENGINE_LIBRARY_DIRS=" + ";".join(args.library_dir),
                     "-P",
                     str(ROOT / "cmake/install/macos_native.cmake"),
@@ -165,6 +170,10 @@ def main():
     parser.add_argument("--cmake", default="cmake")
     parser.add_argument(
         "--app-bundle", action="store_true", help="Optional macOS .app packaging; defaults to a directly runnable native executable"
+    )
+    parser.add_argument(
+        "--strip-runtime-symbols", action="store_true",
+        help="Remove debug and local symbols from the copied macOS runtime before signing",
     )
     parser.add_argument("--library-dir", action="append", default=[])
     parser.add_argument("--support-file", nargs=2, action="append", default=[])

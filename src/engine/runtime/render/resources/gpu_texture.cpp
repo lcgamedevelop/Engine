@@ -3,6 +3,7 @@
 
 #include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
+#include "runtime/resource/codecs/texture_resource_codec.hpp"
 #include "runtime/resource/resource.hpp"
 
 #include <basisu/transcoder/basisu_transcoder.h>
@@ -272,6 +273,7 @@ bool PreparedTexture::prepare()
     }
     else if (data->encoding == schema::TextureEncoding::basis)
     {
+        TextureResourceCodec::initialize_transcoder();
         basist::basisu_transcoder decoder;
         const auto size = static_cast<std::uint32_t>(data->data.size());
         if (!decoder.start_transcoding(data->data.data(), size) ||

@@ -20,7 +20,8 @@ namespace
 using Json = nlohmann::json;
 constexpr std::uint64_t maximum_bytes = 4ULL * 1024 * 1024 * 1024;
 
-bool keys(const Json& value, std::initializer_list<std::string_view> allowed, std::string& error)
+bool keys(const Json& value, std::initializer_list<std::string_view> required, std::string& error,
+          std::initializer_list<std::string_view> optional = {})
 {
     ENGINE_PROFILE_FUNCTION();
     if (!value.is_object())
@@ -30,13 +31,14 @@ bool keys(const Json& value, std::initializer_list<std::string_view> allowed, st
     }
     for (const auto& [name, item] : value.items())
     {
-        if (std::find(allowed.begin(), allowed.end(), name) == allowed.end())
+        if (std::find(required.begin(), required.end(), name) == required.end() &&
+            std::find(optional.begin(), optional.end(), name) == optional.end())
         {
             error = "Unknown runtime configuration field: " + std::string(name);
             return false;
         }
     }
-    for (const auto name : allowed)
+    for (const auto name : required)
     {
         if (!value.contains(name))
         {
@@ -127,7 +129,7 @@ bool apply_parallel(const Json& value, RuntimeParallelConfig& output, std::strin
                "movie", "physics", "animation", "navigation", "resources", "animation_sampling",
                "scene_restore", "render", "rendering", "navigation_tile_threshold",
                "completions_per_frame", "completion_budget_seconds"},
-              error))
+              error, {"physics_limits"}))
     {
         return false;
     }
@@ -154,6 +156,23 @@ bool apply_parallel(const Json& value, RuntimeParallelConfig& output, std::strin
     for (const auto& [name, config] : domains)
     {
         if (!domain(value[name], *config, error))
+        {
+            return false;
+        }
+    }
+    output.physics_limits = {};
+    if (const auto limits = value.find("physics_limits"); limits != value.end())
+    {
+        auto& config = output.physics_limits;
+        if (!keys(*limits, {"maximum_bodies", "maximum_body_pairs", "maximum_contact_constraints",
+                            "temporary_allocator_bytes"}, error) ||
+            !integer(*limits, "maximum_bodies", config.maximum_bodies, 1, UINT32_MAX, error) ||
+            !integer(*limits, "maximum_body_pairs", config.maximum_body_pairs, 1, UINT32_MAX,
+                     error) ||
+            !integer(*limits, "maximum_contact_constraints", config.maximum_contact_constraints, 1,
+                     UINT32_MAX, error) ||
+            !integer(*limits, "temporary_allocator_bytes", config.temporary_allocator_bytes, 1,
+                     UINT32_MAX, error))
         {
             return false;
         }
@@ -200,6 +219,8 @@ bool apply_parallel(const Json& value, RuntimeParallelConfig& output, std::strin
     {
         const auto& render = value["rendering"];
         auto& config = output.rendering;
+        config.transient_vertex_bytes = 0;
+        config.transient_index_bytes = 0;
         if (!keys(render,
                   {"texture_batch_size", "texture_staging_bytes", "prepare_items_per_step",
                    "prepare_seconds_per_step", "upload_bytes_per_step", "cluster_tile_size",
@@ -207,7 +228,7 @@ bool apply_parallel(const Json& value, RuntimeParallelConfig& output, std::strin
                    "maximum_meshlet_candidates", "shadow_atlas_size", "local_shadow_tile_size",
                    "maximum_local_shadow_faces", "maximum_planar_reflections", "vsm_physical_pages",
                    "vsm_pages_per_frame"},
-                  error) ||
+                  error, {"transient_vertex_bytes", "transient_index_bytes"}) ||
             !integer(render, "texture_batch_size", config.texture_batch_size, 1, 64, error) ||
             !integer(render, "texture_staging_bytes", config.texture_staging_bytes, 1,
                      maximum_bytes, error) ||
@@ -231,7 +252,13 @@ bool apply_parallel(const Json& value, RuntimeParallelConfig& output, std::strin
             !integer(render, "vsm_physical_pages", config.vsm_physical_pages, 1, 4096, error) ||
             !integer(render, "vsm_pages_per_frame", config.vsm_pages_per_frame, 1, 16, error) ||
             !integer(render, "maximum_planar_reflections", config.maximum_planar_reflections, 0, 2,
-                     error))
+                     error) ||
+            (render.contains("transient_vertex_bytes") &&
+             !integer(render, "transient_vertex_bytes", config.transient_vertex_bytes, 0,
+                      UINT32_MAX, error)) ||
+            (render.contains("transient_index_bytes") &&
+             !integer(render, "transient_index_bytes", config.transient_index_bytes, 0,
+                      UINT32_MAX, error)))
         {
             return false;
         }

@@ -516,6 +516,14 @@ bool RenderSystem::initialize_renderer()
     init.reset = render_detail::reset_flags |
                  (vsync_enabled_ ? BGFX_RESET_VSYNC : BGFX_RESET_NONE) |
                  (config_.max_anisotropy ? BGFX_RESET_MAXANISOTROPY : BGFX_RESET_NONE);
+    if (config_.transient_vertex_bytes != 0)
+    {
+        init.limits.maxTransientVbSize = config_.transient_vertex_bytes;
+    }
+    if (config_.transient_index_bytes != 0)
+    {
+        init.limits.maxTransientIbSize = config_.transient_index_bytes;
+    }
     if (callbacks_ == nullptr)
     {
         callbacks_.reset(new (std::nothrow) RendererCallbacks{});

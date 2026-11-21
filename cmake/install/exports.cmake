@@ -45,17 +45,21 @@ endif()
 
 set(_engine_export_targets)
 if(TARGET engine_project_app AND TARGET asset_build_app AND NOT ENGINE_ENABLE_TEST_SUPPORT)
+    set(_engine_runtime_export_arguments ${_engine_export_arguments})
+    if(APPLE)
+        list(APPEND _engine_runtime_export_arguments "$<$<CONFIG:Release>:--strip-runtime-symbols>")
+    endif()
     add_custom_target(
         engine_project_export
         COMMAND
             "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/export_desktop.py"
-            ${_engine_export_arguments} --kind runtime --product "${ENGINE_EXPORT_PRODUCT}"
+            ${_engine_runtime_export_arguments} --kind runtime --product "${ENGINE_EXPORT_PRODUCT}"
             --project "${ENGINE_EXPORT_PROJECT}" --manifest "${ENGINE_EXPORT_MANIFEST}" --builder
             "$<TARGET_FILE:asset_build_app>" --executable "$<TARGET_FILE:engine_project_app>"
             --output "${_engine_export_root}/runtime"
         DEPENDS engine_project_app asset_build_app
         COMMENT "Exporting project application and independent runtime resources"
-        VERBATIM)
+        COMMAND_EXPAND_LISTS VERBATIM)
     list(APPEND _engine_export_targets engine_project_export)
 endif()
 
