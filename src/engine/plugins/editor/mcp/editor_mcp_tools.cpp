@@ -1,4 +1,6 @@
 #include "plugins/editor/mcp/editor_mcp_tools.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/file_text.hpp"
 #include "plugins/editor/mcp/component_mcp_tools.hpp"
 #include "plugins/editor/mcp/editor_tool_registration.hpp"
@@ -31,6 +33,7 @@ constexpr std::uintmax_t max_file_size = 1024 * 1024;
 
 bool identifier(const Json& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!value.is_string())
     {
         return false;
@@ -53,12 +56,14 @@ bool identifier(const Json& value)
 
 bool fail(Json& reply, std::string message)
 {
+    ENGINE_PROFILE_FUNCTION();
     reply = {{"error", std::move(message)}};
     return false;
 }
 
 bool read_json(const fs::path& path, Json& value, bool& exists)
 {
+    ENGINE_PROFILE_FUNCTION();
     exists = false;
     value = Json::object();
     std::error_code error;
@@ -84,6 +89,7 @@ bool read_json(const fs::path& path, Json& value, bool& exists)
 
 bool valid_request(const Json& request)
 {
+    ENGINE_PROFILE_FUNCTION();
     return request.is_object() && request.contains("session") && identifier(request["session"]) &&
            request.contains("requestId") && identifier(request["requestId"]) &&
            request.contains("projectRoot") && request["projectRoot"].is_string() &&
@@ -94,6 +100,7 @@ bool valid_request(const Json& request)
 bool fetch_receipt(const fs::path& runtime, const fs::path& project, const Json& identity,
                    Json& receipt, bool& exists)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto path = runtime / "editor-receipts" / identity["session"].get<std::string>() /
                       (identity["requestId"].get<std::string>() + ".json");
     if (!read_json(path, receipt, exists))
@@ -120,6 +127,7 @@ bool fetch_receipt(const fs::path& runtime, const fs::path& project, const Json&
 
 bool publish_request(const fs::path& runtime, const Json& request)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto destination = runtime / "editor-command.json";
     const auto temporary = runtime / (".editor-command-" + request["requestId"].get<std::string>());
     if (!tools::no_symlinks(destination) || !tools::no_symlinks(temporary))
@@ -146,6 +154,7 @@ bool publish_request(const fs::path& runtime, const Json& request)
 
 Json vector_schema(std::size_t count)
 {
+    ENGINE_PROFILE_FUNCTION();
     return {{"type", "array"},
             {"items", {{"type", "number"}}},
             {"minItems", count},
@@ -154,6 +163,7 @@ Json vector_schema(std::size_t count)
 
 Json id_schema()
 {
+    ENGINE_PROFILE_FUNCTION();
     return {{"type", "string"}, {"minLength", 1}, {"maxLength", 128}};
 }
 
@@ -162,10 +172,12 @@ Json id_schema()
 EditorMcpTools::EditorMcpTools(fs::path project_root, McpTarget target)
     : project_root_(std::move(project_root)), target_(std::move(target))
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 bool EditorMcpTools::register_tools(McpSystem& system)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!target_.android_serial.empty() || !target_.ios_udid.empty())
     {
         // 设备只暴露同步与控制；生命周期调用明确拒绝桌面编辑器操作。
@@ -189,6 +201,7 @@ bool EditorMcpTools::register_tools(McpSystem& system)
     const auto register_command =
         [&](std::string name, std::string command, std::string description, Json schema)
     {
+            ENGINE_PROFILE_FUNCTION_PROBE();
         return register_editor_command_tool(system, *this, std::move(name), std::move(description),
                                             std::move(schema), std::move(command));
     };
@@ -338,11 +351,15 @@ bool EditorMcpTools::register_tools(McpSystem& system)
                 object_schema({{"session", id_schema()}, {"requestId", id_schema()}},
                               {"session", "requestId"}),
                 [this](const Json& arguments, Json& reply)
-                { return read_receipt(arguments, reply); }});
+                {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
+                    return read_receipt(arguments, reply);
+                }});
 }
 
 bool EditorMcpTools::call_command(std::string_view command, const Json& arguments, Json& reply)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!target_.android_serial.empty() || !target_.ios_udid.empty() ||
         target_.runtime_dir.empty() || command.empty() || command.size() > 128 ||
         !arguments.is_object())
@@ -371,6 +388,7 @@ bool EditorMcpTools::call_command(std::string_view command, const Json& argument
     if (status.value("hostKind", std::string{}) == "runtime-test" &&
         command != "execute_project_script" && command != "capture_frame" &&
         command != "get_frame_capture" && command != "get_scene_load" &&
+        command != "get_resource_memory" &&
         command != "get_gameplay_prepare" && command != "release_gameplay_prepare")
     {
         return fail(reply, "This editor command is unavailable in the runtime test target");
@@ -451,6 +469,7 @@ bool EditorMcpTools::call_command(std::string_view command, const Json& argument
 
 bool EditorMcpTools::read_receipt(const Json& arguments, Json& reply)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!identifier(arguments["session"]) || !identifier(arguments["requestId"]))
     {
         return fail(reply, "Invalid receipt identity");

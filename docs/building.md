@@ -187,6 +187,8 @@ cmake --build --preset macos-native-release --target engine_export
 
 原生桌面模式的 `catalog.bin`、`packs/` 或 `gen/` 位于程序旁的 `assets/`；默认不包含 ICU 数据。可选 `.app` 模式将它们放在 `Contents/Resources/assets/`，由 SDL 直接读取；宿主优先使用已发布的外部持久资源版本，否则使用包内版本，缺失条目不混用旧包。运行时直接读取资源，不使用自解压程序。编辑器继续要求 `--project`；运行包直接进入 Gameplay。若需要 macOS 原生应用包，配置时显式加 `-DENGINE_MACOS_APP_BUNDLE=ON`，再运行相同导出目标；程序、私有工具和初始资源均进入 `.app`，外部持久目录用于更新资源版本。本地构建仅使用系统要求的 ad-hoc 代码签名，不要求证书或用户确认；正式分发的开发者签名和公证另由发布流程提供。Linux 暂未提供或验证上述导出入口；iOS 使用下文的独立平台导出入口。
 
+macOS Release 游戏宿主链接时清理未引用的代码和数据。导出时移除发布可执行文件副本的调试信息与局部符号，再部署依赖和签名。原始构建文件保留在 `build/`，供调试和符号解析。
+
 编辑器导出包含 Shader 编译器、Node.js、引擎声明、Schema 和固定版本的 TypeScript。导入优先使用项目安装的 TypeScript；项目未安装时，只有声明版本与随包版本一致才使用随包编译器。部署目录存在但工具缺失会报告失败，避免意外借用构建电脑的工具。资源运行包不包含这些编辑器工具。
 
 macOS 编辑器的 `lib/` 同时包含 USD 导入所需的 `libusd_*` / TBB，以及随包 Node.js 工具的依赖。当前 Node.js 使用 `libnode`、`libicu*`、SSL 等动态库；这些属于离线 TypeScript 编译工具，不是引擎脚本 VM 的依赖，不受 `ENGINE_SCRIPT_BACKEND` 切换影响，也不进入项目运行包。引擎默认不部署的 `icudtl.dat` 与 Node.js 的 ICU 动态库需要区分。
@@ -239,13 +241,17 @@ cmake --build --preset web-wasm32-release --target engine_export_web
 python3 platforms/web/serve.py output/web/wasm32/release/runtime/engine-showcase
 ```
 
-Web 依赖安装到 `build/dependencies/web/`；原生 shaderc 启用 WGSL/Tint，Wasm 使用 QuickJS、pthread、Emdawnwebgpu 和单线程 bgfx。GPU 回读等待通过 Asyncify 让出应用 worker。SDK 版本和 IDBFS 原文件校验固定，补丁仅应用到构建目录；来源见 [WebGPU 说明](../third_party/notices/webgpu.md)。Debug 使用 `web-wasm32-debug`，只要求编译成功。
+Web 依赖安装到 `build/dependencies/web/`；原生 shaderc 启用 WGSL/Tint，Wasm 使用 QuickJS、pthread、Emdawnwebgpu 和单线程 bgfx。GPU 回读由浏览器缓冲映射回调完成，等待期间应用 worker 继续处理帧。SDK 版本和 IDBFS 原文件校验固定，补丁仅应用到构建目录，来源见 [WebGPU 说明](../third_party/notices/webgpu.md)。Debug 使用 `web-wasm32-debug`，只要求编译成功。
 
 `ENGINE_EXPORT_PROJECT`、`ENGINE_EXPORT_MANIFEST` 和 `ENGINE_EXPORT_PRODUCT` 指定项目、资源清单和应用身份。导出前须关闭同项目原生编辑器；编辑器 idle 或 preview 仍持有原生目标租约。共享管线负责拒绝跨目标导入，重新打开原生编辑器时按原生目标增量重建缓存。
+
+`ENGINE_WEB_INITIAL_MEMORY_MIB` 指定初始 Wasm 线性内存，默认 32 MiB，随需要增长。`ENGINE_WEB_MAIN_STACK_KIB` 和 `ENGINE_WEB_WORKER_STACK_KIB` 分别指定主线程及应用线程栈、其他 pthread 的默认栈容量，默认 1024 和 512 KiB。初始容量须容纳静态数据和启动栈。在项目的 `runtime-parallel.toml` 为 Web 指定物理与临时几何预算。
 
 输出为 `output/web/wasm32/<debug|release>/runtime/<product>/`，包含 `index.html`、启动模块、`engine.mjs`、`engine.wasm`、必要 worker、独立 `assets/`、`settings/runtime.json` 与许可证。运行文件必须匹配成功链接回执；整包校验后原子发布，失败保留已有输出。资源不嵌入 Wasm，不包含源工程、SQLite 或本机工具。
 
 页面需要安全上下文、WebGPU、OffscreenCanvas 和跨源隔离；部署服务器设置 `Cross-Origin-Opener-Policy: same-origin`、`Cross-Origin-Embedder-Policy: require-corp`，为 `.wasm` 返回 `application/wasm`、`.mjs` 返回 JavaScript MIME。附带服务仅绑定本机回环地址。页面 Start 由用户触发，浏览器音频及输入权限继续遵守浏览器规则。
+
+Web 宿主按 Canvas 的 CSS 尺寸与设备像素比设置后备缓冲。页面决定布局与宽高比，输入使用 CSS 像素。
 
 首版完整预载所选运行包，再复用普通运行时资源加载；没有 WebGL/Noop 回退、远程分包流式更新或 Web 编辑器。正式构建排除运行态测试端点及临时脚本执行。覆盖范围见 [WebGPU 验证](testing.md#webgpu-导出)。
 

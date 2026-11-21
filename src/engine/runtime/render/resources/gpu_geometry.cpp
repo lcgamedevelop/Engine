@@ -1,5 +1,6 @@
 #include "runtime/render/resources/gpu_geometry.hpp"
 
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/resource/types/mesh_resource.hpp"
 #include "runtime/scene/mesh_renderer.hpp"
@@ -26,6 +27,7 @@ enum class VertexStorage
 
 bgfx::VertexLayout make_vertex_layout(VertexStorage storage, bool include_position = true)
 {
+    ENGINE_PROFILE_FUNCTION();
     bgfx::VertexLayout layout;
     layout.begin();
     if (include_position)
@@ -53,6 +55,7 @@ void write_static_vertices(std::span<const GpuVertex> vertices, VertexStorage st
                            std::uint8_t* attributes, std::size_t attribute_stride,
                            std::size_t attribute_size)
 {
+    ENGINE_PROFILE_FUNCTION();
     constexpr auto position_bytes = sizeof(GpuVertex::position);
     for (std::size_t index = 0; index < vertices.size(); ++index)
     {
@@ -78,6 +81,7 @@ void write_static_vertices(std::span<const GpuVertex> vertices, VertexStorage st
 
 bgfx::VertexLayout position_layout()
 {
+    ENGINE_PROFILE_FUNCTION();
     bgfx::VertexLayout layout;
     layout.begin().add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float).end();
     return layout;
@@ -86,6 +90,7 @@ bgfx::VertexLayout position_layout()
 const bgfx::Memory* copy_vertex_data(std::span<const GpuVertex> vertices, VertexStorage storage,
                                      std::uint16_t stride, std::uint32_t attribute_offset)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (storage == VertexStorage::aligned)
     {
         return bgfx::copy(vertices.data(), static_cast<std::uint32_t>(vertices.size() * stride));
@@ -110,6 +115,7 @@ const bgfx::Memory* copy_vertex_data(std::span<const GpuVertex> vertices, Vertex
 
 GpuGeometry::StaticVertexPage::~StaticVertexPage() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     for (const auto buffer : {positions, attributes})
     {
         if (bgfx::isValid(buffer))
@@ -117,10 +123,13 @@ GpuGeometry::StaticVertexPage::~StaticVertexPage() noexcept
             bgfx::destroy(buffer);
         }
     }
+    memory.reset();
 }
 
-bool GpuGeometry::StaticVertexPage::create()
+bool GpuGeometry::StaticVertexPage::create(GpuMemoryTracker* tracker, SceneScopeId scope,
+                                            std::uint64_t scene)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto layout = make_vertex_layout(
         white ? VertexStorage::static_white : VertexStorage::static_float, false);
     positions =
@@ -132,13 +141,30 @@ bool GpuGeometry::StaticVertexPage::create()
     // The read-only flag requests a dedicated bgfx allocation for this persistent stream.
     attributes = bgfx::createDynamicVertexBuffer(capacity, layout, BGFX_BUFFER_COMPUTE_READ);
     attribute_stride_ = layout.getStride();
-    return bgfx::isValid(attributes);
+    if (!bgfx::isValid(attributes))
+    {
+        return false;
+    }
+    if (tracker)
+    {
+        GpuMemoryEntry entry;
+        entry.kind = GpuMemoryKind::static_vertex_page;
+        entry.creation_scope = scope;
+        entry.creation_scene = scene;
+        entry.shared_backing_bytes = byte_size();
+        memory.track(tracker, std::move(entry));
+    }
+    return true;
 }
 
 bool GpuGeometry::StaticVertexPage::store(std::span<const GpuVertex> vertices, std::uint32_t& first)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto range = std::ranges::find_if(free_ranges_, [&](const auto& free)
-                                            { return free.count >= vertices.size(); });
+                                            {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return free.count >= vertices.size();
+    });
     if (range == free_ranges_.end())
     {
         return false;
@@ -164,6 +190,7 @@ bool GpuGeometry::StaticVertexPage::store(std::span<const GpuVertex> vertices, s
 
 void GpuGeometry::StaticVertexPage::release_range(std::uint32_t first, std::uint32_t count) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     auto next = std::ranges::lower_bound(free_ranges_, first, {}, &Range::first);
     if (next != free_ranges_.end() && next->first == first + count)
     {
@@ -182,16 +209,19 @@ void GpuGeometry::StaticVertexPage::release_range(std::uint32_t first, std::uint
 
 std::uint64_t GpuGeometry::StaticVertexPage::byte_size() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::uint64_t{capacity} * (sizeof(GpuVertex::position) + attribute_stride_);
 }
 
 GpuGeometry::~GpuGeometry() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     release();
 }
 
 bool GpuGeometry::IndexBuffer::upload(std::span<const std::uint32_t> source)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (source.empty() || source.size() > UINT32_MAX / sizeof(std::uint16_t))
     {
         return false;
@@ -212,7 +242,10 @@ bool GpuGeometry::IndexBuffer::upload(std::span<const std::uint32_t> source)
         memory = bgfx::alloc(size);
         auto* packed = reinterpret_cast<std::uint16_t*>(memory->data);
         std::ranges::transform(source, packed, [](std::uint32_t index)
-                               { return static_cast<std::uint16_t>(index); });
+                               {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return static_cast<std::uint16_t>(index);
+        });
         if (padded_count != source.size())
         {
             packed[source.size()] = 0;
@@ -236,6 +269,7 @@ bool GpuGeometry::IndexBuffer::upload(std::span<const std::uint32_t> source)
 
 void GpuGeometry::IndexBuffer::release() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (bgfx::isValid(handle))
     {
         bgfx::destroy(handle);
@@ -245,21 +279,25 @@ void GpuGeometry::IndexBuffer::release() noexcept
 
 bool GpuGeometry::create_base_indices(std::span<const std::uint32_t> source)
 {
+    ENGINE_PROFILE_FUNCTION();
     return !bgfx::isValid(indices_.handle) && indices_.upload(source);
 }
 
 bgfx::VertexLayout GpuGeometry::vertex_layout()
 {
+    ENGINE_PROFILE_FUNCTION();
     return make_vertex_layout(VertexStorage::aligned);
 }
 
 bool GpuGeometry::vertices_ready() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return page_ || bgfx::isValid(vertices);
 }
 
 void GpuGeometry::bind_vertices(bool positions_only, bool whole_page) const
 {
+    ENGINE_PROFILE_FUNCTION();
     if (page_)
     {
         const auto first = whole_page ? 0U : first_vertex_;
@@ -281,6 +319,7 @@ void GpuGeometry::bind_vertices(bool positions_only, bool whole_page) const
 
 void GpuGeometry::bind_position_buffer(std::uint8_t stage) const
 {
+    ENGINE_PROFILE_FUNCTION();
     if (page_)
     {
         bgfx::setBuffer(stage, page_->positions, bgfx::Access::Read);
@@ -293,6 +332,7 @@ void GpuGeometry::bind_position_buffer(std::uint8_t stage) const
 
 std::uint16_t GpuGeometry::position_buffer_index() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return page_ ? page_->positions.idx : vertices.idx;
 }
 
@@ -361,14 +401,22 @@ bool GpuGeometry::pack_vertices(const schema::MeshDataT& data,
 
 bgfx::VertexLayout GpuGeometry::vector_layout()
 {
+    ENGINE_PROFILE_FUNCTION();
     bgfx::VertexLayout layout;
     layout.begin().add(bgfx::Attrib::TexCoord0, 4, bgfx::AttribType::Float).end();
     return layout;
 }
 
-bool GpuGeometry::store_vertices(VertexPages& pages, std::span<const GpuVertex> packed, bool white)
+bool GpuGeometry::store_vertices(VertexPages& pages, std::span<const GpuVertex> packed, bool white,
+                                 GpuMemoryTracker* tracker, SceneScopeId scope,
+                                 std::uint64_t scene)
 {
-    std::erase_if(pages, [](const auto& page) { return page.expired(); });
+    ENGINE_PROFILE_FUNCTION();
+    std::erase_if(pages, [](const auto& page)
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return page.expired();
+    });
     for (const auto& candidate : pages)
     {
         auto page = candidate.lock();
@@ -379,7 +427,7 @@ bool GpuGeometry::store_vertices(VertexPages& pages, std::span<const GpuVertex> 
         }
     }
     auto page = std::make_shared<StaticVertexPage>(white);
-    if (!page->create() || !page->store(packed, first_vertex_))
+    if (!page->create(tracker, scope, scene) || !page->store(packed, first_vertex_))
     {
         return false;
     }
@@ -388,7 +436,8 @@ bool GpuGeometry::store_vertices(VertexPages& pages, std::span<const GpuVertex> 
     return true;
 }
 
-bool GpuGeometry::create(const MeshRenderer& renderer, VertexPages* pages)
+bool GpuGeometry::create(const MeshRenderer& renderer, VertexPages* pages,
+                         GpuMemoryTracker* tracker, SceneScopeId scope, std::uint64_t scene)
 {
     ENGINE_PROFILE_ZONE("Render.geometryCreate");
     release();
@@ -480,7 +529,8 @@ bool GpuGeometry::create(const MeshRenderer& renderer, VertexPages* pages)
         const bool use_page =
             split_streams && pages && data->meshlets &&
             packed.size() <= StaticVertexPage::capacity &&
-            store_vertices(*pages, packed, storage == VertexStorage::static_white);
+            store_vertices(*pages, packed, storage == VertexStorage::static_white, tracker, scope,
+                           scene);
         std::uint32_t attribute_offset = 0;
         if (!use_page && split_streams)
         {
@@ -532,6 +582,21 @@ bool GpuGeometry::create(const MeshRenderer& renderer, VertexPages* pages)
         return false;
     }
     vertex_stride_ = stride;
+    if (tracker)
+    {
+        GpuMemoryEntry entry;
+        entry.kind = GpuMemoryKind::mesh_geometry;
+        entry.guid = resource.get()->info().guid;
+        entry.creation_scope = scope;
+        entry.creation_scene = scene;
+        const auto geometry_vertex_bytes =
+            page_ ? (page_->byte_size() / StaticVertexPage::capacity) * vertex_count
+                  : vertex_buffer_bytes();
+        entry.logical_bytes =
+            geometry_vertex_bytes + index_buffer_bytes() + skin.size() * sizeof(skin[0]);
+        entry.shared_backing_id = page_ ? page_->memory.id() : 0;
+        memory_.track(tracker, std::move(entry));
+    }
     return true;
 }
 
@@ -539,6 +604,7 @@ bool GpuGeometry::skinning_bounds(std::span<const std::array<float, 16>> palette
                                   std::array<float, 3>& output_minimum,
                                   std::array<float, 3>& output_maximum) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     output_minimum = {};
     output_maximum = {};
     if (joint_bounds_.empty() || palette.size() < joint_bounds_.size())
@@ -592,6 +658,7 @@ bool GpuGeometry::skinning_bounds(std::span<const std::array<float, 16>> palette
 
 std::uint32_t GpuGeometry::resource_count() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     std::uint32_t meshlet_count = 0;
     for (const auto& buffers : meshlets_)
     {
@@ -606,29 +673,34 @@ std::uint32_t GpuGeometry::resource_count() const noexcept
 
 const GpuGeometry::IndexBuffer* GpuGeometry::index_storage(std::size_t level) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return level == 0 ? &indices_ : level <= lods_.size() ? &lods_[level - 1].indices : nullptr;
 }
 
 bgfx::IndexBufferHandle GpuGeometry::index_buffer(std::size_t level) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* storage = index_storage(level);
     return storage ? storage->handle : bgfx::IndexBufferHandle{bgfx::kInvalidHandle};
 }
 
 std::uint32_t GpuGeometry::index_count(std::size_t level) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* storage = index_storage(level);
     return storage ? storage->count : 0;
 }
 
 bool GpuGeometry::index_uses_16_bits(std::size_t level, bool meshlet) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* storage = meshlet ? meshlet_index_storage(level) : index_storage(level);
     return storage && storage->index16;
 }
 
 std::uint64_t GpuGeometry::index_buffer_bytes() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     std::uint64_t bytes = indices_.bytes;
     for (const auto& lod : lods_)
     {
@@ -643,6 +715,7 @@ std::uint64_t GpuGeometry::index_buffer_bytes() const noexcept
 
 std::span<const schema::MeshSubmesh> GpuGeometry::submeshes(std::size_t level) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (level == 0)
     {
         return submeshes_;
@@ -653,11 +726,13 @@ std::span<const schema::MeshSubmesh> GpuGeometry::submeshes(std::size_t level) c
 
 std::size_t GpuGeometry::lod_count() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return lods_.size() + 1;
 }
 
 void GpuGeometry::release() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     release_meshlets();
     for (auto& lod : lods_)
     {
@@ -685,6 +760,7 @@ void GpuGeometry::release() noexcept
     }
     first_vertex_ = 0;
     indices_.release();
+    memory_.reset();
     resource.reset();
     joint_bounds_.clear();
     vertex_count = 0;
@@ -695,6 +771,7 @@ void GpuGeometry::release() noexcept
 
 std::uint64_t GpuGeometry::meshlet_upload_bytes(bool debug) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* mesh = resource.data<MeshResource>();
     if (!mesh)
     {
@@ -702,6 +779,7 @@ std::uint64_t GpuGeometry::meshlet_upload_bytes(bool debug) const noexcept
     }
     const auto bytes = [&](const auto& regular, const schema::MeshletDataT* meshlets)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (!meshlets)
         {
             return std::uint64_t{0};
@@ -723,11 +801,13 @@ std::uint64_t GpuGeometry::meshlet_upload_bytes(bool debug) const noexcept
 
 bool GpuGeometry::meshlets_ready(bool debug) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return !meshlets_.empty() && (!debug || meshlet_debug_ready_);
 }
 
 bool GpuGeometry::prepare_meshlets(bool debug)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (meshlets_ready(debug))
     {
         return true;
@@ -780,7 +860,11 @@ bool GpuGeometry::prepare_meshlets(bool debug)
         const auto* memory = bgfx::alloc(static_cast<std::uint32_t>(size));
         auto* offsets = reinterpret_cast<std::uint32_t*>(memory->data);
         std::ranges::transform(source->meshlets, offsets,
-                               [](const auto& cluster) { return cluster.first_index(); });
+                               [](const auto& cluster)
+                               {
+                                   ENGINE_PROFILE_FUNCTION_PROBE();
+                                   return cluster.first_index();
+                               });
         auto& handle = meshlets_[level].debug_offsets;
         handle = bgfx::createVertexBuffer(memory, layout, BGFX_BUFFER_COMPUTE_READ);
         if (!bgfx::isValid(handle))
@@ -795,6 +879,7 @@ bool GpuGeometry::prepare_meshlets(bool debug)
 
 void GpuGeometry::release_meshlet_debug() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     for (auto& buffers : meshlets_)
     {
         if (bgfx::isValid(buffers.debug_offsets))
@@ -808,6 +893,7 @@ void GpuGeometry::release_meshlet_debug() noexcept
 
 void GpuGeometry::release_meshlets() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     release_meshlet_debug();
     for (auto& buffers : meshlets_)
     {
@@ -818,6 +904,7 @@ void GpuGeometry::release_meshlets() noexcept
 
 const GpuGeometry::IndexBuffer* GpuGeometry::meshlet_index_storage(std::size_t level) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (level >= meshlets_.size() || !meshlets_[level].ready)
     {
         return nullptr;
@@ -828,12 +915,14 @@ const GpuGeometry::IndexBuffer* GpuGeometry::meshlet_index_storage(std::size_t l
 
 bgfx::IndexBufferHandle GpuGeometry::meshlet_indices(std::size_t level) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* storage = meshlet_index_storage(level);
     return storage ? storage->handle : bgfx::IndexBufferHandle{bgfx::kInvalidHandle};
 }
 
 bgfx::VertexBufferHandle GpuGeometry::meshlet_debug_offsets(std::size_t level) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return level < meshlets_.size() ? meshlets_[level].debug_offsets
                                     : bgfx::VertexBufferHandle{bgfx::kInvalidHandle};
 }

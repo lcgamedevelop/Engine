@@ -1,4 +1,6 @@
 #include "plugins/editor/destruction/destruction_commands.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/resource_access.hpp"
 #include "plugins/runtime/destruction/destruction_resource.hpp"
 
@@ -27,6 +29,7 @@ using RevisionMap = std::map<std::pair<std::uint64_t, std::uint64_t>, std::weak_
 std::shared_ptr<std::uint64_t> edit_revision(RevisionMap& revisions, const Node& node,
                                              const DestructionComponent component)
 {
+    ENGINE_PROFILE_FUNCTION();
     // A new external mutation starts a new history chain; older chains remain invalidated.
     for (auto entry = revisions.begin(); entry != revisions.end();)
     {
@@ -46,6 +49,7 @@ std::shared_ptr<std::uint64_t> edit_revision(RevisionMap& revisions, const Node&
 bool resource(ResourceLoader* loader, const Json& input, schema::AssetKind kind, Guid& output,
               std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!input.is_string())
     {
         error = "Destruction resource and material require resource path strings";
@@ -70,6 +74,7 @@ bool resource(ResourceLoader* loader, const Json& input, schema::AssetKind kind,
 bool read_settings(ResourceLoader* loader, const Json& arguments, schema::DestructionDataT& value,
                    std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!editor::components::fields(
             arguments, {"enabled", "destruction", "material", "density", "friction", "restitution"},
             error) ||
@@ -103,6 +108,7 @@ bool read_settings(ResourceLoader* loader, const Json& arguments, schema::Destru
 
 Json settings_json(ResourceLoader* loader, const schema::DestructionDataT& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string path;
     std::string material;
     if (!value.destruction_guid.empty())
@@ -124,6 +130,7 @@ Json settings_json(ResourceLoader* loader, const schema::DestructionDataT& value
 
 Json component_json(const DestructionComponent& component)
 {
+    ENGINE_PROFILE_FUNCTION();
     schema::DestructionDataT settings;
     if (!component.get_settings(settings))
     {
@@ -144,6 +151,7 @@ Json component_json(const DestructionComponent& component)
 
 DestructionComponent target(WorldSystem& world, const Json& arguments, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto node = editor::components::target(world, arguments, error);
     auto component = node ? node.get_component<DestructionComponent>() : DestructionComponent{};
     if (!component && error.empty())
@@ -159,6 +167,7 @@ bool register_destruction_commands(WorldSystem& world, editor::SceneCommands& sc
                                    editor::EditorCommands& commands,
                                    const std::filesystem::path& project_root)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto revisions = std::make_shared<RevisionMap>();
     if (!register_destruction_asset_commands(commands, project_root) ||
         !commands.register_command(
@@ -167,6 +176,7 @@ bool register_destruction_commands(WorldSystem& world, editor::SceneCommands& sc
                                                  std::unique_ptr<editor::EditorEdit>& edit,
                                                  std::string& error)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 auto node = editor::components::target(world, arguments, error);
                 if (!node)
                 {
@@ -230,6 +240,7 @@ bool register_destruction_commands(WorldSystem& world, editor::SceneCommands& sc
                                             std::unique_ptr<editor::EditorEdit>&,
                                             std::string& error)
                                    {
+                                       ENGINE_PROFILE_FUNCTION_PROBE();
                                        if (!editor::components::fields(arguments, {}, error))
                                        {
                                            return false;
@@ -251,6 +262,7 @@ bool register_destruction_commands(WorldSystem& world, editor::SceneCommands& sc
                                                  std::unique_ptr<editor::EditorEdit>& edit,
                                                  std::string& error)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 if (!editor::components::fields(arguments,
                                                 {"supportNodeIds", "maxGap", "minCoverage"}, error))
                 {
@@ -318,6 +330,7 @@ bool register_destruction_commands(WorldSystem& world, editor::SceneCommands& sc
                                                  std::unique_ptr<editor::EditorEdit>& edit,
                                                  std::string& error)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 if (!editor::components::fields(
                         arguments, {"gravity", "elasticLimit", "fatalLimit", "iterations"}, error))
                 {
@@ -375,6 +388,7 @@ bool register_destruction_commands(WorldSystem& world, editor::SceneCommands& sc
                  reset](const Json& arguments, Json& result,
                         std::unique_ptr<editor::EditorEdit>& edit, std::string& error)
                 {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
                     if (!(reset ? editor::components::fields(arguments, {}, error)
                                 : editor::components::fields(
                                       arguments, {"center", "radius", "damage", "impulse"}, error)))

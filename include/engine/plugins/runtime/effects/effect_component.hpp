@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/resource/resource.hpp"
 #include "runtime/scene/component.hpp"
 
@@ -25,6 +27,7 @@ public:
     EffectComponent() noexcept = default;
     explicit EffectComponent(Component component) noexcept : Component(component, component_type)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
     }
     [[nodiscard]] static bool register_type(ComponentRegistry& registry);
     using Runtime = EffectComponentRuntime;

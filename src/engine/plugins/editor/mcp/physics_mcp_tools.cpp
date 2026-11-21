@@ -1,8 +1,10 @@
 #include "plugins/editor/mcp/component_mcp_tools.hpp"
+#include "runtime/performance/profiling.hpp"
 namespace engine::plugins::mcp
 {
 bool register_physics_tools(McpSystem& system, EditorMcpTools& editor)
 {
+    ENGINE_PROFILE_FUNCTION();
     using Json = nlohmann::json;
     const Json number = {{"type", "number"}};
     const Json vector = {{"type", "array"}, {"items", number}, {"minItems", 3}, {"maxItems", 3}};

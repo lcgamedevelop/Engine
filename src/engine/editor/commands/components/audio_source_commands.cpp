@@ -1,4 +1,6 @@
 #include "editor/commands/components/component_edit.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/resource/resource_system.hpp"
 #include "runtime/scene/audio_source.hpp"
 namespace engine::editor::components
@@ -8,6 +10,7 @@ namespace
 bool read(ResourceLoader* loader, const Json& arguments, schema::AudioSourceDataT& value,
           std::vector<ResourceReference>& prepared, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!fields(arguments,
                 {"enabled", "clip", "volume", "pitch", "loop", "playOnAwake", "spatial",
                  "minDistance", "maxDistance"},
@@ -84,6 +87,7 @@ bool read(ResourceLoader* loader, const Json& arguments, schema::AudioSourceData
 }
 Json write(ResourceLoader* loader, const schema::AudioSourceDataT& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     Json result = Json::object();
     result["clipGuid"] = value.clip_guid;
     std::string path;
@@ -105,22 +109,32 @@ Json write(ResourceLoader* loader, const schema::AudioSourceDataT& value)
 bool register_audio_source(WorldSystem& world, EditorCommands& commands,
                            SceneCommands& scene_commands)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!register_component<engine::AudioSource, schema::AudioSourceDataT>(
             world, scene_commands, commands, "audio_source",
             [&world](Node, const auto& args, auto& data, auto& prepared, auto& error)
-            { return read(world.resource_loader(), args, data, prepared, error); },
-            [&world](auto, const auto& data) { return write(world.resource_loader(), data); }))
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return read(world.resource_loader(), args, data, prepared, error);
+            },
+            [&world](auto, const auto& data)
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return write(world.resource_loader(), data);
+            }))
     {
         return false;
     }
     const auto control =
         [&world, &commands](const char* name, bool (AudioSource::*operation)() noexcept)
     {
+            ENGINE_PROFILE_FUNCTION_PROBE();
         return commands.register_command(
             name, false,
             [&world, operation](const Json& arguments, Json& result, std::unique_ptr<EditorEdit>&,
                                 std::string& error)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 if (!fields(arguments, {}, error))
                 {
                     return false;

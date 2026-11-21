@@ -21,6 +21,7 @@ Object.freeze(Debug);
 
 void log(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (BindingContext::current(arguments, false) == nullptr)
     {
         return;
@@ -44,16 +45,19 @@ void log(const Arguments& arguments)
 
 std::string_view DebugBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "Debug";
 }
 
 std::string_view DebugBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 
 bool DebugBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.function("Log", log, static_cast<std::int32_t>(LogLevel::info)) &&
            vm.function("LogWarning", log, static_cast<std::int32_t>(LogLevel::warning)) &&
            vm.function("LogError", log, static_cast<std::int32_t>(LogLevel::error));

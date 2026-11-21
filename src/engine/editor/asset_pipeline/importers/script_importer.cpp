@@ -1,4 +1,6 @@
 #include "editor/asset_pipeline/importers/script_importer.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "editor/asset_pipeline/asset_io.hpp"
 #include "editor/asset_pipeline/editor_tools.hpp"
@@ -18,6 +20,7 @@ namespace
 {
 bool hash_optional_file(const std::filesystem::path& path, std::string& hash, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::error_code code;
     const bool exists = std::filesystem::exists(path, code);
     if (code)
@@ -37,17 +40,20 @@ bool hash_optional_file(const std::filesystem::path& path, std::string& hash, st
 
 schema::AssetKind ScriptImporter::kind() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::script;
 }
 
 bool ScriptImporter::matches(const std::filesystem::path& source) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return source_extension(source) == ".ts" &&
            !PathUtils::to_utf8(source.filename()).ends_with(".d.ts");
 }
 
 std::string ScriptImporter::module_path(const std::filesystem::path& relative) const
 {
+    ENGINE_PROFILE_FUNCTION();
     auto module = relative;
     module.replace_extension(".js");
     return generic_path(module);
@@ -56,6 +62,7 @@ std::string ScriptImporter::module_path(const std::filesystem::path& relative) c
 bool ScriptImporter::inspect_batch(const ImportContext& context, std::string& fingerprint,
                                    std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     fingerprint.clear();
     std::string key;
     std::filesystem::path node;
@@ -159,6 +166,7 @@ bool ScriptImporter::inspect_batch(const ImportContext& context, std::string& fi
 bool ScriptImporter::scan_dependencies(ImportAsset& asset, const ImportContext&,
                                        std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     asset.build_dependencies.clear();
     asset.runtime_dependencies.clear();
     const auto found = modules_.find(asset.path);
@@ -174,6 +182,7 @@ bool ScriptImporter::scan_dependencies(ImportAsset& asset, const ImportContext&,
 bool ScriptImporter::prepare_batch(const ImportContext& context, TaskDescription& task,
                                    std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     std::filesystem::path node;
     std::filesystem::path builder;
     if (!editor_tool_path("node", ENGINE_NODE_EXECUTABLE, node, error) ||
@@ -187,6 +196,7 @@ bool ScriptImporter::prepare_batch(const ImportContext& context, TaskDescription
             [project, output, node = PathUtils::to_utf8(node),
              builder = PathUtils::to_utf8(builder), &error]()
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 std::string diagnostics;
                 return run_import_tool({node, builder, "--project", project, "--output", output},
                                        diagnostics, error) == ImportToolStatus::success;
@@ -198,6 +208,7 @@ bool ScriptImporter::prepare_batch(const ImportContext& context, TaskDescription
 bool ScriptImporter::convert(const ImportAsset& asset, const ImportContext& context,
                              std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto relative = module_path(asset.source.lexically_relative(context.assets));
     std::vector<std::byte> bytes;
     return read_bytes(context.output.parent_path() / "scripts" / PathUtils::from_utf8(relative),

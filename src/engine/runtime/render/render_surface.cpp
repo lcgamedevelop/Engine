@@ -1,4 +1,5 @@
 #include "runtime/render/render_surface.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include <limits>
 
@@ -7,11 +8,13 @@ namespace engine::render_detail
 
 RenderSurface::~RenderSurface() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
 }
 
 bool RenderSurface::initialize(SDL_Window& window, void* context, SuspendCallback suspend)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (window_ != nullptr || context == nullptr || suspend == nullptr)
     {
         return false;
@@ -30,6 +33,7 @@ bool RenderSurface::initialize(SDL_Window& window, void* context, SuspendCallbac
 SurfaceChange RenderSurface::poll(bgfx::SwapChain& swap_chain, std::uint32_t& width,
                                   std::uint32_t& height)
 {
+    ENGINE_PROFILE_FUNCTION();
     swap_chain = {};
     width = 0;
     height = 0;
@@ -69,6 +73,7 @@ SurfaceChange RenderSurface::poll(bgfx::SwapChain& swap_chain, std::uint32_t& wi
 
 void RenderSurface::shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     stop_watching();
     release();
     suspend_ = nullptr;
@@ -78,6 +83,7 @@ void RenderSurface::shutdown() noexcept
 
 bool RenderSurface::read_size(std::uint32_t& width, std::uint32_t& height) const
 {
+    ENGINE_PROFILE_FUNCTION();
     width = 0;
     height = 0;
     int pixel_width = 0;

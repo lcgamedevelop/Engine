@@ -1,4 +1,6 @@
 #include "runtime/resource/codecs/prefab_resource_codec.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/resource/codecs/resource_decode.hpp"
 
 #include "runtime/resource/codecs/scene_resource_codec.hpp"
@@ -11,6 +13,7 @@ namespace engine
 {
 bool PrefabResourceCodec::validate(const schema::PrefabDataT& data)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (data.schema_version != 6 || data.root_id == 0 || data.nodes.empty())
     {
         return false;
@@ -61,24 +64,32 @@ bool PrefabResourceCodec::validate(const schema::PrefabDataT& data)
 
 schema::AssetKind PrefabResourceCodec::kind() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::prefab;
 }
 
 bool PrefabResourceCodec::decode(const schema::AssetEntryT& entry, ByteView payload,
                                  std::unique_ptr<Resource>& output, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto validate = [](ByteView payload, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return resource_decode_detail::verify_flatbuffer(payload, schema::VerifyPrefabDataBuffer,
                                                          "Invalid Prefab FlatBuffer", error);
     };
     return resource_decode_detail::decode_flatbuffer<ResourceType>(
         entry, payload, 64U * 1024U * 1024U, validate,
-        [](const std::uint8_t* bytes) { return schema::UnPackPrefabData(bytes); }, output, error);
+        [](const std::uint8_t* bytes)
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return schema::UnPackPrefabData(bytes);
+        }, output, error);
 }
 
 bool PrefabResourceCodec::validate_data(const Resource& resource, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* data = resource_detail::data<ResourceType>(&resource);
     if (!data || !(validate(*data) && SceneResourceCodec::validate_nodes(resource, data->nodes)))
     {
@@ -92,6 +103,7 @@ bool PrefabResourceCodec::validate_data(const Resource& resource, std::string& e
 bool PrefabResourceCodec::validate_dependencies(const Resource& resource, ResourceView dependencies,
                                                 std::string&) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* prefab = resource_detail::data<PrefabResource>(&resource);
     return prefab && SceneResourceCodec::validate_node_dependencies(prefab->nodes, dependencies);
 }

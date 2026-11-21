@@ -1,4 +1,6 @@
 #include "editor/commands/components/component_edit.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/resource/resource_system.hpp"
 #include "runtime/scene/animator.hpp"
@@ -10,6 +12,7 @@ namespace
 bool read(ResourceLoader* loader, const Json& arguments, schema::AnimatorDataT& value,
           std::vector<ResourceReference>& prepared, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!fields(arguments, {"enabled", "animation", "speed", "loop", "playOnAwake"}, error))
     {
         return false;
@@ -58,6 +61,7 @@ bool read(ResourceLoader* loader, const Json& arguments, schema::AnimatorDataT& 
 
 Json write(ResourceLoader* loader, const schema::AnimatorDataT& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string path;
     if (!value.animation_guid.empty())
     {
@@ -72,6 +76,7 @@ Json write(ResourceLoader* loader, const schema::AnimatorDataT& value)
 
 Json state(const Animator& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     const char* playback = "stopped";
     switch (value.playback())
     {
@@ -92,22 +97,32 @@ Json state(const Animator& value)
 
 bool register_animator(WorldSystem& world, EditorCommands& commands, SceneCommands& scene_commands)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!register_component<Animator, schema::AnimatorDataT>(
             world, scene_commands, commands, "animator",
             [&world](Node, const auto& args, auto& data, auto& prepared, auto& error)
-            { return read(world.resource_loader(), args, data, prepared, error); },
-            [&world](auto, const auto& data) { return write(world.resource_loader(), data); }))
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return read(world.resource_loader(), args, data, prepared, error);
+            },
+            [&world](auto, const auto& data)
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return write(world.resource_loader(), data);
+            }))
     {
         return false;
     }
     const auto control =
         [&world, &commands](const char* name, bool (Animator::*operation)() noexcept)
     {
+            ENGINE_PROFILE_FUNCTION_PROBE();
         return commands.register_command(
             name, false,
             [&world, operation](const Json& arguments, Json& result, std::unique_ptr<EditorEdit>&,
                                 std::string& error)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 if (!fields(arguments, {}, error))
                 {
                     return false;
@@ -134,6 +149,7 @@ bool register_animator(WorldSystem& world, EditorCommands& commands, SceneComman
                [&world](const Json& arguments, Json& result, std::unique_ptr<EditorEdit>&,
                         std::string& error)
                {
+                   ENGINE_PROFILE_FUNCTION_PROBE();
                    if (!fields(arguments, {"seconds"}, error) || !arguments.contains("seconds") ||
                        !arguments["seconds"].is_number())
                    {

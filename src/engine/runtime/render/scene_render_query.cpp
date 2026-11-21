@@ -1,4 +1,6 @@
 #include "runtime/render/scene_render_query.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/scene/ecs_scene.hpp"
 #include "runtime/scene/ecs_storage.hpp"
 
@@ -16,6 +18,7 @@ namespace engine::render_detail
 
 Node scope_node(const Scene& scene, std::uint64_t id)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (auto node = scene.find_node(id))
     {
         return node;
@@ -29,6 +32,7 @@ Node scope_node(const Scene& scene, std::uint64_t id)
     query.each(
         [&](const ecs_detail::ScopeState& state)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             if (state.scope == scene.id())
             {
                 append = state.destination != 0;
@@ -38,6 +42,7 @@ Node scope_node(const Scene& scene, std::uint64_t id)
 }
 std::uint64_t target_scope(const Scene& scene)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (&scene != scene.world().scene())
     {
         return scene.id();
@@ -47,6 +52,7 @@ std::uint64_t target_scope(const Scene& scene)
     query.each(
         [&](flecs::entity entity, const ecs_detail::ScopeState& state)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             if (state.published && entity.has<ecs_detail::Published>() &&
                 state.publication_revision > revision &&
                 scene.world().scope_candidate({scene.world().epoch(), state.scope}) == &scene)
@@ -61,6 +67,7 @@ std::uint64_t target_scope(const Scene& scene)
 bool drawable_scene(const WorldSystem& world, Camera camera, bool has_extensions,
                     const Scene* candidate)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* scene = candidate ? candidate : world.scene();
     camera = camera ? camera : scene ? scene->active_camera() : Camera{};
     if (!camera || !camera.active() || !camera.visible_in_hierarchy())
@@ -80,6 +87,7 @@ bool drawable_scene(const WorldSystem& world, Camera camera, bool has_extensions
     environments.each(
         [&](flecs::entity entity, const auto& stored, const ecs_detail::NodeRuntime& state)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             if (candidate ? !scope_node(*candidate, entity.id())
                           : !entity.has<ecs_detail::Published>())
             {
@@ -100,6 +108,7 @@ bool drawable_scene(const WorldSystem& world, Camera camera, bool has_extensions
     meshes.each(
         [&](flecs::entity entity, const auto& stored, const ecs_detail::NodeRuntime& state)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             if (candidate ? !scope_node(*candidate, entity.id())
                           : !entity.has<ecs_detail::Published>())
             {
@@ -119,6 +128,7 @@ bool drawable_scene(const WorldSystem& world, Camera camera, bool has_extensions
     texts.each(
         [&](flecs::entity entity, const auto& stored, const ecs_detail::NodeRuntime& state)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             if (candidate ? !scope_node(*candidate, entity.id())
                           : !entity.has<ecs_detail::Published>())
             {

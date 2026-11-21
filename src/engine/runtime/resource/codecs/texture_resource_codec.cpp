@@ -1,4 +1,6 @@
 #include "runtime/resource/codecs/texture_resource_codec.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/resource/codecs/resource_decode.hpp"
 
 #include "runtime/core/guid_map.hpp"
@@ -14,8 +16,10 @@ namespace engine
 
 void TextureResourceCodec::initialize_transcoder()
 {
+    ENGINE_PROFILE_FUNCTION();
     static const bool initialized = []
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         basist::basisu_transcoder_init();
         return true;
     }();
@@ -24,7 +28,7 @@ void TextureResourceCodec::initialize_transcoder()
 
 bool TextureResourceCodec::validate(const schema::TextureDataT& data)
 {
-    initialize_transcoder();
+    ENGINE_PROFILE_FUNCTION();
     if (data.schema_version != 3 || !valid_path(data.path) || data.width == 0 || data.height == 0 ||
         data.width > 16384 || data.height > 16384 || data.mip_count == 0 ||
         data.format < schema::TextureFormat::MIN || data.format > schema::TextureFormat::MAX ||
@@ -135,24 +139,32 @@ bool TextureResourceCodec::validate(const schema::TextureDataT& data)
 
 schema::AssetKind TextureResourceCodec::kind() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::texture;
 }
 
 bool TextureResourceCodec::decode(const schema::AssetEntryT& entry, ByteView payload,
                                   std::unique_ptr<Resource>& output, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto validate = [](ByteView payload, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return resource_decode_detail::verify_flatbuffer(payload, schema::VerifyTextureDataBuffer,
                                                          "Invalid Texture FlatBuffer", error);
     };
     return resource_decode_detail::decode_flatbuffer<ResourceType>(
         entry, payload, 64U * 1024U * 1024U, validate,
-        [](const std::uint8_t* bytes) { return schema::UnPackTextureData(bytes); }, output, error);
+        [](const std::uint8_t* bytes)
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return schema::UnPackTextureData(bytes);
+        }, output, error);
 }
 
 bool TextureResourceCodec::validate_data(const Resource& resource, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* data = resource_detail::data<ResourceType>(&resource);
     if (!data || !(resource.info().dependencies.empty() && data->path == resource.info().path &&
                    validate(*data)))
@@ -168,6 +180,7 @@ bool TextureResourceCodec::validate_dependencies(const Resource& resource,
                                                  ResourceView dependencies,
                                                  std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     return resource.info().dependencies.empty() && dependencies.empty();
 }

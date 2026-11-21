@@ -1,4 +1,6 @@
 #include "plugins/editor/asset_import/movie_importer.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "editor/asset_pipeline/asset_io.hpp"
 #include "editor/asset_pipeline/import_tool.hpp"
@@ -43,6 +45,7 @@ struct Probe
 };
 bool settings_for(const std::filesystem::path& source, Settings& out, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto path = source;
     path += ".meta";
     toml::table table;
@@ -105,11 +108,13 @@ bool settings_for(const std::filesystem::path& source, Settings& out, std::strin
 bool run(const std::vector<std::string>& args, std::string& output, std::string& error,
          unsigned seconds = 120, const CancellationCheck& cancel_requested = {})
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(seconds);
     const auto result = run_import_tool(
         args, output, error,
         [&]
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             return (cancel_requested && cancel_requested()) ||
                    std::chrono::steady_clock::now() >= deadline;
         },
@@ -128,6 +133,7 @@ bool run(const std::vector<std::string>& args, std::string& output, std::string&
 bool probe(const std::filesystem::path& source, Probe& info, std::string& error,
            const CancellationCheck& cancel_requested = {})
 {
+    ENGINE_PROFILE_FUNCTION();
     info = {};
     std::filesystem::path executable;
     std::string output;
@@ -298,6 +304,7 @@ bool probe(const std::filesystem::path& source, Probe& info, std::string& error,
 bool audio_identity(const ImportAsset& asset, const ImportContext& context, Guid& output,
                     std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     if (!context.identities.path_to_guid(asset.path + "/audio", output))
     {
@@ -314,6 +321,7 @@ bool audio_identity(const ImportAsset& asset, const ImportContext& context, Guid
 }
 std::uint32_t read32(const std::byte* p)
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::to_integer<std::uint32_t>(p[0]) | (std::to_integer<std::uint32_t>(p[1]) << 8) |
            (std::to_integer<std::uint32_t>(p[2]) << 16) |
            (std::to_integer<std::uint32_t>(p[3]) << 24);
@@ -322,24 +330,29 @@ std::uint32_t read32(const std::byte* p)
 
 std::string_view MovieImporter::id() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "movie";
 }
 schema::AssetKind MovieImporter::kind() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::movie;
 }
 bool MovieImporter::matches(const std::filesystem::path& source) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto ext = source_extension(source);
     return ext == ".mp4" || ext == ".mov";
 }
 std::string_view MovieImporter::default_meta() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "\n[movie]\naudio = true\n\n[audio]\nsample_rate = 48000\nchannels = 2\ngain = 1.0\n";
 }
 bool MovieImporter::discover(const ImportAsset& source, std::vector<ImportSubresource>& output,
                              std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     error.clear();
     Settings settings;
@@ -357,6 +370,7 @@ bool MovieImporter::discover(const ImportAsset& source, std::vector<ImportSubres
 bool MovieImporter::inspect_batch(const ImportContext& context, std::string& fingerprint,
                                   std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     fingerprint.clear();
     error.clear();
     std::filesystem::path ffmpeg;
@@ -380,6 +394,7 @@ bool MovieImporter::inspect_batch(const ImportContext& context, std::string& fin
 bool MovieImporter::scan_dependencies(ImportAsset& asset, const ImportContext& context,
                                       std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     asset.build_dependencies.clear();
     asset.runtime_dependencies.clear();
@@ -408,6 +423,7 @@ bool MovieImporter::scan_dependencies(ImportAsset& asset, const ImportContext& c
 bool MovieImporter::convert(const ImportAsset& asset, const ImportContext& context,
                             std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     Settings settings;
     Probe info;

@@ -1,4 +1,6 @@
 #pragma once
+
+#include "runtime/performance/function_profile.hpp"
 #include "plugins/runtime/camera/camera_types.hpp"
 #include "runtime/scene/ecs_storage.hpp"
 #include <algorithm>
@@ -50,6 +52,7 @@ public:
     };
     template <class T> [[nodiscard]] bool add_module()
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (frozen_ || T::type().empty() || module(T::type()))
         {
             return false;
@@ -66,6 +69,7 @@ public:
         ops.stage = T::stage();
         ops.validate = [](const auto& definition, std::uint64_t id, std::string& error)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             const auto* data = T::find(definition, id);
             if (!data)
             {
@@ -75,21 +79,29 @@ public:
             return T::validate(*data, definition, error);
         };
         ops.bind = [](WorldSystem& world)
-        { flecs::world(world.native_world()).template set<detail::ModuleHistory<T>>({}); };
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            flecs::world(world.native_world()).template set<detail::ModuleHistory<T>>({});
+        };
         ops.reset = [](WorldSystem& world, Node node)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             auto* column =
                 flecs::world(world.native_world()).template try_get_mut<detail::ModuleHistory<T>>();
             if (column)
             {
                 std::erase_if(column->records, [&](const auto& entry)
-                              { return std::get<0>(entry.first) == node.id(); });
+                              {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
+                    return std::get<0>(entry.first) == node.id();
+                });
             }
         };
         ops.evaluate = [](WorldSystem& world, Component component, std::string_view scope,
                           std::uint64_t id, const auto& definition, const auto& context,
                           CameraPose& pose)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             const auto* data = T::find(definition, id);
             auto* column =
                 flecs::world(world.native_world()).template try_get_mut<detail::ModuleHistory<T>>();
@@ -115,6 +127,7 @@ public:
         ops.check = [](const auto& definition, std::uint64_t id, const auto& context,
                        const CameraPose& pose, bool& accepted)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             if constexpr (T::stage() == CameraModuleStage::constraint)
             {
                 const auto* data = T::find(definition, id);
@@ -132,6 +145,7 @@ public:
         };
         ops.complete = [](WorldSystem& world, Component component, bool success)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             auto* column =
                 flecs::world(world.native_world()).template try_get_mut<detail::ModuleHistory<T>>();
             if (!column)
@@ -157,6 +171,7 @@ public:
                 std::erase_if(column->records,
                               [&](const auto& entry)
                               {
+                                  ENGINE_PROFILE_FUNCTION_PROBE();
                                   return std::get<0>(entry.first) == component.node().id() &&
                                          std::get<1>(entry.first) == component.instance_id() &&
                                          !entry.second.seeded;
@@ -166,6 +181,7 @@ public:
         ops.retain = [](WorldSystem& world, Component component, std::string_view active,
                         std::string_view source)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             auto* column =
                 flecs::world(world.native_world()).template try_get_mut<detail::ModuleHistory<T>>();
             if (!column)
@@ -175,6 +191,7 @@ public:
             std::erase_if(column->records,
                           [&](const auto& entry)
                           {
+                              ENGINE_PROFILE_FUNCTION_PROBE();
                               const auto& key = entry.first;
                               return std::get<0>(key) == component.node().id() &&
                                      std::get<1>(key) == component.instance_id() &&
@@ -184,6 +201,7 @@ public:
         };
         ops.prune = [](WorldSystem& world)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             auto* column =
                 flecs::world(world.native_world()).template try_get_mut<detail::ModuleHistory<T>>();
             if (!column)
@@ -194,6 +212,7 @@ public:
                 column->records,
                 [&](const auto& entry)
                 {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
                     auto node = world.find_node(std::get<0>(entry.first));
                     auto component = node ? node.get_component(ComponentType::CameraControllerData)
                                           : Component{};
@@ -206,6 +225,7 @@ public:
     }
     template <class T> [[nodiscard]] bool add_condition()
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (frozen_ || T::type().empty() || condition(T::type()))
         {
             return false;
@@ -214,6 +234,7 @@ public:
         ops.type = T::type();
         ops.validate = [](const auto& definition, std::uint64_t id, std::string& error)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             const auto* data = T::find(definition, id);
             if (!data)
             {
@@ -225,6 +246,7 @@ public:
         ops.evaluate = [](const auto& definition, std::uint64_t id, const auto& context,
                           CameraConditionMatch& output)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             output = {};
             const auto* data = T::find(definition, id);
             return data && T::evaluate(*data, context, output);
@@ -235,25 +257,30 @@ public:
     }
     [[nodiscard]] bool freeze() noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         frozen_ = true;
         return true;
     }
     [[nodiscard]] bool frozen() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return frozen_;
     }
     [[nodiscard]] std::span<const std::string> module_types() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return module_names_;
     }
     [[nodiscard]] std::span<const std::string> condition_types() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return condition_names_;
     }
     [[nodiscard]] const ModuleOperations* module(std::string_view name) const noexcept;
     [[nodiscard]] const ConditionOperations* condition(std::string_view name) const noexcept;
     [[nodiscard]] std::span<const ModuleOperations> modules() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return modules_;
     }
 

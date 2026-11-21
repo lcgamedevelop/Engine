@@ -1,5 +1,6 @@
 #pragma once
 
+#include "runtime/render/gpu_readback.hpp"
 #include "runtime/render/vsm/vsm_types.hpp"
 
 #include <deque>
@@ -45,8 +46,8 @@ private:
     {
         VsmView view;
         std::vector<std::uint32_t> bits;
+        GpuReadback completion;
         std::uint64_t submission_id = 0, receiver_revision = 0;
-        std::uint32_t ready_frame = 0;
         bool pending = false;
     };
     std::array<Readback, 3> readbacks_;

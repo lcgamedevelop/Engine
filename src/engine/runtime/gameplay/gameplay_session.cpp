@@ -22,6 +22,7 @@
 #include "runtime/app/app.hpp"
 #include "runtime/gameplay/script_runtime.hpp"
 #include "runtime/log/log_system.hpp"
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/task/task_system.hpp"
 #include "runtime/utils/path_utils.hpp"
@@ -106,6 +107,7 @@ struct GameplaySession::State
         : owner(session),
           persistent_root(App::is_initialized() ? App::persistent_data_path() : fs::path{})
     {
+        ENGINE_PROFILE_FUNCTION();
         if (const auto* resources = &owner.resources_)
         {
             target_platform = resources->catalog().data().target_platform;
@@ -114,6 +116,7 @@ struct GameplaySession::State
 
     bool fail(std::string message)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (owner.last_error_ != message)
         {
             LogSystem::write(LogLevel::error, message);
@@ -124,6 +127,7 @@ struct GameplaySession::State
 
     void publish()
     {
+        ENGINE_PROFILE_ZONE("Gameplay.publishStatus");
         if (!App::is_initialized())
         {
             return;
@@ -156,6 +160,7 @@ struct GameplaySession::State
 
     void accept_control(const ControlRead& control)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (!control.error.empty())
         {
             (void)fail(control.error);
@@ -184,6 +189,7 @@ struct GameplaySession::State
 
     void poll_control()
     {
+        ENGINE_PROFILE_FUNCTION();
         if (App::is_initialized())
         {
             accept_control(read_control(persistent_root));
@@ -192,6 +198,7 @@ struct GameplaySession::State
 
     void invalidate_background() noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         ++generation;
         if (pending)
         {
@@ -201,6 +208,7 @@ struct GameplaySession::State
 
     bool collect_background()
     {
+        ENGINE_PROFILE_ZONE("Gameplay.collectDeployment");
         if (!pending || !pending->ready)
         {
             return true;
@@ -229,6 +237,7 @@ struct GameplaySession::State
 
     void schedule_background()
     {
+        ENGINE_PROFILE_ZONE("Gameplay.scheduleDeployment");
         if (owner.background_ == nullptr || pending || persistent_root.empty())
         {
             return;
@@ -251,17 +260,29 @@ struct GameplaySession::State
                 {
                     return false;
                 }
-                operation->control = read_control(root);
-                const bool valid = operation->deployment.read(root, &operation->cancelled);
+                {
+                    ENGINE_PROFILE_ZONE("Gameplay.readDeploymentControl");
+                    operation->control = read_control(root);
+                }
+                const bool valid = [&]
+                {
+                    ENGINE_PROFILE_ZONE("Gameplay.readDeploymentManifest");
+                    return operation->deployment.read(root, &operation->cancelled);
+                }();
                 if (!operation->status_text.empty() &&
                     !operation->cancelled.load(std::memory_order_relaxed))
                 {
+                    ENGINE_PROFILE_ZONE("Gameplay.writeDeploymentStatus");
                     operation->status_written =
                         write_status(root, operation->status_text, operation->write_error);
                 }
                 return valid;
             },
-            [operation](bool) { operation->ready = true; }, TaskPriority::low);
+            [operation](bool)
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                operation->ready = true;
+            }, TaskPriority::low);
         if (submitted)
         {
             pending = std::move(operation);
@@ -270,6 +291,7 @@ struct GameplaySession::State
 
     [[nodiscard]] bool poll_available()
     {
+        ENGINE_PROFILE_FUNCTION();
         DeploymentRead result;
         result.last_manifest = last_manifest;
         result.current_revision = available ? available->revision : "";
@@ -284,6 +306,7 @@ struct GameplaySession::State
 
     void accept_deployment(DeploymentRead& result)
     {
+        ENGINE_PROFILE_FUNCTION();
         last_manifest = std::move(result.last_manifest);
         if (result.available)
         {
@@ -293,6 +316,7 @@ struct GameplaySession::State
 
     bool prepare_builtins(std::vector<ResourceReference>& output)
     {
+        ENGINE_PROFILE_FUNCTION();
         auto* loader = owner.world_.resource_loader();
         if (!loader)
         {
@@ -366,6 +390,7 @@ struct GameplaySession::State
 
     bool apply(const Snapshot& snapshot)
     {
+        ENGINE_PROFILE_FUNCTION();
         auto* resources = &owner.resources_;
         if (resources == nullptr ||
             snapshot.catalog.data().target_platform != resources->catalog().data().target_platform)
@@ -428,6 +453,7 @@ GameplaySession::GameplaySession(ResourceSystem& resources, WorldSystem& world,
     : resources_(resources), world_(world), renderer_(renderer), script_(script), physics_(physics),
       audio_(audio), animation_(animation), fonts_(fonts), ui_(ui), background_(background)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (script_ && !script_->bind_gameplay_session(this))
     {
         last_error_ = "Cannot bind gameplay scene loading service";
@@ -436,6 +462,7 @@ GameplaySession::GameplaySession(ResourceSystem& resources, WorldSystem& world,
 
 GameplaySession::~GameplaySession() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     stop(GameplayStopCause::requested);
     if (script_)
     {
@@ -459,6 +486,7 @@ GameplaySession::~GameplaySession() noexcept
 bool GameplaySession::set_resources(const schema::AssetCatalogDataT& data, const MountList& mounts,
                                     std::string_view entry)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* resources = &resources_;
     if (resources == nullptr)
     {
@@ -529,6 +557,7 @@ bool GameplaySession::begin_prepare(const ResourceCatalog& catalog, const MountL
                                     std::string_view revision, std::string_view entry,
                                     std::string_view scene, std::uint64_t& output_id)
 {
+    ENGINE_PROFILE_FUNCTION();
     output_id = 0;
     auto* resources = &resources_;
     if (!resources || !world_.is_initialized() || !renderer_.is_initialized() ||
@@ -589,6 +618,7 @@ bool GameplaySession::begin_prepare(const ResourceCatalog& catalog, const MountL
 GameplayPrepareStatus GameplaySession::step_prepare(std::uint32_t resource_budget,
                                                     double max_seconds)
 {
+    ENGINE_PROFILE_FUNCTION();
     using Phase = State::PreparePhase;
     auto* resources = &resources_;
     if (!state_ || !resources || resource_budget == 0 || !std::isfinite(max_seconds) ||
@@ -606,6 +636,7 @@ GameplayPrepareStatus GameplaySession::step_prepare(std::uint32_t resource_budge
     }
     auto fail = [&](std::string_view message)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const std::string error(message);
         if (const auto found = preparations_.find(current_prepare_id_);
             found != preparations_.end())
@@ -628,6 +659,7 @@ GameplayPrepareStatus GameplaySession::step_prepare(std::uint32_t resource_budge
         std::uint32_t remaining = resource_budget;
         auto begin = [&](std::string_view guid, std::unique_ptr<ResourceLoad>& load)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             return world_.resource_loader() && world_.resource_loader()->begin_load(guid, load) &&
                    load != nullptr;
         };
@@ -665,6 +697,7 @@ GameplayPrepareStatus GameplaySession::step_prepare(std::uint32_t resource_budge
         auto advance = [&](std::unique_ptr<ResourceLoad>& load, ResourceReference& output,
                            std::uint32_t& completed)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             if (!load || remaining == 0 ||
                 std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count() >=
                     max_seconds)
@@ -789,6 +822,7 @@ GameplayPrepareStatus GameplaySession::step_prepare(std::uint32_t resource_budge
         const SceneWorkBudget budget{resource_budget, max_seconds};
         const auto prepare = [&](auto* system)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             return !system || !world_.scene() ? SceneWorkState::not_required
                                               : system->prepare_scope(scope, budget);
         };
@@ -817,6 +851,7 @@ GameplayPrepareStatus GameplaySession::step_prepare(std::uint32_t resource_budge
 
 bool GameplaySession::activate_prepared()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!state_ || state_->prepare_phase != State::PreparePhase::ready)
     {
         return false;
@@ -838,6 +873,7 @@ bool GameplaySession::activate_prepared()
 
 bool GameplaySession::prepare_status(std::uint64_t id, GameplayPrepareSnapshot& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     const auto found = preparations_.find(id);
     if (found == preparations_.end())
@@ -850,6 +886,7 @@ bool GameplaySession::prepare_status(std::uint64_t id, GameplayPrepareSnapshot& 
 
 bool GameplaySession::release_prepare(std::uint64_t id)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto found = preparations_.find(id);
     if (found == preparations_.end() || (found->second.state != GameplayPrepareStatus::active &&
                                          found->second.state != GameplayPrepareStatus::failed &&
@@ -863,6 +900,7 @@ bool GameplaySession::release_prepare(std::uint64_t id)
 
 bool GameplaySession::start(std::string_view entry)
 {
+    ENGINE_PROFILE_FUNCTION();
     last_error_.clear();
     if (script_ == nullptr)
     {
@@ -956,6 +994,7 @@ bool GameplaySession::tick()
 
 void GameplaySession::release_scene() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     finish_scene_loads(GameplayStopCause::requested, "Scene content was released");
     if (ui_)
     {
@@ -983,6 +1022,7 @@ void GameplaySession::release_scene() noexcept
 
 void GameplaySession::stop(GameplayStopCause cause, std::string_view reason) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!reason.empty())
     {
         last_error_ = reason;
@@ -1029,6 +1069,7 @@ void GameplaySession::stop(GameplayStopCause cause, std::string_view reason) noe
 bool GameplaySession::execute_project_script(const ProjectScriptRequest& request,
                                              std::string& result_json, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     result_json.clear();
     error.clear();
     if (const auto found = preparations_.find(current_prepare_id_);
@@ -1070,7 +1111,11 @@ bool GameplaySession::execute_project_script(const ProjectScriptRequest& request
     entry.kind = schema::AssetKind::script;
     ByteBuffer bytes(request.javascript.size());
     std::transform(request.javascript.begin(), request.javascript.end(), bytes.begin(),
-                   [](char value) { return static_cast<std::byte>(value); });
+                   [](char value)
+                   {
+                       ENGINE_PROFILE_FUNCTION_PROBE();
+                       return static_cast<std::byte>(value);
+                   });
     std::unique_ptr<Resource> value =
         std::make_unique<ScriptResource>(std::move(entry), std::move(bytes));
     ResourceHandle handle;
@@ -1092,6 +1137,7 @@ bool GameplaySession::execute_project_script(const ProjectScriptRequest& request
 
 const ScriptStatus* GameplaySession::script_status() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (script_ == nullptr)
     {
         return nullptr;
@@ -1101,6 +1147,7 @@ const ScriptStatus* GameplaySession::script_status() const noexcept
 
 std::string_view GameplaySession::last_error() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return last_error_;
 }
 

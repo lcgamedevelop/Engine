@@ -1,5 +1,9 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
+#include "runtime/performance/memory_profiling.hpp"
+#include "runtime/render/gpu_memory_tracker.hpp"
 #include "runtime/resource/resource_reference.hpp"
 #include "runtime/resource/types/texture_resource.hpp"
 
@@ -20,6 +24,19 @@ class Resource;
 namespace engine::render_detail
 {
 
+struct TextureStagingPixels
+{
+    TextureStagingPixels() = default;
+    TextureStagingPixels(TextureStagingPixels&&) noexcept = default;
+    TextureStagingPixels& operator=(TextureStagingPixels&& other) noexcept;
+    void resize(std::size_t size);
+
+    std::vector<std::uint8_t> bytes;
+
+private:
+    [[no_unique_address]] memory_profile::Allocation allocation_;
+};
+
 struct PreparedTexture
 {
     // 协调线程按 mip / face / byte_offset 描述一个独立准备单元，不分配输出。
@@ -36,7 +53,7 @@ struct PreparedTexture
     std::uint32_t mip = 0;
     std::uint32_t face = 0;
     std::uint64_t byte_offset = 0;
-    std::vector<std::uint8_t> pixels;
+    TextureStagingPixels pixels;
     // 仅本次 upload 借用；完整工作持有 pixels，分段上传可借用其中的矩形范围。
     std::span<const std::uint8_t> view;
 };
@@ -56,11 +73,13 @@ struct GpuTexture
     GpuTexture& operator=(GpuTexture&& other) noexcept;
 
     // 调用前释放旧句柄；失败后的部分初始化由 release 或析构清理。
-    [[nodiscard]] bool create(const PreparedTexture& prepared);
+    [[nodiscard]] bool create(const PreparedTexture& prepared, GpuMemoryTracker* tracker = nullptr,
+                              SceneScopeId scope = {}, std::uint64_t scene = 0);
     [[nodiscard]] bool upload(const PreparedTexture& part);
     void release() noexcept;
     [[nodiscard]] bool matches(ResourceHandle source) const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const Resource* value = nullptr;
         return resource.loader() && resource.loader()->get(source, value) == ResourceError::none &&
                value == resource.get();
@@ -69,6 +88,7 @@ struct GpuTexture
     ResourceReference resource;
     bgfx::TextureHandle handle = BGFX_INVALID_HANDLE;
     std::uint32_t sampler_flags = 0;
+    [[no_unique_address]] GpuMemoryAllocation memory;
 };
 
 using TextureTable = std::unordered_map<const Resource*, GpuTexture>;
@@ -77,6 +97,7 @@ using TextureTable = std::unordered_map<const Resource*, GpuTexture>;
 [[nodiscard]] inline const GpuTexture* find_texture(const TextureTable& textures,
                                                     ResourceHandle handle) noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     if (textures.empty())
     {
         return nullptr;

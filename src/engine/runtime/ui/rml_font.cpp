@@ -1,4 +1,6 @@
 #include "runtime/ui/rml_font.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/core/guid_map.hpp"
 #include "runtime/resource/types/shader_resource.hpp"
 #include "runtime/resource/types/texture_resource.hpp"
@@ -16,16 +18,22 @@ namespace
 {
 std::string normalized(std::string value)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c)
-                   { return static_cast<char>(c >= 'A' && c <= 'Z' ? c + ('a' - 'A') : c); });
+                   {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return static_cast<char>(c >= 'A' && c <= 'Z' ? c + ('a' - 'A') : c);
+    });
     return value;
 }
 } // namespace
 RmlFont::RmlFont(FontSystem&) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 bool RmlFont::activate(const std::string& key, const ResourceReference& document)
 {
+    ENGINE_PROFILE_FUNCTION();
     active_ = nullptr;
     if (!document || !document.data<UiResource>())
     {
@@ -65,20 +73,33 @@ bool RmlFont::activate(const std::string& key, const ResourceReference& document
 }
 void RmlFont::prune(std::span<const std::string> keys)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto alive = [&](const std::string& key)
-    { return std::find(keys.begin(), keys.end(), key) != keys.end(); };
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return std::find(keys.begin(), keys.end(), key) != keys.end();
+    };
     if (!alive(active_key_))
     {
         active_ = nullptr;
         active_key_.clear();
     }
-    std::erase_if(faces_, [&](const auto& entry) { return !alive(entry.second->document_key); });
-    std::erase_if(documents_, [&](const auto& entry) { return !alive(entry.first); });
+    std::erase_if(faces_, [&](const auto& entry)
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return !alive(entry.second->document_key);
+    });
+    std::erase_if(documents_, [&](const auto& entry)
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return !alive(entry.first);
+    });
 }
 bool RmlFont::resolve_texture(std::string_view key, std::string_view font_guid,
                               std::string_view shader_guid, ResourceReference& font,
                               ResourceReference& shader) const
 {
+    ENGINE_PROFILE_FUNCTION();
     font.reset();
     shader.reset();
     const auto document = documents_.find(std::string(key));
@@ -104,6 +125,7 @@ bool RmlFont::resolve_texture(std::string_view key, std::string_view font_guid,
 Rml::FontFaceHandle RmlFont::GetFontFaceHandle(const Rml::String& family, Rml::Style::FontStyle,
                                                Rml::Style::FontWeight, int size)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!active_)
     {
         return 0;
@@ -141,12 +163,14 @@ Rml::FontFaceHandle RmlFont::GetFontFaceHandle(const Rml::String& family, Rml::S
 }
 const Rml::FontMetrics& RmlFont::GetFontMetrics(Rml::FontFaceHandle handle)
 {
+    ENGINE_PROFILE_FUNCTION();
     static const Rml::FontMetrics empty{};
     return handle ? reinterpret_cast<Face*>(handle)->metrics : empty;
 }
 int RmlFont::GetStringWidth(Rml::FontFaceHandle handle, Rml::StringView text,
                             const Rml::TextShapingContext& context, Rml::Character prior)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!handle)
     {
         return 0;
@@ -174,6 +198,7 @@ int RmlFont::GenerateString(Rml::RenderManager& manager, Rml::FontFaceHandle han
                             Rml::ColourbPremultiplied colour, float,
                             const Rml::TextShapingContext& context, Rml::TexturedMeshList& meshes)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!handle || text.empty())
     {
         return 0;
@@ -210,7 +235,10 @@ int RmlFont::GenerateString(Rml::RenderManager& manager, Rml::FontFaceHandle han
             const auto found =
                 std::lower_bound(data.glyphs.begin(), data.glyphs.end(), glyph->codepoint,
                                  [](const auto& candidate, std::uint32_t value)
-                                 { return candidate->codepoint < value; });
+                                 {
+                                     ENGINE_PROFILE_FUNCTION_PROBE();
+                                     return candidate->codepoint < value;
+                                 });
             const auto glyph_index = static_cast<float>(found - data.glyphs.begin());
             for (std::size_t corner = 0; corner < quad.vertices.size(); ++corner)
             {
@@ -235,6 +263,7 @@ int RmlFont::GenerateString(Rml::RenderManager& manager, Rml::FontFaceHandle han
 }
 void RmlFont::ReleaseFontResources()
 {
+    ENGINE_PROFILE_FUNCTION();
     faces_.clear();
     documents_.clear();
     active_ = nullptr;

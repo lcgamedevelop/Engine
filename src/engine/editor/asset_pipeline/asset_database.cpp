@@ -1,4 +1,5 @@
 #include "editor/asset_pipeline/asset_database.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/utils/path_utils.hpp"
 
@@ -43,6 +44,7 @@ public:
     Statement() noexcept = default;
     ~Statement() noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         sqlite3_finalize(statement_);
     }
     Statement(const Statement&) = delete;
@@ -52,6 +54,7 @@ public:
 
     [[nodiscard]] bool prepare(sqlite3* database, const char* sql)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (statement_ != nullptr || database == nullptr || sql == nullptr)
         {
             return false;
@@ -61,10 +64,12 @@ public:
 
     [[nodiscard]] sqlite3_stmt* get() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         return statement_;
     }
     [[nodiscard]] bool bind(int index, const std::string& value)
     {
+        ENGINE_PROFILE_FUNCTION();
         return statement_ != nullptr &&
                value.size() <= static_cast<std::size_t>(std::numeric_limits<int>::max()) &&
                sqlite3_bind_text(statement_, index, value.data(), static_cast<int>(value.size()),
@@ -72,6 +77,7 @@ public:
     }
     [[nodiscard]] bool bind(int index, std::uint64_t value)
     {
+        ENGINE_PROFILE_FUNCTION();
         return statement_ != nullptr &&
                value <= static_cast<std::uint64_t>(std::numeric_limits<sqlite3_int64>::max()) &&
                sqlite3_bind_int64(statement_, index, static_cast<sqlite3_int64>(value)) ==
@@ -79,6 +85,7 @@ public:
     }
     [[nodiscard]] std::string text(int index) const
     {
+        ENGINE_PROFILE_FUNCTION();
         const auto* value = sqlite3_column_text(statement_, index);
         return value != nullptr ? reinterpret_cast<const char*>(value) : std::string{};
     }
@@ -91,12 +98,14 @@ private:
 
 AssetDatabase::~AssetDatabase() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     rollback();
     sqlite3_close(database_);
 }
 
 bool AssetDatabase::execute(const char* sql, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     char* diagnostics = nullptr;
     const int result = sqlite3_exec(database_, sql, nullptr, nullptr, &diagnostics);
     if (result != SQLITE_OK)
@@ -110,6 +119,7 @@ bool AssetDatabase::execute(const char* sql, std::string& error)
 
 bool AssetDatabase::open(const std::filesystem::path& path, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (sqlite3_open_v2(PathUtils::to_utf8(path).c_str(), &database_,
                         SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX,
                         nullptr) != SQLITE_OK)
@@ -152,6 +162,7 @@ bool AssetDatabase::open(const std::filesystem::path& path, std::string& error)
 
 bool AssetDatabase::load(std::map<Guid, AssetRecord>& records, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     records.clear();
     Statement statement;
     if (!statement.prepare(database_,
@@ -213,6 +224,7 @@ bool AssetDatabase::load(std::map<Guid, AssetRecord>& records, std::string& erro
 
 bool AssetDatabase::revision(std::string& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     Statement statement;
     if (!statement.prepare(database_, "SELECT value FROM state WHERE key='revision';"))
@@ -237,6 +249,7 @@ bool AssetDatabase::revision(std::string& output, std::string& error)
 bool AssetDatabase::begin_update(const std::vector<AssetRecord>& records,
                                  const std::string& revision_value, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (transaction_ || !execute("BEGIN IMMEDIATE;", error))
     {
         return false;
@@ -313,6 +326,7 @@ bool AssetDatabase::begin_update(const std::vector<AssetRecord>& records,
 
 bool AssetDatabase::commit(std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!transaction_ || !execute("COMMIT;", error))
     {
         return false;
@@ -323,6 +337,7 @@ bool AssetDatabase::commit(std::string& error)
 
 void AssetDatabase::rollback() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (transaction_)
     {
         sqlite3_exec(database_, "ROLLBACK;", nullptr, nullptr, nullptr);

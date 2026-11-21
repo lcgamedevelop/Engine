@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/resource/resource_catalog.hpp"
 #include "runtime/resource/resource_codec.hpp"
 #include "runtime/resource/resource_read.hpp"
@@ -32,6 +34,7 @@ public:
 
     template <typename TCodec> [[nodiscard]] bool add()
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         static_assert(std::is_base_of_v<ResourceCodec, TCodec>);
         using Value = typename TCodec::ResourceType;
         static_assert(

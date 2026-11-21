@@ -1,4 +1,5 @@
 #include "runtime/engine_config.hpp"
+#include "runtime/performance/memory_profiling.hpp"
 #include "runtime/resource/codecs/source_resource_codec.hpp"
 #include "runtime/resource/resource_system.hpp"
 #include "runtime/task/task_system.hpp"
@@ -592,6 +593,8 @@ bool file_operation_contracts(const std::filesystem::path& root)
 
 int main()
 {
+    using namespace engine::memory_profile;
+    begin_startup_capture();
     TestDirectory directory;
     if (!create_directory(directory))
     {
@@ -606,5 +609,17 @@ int main()
     failures += !file_operation_contracts(directory.path);
     failures +=
         !(asynchronous_ranges(directory.path) && single_resource_operations(directory.path));
+    const auto memory = snapshot();
+    if (memory.mode != Mode::off)
+    {
+        for (const auto id : {Pool::resource_read, Pool::resource_decode})
+        {
+            const auto& pool = memory.pools[static_cast<std::size_t>(id)];
+            failures += !expect(pool.peak_bytes > 0 && pool.current_bytes == 0 &&
+                                    pool.live_allocations == 0,
+                                "tracked read buffers are released after success and cancellation");
+        }
+    }
+    publish_plots();
     return failures == 0 ? 0 : 1;
 }

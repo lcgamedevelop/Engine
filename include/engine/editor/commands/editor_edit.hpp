@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include <string>
 
 namespace engine::editor
@@ -12,6 +14,7 @@ public:
     // 全局设置等不影响场景持久数据的编辑自行返回 false。
     [[nodiscard]] virtual bool affects_scene() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return true;
     }
     // 仅在编辑器主线程调用；失败不改变对象，成功后可用另一方法恢复。

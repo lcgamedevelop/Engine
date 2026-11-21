@@ -1,4 +1,5 @@
 #include "editor/asset_pipeline/components/environment_codec.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "editor/asset_pipeline/control_toml.hpp"
 #include "editor/asset_pipeline/toml_helpers.hpp"
@@ -15,6 +16,7 @@ namespace
 
 bool read_color(const toml::node* source, Color& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* array = source == nullptr ? nullptr : source->as_array();
     if (array == nullptr || (array->size() != 3 && array->size() != 4))
     {
@@ -35,6 +37,7 @@ bool read_color(const toml::node* source, Color& output)
 
 toml::array write_color(const Color& color)
 {
+    ENGINE_PROFILE_FUNCTION();
     return toml::array{color.r(), color.g(), color.b(), color.a()};
 }
 
@@ -42,16 +45,19 @@ toml::array write_color(const Color& color)
 
 schema::ComponentPayload EnvironmentCodec::type() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::ComponentPayload::EnvironmentData;
 }
 
 std::string_view EnvironmentCodec::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "environment";
 }
 
 bool EnvironmentCodec::validate(const schema::ComponentDataT& component, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* settings = component.payload.AsEnvironmentData();
     if (settings == nullptr || !scene_detail::valid_environment(*settings))
     {
@@ -64,6 +70,7 @@ bool EnvironmentCodec::validate(const schema::ComponentDataT& component, std::st
 bool EnvironmentCodec::read(const toml::table& table, schema::ComponentDataT& component,
                             std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     EnvironmentSettings settings;
     if (const auto* source = table.get("rvt"))
     {
@@ -247,12 +254,14 @@ bool EnvironmentCodec::read(const toml::table& table, schema::ComponentDataT& co
 
 std::span<const std::string_view> EnvironmentCodec::resource_fields() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     static constexpr std::string_view fields[]{"ibl_irradiance", "ibl_prefilter", "ibl_lut"};
     return fields;
 }
 
 void EnvironmentCodec::write(const schema::ComponentDataT& component, toml::table& table) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto& settings = *component.payload.AsEnvironmentData();
     table.insert("type", "environment");
     table.insert("ambient_color", write_color(settings.ambient_color));
@@ -309,6 +318,7 @@ bool EnvironmentCodec::remap_node_references(schema::ComponentDataT& component,
                                              std::span<const schema::NodeIdMappingT> mapping,
                                              std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* settings = component.payload.AsEnvironmentData();
     if (!settings)
     {

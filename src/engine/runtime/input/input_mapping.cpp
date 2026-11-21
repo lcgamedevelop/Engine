@@ -1,4 +1,6 @@
 #include "runtime/input/input_state.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -12,16 +14,19 @@ constexpr double epsilon = 0.000001;
 
 bool pointer_kind(Kind kind)
 {
+    ENGINE_PROFILE_FUNCTION();
     return (kind >= Kind::mouse_button && kind <= Kind::mouse_wheel) || kind == Kind::touch;
 }
 
 template <class T> bool valid_enum(T value)
 {
+    ENGINE_PROFILE_FUNCTION();
     return value >= T::MIN && value <= T::MAX;
 }
 
 std::vector<std::uint32_t> channel_order(const State& state)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::vector<std::uint32_t> order;
     for (std::uint32_t index = 0; index < state.channels.size(); ++index)
     {
@@ -33,6 +38,7 @@ std::vector<std::uint32_t> channel_order(const State& state)
     std::stable_sort(order.begin(), order.end(),
                      [&state](auto a, auto b)
                      {
+                         ENGINE_PROFILE_FUNCTION_PROBE();
                          const auto& left = state.channels[a];
                          const auto& right = state.channels[b];
                          return left.data.priority != right.data.priority
@@ -45,6 +51,7 @@ std::vector<std::uint32_t> channel_order(const State& state)
 double physical(const State& state, Channel& channel, const schema::InputControlRef& ref,
                 const std::set<Key>& consumed, bool& unavailable)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto source_key = key(ref);
     const auto found = state.controls.find(source_key);
     if (found == state.controls.end())
@@ -81,6 +88,7 @@ double physical(const State& state, Channel& channel, const schema::InputControl
         return std::any_of(state.contacts.begin(), state.contacts.end(),
                            [&ref](const auto& entry)
                            {
+                               ENGINE_PROFILE_FUNCTION_PROBE();
                                return entry.first.first == ref.connection_id() &&
                                       entry.second.data.held && !entry.second.suppressed;
                            })
@@ -93,6 +101,7 @@ double physical(const State& state, Channel& channel, const schema::InputControl
 
 void limit(double& x, double& y, bool vector)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto magnitude = vector ? std::hypot(x, y) : std::abs(x);
     if (magnitude > 1)
     {
@@ -103,6 +112,7 @@ void limit(double& x, double& y, bool vector)
 
 const schema::InputVirtualControlDataT* virtual_control(const Channel& channel, std::string_view id)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (const auto& control : channel.data.virtual_controls)
     {
         if (control->id == id)
@@ -116,6 +126,7 @@ const schema::InputVirtualControlDataT* virtual_control(const Channel& channel, 
 void region(const State& state, SDL_Window* window, const schema::InputRegionDataT& data, double& x,
             double& y, double& width, double& height)
 {
+    ENGINE_PROFILE_FUNCTION();
     int window_width = 0;
     int window_height = 0;
     SDL_GetWindowSize(window, &window_width, &window_height);
@@ -137,6 +148,7 @@ void region(const State& state, SDL_Window* window, const schema::InputRegionDat
 bool inside(const schema::InputRegionDataT& data, double x, double y, double rx, double ry,
             double width, double height)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (data.shape == schema::InputRegionShape::circle)
     {
         const auto radius = std::min(width, height) * 0.5;
@@ -147,6 +159,7 @@ bool inside(const schema::InputRegionDataT& data, double x, double y, double rx,
 
 void release_pointer(State& state, std::map<ContactKey, PointerCapture>::iterator found)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto& channel = state.channels[found->second.channel];
     const auto control = channel.virtuals.find(found->second.control);
     if (control != channel.virtuals.end())
@@ -161,6 +174,7 @@ void release_pointer(State& state, std::map<ContactKey, PointerCapture>::iterato
 
 schema::InputValueMode mode(Kind kind)
 {
+    ENGINE_PROFILE_FUNCTION();
     return kind == Kind::mouse_delta || kind == Kind::mouse_relative || kind == Kind::mouse_wheel
                ? schema::InputValueMode::delta
                : schema::InputValueMode::state;
@@ -168,6 +182,7 @@ schema::InputValueMode mode(Kind kind)
 
 schema::InputUnit unit(Kind kind)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (kind == Kind::mouse_delta || kind == Kind::mouse_position)
     {
         return schema::InputUnit::logical;
@@ -185,6 +200,7 @@ schema::InputUnit unit(Kind kind)
 
 bool validate_source(const schema::InputControlRef& ref)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (ref.connection_id() == 0 || !valid_enum(ref.kind()))
     {
         return false;
@@ -213,8 +229,10 @@ bool validate_source(const schema::InputControlRef& ref)
 
 bool validate(const schema::InputChannelDataT& data, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto fail = [&error](const char* message)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         error = message;
         return false;
     };
@@ -240,7 +258,11 @@ bool validate(const schema::InputChannelDataT& data, std::string& error)
         const double values[] = {r.x, r.y, r.width, r.height, r.anchor_x, r.anchor_y, r.deadzone};
         if (r.connection_id == 0 || !valid_enum(r.shape) ||
             !std::all_of(std::begin(values), std::end(values),
-                         [](auto v) { return std::isfinite(v); }) ||
+                         [](auto v)
+                         {
+                             ENGINE_PROFILE_FUNCTION_PROBE();
+                             return std::isfinite(v);
+                         }) ||
             r.width <= 0 || r.height <= 0 || r.deadzone < 0 || r.deadzone >= 1)
         {
             return fail("Invalid virtual input region");
@@ -343,6 +365,7 @@ bool validate(const schema::InputChannelDataT& data, std::string& error)
 
 void evaluate(State& state, bool baseline, bool canceled)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::set<Key> consumed;
     std::set<std::uint32_t> evaluated;
     for (auto index : channel_order(state))
@@ -377,6 +400,7 @@ void evaluate(State& state, bool baseline, bool canceled)
                 std::set<std::string> active_virtuals;
                 const auto read = [&](const schema::InputControlRef& ref)
                 {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
                     bool denied = false;
                     const auto value = physical(state, channel, ref, consumed, denied);
                     const auto source_key = key(ref);
@@ -598,6 +622,7 @@ void evaluate(State& state, bool baseline, bool canceled)
 
 void cancel_pointers(State& state, std::uint32_t channel)
 {
+    ENGINE_PROFILE_FUNCTION();
     bool any = false;
     for (auto it = state.pointers.begin(); it != state.pointers.end();)
     {
@@ -629,6 +654,7 @@ void cancel_pointers(State& state, std::uint32_t channel)
 
 void cancel(State& state, bool keyboard, bool pointer, bool all)
 {
+    ENGINE_PROFILE_FUNCTION();
     ++state.cancel_revision;
     for (auto& [control_key, control] : state.controls)
     {
@@ -667,9 +693,13 @@ void cancel(State& state, bool keyboard, bool pointer, bool all)
 
 void touch(State& state, SDL_Window* window, const SDL_TouchFingerEvent& event, bool claimed)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto device =
         std::find_if(state.devices.begin(), state.devices.end(), [&event](const Device& d)
-                     { return d.data.kind == DeviceKind::touch && d.native_id == event.touchID; });
+                     {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return d.data.kind == DeviceKind::touch && d.native_id == event.touchID;
+        });
     if (device == state.devices.end())
     {
         return;
@@ -710,13 +740,20 @@ void touch(State& state, SDL_Window* window, const SDL_TouchFingerEvent& event, 
                 }
             }
             std::stable_sort(candidates.begin(), candidates.end(),
-                             [](auto* a, auto* b) { return a->priority > b->priority; });
+                             [](auto* a, auto* b)
+                             {
+                                 ENGINE_PROFILE_FUNCTION_PROBE();
+                                 return a->priority > b->priority;
+                             });
             for (const auto* control : candidates)
             {
                 if (std::any_of(
                         state.pointers.begin(), state.pointers.end(),
                         [index, control](const auto& p)
-                        { return p.second.channel == index && p.second.control == control->id; }))
+                        {
+                            ENGINE_PROFILE_FUNCTION_PROBE();
+                            return p.second.channel == index && p.second.control == control->id;
+                        }))
                 {
                     continue;
                 }
@@ -800,7 +837,10 @@ void touch(State& state, SDL_Window* window, const SDL_TouchFingerEvent& event, 
     const bool previous = raw.value > 0;
     const bool held =
         std::any_of(state.contacts.begin(), state.contacts.end(), [id](const auto& entry)
-                    { return entry.first.first == id.first && entry.second.data.held; });
+                    {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return entry.first.first == id.first && entry.second.data.held;
+        });
     raw.value = held ? 1 : 0;
     raw.pressed |= !previous && held;
     raw.released |= previous && !held && !cancellation;
@@ -816,6 +856,7 @@ void touch(State& state, SDL_Window* window, const SDL_TouchFingerEvent& event, 
 
 void capture_candidates(State& state)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (auto& capture : state.captures)
     {
         if (!capture.alive || capture.pending ||
@@ -854,6 +895,7 @@ void capture_candidates(State& state)
                 !std::any_of(state.contacts.begin(), state.contacts.end(),
                              [&ref](const auto& entry)
                              {
+                                 ENGINE_PROFILE_FUNCTION_PROBE();
                                  return entry.first.first == ref.connection_id() &&
                                         entry.second.data.held && !entry.second.suppressed;
                              }))
@@ -873,7 +915,10 @@ void capture_candidates(State& state)
                     const auto code = std::get<2>(modifier_key);
                     const auto device = std::find_if(
                         state.devices.begin(), state.devices.end(), [&modifier_key](const Device& d)
-                        { return d.data.connection_id == std::get<0>(modifier_key); });
+                        {
+                            ENGINE_PROFILE_FUNCTION_PROBE();
+                            return d.data.connection_id == std::get<0>(modifier_key);
+                        });
                     if (options.devices.empty() && ref.kind() != Kind::key &&
                         device != state.devices.end() && device->native_id != 0)
                     {

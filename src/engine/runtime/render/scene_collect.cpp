@@ -1,5 +1,6 @@
 #include "runtime/render/scene_gpu_resources.hpp"
 
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/render/mesh_lod_selection.hpp"
 #include "runtime/render/render_math.hpp"
@@ -30,6 +31,7 @@ namespace
 bool sample_probe(const render_detail::RenderFrameData& frame, const std::array<float, 3>& point,
                   std::array<std::array<float, 4>, 9>& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     double selected_volume = std::numeric_limits<double>::max();
     std::uint64_t selected_id = UINT64_MAX;
     bool found = false;
@@ -124,6 +126,7 @@ bool RenderSystem::SceneGpuResources::collect_frame(WorldSystem& world, const Ve
     output.world_origin = origin;
     const auto fail = [&]()
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         output.meshes.clear();
         output.lights.clear();
         output.probes.clear();
@@ -141,6 +144,7 @@ bool RenderSystem::SceneGpuResources::collect_frame(WorldSystem& world, const Ve
     probes.each(
         [&](flecs::entity entity, const auto&)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             auto volume = world.find_node(entity.id()).get_component<LightProbeVolumeComponent>();
             if (!volume || !volume.active() || !volume.visible_in_hierarchy())
             {
@@ -235,7 +239,11 @@ bool RenderSystem::SceneGpuResources::collect_frame(WorldSystem& world, const Ve
                     auto& bucket = bindings[binding.content_hash];
                     const auto equal =
                         std::find_if(bucket.begin(), bucket.end(),
-                                     [&](const auto* value) { return *value == binding; });
+                                     [&](const auto* value)
+                                     {
+                                         ENGINE_PROFILE_FUNCTION_PROBE();
+                                         return *value == binding;
+                                     });
                     if (equal != bucket.end())
                     {
                         binding.binding_id = (*equal)->binding_id;
@@ -298,9 +306,17 @@ bool RenderSystem::SceneGpuResources::collect_frame(WorldSystem& world, const Ve
     }
     if (!uses_skinning &&
         std::none_of(meshes.begin(), meshes.end(),
-                     [](const auto& mesh) { return bgfx::isValid(mesh.palette); }) &&
+                     [](const auto& mesh)
+                     {
+                         ENGINE_PROFILE_FUNCTION_PROBE();
+                         return bgfx::isValid(mesh.palette);
+                     }) &&
         std::none_of(retained_meshes.begin(), retained_meshes.end(),
-                     [](const auto& entry) { return bgfx::isValid(entry.second.palette); }))
+                     [](const auto& entry)
+                     {
+                         ENGINE_PROFILE_FUNCTION_PROBE();
+                         return bgfx::isValid(entry.second.palette);
+                     }))
     {
         skinning.release();
     }
@@ -310,6 +326,7 @@ bool RenderSystem::SceneGpuResources::collect_frame(WorldSystem& world, const Ve
     lights.each(
         [&](flecs::entity entity, const auto& stored)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             auto node = world.find_node(entity.id());
             const auto light = node.get_component<Light>();
             if (!valid || !light || !light.active() || !light.visible_in_hierarchy())
@@ -337,7 +354,10 @@ bool RenderSystem::SceneGpuResources::collect_frame(WorldSystem& world, const Ve
     }
     // Keep the contribution order within each group, including overflow fallback.
     std::stable_partition(output.lights.begin(), output.lights.end(), [](const auto& light)
-                          { return light.settings.kind == schema::LightKind::directional; });
+                          {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return light.settings.kind == schema::LightKind::directional;
+    });
     output.world_epoch = world.epoch();
     return true;
 }
@@ -355,6 +375,7 @@ bool RenderSystem::SceneGpuResources::collect_view(const render_detail::RenderFr
     output.observer = draw.lod_observer;
     const auto fail = [&]()
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         output.opaque.clear();
         output.transparent.clear();
         output.opaque_stats = {};
@@ -441,7 +462,10 @@ bool RenderSystem::SceneGpuResources::collect_view(const render_detail::RenderFr
                 lod_applied = lod_applied || !data->lods.empty();
                 std::uint64_t revision = gpu.revision;
                 const auto combine = [&](std::uint64_t value)
-                { revision ^= value + 0x9e3779b97f4a7c15ULL + (revision << 6) + (revision >> 2); };
+                {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
+                    revision ^= value + 0x9e3779b97f4a7c15ULL + (revision << 6) + (revision >> 2);
+                };
                 combine(reinterpret_cast<std::uintptr_t>(gpu.geometry->resource.get()));
                 combine(draw.lod_observer[0]);
                 combine(draw.lod_observer[1]);
@@ -465,6 +489,7 @@ bool RenderSystem::SceneGpuResources::collect_view(const render_detail::RenderFr
             std::all_of(gpu.materials.begin(), gpu.materials.end(),
                         [](const auto& material)
                         {
+                            ENGINE_PROFILE_FUNCTION_PROBE();
                             return material.blend != schema::BlendMode::opaque ||
                                    (material.program &&
                                     material.program->definition.meshlet_culling_compatible);
@@ -476,6 +501,7 @@ bool RenderSystem::SceneGpuResources::collect_view(const render_detail::RenderFr
         }
         const auto collect = [&](std::uint32_t first, std::uint32_t count, std::size_t slot)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             if (slot >= gpu.materials.size() || !gpu.materials[slot].program)
             {
                 return false;
@@ -546,7 +572,11 @@ bool RenderSystem::SceneGpuResources::collect_view(const render_detail::RenderFr
         }
     }
     std::stable_sort(output.transparent.begin(), output.transparent.end(),
-                     [](const auto& left, const auto& right) { return left.depth > right.depth; });
+                     [](const auto& left, const auto& right)
+                     {
+                         ENGINE_PROFILE_FUNCTION_PROBE();
+                         return left.depth > right.depth;
+                     });
     return render_detail::prepare_draw_batches(
         frame, output, draw, render_detail::SceneDrawMode::opaque, output.batches);
 }

@@ -1,19 +1,23 @@
 #include "editor/asset_pipeline/components/character_motor_codec.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/scene/character_motor.hpp"
 #include <utility>
 namespace engine::editor::asset_pipeline
 {
 schema::ComponentPayload CharacterMotorCodec::type() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::ComponentPayload::CharacterMotorData;
 }
 std::string_view CharacterMotorCodec::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "character_motor";
 }
 bool CharacterMotorCodec::validate(const schema::ComponentDataT& component,
                                    std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* value = component.payload.AsCharacterMotorData();
     if (!value || !CharacterMotor::valid_settings(*value))
     {
@@ -25,6 +29,7 @@ bool CharacterMotorCodec::validate(const schema::ComponentDataT& component,
 bool CharacterMotorCodec::read(const toml::table& table, schema::ComponentDataT& component,
                                std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     schema::CharacterMotorDataT value;
     if (table.contains("radius") && !float_number(table.get("radius"), value.radius))
     {
@@ -75,6 +80,7 @@ bool CharacterMotorCodec::read(const toml::table& table, schema::ComponentDataT&
 }
 void CharacterMotorCodec::write(const schema::ComponentDataT& component, toml::table& table) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* value = component.payload.AsCharacterMotorData();
     table.insert("type", "character_motor");
     table.insert("radius", value->radius);

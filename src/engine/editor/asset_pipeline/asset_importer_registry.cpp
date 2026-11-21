@@ -1,4 +1,5 @@
 #include "editor/asset_pipeline/asset_importer_registry.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "editor/asset_pipeline/importers/audio_importer.hpp"
 #include "editor/asset_pipeline/importers/ktx_texture_importer.hpp"
@@ -18,6 +19,7 @@ namespace engine::editor::asset_pipeline
 {
 bool AssetImporterRegistry::initialize()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!importers_.empty())
     {
         return false;
@@ -34,6 +36,7 @@ bool AssetImporterRegistry::initialize()
 }
 bool AssetImporterRegistry::add(std::unique_ptr<AssetImporter>& importer, bool fallback)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!importer || importer->id().empty() ||
         importer->id().find_first_not_of("abcdefghijklmnopqrstuvwxyz_") != std::string_view::npos ||
         find(importer->id()) != nullptr || (fallback && fallback_ != nullptr) ||
@@ -50,6 +53,7 @@ bool AssetImporterRegistry::add(std::unique_ptr<AssetImporter>& importer, bool f
 }
 bool AssetImporterRegistry::replace(std::unique_ptr<AssetImporter>& importer)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!importer || importer->kind() < schema::AssetKind::MIN ||
         importer->kind() > schema::AssetKind::MAX)
     {
@@ -71,11 +75,13 @@ bool AssetImporterRegistry::replace(std::unique_ptr<AssetImporter>& importer)
 }
 void AssetImporterRegistry::clear() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     fallback_ = nullptr;
     importers_.clear();
 }
 AssetImporter* AssetImporterRegistry::find(std::string_view id) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     for (const auto& importer : importers_)
     {
         if (importer->id() == id)
@@ -87,6 +93,7 @@ AssetImporter* AssetImporterRegistry::find(std::string_view id) const noexcept
 }
 AssetImporter* AssetImporterRegistry::find(schema::AssetKind kind) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     AssetImporter* match = nullptr;
     for (const auto& importer : importers_)
     {
@@ -103,6 +110,7 @@ AssetImporter* AssetImporterRegistry::find(schema::AssetKind kind) const noexcep
 }
 AssetImporter* AssetImporterRegistry::select(const std::filesystem::path& source) const
 {
+    ENGINE_PROFILE_FUNCTION();
     AssetImporter* match = nullptr;
     for (const auto& importer : importers_)
     {

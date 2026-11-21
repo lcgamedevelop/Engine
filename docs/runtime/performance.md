@@ -5,13 +5,57 @@
 ## 开关与职责
 
 - `ENGINE_ENABLE_TRACY` 默认 OFF；开启时目标私有链接同版本 Tracy on-demand 客户端，公开核心接口不依赖 Tracy。
-- 埋点位于模块实现，私有宏见 `src/engine/runtime/performance/profiling.hpp`。关闭时不查找、编译或链接 Tracy。
+- Tracy 构建可追加 `-DENGINE_ENABLE_TRACY_FUNCTIONS=ON`，记录实现函数、头文件内联、模板和闭包的运行期调用区间。函数标记适合短窗口追调用路径，常规采样默认只启用命名阶段和统计指标。
+- 头文件和 Engine／System 基础框架通过标准库探针把函数区间交给宿主。核心库将同一编译开关传给消费者，宿主装配 Tracy 采集端。常量求值保持原行为，区间由 Tracy 自身处理连接切换和结束配对。
+- Web 页面加上 `engine-profile=1` 查询参数后，浏览器性能录制可看到 `Engine.web.*` 的启动、资源目录和存储区间。区间提交后会从页面的计时缓冲清除。
+- Android 的 Java Activity 和 Surface 使用系统追踪区间 `Engine.Android.*`，可在该应用的系统性能记录中查看生命周期和渲染交接。
+- 命名阶段使用 `src/engine/runtime/performance/profiling.hpp`。头文件和基础框架使用 `runtime/performance/function_profile.hpp`。关闭时不查找、编译或链接 Tracy。
+- 计时底层、故障处理和采集器自身使用各自的外层调用边界。分配器回调通过命名池的内存事件记录，避免在观测路径内再次进入同一采集接口。
 - 主 FrameMark 位于编辑器／运行宿主的帧循环，包含系统、玩法、渲染、编辑工具和帧末等待；`Render` 是独立的命名帧序列。`Host.frame`、`Render.frame` 是 CPU 区间，后者包含提交与等待，不能当作完整宿主帧。
 - Tracy 依赖特性同时启用 bgfx 的 `profiler` 特性。配置检查实际导入库是否公开 `BGFX_CONFIG_PROFILER=1`，不能只给引擎头文件补宏冒充后端已启用。现有 `RendererCallbacks` 将内部 begin/end 回调桥接到 Tracy，复制临时视图名称，并保持按线程配对；Engine／System 基础框架仍不依赖 Tracy。
 - bgfx 状态面板由已有 MCP 开关控制，与 Tracy 构建开关独立，默认关闭。
 - Tracy 构建只在采集器连接期间启用 bgfx 视图时间戳采样，不显示统计面板；连接状态在可绘制帧准备时更新，断开后停止阶段采样，避免日常运行持续承担原生通道拆分开销。`Bgfx.cpu/gpu*Ms` 按反射、阴影、深度、材质表面、不透明、AO、SSR、透明、后处理、呈现、Meshlet、RVT 和 VSM 反馈分组。GPU 分组图只描述对应已完成帧的有效记录；原始 `Render.cpuView`、`Render.gpuView` 和 `Render.gpuFrame` 消息分别保留计数器、频率和 GPU 源帧号，离线去重，不丢弃独立延迟返回的视图。
 
 ## 分段与内存
+
+`ENGINE_TRACY_MEMORY_MODE` 默认为 `off`。`totals` 保留已覆盖分配池的当前容量、峰值和存活笔数，可在 Web 构建中独立于 Tracy 客户端使用。`detailed` 需要 `ENGINE_ENABLE_TRACY=ON`，连接时记录命名池逐笔分配与释放，支持调用栈的平台同时记录两侧的栈。
+
+| 分配池 | 当前覆盖 | 统计粒度 |
+| --- | --- | --- |
+| `Engine.ResourceRead` | ResourceSystem 接收完整资源封包后的同步与异步读取缓冲 | `ByteBuffer` 实际容量，逐笔 |
+| `Engine.ResourceDecode` | 资源封包验证后到单项解码结束之间的载荷副本 | `ByteBuffer` 实际容量，逐笔 |
+| `Engine.TexturePrepare` | 纹理任务持有的转码像素，随任务销毁或替换归还 | 像素容器实际容量，逐笔 |
+| `Engine.TextureUpload` | 交给 bgfx 的上传副本，释放回调归还 | CPU 副本字节，逐笔 |
+| `Engine.QuickJS` | QuickJS 拥有的 arena 与大块，跟踪创建、重分配和释放 | 传给宿主分配器的请求字节，逐笔 |
+| `Engine.FrameReadback` | 屏幕截图的 CPU 读回缓冲，随渲染器销毁释放 | 像素容器实际容量，逐笔 |
+| `Engine.ScreenshotEncode` | 编码和写盘持有的像素副本，随编码任务归还 | 像素容器实际容量，逐笔 |
+| `Engine.BgfxCpu` | bgfx 通过 `AllocatorI` 创建的 CPU 块，覆盖初始化、渲染线程及设备关闭 | 调用者请求的字节，逐笔 |
+| `Engine.Jolt` | 由引擎安装的 Jolt 常规与对齐分配回调，覆盖物理工厂及其分配 | 调用者请求的字节，逐笔 |
+| `Engine.Flecs` | 启动首个 WorldSystem 时还未配置的 Flecs OS 内存接口，覆盖 ECS 堆块、arena 与字符串 | 向接口请求的字节，逐笔 |
+
+`memory_profile::snapshot()` 返回一次读取时的计数、单调时钟时间戳、数据变更序号和 Tracy 连接标识。曲线里的 `Memory.captureGaps` 累计连接前未采集的分配以及跨过断连的事件。离线期间容量仍有记账，连接前存活的对象可从当前量看到。MCP 和 Web 的池字段 `hasSamples` 表示实际记录过分配，值为 false 时尚无该池证据。读取端当前提供命名池总量。
+
+QuickJS 的对象会在已取得的 arena 内复用空间，分配池只累计实际交给虚拟机的底层块。上传副本的释放由 bgfx 回调确认，GPU 完成和驱动回收由对应层提供。诊断构建的内存块包含少量追踪元数据，该开销由进程或 Wasm 总量观测。
+
+编辑器或测试运行端的 MCP 命令 `get_resource_memory` 可用 `guid` 查询指定资源，或用 `limit` 查询最大项，默认 32 项，上限 64 项。排序使用已测的 CPU 主载荷容量，未测项使用包内载荷大小。结果的 `totals` 汇总整个资源图，每份存活记录只计一次。把上次的 `totals` 传为 `baseline`，可以比较同一加载会话的已测容量和覆盖数量。每个记录列出获取、依赖和请求，超出 32 条时保留完整计数并标明截断。CPU 命名池、连接与采集缺口在 `cpuProfiler` 中单独报告。记录阶段与持有关系见[资源内存快照](../plugins/runtime/class-diagrams/resource-graph.md#资源内存快照)。
+
+MCP 和 Web 的 `gpuMemory` 使用同一个渲染快照。当前覆盖场景纹理、网格基础几何、共享顶点页、呈现目标与截图回读。Tracy 的 `Render.gpuLogicalLiveBytes`、`Render.gpuLogicalRetiringBytes` 和同组 `gpuSharedBacking` 曲线与快照使用相同口径。网格逻辑量含页内子范围，顶点页容量以独立记录计一次。驱动报告量在 `driverBytes` 独立提供，可用性随平台变化。这三组数值存在重叠。
+
+`pending` 报告等待回读、渲染退役或后端销毁处理的记录，`recentReclaims` 从最近的 128 条回收记录中返回匹配项。各列表有总匹配数，`overwrittenHistory` 表示超出历史容量的记录数。纹理退役的各时点以及截图回读实际完成由 [RenderSystem](class-diagrams/render-system.md#渲染内存快照) 定义。常规纹理、网格的后端确认表示 bgfx 已处理销毁命令，驱动内的物理释放仍依赖平台工具。
+
+Web 的 `totals` 构建从 `bootstrap.mjs` 提供只读异步函数 `memory_snapshot()`，返回当前场景、分配池计数、序号、时间戳、采集连接与缺口状态，以及 `linearBytes`、`allocatorLiveBytes` 和 `allocatorFreeBytes`。Wasm 线性容量包含分配器保留空间、栈及其他内存，分配池是存活分配的已覆盖部分。默认的 `off` 构建不导出原生查询入口。结合 `Engine.web.bootstrap.module`、`Engine.web.bootstrap.callMain` 和 `Engine.web.bootstrap.onEngineReady` 可以对齐模块初始化、宿主启动及首帧。浏览器进程 RSS 与 Wasm 容量需要分别从平台和引擎读取。
+
+在 Web 预设上追加 `-DENGINE_TRACY_MEMORY_MODE=totals -DENGINE_WEB_HEAP_OBSERVATION=ON`，可在同一查询中查看 `generalHeap`。它从宿主进入 `main` 开始记录链接到 Wasm C 分配入口的请求，底层仍使用 SDK 的 dlmalloc。它提供当前量、峰值、最大 16 笔未归属分配、最近 16 笔释放以及分配身份与释放序号。记录没有浏览器或原生调用栈，启动前的分配、SDK 内部直连分配器、浏览器、驱动和 JavaScript 堆需要各自的分析入口。
+
+`unattributed` 可与现有命名池一起分析。已归属的普通堆块列在 `attributed`，其请求大小与命名池中的容量可能略有差别，汇总时采用命名池的一侧。由命名池直接申请的底层缓冲在申请时只进入命名池。`droppedAllocations` 报告超过记录容量的分配，`overwrittenReleases` 表示已经移出最近释放窗口的记录。`unmatchedReleases` 和 `unmatchedAttributions` 报告缺少对应通用堆记录的操作，`ownershipConflicts` 报告可观测记录与归属冲突。`recordCapacity` 和 `metadataBytes` 分别报告上限和跟踪表容量。诊断开关默认关闭。
+
+macOS 诊断预设可启用 `-DENGINE_MACOS_HEAP_OBSERVATION=ON`，配合 `totals` 或 `detailed` 观测经过系统分配入口的普通 C/C++ 堆请求。覆盖标准分配与对齐接口、Darwin 类型分配入口及常用 malloc zone 接口。编辑器和测试运行端的 `cpuProfiler.generalHeap` 提供与 Web 相同的容量、归属及历史字段。经专用堆或内部分配器私有入口的内存仍由对应命名池、平台分析器或模块统计提供。
+
+详细模式在 Tracy 的 `Engine.GeneralHeap` 池提供分配与释放调用栈。底层块进入命名池时结束通用堆事件，解除命名归属时续记其余生命周期。`Memory.generalHeapBytes` 绘制通用堆的未归属请求容量，`captureGaps` 标出因未连接或断连错开的事件。诊断宿主通过独立的动态库接入系统分配入口，macOS 导出时随宿主收集。
+
+在详细或总量的 Tracy 构建中，可用 `ENGINE_TRACY_WAIT_FOR_CAPTURE_MS` 将启动追踪连接等待限制在 0 至 30000 毫秒。运行宿主在开始初始化呈现系统前等待，超时按原流程启动。采集器先记录连接，接着加载的资源会出现在同一条时间线上。正式默认构建保持 `ENGINE_TRACY_MEMORY_MODE=off`。
+
+macOS 若客户端实时符号解析返回 `[error]`，启动时设置 `TRACY_SYMBOL_OFFLINE_RESOLVE=1`，让 Tracy 保存镜像和相对地址。保留匹配的 Release 可执行文件，使用 `xcrun atos -o <executable> -offset <offset>` 解析调用栈。
 
 宿主标记分别覆盖事件、任务完成派发、系统更新、音频、玩法、影片、场景准备；编辑器工具和资源服务另列。场景资源准备拆分脏网格、资源集合、程序、贴图任务、材质绑定、Meshlet、通道目标及进度统计，绘制按收集、光照／阴影、深度、表面、AO、不透明、SSR、透明、扩展与呈现划分。`Render.outputPresentSubmit` 与 `Render.bgfxFrame` 分开，避免将后端换帧等待全部归为呈现绘制。
 

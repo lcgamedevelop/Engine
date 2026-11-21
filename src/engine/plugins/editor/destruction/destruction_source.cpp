@@ -1,4 +1,6 @@
 #include "plugins/editor/destruction/destruction_source.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "editor/asset_pipeline/toml_helpers.hpp"
 
@@ -15,6 +17,7 @@ namespace engine::plugins::destruction
 bool read_destruction_source(std::string_view text, schema::DestructionGeneratorDataT& output,
                              std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     error.clear();
     if (text.empty() || text.size() > 1024U * 1024U)
@@ -47,7 +50,11 @@ bool read_destruction_source(std::string_view text, schema::DestructionGenerator
         std::array<double, 3> size{};
         if (!editor::asset_pipeline::numbers(table.get("size"), size) ||
             !std::all_of(size.begin(), size.end(),
-                         [](double number) { return number > 0 && number <= 1000; }))
+                         [](double number)
+                         {
+                             ENGINE_PROFILE_FUNCTION_PROBE();
+                             return number > 0 && number <= 1000;
+                         }))
         {
             error = "Destruction size requires three finite positive dimensions up to 1000";
             return false;

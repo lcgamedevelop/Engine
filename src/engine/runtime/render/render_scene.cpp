@@ -4,6 +4,7 @@
 #include "runtime/render/vsm/virtual_shadow_pass.hpp"
 
 #include "runtime/font/font_system.hpp"
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/render/passes/meshlet_cull_pass.hpp"
 #include "runtime/render/passes/planar_reflection_math.hpp"
@@ -41,9 +42,14 @@ render_detail::PlanarReflectionScissor
 reflection_scissor(const render_detail::PlanarReflectionPass& target,
                    const render_detail::RenderFrameData& frame)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto receiver =
         std::find_if(frame.meshes.begin(), frame.meshes.end(),
-                     [&](const auto& mesh) { return mesh.gpu->node_id == target.node_id; });
+                     [&](const auto& mesh)
+                     {
+                         ENGINE_PROFILE_FUNCTION_PROBE();
+                         return mesh.gpu->node_id == target.node_id;
+                     });
     if (receiver == frame.meshes.end() || bgfx::isValid(receiver->gpu->deformed_vertices))
     {
         return {};
@@ -54,7 +60,10 @@ reflection_scissor(const render_detail::PlanarReflectionPass& target,
     {
         if (!std::any_of(
                 material.samplers.begin(), material.samplers.end(), [](const auto& sampler)
-                { return sampler.source == schema::ShaderTextureSource::planar_reflection; }))
+                {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
+                    return sampler.source == schema::ShaderTextureSource::planar_reflection;
+                }))
         {
             continue;
         }
@@ -65,7 +74,11 @@ reflection_scissor(const render_detail::PlanarReflectionPass& target,
         }
         const auto uniform =
             std::find_if(program->uniforms.begin(), program->uniforms.end(),
-                         [](const auto& item) { return item.name == "u_water_parameters"; });
+                         [](const auto& item)
+                         {
+                             ENGINE_PROFILE_FUNCTION_PROBE();
+                             return item.name == "u_water_parameters";
+                         });
         const auto index = static_cast<std::size_t>(uniform - program->uniforms.begin());
         if (uniform == program->uniforms.end() || index >= material.values.size() ||
             !std::isfinite(material.values[index][0]))

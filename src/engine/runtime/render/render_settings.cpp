@@ -1,4 +1,6 @@
 #include "runtime/render/render_settings.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/scene/ecs_scene.hpp"
 #include "runtime/scene/ecs_storage.hpp"
 
@@ -27,6 +29,7 @@ namespace
 
 std::array<float, 3> color_channels(const Color& color)
 {
+    ENGINE_PROFILE_FUNCTION();
     return {color.r(), color.g(), color.b()};
 }
 
@@ -37,6 +40,7 @@ namespace render_detail
 
 bool scene_render_components(Scene& scene, SceneRenderComponents& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     auto& world = scene.world();
     if (!world.refresh_scene_state())
@@ -52,6 +56,7 @@ bool scene_render_components(Scene& scene, SceneRenderComponents& output)
     environments.each(
         [&](flecs::entity entity, const auto& stored, const ecs_detail::NodeRuntime& state)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             if (!scope_node(scene, entity.id()) || !state.active || !state.visible_in_hierarchy ||
                 !stored.state.flags.enabled || !stored.state.flags.visible)
             {
@@ -81,6 +86,7 @@ bool scene_render_components(Scene& scene, SceneRenderComponents& output)
     lights.each(
         [&](flecs::entity entity, const auto& stored, const ecs_detail::NodeRuntime& state)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             if (!scope_node(scene, entity.id()) || !state.active || !state.visible_in_hierarchy ||
                 !stored.state.flags.enabled || !stored.state.flags.visible ||
                 stored.data.kind != schema::LightKind::directional)
@@ -137,6 +143,7 @@ bool scene_render_components(Scene& scene, SceneRenderComponents& output)
 
 RenderSettings render_settings(const SceneRenderComponents& components)
 {
+    ENGINE_PROFILE_FUNCTION();
     RenderSettings settings;
     EnvironmentSettings environment;
     if (components.environment.get_settings(environment))
@@ -222,16 +229,19 @@ RenderSettings render_settings(const SceneRenderComponents& components)
 
 void RenderSystem::set_idle_clear_color(std::uint32_t rgba) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     idle_clear_color_ = rgba;
 }
 
 std::uint32_t RenderSystem::idle_clear_color() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return idle_clear_color_;
 }
 
 bool RenderSystem::resolve_settings(RenderSettings& settings) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     settings = {};
     Scene* scene = scope_preparing_scene_ ? scope_preparing_scene_
                    : world_ != nullptr    ? world_->scene()
@@ -254,6 +264,7 @@ bool RenderSystem::resolve_settings(RenderSettings& settings) const noexcept
         std::any_of(scene_resources_->view_stats.begin(), scene_resources_->view_stats.end(),
                     [this](const auto& view)
                     {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
                         return view.view_id == render_detail::main_view &&
                                view.frame_number == frame_number_ && view.frame_number != 0;
                     });
@@ -269,6 +280,7 @@ bool RenderSystem::resolve_settings(RenderSettings& settings) const noexcept
 
 RenderSettings RenderSystem::settings() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     RenderSettings current;
     if (!resolve_settings(current))
     {

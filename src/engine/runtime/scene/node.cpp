@@ -1,4 +1,6 @@
 #include "runtime/scene/node.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/scene/component_registry.hpp"
 #include "runtime/scene/ecs_scene.hpp"
@@ -14,6 +16,7 @@ thread_local std::uint64_t ecs_detail::preparing_scope = 0;
 
 bool ecs_detail::scope_writable(Node node) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!node || !node.world()->can_modify())
     {
         return false;
@@ -29,10 +32,12 @@ bool ecs_detail::scope_writable(Node node) noexcept
 Node::Node(WorldSystem& world, std::uint64_t epoch, std::uint64_t entity) noexcept
     : world_(&world), world_epoch_(epoch), entity_id_(entity)
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 bool Node::valid() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!world_ || entity_id_ == 0 || world_epoch_ != world_->epoch() ||
         world_->native_world() == nullptr || !ecs_is_alive(world_->native_world(), entity_id_))
     {
@@ -43,14 +48,17 @@ bool Node::valid() const noexcept
 }
 std::uint64_t Node::id() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return entity_id_;
 }
 WorldSystem* Node::world() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return world_ && world_->epoch() == world_epoch_ && world_->native_world() ? world_ : nullptr;
 }
 Scene* Node::scene() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return nullptr;
@@ -61,6 +69,7 @@ Scene* Node::scene() const noexcept
 }
 std::string Node::name() const
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return {};
@@ -71,6 +80,7 @@ std::string Node::name() const
 }
 std::uint64_t Node::local_id() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return 0;
@@ -81,6 +91,7 @@ std::uint64_t Node::local_id() const noexcept
 }
 bool Node::build_info(schema::NodeInfoT& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     if (!valid())
     {
@@ -108,6 +119,7 @@ bool Node::build_info(schema::NodeInfoT& output) const
 }
 bool Node::enabled() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return false;
@@ -118,6 +130,7 @@ bool Node::enabled() const noexcept
 }
 bool Node::set_enabled(bool value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid() || !ecs_detail::scope_writable(*this))
     {
         return false;
@@ -135,6 +148,7 @@ bool Node::set_enabled(bool value) noexcept
 }
 bool Node::active() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid() || !world_->refresh_scene_state())
     {
         return false;
@@ -144,6 +158,7 @@ bool Node::active() const noexcept
 }
 bool Node::visible() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return false;
@@ -154,6 +169,7 @@ bool Node::visible() const noexcept
 }
 bool Node::set_visible(bool value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid() || !ecs_detail::scope_writable(*this))
     {
         return false;
@@ -171,6 +187,7 @@ bool Node::set_visible(bool value) noexcept
 }
 bool Node::visible_in_hierarchy() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid() || !world_->refresh_scene_state())
     {
         return false;
@@ -180,6 +197,7 @@ bool Node::visible_in_hierarchy() const noexcept
 }
 Node Node::parent() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return {};
@@ -190,6 +208,7 @@ Node Node::parent() const noexcept
 }
 Node Node::find_child(std::string_view relative_path) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* owner = scene();
     if (!owner || relative_path.empty() || relative_path.front() == '/' ||
         relative_path.back() == '/')
@@ -212,6 +231,7 @@ Node Node::find_child(std::string_view relative_path) const noexcept
             .children(
                 [&](flecs::entity entity)
                 {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
                     const auto* properties = entity.try_get<schema::NodePropertiesT>();
                     if (!properties || properties->name != segment)
                     {
@@ -239,6 +259,7 @@ Node Node::find_child(std::string_view relative_path) const noexcept
 }
 bool Node::set_parent(Node parent) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid() || !ecs_detail::scope_writable(*this))
     {
         return false;
@@ -276,6 +297,7 @@ bool Node::set_parent(Node parent) noexcept
 }
 bool Node::transient() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     for (auto ancestor = *this; ancestor; ancestor = ancestor.parent())
     {
         flecs::world current(ancestor.world_->native_world());
@@ -288,6 +310,7 @@ bool Node::transient() const noexcept
 }
 bool Node::set_transient(bool value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid() || !ecs_detail::scope_writable(*this))
     {
         return false;
@@ -298,6 +321,7 @@ bool Node::set_transient(bool value) noexcept
 }
 bool Node::persistent() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     for (auto ancestor = *this; ancestor; ancestor = ancestor.parent())
     {
         flecs::world current(ancestor.world_->native_world());
@@ -310,6 +334,7 @@ bool Node::persistent() const noexcept
 }
 bool Node::set_persistent(bool value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid() || !ecs_detail::scope_writable(*this) || parent())
     {
         return false;
@@ -322,18 +347,22 @@ bool Node::set_persistent(bool value) noexcept
 }
 Component Node::add_component(ComponentType type)
 {
+    ENGINE_PROFILE_FUNCTION();
     return valid() ? world_->component_registry().create(type, *this) : Component{};
 }
 Component Node::get_component(ComponentType type) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return valid() ? world_->component_registry().find(type, *this) : Component{};
 }
 bool Node::remove_component(ComponentType type)
 {
+    ENGINE_PROFILE_FUNCTION();
     return valid() && world_->component_registry().remove(type, *this);
 }
 bool Node::collect_components(std::vector<Component>& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     return valid() && world_->component_registry().collect(*this, output);
 }

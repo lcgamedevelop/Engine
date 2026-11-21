@@ -1,10 +1,12 @@
 #include "runtime/render/render_surface.hpp"
+#include "runtime/performance/profiling.hpp"
 
 namespace engine::render_detail
 {
 
 bool RenderSurface::prepare(bgfx::Init& init, bool& available)
 {
+    ENGINE_PROFILE_FUNCTION();
     available = false;
     std::uint32_t width = 0;
     std::uint32_t height = 0;
@@ -40,6 +42,7 @@ bool RenderSurface::prepare(bgfx::Init& init, bool& available)
 
 bool RenderSurface::read_platform_data(bgfx::PlatformData& data, bgfx::SwapChain& swap_chain) const
 {
+    ENGINE_PROFILE_FUNCTION();
     data = {};
     swap_chain.ndt = nullptr;
     swap_chain.nwh = metal_view_ != nullptr ? SDL_Metal_GetLayer(metal_view_) : nullptr;
@@ -53,6 +56,7 @@ bool RenderSurface::read_platform_data(bgfx::PlatformData& data, bgfx::SwapChain
 
 void RenderSurface::release() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (metal_view_ != nullptr)
     {
         SDL_Metal_DestroyView(metal_view_);
@@ -64,11 +68,13 @@ void RenderSurface::release() noexcept
 
 bool RenderSurface::start_watching()
 {
+    ENGINE_PROFILE_FUNCTION();
     return true;
 }
 
 void RenderSurface::stop_watching() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 } // namespace engine::render_detail

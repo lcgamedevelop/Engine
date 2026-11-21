@@ -15,11 +15,13 @@ namespace engine::render_detail
 
 SkinningPass::~SkinningPass() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     release();
 }
 
 bool SkinningPass::prepare()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (bgfx::isValid(program_))
     {
         return true;
@@ -87,6 +89,7 @@ bool SkinningPass::dispatch(const GpuGeometry& geometry, bgfx::DynamicVertexBuff
 
 std::uint32_t SkinningPass::resource_count() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return static_cast<std::uint32_t>(bgfx::isValid(shader_)) +
            static_cast<std::uint32_t>(bgfx::isValid(program_)) +
            static_cast<std::uint32_t>(bgfx::isValid(parameters_));
@@ -94,6 +97,7 @@ std::uint32_t SkinningPass::resource_count() const noexcept
 
 void SkinningPass::release() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (bgfx::isValid(program_))
     {
         bgfx::destroy(program_);

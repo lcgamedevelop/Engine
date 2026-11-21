@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/resource/virtual_file_system.hpp"
 
 #include <cstdint>
@@ -24,36 +26,47 @@ struct NativeValue
     NativeValue() = default;
     NativeValue(bool value) : data(value)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
     }
     NativeValue(double value) : data(value)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
     }
     NativeValue(std::int32_t value) : data(static_cast<double>(value))
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
     }
     NativeValue(std::uint32_t value) : data(static_cast<double>(value))
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
     }
     NativeValue(std::uint64_t value) : data(value)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
     }
     NativeValue(std::string_view value) : data(std::string(value))
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
     }
     NativeValue(const char* value) : data(std::string(value))
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
     }
     NativeValue(std::string value) : data(std::move(value))
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
     }
     NativeValue(Array value) : data(std::move(value))
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
     }
     NativeValue(Object value) : data(std::move(value))
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
     }
     NativeValue(ByteBuffer value) : data(std::move(value))
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
     }
 };
 

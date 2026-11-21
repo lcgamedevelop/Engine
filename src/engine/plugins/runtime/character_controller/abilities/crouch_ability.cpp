@@ -1,10 +1,12 @@
 #include "plugins/runtime/character_controller/abilities/crouch_ability.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/character_controller/abilities/ability_validation.hpp"
 namespace engine::plugins::character_controller
 {
 const CrouchAbility::Data* CrouchAbility::find(const schema::CharacterControllerDataT& d,
                                                std::string_view id)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (d.ability_data)
     {
         for (const auto& v : d.ability_data->crouch)
@@ -20,6 +22,7 @@ const CrouchAbility::Data* CrouchAbility::find(const schema::CharacterController
 bool CrouchAbility::validate(const Data& d, const schema::CharacterControllerDataT& definition,
                              std::string& e)
 {
+    ENGINE_PROFILE_FUNCTION();
     return (detail::action_exists(definition, d.action) && detail::bounded(d.speed, 0, 1000) &&
             detail::bounded(d.half_height, 0.01, 1000)) ||
            detail::invalid(e, "invalid crouch action, speed or height");
@@ -27,6 +30,7 @@ bool CrouchAbility::validate(const Data& d, const schema::CharacterControllerDat
 bool CrouchAbility::query(const Data& d, const Runtime&, const CharacterAbilityContext& c,
                           const CharacterMotionPlan&, CharacterAbilityRequest& out)
 {
+    ENGINE_PROFILE_FUNCTION();
     out = {};
     CharacterActionState a;
     if (!c.motor || !c.motor->settings || !c.action(d.action, a) ||
@@ -47,6 +51,7 @@ void CrouchAbility::finish(const Data&, const Runtime&, const CharacterAbilityCo
                            const CharacterAbilityDecision& d, const CharacterMotorStepResult& r,
                            Runtime& next, bool& consume)
 {
+    ENGINE_PROFILE_FUNCTION();
     consume = false;
     next.active = d.result == CharacterAbilitySelection::selected && !r.status.control_error &&
                   r.status.active_half_height < c.motor->settings->half_height - 0.001F;
@@ -54,6 +59,7 @@ void CrouchAbility::finish(const Data&, const Runtime&, const CharacterAbilityCo
 }
 void CrouchAbility::status(const Data& d, const Runtime& r, CharacterAbilityStatus& out)
 {
+    ENGINE_PROFILE_FUNCTION();
     out = {};
     out.id = d.id;
     out.active = r.active;

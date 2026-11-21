@@ -1,4 +1,6 @@
 #include "plugins/editor/navigation_crowd/navigation_agent_codec.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "editor/asset_pipeline/toml_helpers.hpp"
 #include "plugins/runtime/navigation_crowd/navigation_agent.hpp"
@@ -11,17 +13,20 @@ namespace engine::plugins::navigation_crowd
 
 schema::ComponentPayload NavigationAgentCodec::type() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return NavigationAgent::component_type;
 }
 
 std::string_view NavigationAgentCodec::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "navigation_agent";
 }
 
 bool NavigationAgentCodec::validate(const schema::ComponentDataT& component,
                                     std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* value = component.payload.AsNavigationAgentData();
     if (value == nullptr || !NavigationAgent::valid_settings(*value))
     {
@@ -34,9 +39,11 @@ bool NavigationAgentCodec::validate(const schema::ComponentDataT& component,
 bool NavigationAgentCodec::read(const toml::table& table, schema::ComponentDataT& component,
                                 std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     schema::NavigationAgentDataT value;
     const auto read_number = [&](std::string_view name, float& output)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (table.contains(name) && !editor::asset_pipeline::float_number(table.get(name), output))
         {
             error = "invalid navigation_agent." + std::string(name);
@@ -73,6 +80,7 @@ bool NavigationAgentCodec::read(const toml::table& table, schema::ComponentDataT
 
 void NavigationAgentCodec::write(const schema::ComponentDataT& component, toml::table& table) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* value = component.payload.AsNavigationAgentData();
     table.insert("type", "navigation_agent");
     table.insert("radius", value->radius);
@@ -86,6 +94,7 @@ void NavigationAgentCodec::write(const schema::ComponentDataT& component, toml::
 
 bool register_navigation_agent_codec()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (editor::asset_pipeline::find_scene_component_codec(NavigationAgent::component_type))
     {
         return true;

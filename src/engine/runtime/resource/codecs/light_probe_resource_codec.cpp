@@ -1,4 +1,6 @@
 #include "runtime/resource/codecs/light_probe_resource_codec.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/resource/codecs/resource_decode.hpp"
 
 #include <set>
@@ -11,6 +13,7 @@ namespace engine
 {
 bool LightProbeResourceCodec::validate(const schema::LightProbeDataT& data) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     constexpr std::size_t maximum_probes = 262144;
     if (data.schema_version != 2 || !valid_path(data.path) || data.source_fingerprint.empty() ||
         data.source_fingerprint.size() > 256 || data.grid_x < 2 || data.grid_y < 2 ||
@@ -35,9 +38,17 @@ bool LightProbeResourceCodec::validate(const schema::LightProbeDataT& data) noex
         }
     }
     if (!std::all_of(data.baked_transform.begin(), data.baked_transform.end(),
-                     [](double value) { return std::isfinite(value); }) ||
+                     [](double value)
+                     {
+                         ENGINE_PROFILE_FUNCTION_PROBE();
+                         return std::isfinite(value);
+                     }) ||
         !std::all_of(data.valid.begin(), data.valid.end(),
-                     [](std::uint8_t value) { return value <= 1; }) ||
+                     [](std::uint8_t value)
+                     {
+                         ENGINE_PROFILE_FUNCTION_PROBE();
+                         return value <= 1;
+                     }) ||
         data.baked_transform[3] != 0 || data.baked_transform[7] != 0 ||
         data.baked_transform[11] != 0 || data.baked_transform[15] != 1)
     {
@@ -54,6 +65,7 @@ bool LightProbeResourceCodec::validate(const schema::LightProbeDataT& data) noex
     return std::all_of(data.coefficients.begin(), data.coefficients.end(),
                        [](const auto& value)
                        {
+                           ENGINE_PROFILE_FUNCTION_PROBE();
                            return std::isfinite(value.x()) && std::isfinite(value.y()) &&
                                   std::isfinite(value.z());
                        });
@@ -61,24 +73,31 @@ bool LightProbeResourceCodec::validate(const schema::LightProbeDataT& data) noex
 
 schema::AssetKind LightProbeResourceCodec::kind() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::light_probe;
 }
 
 bool LightProbeResourceCodec::decode(const schema::AssetEntryT& entry, ByteView payload,
                                      std::unique_ptr<Resource>& output, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto validate = [](ByteView payload, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return resource_decode_detail::verify_flatbuffer(
             payload, schema::VerifyLightProbeDataBuffer, "Invalid LightProbe FlatBuffer", error);
     };
     return resource_decode_detail::decode_flatbuffer<ResourceType>(
         entry, payload, 32U * 1024U * 1024U, validate, [](const std::uint8_t* bytes)
-        { return schema::UnPackLightProbeData(bytes); }, output, error);
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return schema::UnPackLightProbeData(bytes);
+        }, output, error);
 }
 
 bool LightProbeResourceCodec::validate_data(const Resource& resource, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* data = resource_detail::data<ResourceType>(&resource);
     if (!data || !(resource.info().dependencies.empty() && data->path == resource.info().path &&
                    validate(*data)))
@@ -94,6 +113,7 @@ bool LightProbeResourceCodec::validate_dependencies(const Resource& resource,
                                                     ResourceView dependencies,
                                                     std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     return resource.info().dependencies.empty() && dependencies.empty();
 }

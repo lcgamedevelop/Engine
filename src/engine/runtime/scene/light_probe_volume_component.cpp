@@ -1,4 +1,5 @@
 #include "runtime/scene/light_probe_volume_component.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/core/guid_map.hpp"
 #include "runtime/resource/types/light_probe_resource.hpp"
@@ -18,16 +19,19 @@ namespace engine
 {
 bool LightProbeVolumeComponent::register_type(ComponentRegistry& registry)
 {
+    ENGINE_PROFILE_FUNCTION();
     return register_component_storage<LightProbeVolumeComponent, Data, Runtime>(registry);
 }
 
 LightProbeVolumeComponent::Runtime* LightProbeVolumeComponent::runtime() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return runtime_state<Runtime>();
 }
 
 bool LightProbeVolumeComponent::get_settings(Data& output) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* value = read_data<Data>();
     output = value ? *value : Data{};
     return value != nullptr;
@@ -35,6 +39,7 @@ bool LightProbeVolumeComponent::get_settings(Data& output) const noexcept
 
 bool LightProbeVolumeComponent::set_settings(const LightProbeVolumeSettings& settings)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -58,6 +63,7 @@ bool LightProbeVolumeComponent::set_settings(const LightProbeVolumeSettings& set
 
 ResourceHandle LightProbeVolumeComponent::resource() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return {};
@@ -83,6 +89,7 @@ ResourceHandle LightProbeVolumeComponent::resource() const noexcept
 
 bool LightProbeVolumeComponent::restore_data(const schema::ComponentDataT& data)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!data.flags)
     {
         return false;

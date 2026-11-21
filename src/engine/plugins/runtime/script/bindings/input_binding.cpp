@@ -1,4 +1,6 @@
 #include "plugins/runtime/script/bindings/input_binding.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "plugins/runtime/script/bindings/binding_context.hpp"
 #include "runtime/input/input_system.hpp"
@@ -63,6 +65,7 @@ template <typename Enum>
 void append_enum(std::string& output, std::string_view name, Enum maximum,
                  const char* (*enum_name)(Enum))
 {
+    ENGINE_PROFILE_FUNCTION();
     output += "export const ";
     output += name;
     output += " = Object.freeze({";
@@ -86,6 +89,7 @@ void append_enum(std::string& output, std::string_view name, Enum maximum,
 
 bool fields(const Json& object, std::initializer_list<std::string_view> allowed)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!object.is_object())
     {
         return false;
@@ -102,6 +106,7 @@ bool fields(const Json& object, std::initializer_list<std::string_view> allowed)
 
 bool text(const Json& object, const char* name, std::string& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto item = object.find(name);
     if (item == object.end())
     {
@@ -117,6 +122,7 @@ bool text(const Json& object, const char* name, std::string& output)
 
 bool boolean(const Json& object, const char* name, bool& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto item = object.find(name);
     if (item == object.end())
     {
@@ -132,6 +138,7 @@ bool boolean(const Json& object, const char* name, bool& output)
 
 template <typename Number> bool number(const Json& object, const char* name, Number& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto item = object.find(name);
     if (item == object.end())
     {
@@ -160,6 +167,7 @@ template <typename Number> bool number(const Json& object, const char* name, Num
 
 template <typename Enum> bool enumeration(const Json& object, const char* name, Enum& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::uint32_t value = static_cast<std::uint32_t>(output);
     if (!number(object, name, value) || value > static_cast<std::uint32_t>(Enum::MAX))
     {
@@ -171,6 +179,7 @@ template <typename Enum> bool enumeration(const Json& object, const char* name, 
 
 bool identifier(const Json& value, std::uint64_t& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = 0;
     if (!value.is_string())
     {
@@ -183,6 +192,7 @@ bool identifier(const Json& value, std::uint64_t& output)
 
 bool control(const Json& value, schema::InputControlRef& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::uint64_t device = 0;
     auto kind = schema::InputControlKind::key;
     std::uint32_t code = 0;
@@ -201,6 +211,7 @@ template <typename Item, typename Parse>
 bool objects(const Json& value, const char* name, std::vector<std::unique_ptr<Item>>& output,
              Parse parse)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto array = value.find(name);
     if (array == value.end())
     {
@@ -224,6 +235,7 @@ bool objects(const Json& value, const char* name, std::vector<std::unique_ptr<It
 
 bool part(const Json& value, schema::InputBindingPartDataT& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto source = value.find("source");
     return fields(value, {"source", "virtual_control", "virtual_axis", "weight_x", "weight_y"}) &&
            (source == value.end() || control(*source, output.source)) &&
@@ -234,6 +246,7 @@ bool part(const Json& value, schema::InputBindingPartDataT& output)
 
 bool binding(const Json& value, schema::InputBindingDataT& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!fields(value, {"parts", "modifiers", "scale", "deadzone", "press_threshold",
                         "release_threshold", "normalize"}) ||
         !objects(value, "parts", output.parts, part) || !number(value, "scale", output.scale) ||
@@ -267,6 +280,7 @@ bool binding(const Json& value, schema::InputBindingDataT& output)
 
 bool action(const Json& value, schema::InputActionDataT& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     return fields(value, {"name", "kind", "value_mode", "combine", "bindings"}) &&
            text(value, "name", output.name) && enumeration(value, "kind", output.kind) &&
            enumeration(value, "value_mode", output.value_mode) &&
@@ -276,6 +290,7 @@ bool action(const Json& value, schema::InputActionDataT& output)
 
 bool region(const Json& value, schema::InputRegionDataT& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto id = value.find("connection_id");
     return fields(value, {"connection_id", "x", "y", "width", "height", "anchor_x", "anchor_y",
                           "shape", "floating", "deadzone", "cancel_on_exit"}) &&
@@ -292,6 +307,7 @@ bool region(const Json& value, schema::InputRegionDataT& output)
 
 bool virtual_control(const Json& value, schema::InputVirtualControlDataT& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!fields(value, {"id", "kind", "priority", "enabled", "visible", "region"}) ||
         !text(value, "id", output.id) || !enumeration(value, "kind", output.kind) ||
         !number(value, "priority", output.priority) || !boolean(value, "enabled", output.enabled) ||
@@ -310,6 +326,7 @@ bool virtual_control(const Json& value, schema::InputVirtualControlDataT& output
 
 bool channel(const Json& value, schema::InputChannelDataT& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     return fields(value, {"enabled", "priority", "consume_inputs", "activation", "actions",
                           "virtual_controls"}) &&
            boolean(value, "enabled", output.enabled) &&
@@ -322,6 +339,7 @@ bool channel(const Json& value, schema::InputChannelDataT& output)
 
 bool capture_options(const Json& value, schema::InputCaptureOptionsT& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!fields(value,
                 {"devices", "kinds", "threshold", "neutral_threshold", "include_modifiers"}) ||
         !number(value, "threshold", output.threshold) ||
@@ -370,6 +388,7 @@ bool capture_options(const Json& value, schema::InputCaptureOptionsT& output)
 
 BindingContext* context(const Arguments& arguments, int count)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* result = BindingContext::current(arguments);
     if (!result)
     {
@@ -391,6 +410,7 @@ BindingContext* context(const Arguments& arguments, int count)
 
 bool completed(BindingContext& context, bool success)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!success)
     {
         const auto& error = context.input()->last_error();
@@ -401,6 +421,7 @@ bool completed(BindingContext& context, bool success)
 
 bool json_argument(const Arguments& arguments, int index, BindingContext& context, Json& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string string;
     if (BindingContext::text(arguments, index, string) && string.size() <= vm::maximum_text_size)
     {
@@ -417,6 +438,7 @@ bool json_argument(const Arguments& arguments, int index, BindingContext& contex
 bool channel_handle(const Arguments& arguments, BindingContext& context,
                     schema::InputChannelHandle& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (arguments.is_uint32(0) && arguments.is_uint32(1))
     {
         output = {arguments.unsigned_integer(0), arguments.unsigned_integer(1)};
@@ -432,6 +454,7 @@ bool channel_handle(const Arguments& arguments, BindingContext& context,
 bool capture_handle(const Arguments& arguments, BindingContext& context,
                     schema::InputCaptureHandle& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (arguments.is_uint32(0) && arguments.is_uint32(1))
     {
         output = {arguments.unsigned_integer(0), arguments.unsigned_integer(1)};
@@ -446,6 +469,7 @@ bool capture_handle(const Arguments& arguments, BindingContext& context,
 
 Value value(const schema::InputControlRef& source)
 {
+    ENGINE_PROFILE_FUNCTION();
     return Value::Object{{"connection_id", source.connection_id()},
                          {"kind", static_cast<std::uint32_t>(source.kind())},
                          {"code", source.code()}};
@@ -453,11 +477,13 @@ Value value(const schema::InputControlRef& source)
 
 template <typename Handle> Value handle_value(const Handle& handle)
 {
+    ENGINE_PROFILE_FUNCTION();
     return Value::Object{{"slot", handle.slot()}, {"generation", handle.generation()}};
 }
 
 void get_frame_state(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     if (auto* binding = context(arguments, 0))
     {
@@ -470,6 +496,7 @@ void get_frame_state(const Arguments& arguments)
 
 void get_devices(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     if (auto* binding = context(arguments, 0))
     {
@@ -488,6 +515,7 @@ void get_devices(const Arguments& arguments)
 
 void get_controls(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     auto* binding = context(arguments, 1);
     std::uint64_t device = 0;
@@ -521,6 +549,7 @@ void get_controls(const Arguments& arguments)
 
 void read_control(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     auto* binding = context(arguments, 1);
     Json object;
@@ -550,6 +579,7 @@ void read_control(const Arguments& arguments)
 
 void get_contacts(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     auto* binding = context(arguments, 0);
     std::vector<schema::InputContactStateT> contacts;
@@ -574,6 +604,7 @@ void get_contacts(const Arguments& arguments)
 
 void create_channel(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     auto* binding = context(arguments, 0);
     schema::InputChannelHandle output;
@@ -586,6 +617,7 @@ void create_channel(const Arguments& arguments)
 
 void configure_channel(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto* binding = context(arguments, 3);
     schema::InputChannelHandle handle;
@@ -606,6 +638,7 @@ void configure_channel(const Arguments& arguments)
 
 void set_channel_enabled(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto* binding = context(arguments, 4);
     schema::InputChannelHandle handle;
@@ -627,6 +660,7 @@ void set_channel_enabled(const Arguments& arguments)
 
 void destroy_channel(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto* binding = context(arguments, 2);
     schema::InputChannelHandle handle;
@@ -640,6 +674,7 @@ void destroy_channel(const Arguments& arguments)
 
 void read_action(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     auto* binding = context(arguments, 3);
     schema::InputChannelHandle handle;
@@ -668,6 +703,7 @@ void read_action(const Arguments& arguments)
 
 void begin_capture(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     auto* binding = context(arguments, 3);
     schema::InputChannelHandle channel;
@@ -693,6 +729,7 @@ void begin_capture(const Arguments& arguments)
 
 void read_capture(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     auto* binding = context(arguments, 2);
     schema::InputCaptureHandle handle;
@@ -714,6 +751,7 @@ void read_capture(const Arguments& arguments)
 
 void cancel_capture(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto* binding = context(arguments, 2);
     schema::InputCaptureHandle handle;
@@ -725,6 +763,7 @@ void cancel_capture(const Arguments& arguments)
 
 void last_error(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     if (auto* binding = BindingContext::current(arguments); binding && arguments.count() == 0)
     {
@@ -735,13 +774,16 @@ void last_error(const Arguments& arguments)
 
 std::string_view InputBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "Input";
 }
 
 std::string_view InputBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     static const std::string source = []
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         std::string result(javascript);
         append_enum(result, "InputDeviceKind", schema::InputDeviceKind::MAX,
                     schema::EnumNameInputDeviceKind);
@@ -769,6 +811,7 @@ std::string_view InputBinding::source() const noexcept
 
 bool InputBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.function("InputGetFrameState", get_frame_state) &&
            vm.function("InputGetDevices", get_devices) &&
            vm.function("InputGetControls", get_controls) &&

@@ -1,4 +1,6 @@
 #include "plugins/runtime/effects/effect_validation.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include <Effekseer.h>
 #include <Effekseer/Renderer/Effekseer.GpuParticles.h>
@@ -19,6 +21,7 @@ public:
     Effekseer::GpuParticles::ResourceRef CreateResource(const Effekseer::GpuParticles::ParamSet&,
                                                         const Effekseer::Effect*) override
     {
+        ENGINE_PROFILE_FUNCTION();
         found = true;
         return nullptr;
     }
@@ -27,6 +30,7 @@ public:
 
 bool valid_dependency_path(const char16_t* path)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (path == nullptr)
     {
         return false;
@@ -59,6 +63,7 @@ bool valid_dependency_path(const char16_t* path)
 
 bool validate_effect(ByteView bytes, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     if (bytes.empty() || bytes.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
     {
@@ -84,6 +89,7 @@ bool validate_effect(ByteView bytes, std::string& error)
     }
     const auto valid_paths = [](int count, const auto& get)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         for (int index = 0; index < count; ++index)
         {
             if (!valid_dependency_path(get(index)))
@@ -94,13 +100,29 @@ bool validate_effect(ByteView bytes, std::string& error)
         return true;
     };
     if (!valid_paths(effect->GetColorImageCount(),
-                     [&](int index) { return effect->GetColorImagePath(index); }) ||
+                     [&](int index)
+                     {
+                         ENGINE_PROFILE_FUNCTION_PROBE();
+                         return effect->GetColorImagePath(index);
+                     }) ||
         !valid_paths(effect->GetNormalImageCount(),
-                     [&](int index) { return effect->GetNormalImagePath(index); }) ||
+                     [&](int index)
+                     {
+                         ENGINE_PROFILE_FUNCTION_PROBE();
+                         return effect->GetNormalImagePath(index);
+                     }) ||
         !valid_paths(effect->GetDistortionImageCount(),
-                     [&](int index) { return effect->GetDistortionImagePath(index); }) ||
+                     [&](int index)
+                     {
+                         ENGINE_PROFILE_FUNCTION_PROBE();
+                         return effect->GetDistortionImagePath(index);
+                     }) ||
         !valid_paths(effect->GetModelCount(),
-                     [&](int index) { return effect->GetModelPath(index); }))
+                     [&](int index)
+                     {
+                         ENGINE_PROFILE_FUNCTION_PROBE();
+                         return effect->GetModelPath(index);
+                     }))
     {
         error = "Effect dependency paths require valid UTF-16 and at most 511 code units";
         return false;

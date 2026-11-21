@@ -1,4 +1,6 @@
 #include "editor/mesh/mesh_lods.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/mesh/mesh_lod_settings.hpp"
 
 #include "runtime/utils/mesh_utils.hpp"
@@ -21,6 +23,7 @@ namespace
 bool sequence(const toml::table& table, std::string_view name, std::vector<float>& output,
               std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!table.contains(name))
     {
         return true;
@@ -53,6 +56,7 @@ bool sequence(const toml::table& table, std::string_view name, std::vector<float
 
 bool read_mesh_lod_settings(const toml::table& meta, MeshLodSettings& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     MeshLodSettings settings;
     if (!meta.contains("lod"))
     {
@@ -112,6 +116,7 @@ bool read_mesh_lod_settings(const toml::table& meta, MeshLodSettings& output, st
 
 bool generate_mesh_lods(schema::MeshDataT& mesh, const toml::table& meta, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     MeshLodSettings settings;
     if (!read_mesh_lod_settings(meta, settings, error))
     {
@@ -132,7 +137,10 @@ bool generate_mesh_lods(schema::MeshDataT& mesh, const toml::table& meta, std::s
     std::vector<float> attributes;
     std::vector<float> weights{0.5F, 0.5F, 0.5F};
     const auto extend = [&](std::size_t count, float weight)
-    { weights.insert(weights.end(), count, weight); };
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        weights.insert(weights.end(), count, weight);
+    };
     if (!mesh.texcoords.empty())
     {
         extend(2, 1.0F);
@@ -168,6 +176,7 @@ bool generate_mesh_lods(schema::MeshDataT& mesh, const toml::table& meta, std::s
                                              static_cast<float>(vertex.nz() / length)});
         const auto uv = [&](const auto& values)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             if (!values.empty())
             {
                 attributes.push_back(static_cast<float>(values[index].x()));
@@ -202,6 +211,7 @@ bool generate_mesh_lods(schema::MeshDataT& mesh, const toml::table& meta, std::s
             std::any_of(coincident.begin() + 1, coincident.end(),
                         [&](auto index)
                         {
+                            ENGINE_PROFILE_FUNCTION_PROBE();
                             return !std::equal(first, first + attribute_count,
                                                attributes.begin() + index * attribute_count);
                         });
@@ -275,6 +285,7 @@ bool generate_mesh_lods(schema::MeshDataT& mesh, const toml::table& meta, std::s
 bool generate_mesh_lods(schema::MeshDataT& mesh, const std::filesystem::path& source,
                         std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto path = source;
     path += ".meta";
     std::ifstream stream(path, std::ios::binary);
@@ -294,6 +305,7 @@ bool generate_mesh_lods(schema::MeshDataT& mesh, const std::filesystem::path& so
 
 std::string mesh_lod_fingerprint()
 {
+    ENGINE_PROFILE_FUNCTION();
     return ":meshoptimizer-" + std::to_string(MESHOPTIMIZER_VERSION) + ":static-lod-1";
 }
 

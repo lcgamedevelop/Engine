@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "plugins/runtime/script/bindings/script_binding.hpp"
 
 #include <concepts>
@@ -16,6 +18,7 @@ public:
     [[nodiscard]] bool initialize();
     template <std::derived_from<ScriptBinding> T> [[nodiscard]] bool add()
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         std::unique_ptr<ScriptBinding> binding = std::make_unique<T>();
         return add_binding(binding);
     }

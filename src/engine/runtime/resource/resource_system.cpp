@@ -1,5 +1,7 @@
 #include "runtime/resource/resource_system.hpp"
 
+#include "runtime/performance/memory_profiling.hpp"
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/utils/hash_utils.hpp"
 
@@ -25,11 +27,13 @@ namespace
 constexpr std::uint64_t maximum_read_size = 64U * 1024U * 1024U;
 std::string_view target_platform() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return ENGINE_TARGET_PLATFORM;
 }
 
 bool matches_content(ByteView bytes, const schema::AssetEntryT& entry)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (entry.content_size != bytes.size() || entry.content_hash.size() != 16)
     {
         return false;
@@ -40,6 +44,7 @@ bool matches_content(ByteView bytes, const schema::AssetEntryT& entry)
 bool parse_header(const schema::AssetEntryT& entry, ByteView bytes,
                   schema::ResourceHeaderDataT& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     if (entry.header_size < 16 || entry.header_size > 65536 ||
         entry.header_size > entry.content_size || bytes.size() < entry.header_size ||
@@ -75,13 +80,19 @@ bool parse_header(const schema::AssetEntryT& entry, ByteView bytes,
 
 const ResourceMount* find_mount(const MountList& mounts, std::string_view name)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto found = std::find_if(mounts.begin(), mounts.end(),
-                                    [name](const auto& mount) { return mount.name == name; });
+                                    [name](const auto& mount)
+                                    {
+                                        ENGINE_PROFILE_FUNCTION_PROBE();
+                                        return mount.name == name;
+                                    });
     return found == mounts.end() ? nullptr : &*found;
 }
 
 ResourceError file_error(FileError value)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (value == FileError::busy)
     {
         return ResourceError::busy;
@@ -110,6 +121,7 @@ struct ResourceSystem::ReadState
         bool memory = false;
         std::unique_ptr<FileRead> file;
         ByteBuffer bytes;
+        [[no_unique_address]] memory_profile::Allocation bytes_tracking;
         std::unique_ptr<Resource> candidate;
         std::string message;
         std::future<bool> decoding;
@@ -122,10 +134,12 @@ struct ResourceSystem::ReadState
 
     bool has_operations() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         return !pending.empty() ||
                std::any_of(operations.begin(), operations.end(),
                            [](const auto& weak)
                            {
+                               ENGINE_PROFILE_FUNCTION_PROBE();
                                const auto value = weak.lock();
                                return value && (value->status == ResourceReadStatus::reading ||
                                                 value->status == ResourceReadStatus::ready);
@@ -136,27 +150,33 @@ struct ResourceSystem::ReadState
 ResourceSystem::ResourceSystem() noexcept = default;
 ResourceSystem::~ResourceSystem() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
 }
 const ResourceCatalog& ResourceSystem::catalog() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return catalog_;
 }
 std::uint64_t ResourceSystem::generation() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return generation_;
 }
 ResourceError ResourceSystem::error() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return error_;
 }
 std::string_view ResourceSystem::last_error() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return last_error_;
 }
 
 bool ResourceSystem::fail(ResourceError error, std::string message)
 {
+    ENGINE_PROFILE_FUNCTION();
     error_ = error;
     last_error_ = std::move(message);
     return false;
@@ -164,6 +184,7 @@ bool ResourceSystem::fail(ResourceError error, std::string message)
 
 const ResourceCodec* ResourceSystem::codec(schema::AssetKind kind) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto found = codecs_.find(kind);
     return found == codecs_.end() ? nullptr : found->second.get();
 }
@@ -171,6 +192,7 @@ const ResourceCodec* ResourceSystem::codec(schema::AssetKind kind) const noexcep
 bool ResourceSystem::configure_async(TaskSystem& file_tasks, TaskSystem& read_tasks,
                                      const ResourceReadConfig& config)
 {
+    ENGINE_PROFILE_ZONE("Resource.configureAsync");
     if (!is_initialized() || !file_tasks.is_initialized() || !read_tasks.is_initialized() ||
         &file_tasks == &read_tasks || config.max_in_flight == 0 ||
         config.max_in_flight_bytes == 0 || config.completion_budget == 0)
@@ -195,6 +217,7 @@ bool ResourceSystem::configure_async(TaskSystem& file_tasks, TaskSystem& read_ta
 
 bool ResourceSystem::update_catalog(const schema::AssetCatalogDataT& data, const MountList& mounts)
 {
+    ENGINE_PROFILE_ZONE("Resource.updateCatalog");
     ResourceCatalog candidate;
     VirtualFileSystem validation;
     if (generation_ == std::numeric_limits<std::uint64_t>::max() ||
@@ -224,6 +247,7 @@ bool ResourceSystem::update_catalog(const schema::AssetCatalogDataT& data, const
 
 bool ResourceSystem::read(std::string_view guid, std::unique_ptr<Resource>& output)
 {
+    ENGINE_PROFILE_ZONE("Resource.read");
     if (output)
     {
         return fail(ResourceError::busy, "Resource output must be empty");
@@ -252,6 +276,8 @@ bool ResourceSystem::read(std::string_view guid, std::unique_ptr<Resource>& outp
     {
         return fail(file_error(files_.error()), std::string(files_.last_error()));
     }
+    memory_profile::Allocation tracking;
+    tracking.track(memory_profile::Pool::resource_read, entity.data(), entity.capacity());
     if (!decode_single(*entry, *handler, generation_, entity, output, last_error_))
     {
         error_ = ResourceError::invalid_data;
@@ -264,6 +290,7 @@ bool ResourceSystem::read(std::string_view guid, std::unique_ptr<Resource>& outp
 
 bool ResourceSystem::begin_read(std::string_view guid, std::unique_ptr<ResourceRead>& output)
 {
+    ENGINE_PROFILE_ZONE("Resource.beginRead");
     if (output)
     {
         return fail(ResourceError::busy, "Read operation output must be empty");
@@ -316,6 +343,7 @@ bool ResourceSystem::begin_read(std::string_view guid, std::unique_ptr<ResourceR
 
 bool ResourceSystem::validate_memory_info(const Resource& resource)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!is_initialized())
     {
         return fail(ResourceError::unavailable, "Resource system is unavailable");
@@ -354,6 +382,7 @@ bool ResourceSystem::validate_memory_info(const Resource& resource)
 
 bool ResourceSystem::validate_memory(Resource& candidate)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!validate_memory_info(candidate))
     {
         return false;
@@ -376,6 +405,7 @@ bool ResourceSystem::validate_memory(Resource& candidate)
 bool ResourceSystem::begin_read_memory(std::unique_ptr<Resource>& candidate,
                                        std::unique_ptr<ResourceRead>& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (output)
     {
         return fail(ResourceError::busy, "Read operation output must be empty");
@@ -415,6 +445,7 @@ bool ResourceSystem::decode_single(const schema::AssetEntryT& entry, const Resou
                                    std::uint64_t generation, ByteView entity,
                                    std::unique_ptr<Resource>& output, std::string& message)
 {
+    ENGINE_PROFILE_ZONE("Resource.decodeSingle");
     ByteBuffer payload;
     message.clear();
     if (!decode_resource(entry, entity, payload))
@@ -422,6 +453,8 @@ bool ResourceSystem::decode_single(const schema::AssetEntryT& entry, const Resou
         message = "Invalid resource envelope or hash: " + entry.path;
         return false;
     }
+    memory_profile::Allocation tracking;
+    tracking.track(memory_profile::Pool::resource_decode, payload.data(), payload.capacity());
     std::unique_ptr<Resource> candidate;
     if (!handler.decode(entry, payload, candidate, message) || !candidate ||
         candidate->info() != entry || candidate->kind() != entry.kind ||
@@ -441,6 +474,7 @@ bool ResourceSystem::decode_single(const schema::AssetEntryT& entry, const Resou
 bool ResourceSystem::validate_dependencies(const Resource& resource, ResourceView dependencies,
                                            ResourceError& error, std::string& message) const
 {
+    ENGINE_PROFILE_FUNCTION();
     error = ResourceError::none;
     message.clear();
     if (!is_initialized())
@@ -469,7 +503,11 @@ bool ResourceSystem::validate_dependencies(const Resource& resource, ResourceVie
     }
     if (dependencies.size() != resource.info().dependencies.size() ||
         !std::all_of(resource.info().dependencies.begin(), resource.info().dependencies.end(),
-                     [&references](const auto& guid) { return references.contains(guid); }) ||
+                     [&references](const auto& guid)
+                     {
+                         ENGINE_PROFILE_FUNCTION_PROBE();
+                         return references.contains(guid);
+                     }) ||
         !handler->validate_dependencies(resource, dependencies, message))
     {
         error = ResourceError::dependency_failed;
@@ -498,6 +536,7 @@ void ResourceSystem::poll_reads()
         auto& result = *work->result;
         auto fail = [&result](ResourceError error, std::string_view message)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             result.cancelled.store(true, std::memory_order_relaxed);
             result.status = ResourceReadStatus::failed;
             result.error = error;
@@ -515,6 +554,11 @@ void ResourceSystem::poll_reads()
                 {
                     fail(ResourceError::io_failed, "Cannot take completed file data");
                 }
+                else
+                {
+                    work->bytes_tracking.track(memory_profile::Pool::resource_read,
+                                               work->bytes.data(), work->bytes.capacity());
+                }
                 work->file.reset();
             }
             else if (work->file->status() != FileReadStatus::reading)
@@ -528,6 +572,7 @@ void ResourceSystem::poll_reads()
                 "Resource.read.decode",
                 [work]()
                 {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
                     if (work->result->cancelled.load(std::memory_order_relaxed))
                     {
                         return false;
@@ -546,6 +591,7 @@ void ResourceSystem::poll_reads()
                         success = decode_single(work->entry, *work->codec, work->generation,
                                                 work->bytes, work->candidate, work->message);
                     }
+                    work->bytes_tracking.reset();
                     ByteBuffer{}.swap(work->bytes);
                     return success;
                 });
@@ -594,6 +640,7 @@ void ResourceSystem::poll_reads()
     std::erase_if(state->operations,
                   [](const auto& weak)
                   {
+                      ENGINE_PROFILE_FUNCTION_PROBE();
                       const auto result = weak.lock();
                       return !result || result->status == ResourceReadStatus::delivered ||
                              result->status == ResourceReadStatus::cancelled ||
@@ -603,6 +650,7 @@ void ResourceSystem::poll_reads()
 
 void ResourceSystem::shutdown_reads() noexcept
 {
+    ENGINE_PROFILE_ZONE("Resource.shutdownReads");
     const auto state = std::move(reads_);
     if (!state)
     {
@@ -627,6 +675,7 @@ void ResourceSystem::shutdown_reads() noexcept
 
 bool ResourceSystem::on_initialize(const EngineConfig&)
 {
+    ENGINE_PROFILE_FUNCTION();
     schema::AssetCatalogDataT data;
     data.schema_version = 4;
     data.revision = "builtin-only";
@@ -647,6 +696,7 @@ bool ResourceSystem::on_tick(double)
 
 void ResourceSystem::on_shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown_reads();
     files_.shutdown_async();
     files_ = {};
@@ -657,6 +707,7 @@ void ResourceSystem::on_shutdown() noexcept
 
 bool ResourceSystem::read_catalog(const std::filesystem::path& root, ResourceCatalog& output)
 {
+    ENGINE_PROFILE_ZONE("Resource.readCatalog");
     output = {};
     ByteBuffer bytes;
     // 读取清单同样拒绝符号链接；目录实体大小不需要预先知道。
@@ -695,6 +746,7 @@ bool ResourceSystem::encode_resource(std::string_view guid, schema::AssetKind ki
                                      ByteView payload, ByteBuffer& output,
                                      std::uint32_t& header_size)
 {
+    ENGINE_PROFILE_ZONE("Resource.encode");
     output.clear();
     header_size = 0;
     if (!GuidMap::valid_guid(guid) || kind < schema::AssetKind::MIN ||
@@ -737,6 +789,7 @@ bool ResourceSystem::encode_resource(std::string_view guid, schema::AssetKind ki
 bool ResourceSystem::decode_resource(const schema::AssetEntryT& entry, ByteView entity,
                                      ByteBuffer& payload)
 {
+    ENGINE_PROFILE_ZONE("Resource.decode");
     payload.clear();
     schema::ResourceHeaderDataT header;
     if (!matches_content(entity, entry) || !parse_header(entry, entity, header))
@@ -750,6 +803,7 @@ bool ResourceSystem::decode_resource(const schema::AssetEntryT& entry, ByteView 
 bool ResourceSystem::read_resource(const ResourceCatalog& catalog, const MountList& mounts,
                                    std::string_view guid, ByteBuffer& payload)
 {
+    ENGINE_PROFILE_FUNCTION();
     payload.clear();
     const auto* entry = catalog.find(guid);
     VirtualFileSystem files;
@@ -761,6 +815,7 @@ bool ResourceSystem::read_resource(const ResourceCatalog& catalog, const MountLi
 
 bool ResourceSystem::read_header(std::string_view guid, schema::ResourceHeaderDataT& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     error_ = ResourceError::none;
     last_error_.clear();

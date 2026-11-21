@@ -1,4 +1,6 @@
 #include "plugins/editor/asset_import/fbx_document.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include <ozz/animation/offline/motion_extractor.h>
 #include <ozz/animation/offline/raw_animation.h>
@@ -16,6 +18,7 @@ bool apply_animation_motion(const FbxDocument& source, const FbxDocument& skelet
                             const ufbx_anim_stack& stack, schema::AnimationDataT& animation,
                             std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const AnimationMotionSettings* settings = nullptr;
     for (const auto& [key, motion] : source.animation_motion)
     {
@@ -39,7 +42,10 @@ bool apply_animation_motion(const FbxDocument& source, const FbxDocument& skelet
     const auto joint = skeleton.joint_indices.at(node->second);
     const auto found = std::find_if(animation.tracks.begin(), animation.tracks.end(),
                                   [joint](const auto& track)
-                                  { return track != nullptr && track->joint == joint; });
+                                  {
+                                      ENGINE_PROFILE_FUNCTION_PROBE();
+                                      return track != nullptr && track->joint == joint;
+                                  });
     if (found == animation.tracks.end() || (*found)->translations.empty() ||
         (*found)->rotations.empty())
     {
@@ -47,7 +53,14 @@ bool apply_animation_motion(const FbxDocument& source, const FbxDocument& skelet
         return false;
     }
     const auto has_axis = [](const auto& axes)
-    { return std::any_of(axes.begin(), axes.end(), [](bool selected) { return selected; }); };
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return std::any_of(axes.begin(), axes.end(), [](bool selected)
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return selected;
+        });
+    };
     const bool rotation_selected = has_axis(settings->rotation);
     if (!has_axis(settings->position) && !rotation_selected)
     {

@@ -24,6 +24,17 @@ if(NOT ENGINE_EXPORT_PRODUCT MATCHES "^[a-z][a-z0-9_-]*$")
     message(FATAL_ERROR "ENGINE_EXPORT_PRODUCT must be a lowercase application identity")
 endif()
 
+function(engine_link_desktop_game_plugins target)
+    engine_link_resource_plugin(${target})
+    engine_link_script_plugin(${target})
+    engine_link_animation_retarget_plugin(${target})
+    engine_link_character_plugin(${target})
+    engine_link_navigation_crowd_plugin(${target})
+    engine_link_effects_plugin(${target})
+    engine_link_terrain_plugin(${target})
+    engine_link_destruction_plugin(${target})
+endfunction()
+
 # 项目宿主只装配运行时插件，资源从 App 的内置目录独立读取。
 add_executable(engine_project_app EXCLUDE_FROM_ALL "${PROJECT_SOURCE_DIR}/src/main.cpp" "${PROJECT_SOURCE_DIR}/src/runtime_entry.cpp")
 target_include_directories(engine_project_app PRIVATE "${PROJECT_SOURCE_DIR}/src/engine")
@@ -36,12 +47,12 @@ target_link_libraries(engine_project_app PRIVATE engine::runtime engine::app eng
 target_compile_definitions(
     engine_project_app PRIVATE ENGINE_HAS_APP_SERVICES=1 ENGINE_START_PACKAGED_GAMEPLAY=1
                                ENGINE_PROJECT_APPLICATION_NAME="${ENGINE_EXPORT_PRODUCT}")
-engine_link_resource_plugin(engine_project_app)
-engine_link_script_plugin(engine_project_app)
-engine_link_character_plugin(engine_project_app)
+engine_link_desktop_game_plugins(engine_project_app)
 engine_configure_runtime_settings(engine_project_app)
 engine_apply_options(engine_project_app)
-engine_enable_profiling(engine_project_app)
+if(APPLE)
+    target_link_options(engine_project_app PRIVATE "$<$<CONFIG:Release>:LINKER:-dead_strip>")
+endif()
 engine_copy_script_data(engine_project_app)
 
 if(ENGINE_ENABLE_TEST_SUPPORT)
@@ -62,11 +73,8 @@ if(ENGINE_ENABLE_TEST_SUPPORT)
         PRIVATE ENGINE_HAS_APP_SERVICES=1 ENGINE_START_PACKAGED_GAMEPLAY=1
                 ENGINE_HAS_RUNTIME_MCP_ENDPOINT=1 JSON_NOEXCEPTION=1
                 ENGINE_PROJECT_APPLICATION_NAME="${ENGINE_EXPORT_PRODUCT}-mcp-test")
-    engine_link_resource_plugin(engine_project_mcp_test_app)
-    engine_link_script_plugin(engine_project_mcp_test_app)
-    engine_link_character_plugin(engine_project_mcp_test_app)
+    engine_link_desktop_game_plugins(engine_project_mcp_test_app)
     engine_configure_runtime_settings(engine_project_mcp_test_app)
     engine_apply_options(engine_project_mcp_test_app)
-    engine_enable_profiling(engine_project_mcp_test_app)
     engine_copy_script_data(engine_project_mcp_test_app)
 endif()

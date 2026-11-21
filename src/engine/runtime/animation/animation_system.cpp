@@ -9,6 +9,7 @@
 #include "runtime/animation/animation_event_interval.hpp"
 #include "runtime/animation/animation_ik.hpp"
 #include "runtime/animation/animation_services.hpp"
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/resource/resource_reference.hpp"
 #include "runtime/resource/types/animation_resource.hpp"
@@ -40,6 +41,7 @@ namespace
 constexpr std::size_t maximum_events_per_tick = 4096;
 bool active_transform_chain(Node node)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (auto current = node; current; current = current.parent())
     {
         const auto transform = current.get_component<Transform>();
@@ -59,6 +61,7 @@ struct AnimationSampler
     std::vector<schema::JointLocalPose> source_pose, target_pose;
     void prepare(std::shared_ptr<const animation_detail::CompiledAnimation> compiled)
     {
+        ENGINE_PROFILE_FUNCTION();
         clip = std::move(compiled);
         const auto& skeleton = *clip->sampling->skeleton;
         context = std::make_unique<ozz::animation::SamplingJob::Context>(skeleton.num_joints());
@@ -69,6 +72,7 @@ struct AnimationSampler
     }
     bool sample(double seconds)
     {
+        ENGINE_PROFILE_FUNCTION();
         ozz::animation::SamplingJob job;
         job.animation = clip->animation.get();
         job.context = context.get();
@@ -135,6 +139,7 @@ struct AnimationEntry
     bool prepare(const schema::MeshDataT& mesh, MeshRenderer renderer, Animator animator,
                  std::shared_ptr<const animation_detail::CompiledAnimation> clip)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (!animation_detail::matrix(mesh.mesh_to_skeleton, mesh_to_skeleton) ||
             !animation_detail::inverse(mesh_to_skeleton, skeleton_to_mesh))
         {
@@ -154,6 +159,7 @@ struct AnimationEntry
     bool sample(double seconds, double previous_seconds, double blend, bool rest, bool frozen_final,
                 std::span<const animation_detail::IkOperation> ik)
     {
+        ENGINE_PROFILE_FUNCTION();
         const auto& skeleton = *current.clip->target;
         if (frozen_final && sampled)
         {
@@ -266,6 +272,7 @@ bool sample_range(std::vector<AnimationSample>& samples, std::size_t begin, std:
 bool stage_time(AnimationSample& sample, double delta_time, const Animator::Data& settings,
                 std::size_t& event_count, bool tick_enabled)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* state = engine::ecs_detail::component_runtime(sample.animator);
     const auto* animation = state->animation_.data<AnimationResource>();
     const double duration = animation->duration;
@@ -391,12 +398,14 @@ bool stage_time(AnimationSample& sample, double delta_time, const Animator::Data
 }
 void resolve_pending_attachments(WorldSystem& world, Scene* scope = nullptr)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto query = flecs::world(world.native_world())
                      .query_builder<const ecs_detail::ComponentStorage<BoneAttachment::Data>>()
                      .build();
     query.each(
         [&](flecs::entity entity, const auto& stored)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             auto attachment = (scope ? scope->find_node(entity.id()) : world.find_node(entity.id()))
                                   .get_component<BoneAttachment>();
             if (!attachment || !engine::ecs_detail::component_runtime(attachment)->binding_pending)
@@ -420,6 +429,7 @@ struct AttachmentCommit
 bool candidate_world(Node node, const std::map<std::uint64_t, std::array<double, 16>>& overrides,
                      std::array<double, 16>& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
     std::vector<Node> chain;
     for (auto current = node; current; current = current.parent())
@@ -450,6 +460,7 @@ bool candidate_world(Node node, const std::map<std::uint64_t, std::array<double,
 }
 bool publish_attachments(WorldSystem& world, Scene* scope = nullptr)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::vector<BoneAttachment> attachments;
     auto query = flecs::world(world.native_world())
                      .query_builder<const ecs_detail::ComponentStorage<BoneAttachment::Data>>()
@@ -457,6 +468,7 @@ bool publish_attachments(WorldSystem& world, Scene* scope = nullptr)
     query.each(
         [&](flecs::entity entity, const auto&)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             auto node = scope ? scope->find_node(entity.id()) : world.find_node(entity.id());
             if (node)
             {
@@ -465,6 +477,7 @@ bool publish_attachments(WorldSystem& world, Scene* scope = nullptr)
         });
     const auto depth = [](Node node)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         std::size_t value = 0;
         for (auto parent = node.parent(); parent; parent = parent.parent())
         {
@@ -473,7 +486,10 @@ bool publish_attachments(WorldSystem& world, Scene* scope = nullptr)
         return value;
     };
     std::stable_sort(attachments.begin(), attachments.end(), [&](const auto& a, const auto& b)
-                     { return depth(a.node()) < depth(b.node()); });
+                     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return depth(a.node()) < depth(b.node());
+    });
     std::vector<AttachmentCommit> commits;
     std::map<std::uint64_t, std::array<double, 16>> overrides;
     for (auto attachment : attachments)
@@ -554,6 +570,7 @@ bool publish_attachments(WorldSystem& world, Scene* scope = nullptr)
 }
 bool commit_sample(const AnimationSample& sample)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto animator = sample.animator;
     auto renderer = sample.renderer;
     if (!animator || !renderer || animator.instance_id() != sample.entry->animator_instance ||
@@ -615,6 +632,7 @@ struct AnimationSystem::State
     AnimationEntry* prepare_entry(ResourceLoader* loader, Node node, Animator animator,
                                   MeshRenderer renderer)
     {
+        ENGINE_PROFILE_FUNCTION();
         auto* runtime = engine::ecs_detail::component_runtime(animator);
         const auto* mesh = renderer.mesh_data();
         const auto* clip = runtime->animation_.data<AnimationResource>();
@@ -721,6 +739,7 @@ struct AnimationSystem::State
     bool skeleton(const ResourceReference& resource,
                   std::shared_ptr<const animation_detail::CompiledSkeleton>& output)
     {
+        ENGINE_PROFILE_FUNCTION();
         const auto key = animation_detail::identity(*resource);
         if (auto found = skeletons.find(key); found != skeletons.end())
         {
@@ -743,6 +762,7 @@ struct AnimationSystem::State
                  const ResourceReference& bound_source,
                  std::shared_ptr<const animation_detail::CompiledAnimation>& output)
     {
+        ENGINE_PROFILE_FUNCTION();
         output.reset();
         ResourceReference target;
         ResourceReference source;
@@ -831,13 +851,16 @@ AnimationSystem::AnimationSystem(WorldSystem* world, TaskSystem* tasks,
                                  std::unique_ptr<AnimationRetargeter> retargeter) noexcept
     : world_(world), tasks_(tasks), config_(config), retargeter_(std::move(retargeter))
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 AnimationSystem::~AnimationSystem() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
 }
 bool AnimationSystem::on_initialize(const EngineConfig&)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (config_.min_parallel_count == 0 || config_.batch_size == 0 ||
         (tasks_ && !tasks_->is_initialized()) || (world_ && !world_->native_world()))
     {
@@ -857,10 +880,12 @@ bool AnimationSystem::on_initialize(const EngineConfig&)
 }
 void AnimationSystem::set_event_sink(AnimationEventSink sink)
 {
+    ENGINE_PROFILE_FUNCTION();
     event_sink_ = std::move(sink);
 }
 void AnimationSystem::clear() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (state_ && world_)
     {
         for (const auto& [id, entry] : state_->entries)
@@ -887,6 +912,7 @@ void AnimationSystem::clear() noexcept
             query.each(
                 [&](flecs::entity entity, auto&)
                 {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
                     animation_detail::clear_attachment_drive(
                         world_->find_node(entity.id()).get_component<BoneAttachment>());
                 });
@@ -904,12 +930,17 @@ void AnimationSystem::clear() noexcept
 }
 SceneWorkState AnimationSystem::prepare_scope(SceneScopeId scope, const SceneWorkBudget& budget)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!state_ || !world_ || !world_->refresh_scene_state())
     {
         return SceneWorkState::failed;
     }
     std::erase_if(state_->preparing,
-                  [&](const auto& entry) { return !world_->scope_candidate(entry.first); });
+                  [&](const auto& entry)
+                  {
+                      ENGINE_PROFILE_FUNCTION_PROBE();
+                      return !world_->scope_candidate(entry.first);
+                  });
     auto found = state_->preparing.find(scope);
     if (found == state_->preparing.end())
     {
@@ -924,6 +955,7 @@ SceneWorkState AnimationSystem::prepare_scope(SceneScopeId scope, const SceneWor
         found->second, budget,
         [&](Node node)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             auto animator = node.get_component<Animator>();
             auto renderer = node.get_component<MeshRenderer>();
             if (!animator || !animator.active())
@@ -992,6 +1024,7 @@ SceneWorkState AnimationSystem::prepare_scope(SceneScopeId scope, const SceneWor
 }
 bool AnimationSystem::scope_status(SceneScopeId scope, ScenePreparationSnapshot& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     if (!state_)
     {
@@ -1007,6 +1040,7 @@ bool AnimationSystem::scope_status(SceneScopeId scope, ScenePreparationSnapshot&
 }
 void AnimationSystem::release_scope(SceneScopeId scope) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!state_)
     {
         return;
@@ -1054,6 +1088,7 @@ bool AnimationSystem::on_tick(double delta_time)
         query.each(
             [&](flecs::entity entity, const auto& stored)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 if (!success)
                 {
                     return;
@@ -1146,7 +1181,11 @@ bool AnimationSystem::on_tick(double delta_time)
             const auto end = begin + std::min(config_.batch_size, samples.size() - begin);
             TaskDescription task;
             task.name = "Animation.sample_batch";
-            task.execute = [&samples, begin, end] { return sample_range(samples, begin, end); };
+            task.execute = [&samples, begin, end]
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return sample_range(samples, begin, end);
+            };
             batch.push_back(std::move(task));
             begin = end;
         }
@@ -1189,10 +1228,22 @@ bool AnimationSystem::on_tick(double delta_time)
             it = state_->entries.erase(it);
         }
     }
-    std::erase_if(state_->clips, [](const auto& item) { return item.second.use_count() == 1; });
+    std::erase_if(state_->clips, [](const auto& item)
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return item.second.use_count() == 1;
+    });
     std::erase_if(state_->sampling_clips,
-                  [](const auto& item) { return item.second.use_count() == 1; });
-    std::erase_if(state_->skeletons, [](const auto& item) { return item.second.use_count() == 1; });
+                  [](const auto& item)
+                  {
+                      ENGINE_PROFILE_FUNCTION_PROBE();
+                      return item.second.use_count() == 1;
+                  });
+    std::erase_if(state_->skeletons, [](const auto& item)
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return item.second.use_count() == 1;
+    });
     if (!publish_attachments(*world_))
     {
         return false;
@@ -1203,6 +1254,7 @@ bool AnimationSystem::on_tick(double delta_time)
 }
 void AnimationSystem::on_shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     clear();
     if (world_ && world_->native_world())
     {

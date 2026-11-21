@@ -1,4 +1,7 @@
 #include "runtime/render/render_surface.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
+
 
 #include "web/render/web_surface_state.hpp"
 
@@ -15,6 +18,7 @@ std::vector<State> surfaces;
 
 std::string message(WGPUStringView value)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (value.data == nullptr)
     {
         return {};
@@ -27,6 +31,7 @@ std::string message(WGPUStringView value)
 void adapter_ready(WGPURequestAdapterStatus status, WGPUAdapter adapter, WGPUStringView error,
                    void* userdata, void*)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::unique_ptr<State> held(static_cast<State*>(userdata));
     auto& state = **held;
     --state.pending_callbacks;
@@ -48,6 +53,7 @@ void adapter_ready(WGPURequestAdapterStatus status, WGPUAdapter adapter, WGPUStr
 void device_lost(WGPUDevice const*, WGPUDeviceLostReason reason, WGPUStringView error,
                  void* userdata, void*)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::unique_ptr<State> held(static_cast<State*>(userdata));
     auto& state = **held;
     --state.pending_callbacks;
@@ -60,6 +66,7 @@ void device_lost(WGPUDevice const*, WGPUDeviceLostReason reason, WGPUStringView 
 
 void device_error(WGPUDevice const*, WGPUErrorType, WGPUStringView error, void* userdata, void*)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto& state = *static_cast<WebSurfaceState*>(userdata);
     if (!state.cancelled)
     {
@@ -71,6 +78,7 @@ void device_error(WGPUDevice const*, WGPUErrorType, WGPUStringView error, void* 
 void device_ready(WGPURequestDeviceStatus status, WGPUDevice device, WGPUStringView error,
                   void* userdata, void*)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::unique_ptr<State> held(static_cast<State*>(userdata));
     auto& state = **held;
     --state.pending_callbacks;
@@ -93,13 +101,18 @@ void device_ready(WGPURequestDeviceStatus status, WGPUDevice device, WGPUStringV
 
 bool web_gpu_callbacks_pending()
 {
+    ENGINE_PROFILE_ZONE("WebGPU.drainCallbacks");
     std::erase_if(surfaces, [](const State& state)
-                  { return state->cancelled && state->pending_callbacks == 0; });
-    return !surfaces.empty();
+                  {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return state->cancelled && state->pending_callbacks == 0;
+    });
+    return !surfaces.empty() || bgfx::webReadbacksPending();
 }
 
 bool RenderSurface::prepare(bgfx::Init& init, bool& available)
 {
+    ENGINE_PROFILE_ZONE("WebGPU.prepareSurface");
     available = false;
     if (window_ == nullptr || current_.nwh != nullptr)
     {
@@ -213,6 +226,7 @@ bool RenderSurface::prepare(bgfx::Init& init, bool& available)
 
 bool RenderSurface::read_platform_data(bgfx::PlatformData& data, bgfx::SwapChain& swap_chain) const
 {
+    ENGINE_PROFILE_FUNCTION();
     data = {};
     if (!web_state_ || web_state_->cancelled || !web_state_->error.empty() ||
         web_state_->device == nullptr)
@@ -227,6 +241,7 @@ bool RenderSurface::read_platform_data(bgfx::PlatformData& data, bgfx::SwapChain
 
 void RenderSurface::release() noexcept
 {
+    ENGINE_PROFILE_ZONE("WebGPU.releaseSurface");
     if (web_state_)
     {
         auto& state = *web_state_;
@@ -255,9 +270,11 @@ void RenderSurface::release() noexcept
 
 bool RenderSurface::start_watching()
 {
+    ENGINE_PROFILE_FUNCTION();
     return true;
 }
 void RenderSurface::stop_watching() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 } // namespace engine::render_detail

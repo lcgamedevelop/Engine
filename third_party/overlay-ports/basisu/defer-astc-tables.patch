@@ -1,0 +1,88 @@
+diff --git a/transcoder/basisu_transcoder.cpp b/transcoder/basisu_transcoder.cpp
+--- a/transcoder/basisu_transcoder.cpp
++++ b/transcoder/basisu_transcoder.cpp
+@@ -2101,9 +2101,4 @@
+ #endif
+ 
+-	namespace astc_ldr_t
+-	{
+-		void init_transcoding_tables();
+-	}
+-
+ 	static bool g_transcoder_initialized;
+ 		
+@@ -2254,6 +2249,4 @@
+ 		astc_ldr_t::init();
+ 		
+-		astc_ldr_t::init_transcoding_tables();
+-
+ 		// Used by arith encoder/decoder
+ 		arith_fastbits_f32::init();
+@@ -25424,6 +25417,4 @@
+ 		g_initialized = true;
+ 
+-		init_astc_block_grid_data_hash();
+-
+ 		compute_base_ofs_requantize_tabs();
+ 	}
+@@ -27472,10 +27463,6 @@
+ 	grid_weight_dct g_grid_weight_dcts[astc_helpers::cTOTAL_BLOCK_SIZES];
+ 
+-	// These tables could be initialized per transcoded texture, but that would result in per-texture overhead.
+-	void init_transcoding_tables()
+-	{
+-		if (g_encoder_trial_modes[0].size())
+-			return;
+-
++	static void build_transcoding_tables()
++	{
+ 		// We don't know what ASTC block sizes they're going to transcode, to prepare for all of them.
+ 		for (uint32_t i = 0; i < astc_helpers::cTOTAL_BLOCK_SIZES; i++)
+@@ -27495,4 +27482,14 @@
+ 			g_grid_weight_dcts[i].init(block_width, block_height);
+ 		} // i
++	}
++
++	void init_transcoding_tables()
++	{
++		static const bool initialized = []
++		{
++			build_transcoding_tables();
++			return true;
++		}();
++		(void)initialized;
+ 	}
+ 
+@@ -27793,4 +27790,5 @@
+ 		fvec dct_work;
+ 
++		init_transcoding_tables();
+ 		assert((size_t)astc_block_size_index < std::size(g_encoder_trial_modes));
+ 		const auto& encoder_trial_modes = g_encoder_trial_modes[astc_block_size_index];
+@@ -28803,4 +28801,5 @@
+ 		}
+ 
++		init_transcoding_tables();
+ 		assert((size_t)astc_block_size_index < std::size(g_encoder_trial_modes));
+ 		const auto& encoder_trial_modes = g_encoder_trial_modes[astc_block_size_index];
+diff --git a/transcoder/basisu_transcoder_internal.h b/transcoder/basisu_transcoder_internal.h
+--- a/transcoder/basisu_transcoder_internal.h
++++ b/transcoder/basisu_transcoder_internal.h
+@@ -1836,4 +1836,5 @@
+ 
+ 		void init_astc_block_grid_data_hash();
++		void init_transcoding_tables();
+ 				
+ 		const float DEADZONE_ALPHA = .5f;
+diff --git a/encoder/basisu_astc_ldr_encode.cpp b/encoder/basisu_astc_ldr_encode.cpp
+--- a/encoder/basisu_astc_ldr_encode.cpp
++++ b/encoder/basisu_astc_ldr_encode.cpp
+@@ -16754,4 +16754,8 @@
+ 	g_initialized = true;
+ 
++	// The encoder owns the weight-grid matrices.
++	basist::astc_ldr_t::init_astc_block_grid_data_hash();
++	basist::astc_ldr_t::init_transcoding_tables();
++
+ 	for (uint32_t h_iter = 0; h_iter < basist::astc_ldr_t::astc_block_grid_data_hash_t::LUT_SIZE; ++h_iter)
+ 	{

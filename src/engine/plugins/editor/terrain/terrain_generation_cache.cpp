@@ -1,4 +1,6 @@
 #include "plugins/editor/terrain/terrain_generation_cache.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/asset_pipeline/asset_io.hpp"
 #include "plugins/editor/terrain/terrain_source.hpp"
 #include "plugins/runtime/terrain/terrain_samples.hpp"
@@ -14,6 +16,7 @@ bool generate_terrain_block(const TerrainGenerationInput& input, const TerrainGe
                             const std::filesystem::path& cache, schema::TerrainBlockDataT& output,
                             std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     namespace io = editor::asset_pipeline;
     namespace fs = std::filesystem;
     output = {};
@@ -23,9 +26,17 @@ bool generate_terrain_block(const TerrainGenerationInput& input, const TerrainGe
         return false;
     }
     if (std::any_of(input.recipe.stamps.begin(), input.recipe.stamps.end(),
-                    [](const auto& brush) { return !brush; }) ||
+                    [](const auto& brush)
+                    {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
+                        return !brush;
+                    }) ||
         std::any_of(input.recipe.roads.begin(), input.recipe.roads.end(),
-                    [](const auto& road) { return !road; }))
+                    [](const auto& road)
+                    {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
+                        return !road;
+                    }))
     {
         error = "Terrain generation requires complete stamps and roads";
         return false;
@@ -40,13 +51,17 @@ bool generate_terrain_block(const TerrainGenerationInput& input, const TerrainGe
     const double margin =
         recipe.voxel_size *
         (1 + std::count_if(recipe.stamps.begin(), recipe.stamps.end(), [](const auto& brush)
-                           { return brush->operation == schema::TerrainBrushOperation::smooth; }));
+                           {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return brush->operation == schema::TerrainBrushOperation::smooth;
+        }));
     const Bounds3 bounds{
         {low.x() - margin, low.y() - margin, low.z() - margin},
         {low.x() + edge + margin, low.y() + edge + margin, low.z() + edge + margin}};
     std::erase_if(recipe.stamps,
                   [&](const auto& brush)
                   {
+                      ENGINE_PROFILE_FUNCTION_PROBE();
                       const auto extent =
                           brush->shape == schema::TerrainBrushShape::sphere
                               ? Vec3{brush->extent.x(), brush->extent.x(), brush->extent.x()}
@@ -59,6 +74,7 @@ bool generate_terrain_block(const TerrainGenerationInput& input, const TerrainGe
     std::erase_if(recipe.roads,
                   [&](const auto& road)
                   {
+                      ENGINE_PROFILE_FUNCTION_PROBE();
                       const double radius = road->width * .5 + road->falloff;
                       for (std::size_t i = 1; i < road->points.size(); ++i)
                       {
@@ -103,9 +119,16 @@ bool generate_terrain_block(const TerrainGenerationInput& input, const TerrainGe
                      : std::size_t(recipe.block_cells) * recipe.block_cells * recipe.block_cells) ||
             block->layers.size() != block->density.size() ||
             !std::all_of(block->density.begin(), block->density.end(),
-                         [](float v) { return std::isfinite(v); }) ||
+                         [](float v)
+                         {
+                             ENGINE_PROFILE_FUNCTION_PROBE();
+                             return std::isfinite(v);
+                         }) ||
             !std::all_of(block->layers.begin(), block->layers.end(), [&](const auto& v)
-                         { return terrain_detail::layer_valid(v, recipe.material_layers.size()); }))
+                         {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return terrain_detail::layer_valid(v, recipe.material_layers.size());
+            }))
         {
             error = "Terrain cached block does not match its recipe";
             return false;

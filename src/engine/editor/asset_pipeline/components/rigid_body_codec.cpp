@@ -1,4 +1,5 @@
 #include "editor/asset_pipeline/components/rigid_body_codec.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/scene/rigid_body.hpp"
 #include <array>
 #include <utility>
@@ -6,14 +7,17 @@ namespace engine::editor::asset_pipeline
 {
 schema::ComponentPayload RigidBodyCodec::type() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::ComponentPayload::RigidBodyData;
 }
 std::string_view RigidBodyCodec::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "rigid_body";
 }
 bool RigidBodyCodec::validate(const schema::ComponentDataT& component, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* value = component.payload.AsRigidBodyData();
     if (value == nullptr || !engine::RigidBody::valid_settings(*value))
     {
@@ -25,6 +29,7 @@ bool RigidBodyCodec::validate(const schema::ComponentDataT& component, std::stri
 bool RigidBodyCodec::read(const toml::table& table, schema::ComponentDataT& component,
                           std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     schema::RigidBodyDataT value;
     if (table.contains("motion"))
     {
@@ -104,6 +109,7 @@ bool RigidBodyCodec::read(const toml::table& table, schema::ComponentDataT& comp
 }
 void RigidBodyCodec::write(const schema::ComponentDataT& component, toml::table& table) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* value = component.payload.AsRigidBodyData();
     table.insert("type", "rigid_body");
     table.insert("motion", schema::EnumNameBodyMotion(value->motion));

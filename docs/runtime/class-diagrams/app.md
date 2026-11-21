@@ -17,6 +17,8 @@ classDiagram
         +cache_path() const Path&$
         +set_game_language(string_view language) void$
         +game_language() const string&$
+        +supports_vibration() bool$
+        +vibrate(uint32_t duration_ms) bool$
     }
     class AppConfig {
         <<struct>>
@@ -34,6 +36,7 @@ classDiagram
 ```
 
 - `App` 是不可构造的静态平台门面，不继承 `System`，不拥有项目或引擎。宿主先初始化 App，再初始化日志和引擎；所有使用者退出后关闭 App。
+- `supports_vibration()` 查询当前平台是否提供设备震动入口；`vibrate(duration_ms)` 向平台发出短震请求，0 用于取消，返回值表示平台接受请求。Web 通过浏览器设备震动能力提交，具体执行由浏览器及系统设置决定；其他宿主当前返回不可用。脚本只能在活动回调中触发震动。
 - 游戏语言默认 `en`；宿主加载运行配置后、创建脚本上下文前传给 `set_game_language()`，由 App 保存字符串。TS 通过只读 `App.gameLanguage` 读取，与路径属性一样可在模块顶层使用；具体本地化由项目业务处理。
 - `AppConfig::application_name` 默认为 `engine`。三个非空路径配置分别覆盖平台默认值，可供编辑器和测试使用；不推导或依赖项目的 `settings/cache/assets` 结构。
 - `assets_path()` 是应用包内资源读取根。桌面默认取 SDL 应用资源目录下的 `assets/`，原生可执行程序为 `<exe>/assets/`，可选 macOS `.app` 为 `Contents/Resources/assets/`；允许目录尚不存在，不在安装位置创建目录。Android 默认返回 `apk:/assets`，直接对应 APK 的 `assets/`，不附加项目名。调用者将该根交给资源系统解释，不执行普通磁盘 canonical 或目录查询。

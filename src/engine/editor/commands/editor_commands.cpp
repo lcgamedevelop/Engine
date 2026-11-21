@@ -1,4 +1,6 @@
 #include "editor/commands/editor_commands.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "editor/commands/editor_edit.hpp"
 
@@ -20,6 +22,7 @@ constexpr std::size_t batch_limit = 64;
 
 bool matching_scene(const Json& arguments, std::uint64_t current)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!arguments.is_object() || arguments.size() != 1 || !arguments.contains("sceneId") ||
         !arguments["sceneId"].is_string() || current == 0)
     {
@@ -39,12 +42,18 @@ public:
 
     bool affects_scene() const noexcept override
     {
+        ENGINE_PROFILE_FUNCTION();
         return std::any_of(edits.begin(), edits.end(),
-                           [](const auto& edit) { return edit->affects_scene(); });
+                           [](const auto& edit)
+                           {
+                               ENGINE_PROFILE_FUNCTION_PROBE();
+                               return edit->affects_scene();
+                           });
     }
 
     bool apply(std::string& error) override
     {
+        ENGINE_PROFILE_FUNCTION();
         for (std::size_t index = 0; index < edits.size(); ++index)
         {
             if (!edits[index]->apply(error))
@@ -65,6 +74,7 @@ public:
 
     bool revert(std::string& error) override
     {
+        ENGINE_PROFILE_FUNCTION();
         for (std::size_t index = edits.size(); index != 0; --index)
         {
             if (!edits[index - 1]->revert(error))
@@ -103,10 +113,12 @@ struct EditorCommands::State
 
     explicit State(SceneIdProvider provider) : scene_id(std::move(provider))
     {
+        ENGINE_PROFILE_FUNCTION();
     }
 
     void commit(std::unique_ptr<EditorEdit> edit)
     {
+        ENGINE_PROFILE_FUNCTION();
         redo.clear();
         if (undo.size() == history_limit)
         {
@@ -122,6 +134,7 @@ struct EditorCommands::State
     bool prepare(std::string_view name, const Json& arguments, Json& result,
                  std::unique_ptr<EditorEdit>& edit, std::string& error, bool require_edit)
     {
+        ENGINE_PROFILE_FUNCTION();
         const auto found = commands.find(name);
         if (found == commands.end())
         {
@@ -147,6 +160,7 @@ struct EditorCommands::State
 
     bool batch(const Json& arguments, Json& result, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (!arguments.is_object() || arguments.size() != 1 || !arguments.contains("commands") ||
             !arguments["commands"].is_array() || arguments["commands"].empty() ||
             arguments["commands"].size() > batch_limit)
@@ -191,6 +205,7 @@ struct EditorCommands::State
 
 bool EditorCommands::set_edit_wrapper(EditWrapper wrapper)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!wrapper || state_->wrapper)
     {
         return false;
@@ -202,12 +217,14 @@ bool EditorCommands::set_edit_wrapper(EditWrapper wrapper)
 EditorCommands::EditorCommands(SceneIdProvider scene_id)
     : state_(std::make_unique<State>(std::move(scene_id)))
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 EditorCommands::~EditorCommands() noexcept = default;
 
 bool EditorCommands::register_command(std::string_view name, bool undoable, Handler handler)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (name.empty() || name.size() > 128 || !handler || name == "batch" || name == "undo" ||
         name == "redo")
     {
@@ -220,6 +237,7 @@ bool EditorCommands::register_command(std::string_view name, bool undoable, Hand
 bool EditorCommands::execute(std::string_view name, const Json& arguments, Json& result,
                              std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     result = nullptr;
     error.clear();
     const auto generation = state_->scene_id ? state_->scene_id() : 0;
@@ -298,22 +316,26 @@ bool EditorCommands::execute(std::string_view name, const Json& arguments, Json&
 
 void EditorCommands::clear_history() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     state_->undo.clear();
     state_->redo.clear();
 }
 
 std::size_t EditorCommands::undo_count() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return state_->undo.size();
 }
 
 std::size_t EditorCommands::redo_count() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return state_->redo.size();
 }
 
 std::uint64_t EditorCommands::mutation_revision() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return state_->mutation_revision;
 }
 

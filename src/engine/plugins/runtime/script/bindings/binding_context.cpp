@@ -1,4 +1,6 @@
 #include "plugins/runtime/script/bindings/binding_context.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/gameplay/gameplay_session.hpp"
 
 #include "runtime/app/app.hpp"
@@ -23,32 +25,38 @@ BindingContext::BindingContext(ResourceLoader* resources, WorldSystem* world,
     : resources_(resources), world_(world), renderer_(renderer), ui_(ui), physics_(physics),
       navigation_(navigation), input_(input), window_(window), movies_(movies)
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 BindingContext::~BindingContext() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
 }
 
 void BindingContext::activate() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     active_ = true;
 }
 
 void BindingContext::begin_call(double delta_time) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     callable_ = active_;
     delta_time_ = std::isfinite(delta_time) ? delta_time : 0.0;
 }
 
 void BindingContext::end_call() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     callable_ = false;
     delta_time_ = 0.0;
 }
 
 void BindingContext::cancel_movies() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (movies_ && movie_handle_.id)
     {
         MoviePlaybackStatus status;
@@ -67,10 +75,12 @@ void BindingContext::cancel_movies() noexcept
 
 MoviePlayer* BindingContext::movies() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return movies_;
 }
 bool BindingContext::remember_movie(MoviePlaybackHandle handle) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (movie_handle_.id || !handle.id)
     {
         return false;
@@ -80,11 +90,13 @@ bool BindingContext::remember_movie(MoviePlaybackHandle handle) noexcept
 }
 bool BindingContext::owns_movie(MoviePlaybackHandle handle) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return handle.id && movie_handle_.id == handle.id &&
            movie_handle_.generation == handle.generation;
 }
 void BindingContext::forget_movie(MoviePlaybackHandle handle) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (owns_movie(handle))
     {
         movie_handle_ = {};
@@ -93,10 +105,12 @@ void BindingContext::forget_movie(MoviePlaybackHandle handle) noexcept
 
 void BindingContext::remember_release(std::string key, std::function<void()> release)
 {
+    ENGINE_PROFILE_FUNCTION();
     lifetime_releases_.insert_or_assign(std::move(key), std::move(release));
 }
 void BindingContext::forget_release(std::string_view key)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto found = lifetime_releases_.find(key);
     if (found != lifetime_releases_.end())
     {
@@ -106,6 +120,7 @@ void BindingContext::forget_release(std::string_view key)
 
 void BindingContext::shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     auto releases = std::move(lifetime_releases_);
     lifetime_releases_.clear();
     for (auto& [key, release] : releases)
@@ -170,41 +185,49 @@ void BindingContext::shutdown() noexcept
 
 WorldSystem* BindingContext::world() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return world_;
 }
 
 RenderSystem* BindingContext::renderer() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return callable_ ? renderer_ : nullptr;
 }
 
 UiSystem* BindingContext::ui() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return callable_ ? ui_ : nullptr;
 }
 
 PhysicsSystem* BindingContext::physics() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return callable_ ? physics_ : nullptr;
 }
 
 NavigationSystem* BindingContext::navigation() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return callable_ ? navigation_ : nullptr;
 }
 
 InputSystem* BindingContext::input() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return callable_ ? input_ : nullptr;
 }
 
 WindowSystem* BindingContext::window() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return callable_ ? window_ : nullptr;
 }
 
 bool BindingContext::set_mouse_mode(MouseMode mode)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!active_ || !callable_ || window_ == nullptr || !window_->is_initialized())
     {
         return false;
@@ -222,14 +245,17 @@ bool BindingContext::set_mouse_mode(MouseMode mode)
 
 void BindingContext::set_gameplay_session(GameplaySession* session) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     gameplay_ = session;
 }
 GameplaySession* BindingContext::gameplay() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return active_ && callable_ ? gameplay_ : nullptr;
 }
 std::uint64_t BindingContext::begin_scene_load(const SceneLoadSpec& spec)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!gameplay() || resource_sequence_ == UINT64_MAX)
     {
         return 0;
@@ -250,11 +276,13 @@ std::uint64_t BindingContext::begin_scene_load(const SceneLoadSpec& spec)
 }
 SceneLoadId BindingContext::scene_request(std::uint64_t token) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto found = scene_requests_.find(token);
     return gameplay() && found != scene_requests_.end() ? found->second : SceneLoadId{};
 }
 bool BindingContext::release_scene_request(std::uint64_t token)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto id = scene_request(token);
     if (!gameplay() || id.request == 0 || !gameplay_->release_scene_load(id))
     {
@@ -265,6 +293,7 @@ bool BindingContext::release_scene_request(std::uint64_t token)
 }
 Scene* BindingContext::owned_scene(std::uint64_t id) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!world_ || !active_ || !callable_)
     {
         return nullptr;
@@ -296,6 +325,7 @@ Scene* BindingContext::owned_scene(std::uint64_t id) const noexcept
 
 std::uint64_t BindingContext::load_resource(std::string_view path)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!active_ || !callable_ || !resources_ || resource_sequence_ == UINT64_MAX)
     {
         resource_error_ = "Resource service is unavailable";
@@ -321,12 +351,14 @@ std::uint64_t BindingContext::load_resource(std::string_view path)
 
 ResourceHandle BindingContext::resource_handle(std::uint64_t token) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto found = resource_handles_.find(token);
     return found != resource_handles_.end() ? found->second.handle() : ResourceHandle{};
 }
 
 std::uint64_t BindingContext::retain_resource(std::uint64_t token)
 {
+    ENGINE_PROFILE_FUNCTION();
     ResourceReference reference;
     if (!active_ || !callable_ || resource_sequence_ == UINT64_MAX ||
         !reference.retain(resources_, resource_handle(token)))
@@ -342,6 +374,7 @@ std::uint64_t BindingContext::retain_resource(std::uint64_t token)
 
 bool BindingContext::release_resource(std::uint64_t token)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!active_ || !callable_ || !resource_handles_.erase(token))
     {
         resource_error_ = "Invalid resource acquisition";
@@ -353,6 +386,7 @@ bool BindingContext::release_resource(std::uint64_t token)
 
 std::uint64_t BindingContext::begin_resource_load(std::string_view path)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!active_ || !callable_ || !resources_ || resource_sequence_ == UINT64_MAX)
     {
         resource_error_ = "Resource service is unavailable";
@@ -372,12 +406,14 @@ std::uint64_t BindingContext::begin_resource_load(std::string_view path)
 
 ResourceLoad* BindingContext::resource_request(std::uint64_t token) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto found = resource_requests_.find(token);
     return found != resource_requests_.end() ? found->second.get() : nullptr;
 }
 
 std::uint64_t BindingContext::take_resource(std::uint64_t token)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* operation = resource_request(token);
     if (!active_ || !callable_ || !operation || resource_sequence_ == UINT64_MAX)
     {
@@ -404,6 +440,7 @@ std::uint64_t BindingContext::take_resource(std::uint64_t token)
 
 bool BindingContext::cancel_resource_load(std::uint64_t token)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* operation = resource_request(token);
     if (!active_ || !callable_ || !operation)
     {
@@ -417,6 +454,7 @@ bool BindingContext::cancel_resource_load(std::uint64_t token)
 std::uint64_t
 BindingContext::submit_async(const std::function<bool(std::function<void(bool)>)>& start)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!active_ || !callable_ || !start || async_results_.size() >= 128 ||
         async_sequence_ == std::numeric_limits<std::uint64_t>::max())
     {
@@ -426,6 +464,7 @@ BindingContext::submit_async(const std::function<bool(std::function<void(bool)>)
     if (!start(
             [weak = std::weak_ptr<AsyncResult>(result)](bool success)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 if (auto target = weak.lock())
                 {
                     target->success = success;
@@ -442,6 +481,7 @@ BindingContext::submit_async(const std::function<bool(std::function<void(bool)>)
 
 int BindingContext::take_async(std::uint64_t request)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!active_ || !callable_)
     {
         return -2;
@@ -469,30 +509,45 @@ int BindingContext::take_async(std::uint64_t request)
 
 void BindingContext::remember_input_channel(schema::InputChannelHandle channel)
 {
+    ENGINE_PROFILE_FUNCTION();
     input_channels_.push_back(channel);
 }
 
 bool BindingContext::owns_input_channel(schema::InputChannelHandle channel) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::any_of(
         input_channels_.begin(), input_channels_.end(), [channel](const auto& value)
-        { return value.slot() == channel.slot() && value.generation() == channel.generation(); });
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return value.slot() == channel.slot() && value.generation() == channel.generation();
+        });
 }
 
 void BindingContext::forget_input_channel(schema::InputChannelHandle channel)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto matches = [channel](const auto& value)
-    { return value.slot() == channel.slot() && value.generation() == channel.generation(); };
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return value.slot() == channel.slot() && value.generation() == channel.generation();
+    };
     std::erase_if(input_channels_, matches);
-    std::erase_if(input_captures_, [&matches](const auto& value) { return matches(value.first); });
+    std::erase_if(input_captures_, [&matches](const auto& value)
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return matches(value.first);
+    });
 }
 
 void BindingContext::remember_input_capture(schema::InputChannelHandle channel,
                                             schema::InputCaptureHandle capture)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::erase_if(input_captures_,
                   [channel](const auto& value)
                   {
+                      ENGINE_PROFILE_FUNCTION_PROBE();
                       return value.first.slot() == channel.slot() &&
                              value.first.generation() == channel.generation();
                   });
@@ -501,9 +556,11 @@ void BindingContext::remember_input_capture(schema::InputChannelHandle channel,
 
 bool BindingContext::owns_input_capture(schema::InputCaptureHandle capture) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::any_of(input_captures_.begin(), input_captures_.end(),
                        [capture](const auto& value)
                        {
+                           ENGINE_PROFILE_FUNCTION_PROBE();
                            return value.second.slot() == capture.slot() &&
                                   value.second.generation() == capture.generation();
                        });
@@ -511,21 +568,25 @@ bool BindingContext::owns_input_capture(schema::InputCaptureHandle capture) cons
 
 void BindingContext::set_input_error(std::string_view error)
 {
+    ENGINE_PROFILE_FUNCTION();
     input_error_ = error;
 }
 
 const std::string& BindingContext::input_error() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return input_error_;
 }
 
 std::uint64_t BindingContext::scene_id() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return scene_id_;
 }
 
 void BindingContext::set_scene_id(std::uint64_t value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (scene_id_ != value)
     {
         async_results_.clear();
@@ -540,9 +601,13 @@ void BindingContext::set_scene_id(std::uint64_t value) noexcept
         std::erase_if(owned_scene_ids_,
                       [this](std::uint64_t id)
                       {
+                          ENGINE_PROFILE_FUNCTION_PROBE();
                           return std::none_of(world_->scenes().begin(), world_->scenes().end(),
                                               [id](const auto& scene)
-                                              { return scene->id() == id; });
+                                              {
+                                                  ENGINE_PROFILE_FUNCTION_PROBE();
+                                                  return scene->id() == id;
+                                              });
                       });
         if (value != 0 && world_->scene() && world_->scene()->id() == value &&
             std::find(owned_scene_ids_.begin(), owned_scene_ids_.end(), value) ==
@@ -555,12 +620,14 @@ void BindingContext::set_scene_id(std::uint64_t value) noexcept
 
 Node BindingContext::find_node(std::uint64_t scene_id, std::uint64_t node_id) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* value = owned_scene(scene_id);
     return value ? value->find_node(node_id) : Node{};
 }
 
 bool BindingContext::push_animation_events(std::span<const AnimationEvent> events)
 {
+    ENGINE_PROFILE_FUNCTION();
     constexpr std::size_t maximum_events = 4096;
     const auto pending = animation_events_.size() - animation_event_cursor_;
     if (!active_ || events.size() > maximum_events - pending)
@@ -579,6 +646,7 @@ bool BindingContext::push_animation_events(std::span<const AnimationEvent> event
 
 bool BindingContext::take_animation_event(AnimationEvent& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     if (!active_ || !callable_)
     {
@@ -608,11 +676,13 @@ bool BindingContext::take_animation_event(AnimationEvent& output)
 
 double BindingContext::delta_time() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return callable_ ? delta_time_ : 0.0;
 }
 
 KeyValueStore& BindingContext::storage()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!storage_attempted_)
     {
         storage_attempted_ = true;
@@ -628,16 +698,19 @@ KeyValueStore& BindingContext::storage()
 
 void BindingContext::set_storage_error(std::string_view error)
 {
+    ENGINE_PROFILE_FUNCTION();
     storage_error_ = error;
 }
 
 const std::string& BindingContext::storage_error()
 {
+    ENGINE_PROFILE_FUNCTION();
     return storage_error_.empty() ? storage().last_error() : storage_error_;
 }
 
 BindingContext* BindingContext::current(const Arguments& arguments, bool require_callable)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* active = static_cast<BindingContext*>(arguments.owner());
     if (active == nullptr || !active->active_ || (require_callable && !active->callable_))
     {
@@ -648,6 +721,7 @@ BindingContext* BindingContext::current(const Arguments& arguments, bool require
 
 Scene* BindingContext::scene(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* binding = current(arguments);
     std::uint64_t id = 0;
     auto* scene = binding && identifier(arguments, 0, id) ? binding->owned_scene(id) : nullptr;
@@ -671,6 +745,7 @@ Scene* BindingContext::scene(const Arguments& arguments)
 
 Node BindingContext::node(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* binding = current(arguments);
     std::uint64_t scene_id = 0;
     std::uint64_t node_id = 0;
@@ -681,6 +756,7 @@ Node BindingContext::node(const Arguments& arguments)
 
 Component BindingContext::component(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = node(arguments);
     if (!value || arguments.count() < 3 || !arguments.is_int32(2))
     {
@@ -696,18 +772,21 @@ Component BindingContext::component(const Arguments& arguments)
 
 bool BindingContext::identifier(const Arguments& arguments, int index, std::uint64_t& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = 0;
     return arguments.identifier(index, output);
 }
 
 bool BindingContext::number(const Arguments& arguments, int index, double& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = 0.0;
     return arguments.number(index, output);
 }
 
 bool BindingContext::scalar(const Arguments& arguments, int index, float& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = 0.0F;
     double value = 0.0;
     if (!number(arguments, index, value) || std::abs(value) > std::numeric_limits<float>::max())
@@ -720,6 +799,7 @@ bool BindingContext::scalar(const Arguments& arguments, int index, float& output
 
 bool BindingContext::text(const Arguments& arguments, int index, std::string& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     return arguments.text(index, output);
 }

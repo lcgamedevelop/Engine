@@ -1,4 +1,5 @@
 #include "plugins/runtime/effects/effect_resource_path.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/core/guid_map.hpp"
 #include "runtime/scene/resource_binding.hpp"
@@ -16,6 +17,7 @@ namespace engine::plugins::effects::detail
 
 std::string effect_dependency_path(std::string_view path)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string normalized(path);
     std::replace(normalized.begin(), normalized.end(), '\\', '/');
     return PathUtils::to_utf8(PathUtils::from_utf8(normalized).lexically_normal());
@@ -24,6 +26,7 @@ std::string effect_dependency_path(std::string_view path)
 bool load_effect_bindings(const ResourceReference& resource, const schema::EffectAssetDataT& asset,
                           EffectBindings& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     EffectBindings candidate;
     for (const auto& binding : asset.bindings)
@@ -44,6 +47,7 @@ bool load_effect_bindings(const ResourceReference& resource, const schema::Effec
 
 std::string effect_utf8(const char16_t* path)
 {
+    ENGINE_PROFILE_FUNCTION();
     return path != nullptr ? PathUtils::to_utf8(std::filesystem::path(path)) : std::string{};
 }
 

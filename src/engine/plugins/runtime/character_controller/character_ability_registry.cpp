@@ -1,4 +1,5 @@
 #include "plugins/runtime/character_controller/character_ability_registry.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/character_controller/abilities/crouch_ability.hpp"
 #include "plugins/runtime/character_controller/abilities/jump_ability.hpp"
 #include "plugins/runtime/character_controller/abilities/sprint_ability.hpp"
@@ -9,11 +10,13 @@ namespace engine::plugins::character_controller
 {
 bool register_builtin_character_abilities(CharacterAbilityRegistry& registry)
 {
+    ENGINE_PROFILE_FUNCTION();
     return registry.add<SprintAbility>() && registry.add<CrouchAbility>() &&
            registry.add<JumpAbility>();
 }
 bool register_character_components(WorldSystem& world, const CharacterAbilityRegistry& types)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!types.frozen() || !world.native_world())
     {
         return false;

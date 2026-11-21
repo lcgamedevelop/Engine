@@ -1,4 +1,6 @@
 #include "plugins/runtime/character_controller/character_camera.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/camera/camera_controller.hpp"
 #include "runtime/scene/ecs_storage.hpp"
 #include <cmath>
@@ -7,11 +9,17 @@ namespace engine::plugins::character_controller
 {
 bool CharacterCamera::register_type(ComponentRegistry& r)
 {
+    ENGINE_PROFILE_FUNCTION();
     return register_component_storage<CharacterCamera, Data>(r);
 }
 bool CharacterCamera::valid_settings(const Data& d) noexcept
 {
-    const auto finite = [](const Vec2& v) { return std::isfinite(v.x()) && std::isfinite(v.y()); };
+    ENGINE_PROFILE_FUNCTION();
+    const auto finite = [](const Vec2& v)
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return std::isfinite(v.x()) && std::isfinite(v.y());
+    };
     if (!finite(d.pointer_scale_degrees) || !finite(d.rate_degrees_per_second))
     {
         return false;
@@ -64,12 +72,14 @@ bool CharacterCamera::valid_settings(const Data& d) noexcept
 }
 bool CharacterCamera::get_settings(Data& out) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* d = read_data<Data>();
     out = d ? *d : Data{};
     return d;
 }
 bool CharacterCamera::set_settings(const Data& d)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable() || !valid_settings(d))
     {
         return false;
@@ -80,11 +90,13 @@ bool CharacterCamera::set_settings(const Data& d)
 }
 bool CharacterCamera::restore_data(const schema::ComponentDataT& d)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* data = d.payload.AsCharacterCameraData();
     return d.flags && data && set_settings(*data) && restore_flags(d);
 }
 bool CharacterCamera::get_angles(double& yaw, double& pitch) const
 {
+    ENGINE_PROFILE_FUNCTION();
     yaw = 0;
     pitch = 0;
     if (!active())
@@ -106,6 +118,7 @@ bool CharacterCamera::get_angles(double& yaw, double& pitch) const
 }
 bool CharacterCamera::set_angles(double yaw, double pitch)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable() || !active() || !std::isfinite(yaw) || !std::isfinite(pitch))
     {
         return false;
@@ -149,6 +162,7 @@ bool CharacterCamera::set_angles(double yaw, double pitch)
 }
 bool CharacterCamera::apply_look(const Vec2& delta, const Vec2& rate, double dt)
 {
+    ENGINE_PROFILE_FUNCTION();
     double yaw, pitch;
     if (!std::isfinite(dt) || dt < 0 || !get_angles(yaw, pitch))
     {
@@ -162,6 +176,7 @@ bool CharacterCamera::apply_look(const Vec2& delta, const Vec2& rate, double dt)
 }
 bool CharacterCamera::toggle_view()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable() || !active())
     {
         return false;

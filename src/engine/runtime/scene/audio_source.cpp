@@ -1,4 +1,5 @@
 #include "runtime/scene/audio_source.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/resource/types/audio_resource.hpp"
 #include "runtime/scene/audio_source_runtime.hpp"
@@ -17,16 +18,19 @@ namespace engine
 
 bool AudioSource::register_type(ComponentRegistry& registry)
 {
+    ENGINE_PROFILE_FUNCTION();
     return register_component_storage<AudioSource, Data, Runtime>(registry);
 }
 
 AudioSource::Runtime* AudioSource::runtime() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return runtime_state<Runtime>();
 }
 
 bool AudioSource::valid_settings(const schema::AudioSourceDataT& settings) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return (settings.clip_guid.empty() || GuidMap::valid_guid(settings.clip_guid)) &&
            std::isfinite(settings.volume) && settings.volume >= 0.0F && settings.volume <= 1.0F &&
            std::isfinite(settings.pitch) && settings.pitch >= 0.01F && settings.pitch <= 4.0F &&
@@ -36,6 +40,7 @@ bool AudioSource::valid_settings(const schema::AudioSourceDataT& settings) noexc
 
 bool AudioSource::get_settings(Data& output) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* value = read_data<Data>();
     output = value ? *value : Data{};
     return value != nullptr;
@@ -43,11 +48,13 @@ bool AudioSource::get_settings(Data& output) const noexcept
 
 bool AudioSource::set_settings(const schema::AudioSourceDataT& settings)
 {
+    ENGINE_PROFILE_FUNCTION();
     return apply_settings(settings, {});
 }
 
 bool AudioSource::apply_settings(const Data& settings, ResourceReference prepared)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -99,6 +106,7 @@ bool AudioSource::apply_settings(const Data& settings, ResourceReference prepare
 
 bool AudioSource::restore_data(const schema::ComponentDataT& data)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!data.flags)
     {
         return false;
@@ -121,6 +129,7 @@ bool AudioSource::restore_data(const schema::ComponentDataT& data)
 
 bool AudioSource::set_clip(std::string_view path)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -148,6 +157,7 @@ bool AudioSource::set_clip(std::string_view path)
 
 std::string_view AudioSource::clip_path() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return {};
@@ -157,6 +167,7 @@ std::string_view AudioSource::clip_path() const noexcept
 
 const schema::AudioClipDataT* AudioSource::clip_data() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return {};
@@ -166,6 +177,7 @@ const schema::AudioClipDataT* AudioSource::clip_data() const noexcept
 
 bool AudioSource::play() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -187,6 +199,7 @@ bool AudioSource::play() noexcept
 
 bool AudioSource::pause() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -204,6 +217,7 @@ bool AudioSource::pause() noexcept
 
 bool AudioSource::stop() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -215,6 +229,7 @@ bool AudioSource::stop() noexcept
 
 bool AudioSource::playing() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return false;
@@ -224,6 +239,7 @@ bool AudioSource::playing() const noexcept
 
 AudioPlayback AudioSource::playback() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return {};

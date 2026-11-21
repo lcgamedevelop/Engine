@@ -18,10 +18,11 @@ endif()
 
 if(ENGINE_ENABLE_RUNTIME_DEPS)
 
+    engine_add_memory_profiling()
+
     engine_add_system(runtime task)
     target_sources(engine_task PRIVATE src/engine/runtime/task/thread_system.cpp)
     target_link_libraries(engine_task PRIVATE TBB::tbb Threads::Threads)
-    engine_enable_profiling(engine_task)
     engine_configure_platform_tasks()
 
     engine_add_system(runtime window)
@@ -41,10 +42,10 @@ if(ENGINE_ENABLE_RUNTIME_DEPS)
 
     engine_add_system(runtime render)
     target_sources(engine_render PRIVATE src/engine/runtime/render/render_observation.cpp
+        src/engine/runtime/render/gpu_memory_tracker.cpp
         src/engine/runtime/render/passes/frame_output.cpp)
     target_sources(engine_render PRIVATE src/engine/runtime/render/render_features.cpp src/engine/runtime/render/mesh_lod_selection.cpp src/engine/runtime/render/passes/atmosphere_pass.cpp src/engine/runtime/render/passes/debug_draw_pass.cpp)
     target_link_libraries(engine_render PRIVATE engine_bgfx_debugdraw)
-    engine_enable_profiling(engine_render)
     target_sources(
         engine_render
         PRIVATE src/engine/runtime/render/render_surface.cpp
@@ -91,6 +92,7 @@ if(ENGINE_ENABLE_RUNTIME_DEPS)
                 engine::task
                 engine::world
                 engine::resource
+                engine::memory_profile
                 engine::font
                 engine::ui
                 SDL3::SDL3
@@ -112,7 +114,6 @@ if(ENGINE_ENABLE_RUNTIME_DEPS)
     engine_configure_platform_graphics()
 
     engine_add_system(runtime resource)
-    engine_enable_profiling(engine_resource)
     target_sources(
         engine_resource
         PRIVATE src/engine/runtime/resource/builtin_resources.cpp
@@ -148,11 +149,11 @@ if(ENGINE_ENABLE_RUNTIME_DEPS)
     target_link_libraries(
         engine_resource
         PUBLIC engine::scene_data
-        PRIVATE engine::task flatbuffers::flatbuffers basisu::basisu_encoder SDL3::SDL3)
+        PRIVATE engine::task engine::memory_profile flatbuffers::flatbuffers basisu::basisu_encoder
+                SDL3::SDL3)
 
     engine_add_system(runtime world)
     target_sources(engine_world PRIVATE src/engine/runtime/world/world_scene_scope.cpp)
-    engine_enable_profiling(engine_world)
     include(${PROJECT_SOURCE_DIR}/cmake/core/scene_schema.cmake)
     engine_add_scene_schema()
     add_library(engine_scene_ecs INTERFACE)
@@ -190,12 +191,13 @@ if(ENGINE_ENABLE_RUNTIME_DEPS)
     target_link_libraries(
         engine_world
         PUBLIC engine::scene_data
-        PRIVATE engine::scene_ecs engine::resource engine::log bgfx::bx ozz_base)
+        PRIVATE engine::scene_ecs engine::resource engine::log engine::memory_profile bgfx::bx
+                ozz_base)
     target_include_directories(engine_world PRIVATE "${PROJECT_SOURCE_DIR}/src/engine")
 
     engine_add_system(runtime physics)
-    engine_enable_profiling(engine_physics)
-    target_link_libraries(engine_physics PRIVATE Jolt::Jolt engine::world engine::resource engine::task)
+    target_link_libraries(engine_physics
+        PRIVATE Jolt::Jolt engine::world engine::resource engine::task engine::memory_profile)
     # Jolt's public job-system base is built without RTTI; the bridge must match it.
     if(MSVC)
         target_compile_options(engine_physics PRIVATE /GR-)
@@ -203,11 +205,9 @@ if(ENGINE_ENABLE_RUNTIME_DEPS)
         target_compile_options(engine_physics PRIVATE -fno-rtti)
     endif()
     engine_add_system(runtime audio)
-    engine_enable_profiling(engine_audio)
     target_link_libraries(engine_audio PRIVATE engine::world engine::resource SDL3::SDL3)
 
     engine_add_system(runtime navigation)
-    engine_enable_profiling(engine_navigation)
     target_link_libraries(engine_navigation PRIVATE engine::task)
     target_link_libraries(
         engine_navigation
@@ -218,7 +218,6 @@ if(ENGINE_ENABLE_RUNTIME_DEPS)
     target_sources(engine_animation PRIVATE
         src/engine/runtime/animation/animation_event_interval.cpp
         src/engine/runtime/animation/animation_ik.cpp)
-    engine_enable_profiling(engine_animation)
     target_include_directories(engine_animation PRIVATE "${PROJECT_SOURCE_DIR}/src/engine")
     target_link_libraries(engine_animation PRIVATE engine::task ozz_animation ozz_animation_offline
                                                    engine::world engine::resource)
@@ -235,7 +234,6 @@ if(ENGINE_ENABLE_RUNTIME_DEPS)
         PUBLIC engine::scene_data
         PRIVATE engine::resource engine::world bgfx::bgfx bgfx::bx)
     engine_add_system(runtime ui)
-    engine_enable_profiling(engine_ui)
     target_sources(
         engine_ui PRIVATE src/engine/runtime/ui/rml_font.cpp src/engine/runtime/ui/rml_render.cpp
                           src/engine/runtime/ui/rml_input.cpp)
@@ -299,7 +297,6 @@ if(ENGINE_ENABLE_RUNTIME_DEPS)
                                                   nlohmann_json::nlohmann_json SDL3::SDL3)
     target_compile_definitions(engine_gameplay PRIVATE JSON_NOEXCEPTION=1)
     target_link_libraries(engine_gameplay PRIVATE engine::task)
-    engine_enable_profiling(engine_gameplay)
     engine_apply_options(engine_gameplay)
 
     add_library(engine_movie STATIC src/engine/runtime/movie/movie_player.cpp)
@@ -315,8 +312,7 @@ if(ENGINE_ENABLE_RUNTIME_DEPS)
     target_link_libraries(
         engine_runtime
         PUBLIC engine::core engine::gameplay engine::movie
-        PRIVATE ${ENGINE_RUNTIME_SYSTEM_TARGETS} nlohmann_json::nlohmann_json)
+        PRIVATE ${ENGINE_RUNTIME_SYSTEM_TARGETS} engine::memory_profile nlohmann_json::nlohmann_json)
     target_compile_definitions(engine_runtime PRIVATE JSON_NOEXCEPTION=1)
     engine_apply_options(engine_runtime)
-    engine_enable_profiling(engine_runtime)
 endif()

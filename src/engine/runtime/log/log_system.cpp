@@ -1,4 +1,6 @@
 #include "runtime/log/log_system.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/app/app.hpp"
 
@@ -30,6 +32,7 @@ constexpr unsigned int retained_files = 3;
 
 const char* level_name(LogLevel level) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     switch (level)
     {
     case LogLevel::info:
@@ -44,6 +47,7 @@ const char* level_name(LogLevel level) noexcept
 
 std::string format_record(LogLevel level, std::string_view message)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto now =
         std::chrono::floor<std::chrono::milliseconds>(std::chrono::system_clock::now());
     const auto day = std::chrono::floor<std::chrono::days>(now);
@@ -77,6 +81,7 @@ std::string format_record(LogLevel level, std::string_view message)
 
 std::filesystem::path archive_path(const std::filesystem::path& path, unsigned int index)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto result = path;
     result += "." + std::to_string(index);
     return result;
@@ -91,6 +96,7 @@ struct LogSystem::Output final : quill::Sink
 {
     [[nodiscard]] bool open(const std::filesystem::path& path)
     {
+        ENGINE_PROFILE_FUNCTION();
         file.open(path, std::ios::binary | std::ios::app);
         if (!file.is_open())
         {
@@ -112,6 +118,7 @@ struct LogSystem::Output final : quill::Sink
     // backend too. Preserve that serialization for the saved output function.
     void platform_output(int category, SDL_LogPriority priority, const char* message) noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         const std::lock_guard lock(platform_mutex);
         if (previous_output)
         {
@@ -122,6 +129,7 @@ struct LogSystem::Output final : quill::Sink
     static void SDLCALL sdl_output(void* userdata, int category, SDL_LogPriority priority,
                                    const char* message)
     {
+        ENGINE_PROFILE_FUNCTION();
         auto& output = *static_cast<Output*>(userdata);
         output.platform_output(category, priority, message);
         if (!quill::Backend::is_running())
@@ -166,6 +174,7 @@ struct LogSystem::Output final : quill::Sink
 
     void report_failure() noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         if (!failed.exchange(true, std::memory_order_relaxed))
         {
             // Never re-enter LogSystem or take its producer/lifecycle mutex here.
@@ -180,6 +189,7 @@ struct LogSystem::Output final : quill::Sink
                    const std::vector<std::pair<std::string, std::string>>*, std::string_view,
                    std::string_view record) override
     {
+        ENGINE_PROFILE_FUNCTION();
         if (logger_name != "engine.sdl")
         {
             const SDL_LogPriority priority =
@@ -220,6 +230,7 @@ struct LogSystem::Output final : quill::Sink
 
     void flush_sink() override
     {
+        ENGINE_PROFILE_FUNCTION();
         if (file.is_open())
         {
             file.flush();
@@ -232,6 +243,7 @@ struct LogSystem::Output final : quill::Sink
 
     void close() noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         if (file.is_open())
         {
             flush_sink();
@@ -245,6 +257,7 @@ struct LogSystem::Output final : quill::Sink
 
     [[nodiscard]] bool rotate()
     {
+        ENGINE_PROFILE_FUNCTION();
         file.flush();
         const bool flushed = static_cast<bool>(file);
         file.close();
@@ -299,6 +312,7 @@ struct LogSystem::Output final : quill::Sink
 
 LogSystem::LogSystem() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     // Pin Quill's managers before the LogSystem singleton destructor is registered.
     // Quill's later atexit hook drains/stops the backend before our destructor fallback.
     (void)quill::Backend::is_running();
@@ -306,17 +320,20 @@ LogSystem::LogSystem() noexcept
 
 LogSystem::~LogSystem() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
 }
 
 LogSystem& LogSystem::instance() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     static LogSystem log;
     return log;
 }
 
 bool LogSystem::on_initialize(const EngineConfig&)
 {
+    ENGINE_PROFILE_FUNCTION();
     SDL_LogOutputFunction previous_output = nullptr;
     void* previous_userdata = nullptr;
     SDL_GetLogOutputFunction(&previous_output, &previous_userdata);
@@ -346,6 +363,7 @@ bool LogSystem::on_initialize(const EngineConfig&)
     options.check_printable_char = {};
     options.error_notifier = [weak = std::weak_ptr<Output>(output)](const std::string& message)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const auto text = "Quill backend: " + message;
         if (const auto sink = weak.lock())
         {
@@ -377,6 +395,7 @@ bool LogSystem::on_initialize(const EngineConfig&)
 
 void LogSystem::write(LogLevel level, std::string_view message)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto& log = instance();
     const std::lock_guard lock(log.mutex_);
     if (!log.output_ || !quill::Backend::is_running())
@@ -410,6 +429,7 @@ void LogSystem::write(LogLevel level, std::string_view message)
 
 bool LogSystem::flush()
 {
+    ENGINE_PROFILE_FUNCTION();
     const std::lock_guard lock(mutex_);
     if (!output_ || !quill::Backend::is_running())
     {
@@ -422,11 +442,13 @@ bool LogSystem::flush()
 
 const std::filesystem::path& LogSystem::file_path() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return file_path_;
 }
 
 void LogSystem::on_shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     // The host has stopped its producers. Restore first, outside mutex_: SDL
     // serializes replacement with any callback already enqueueing a record.
     if (output_)

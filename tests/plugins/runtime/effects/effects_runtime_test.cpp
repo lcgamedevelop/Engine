@@ -545,8 +545,17 @@ int main(int argc, char** argv)
         return 1;
     }
     const auto retained_id = retained.instance_id();
+    const SceneScopeId previous_scope{world.epoch(), scene->id()};
+    ScenePreparationSnapshot previous_preparation;
+    if (!expect(effects.scope_status(previous_scope, previous_preparation),
+                "the published scene has extension preparation"))
+    {
+        return 1;
+    }
     world.unload_scene();
     if (!advance(windows, renderer, effects) ||
+        !expect(!effects.scope_status(previous_scope, previous_preparation),
+                "unloading releases the published scope preparation") ||
         !expect(world.scene() == nullptr && retained.instance_id() == retained_id &&
                     retained.playing() && bgfx::getStats()->numTextures >= binding_count + 2,
                 "camera-less interval preserves live effect assets and SDK instance"))

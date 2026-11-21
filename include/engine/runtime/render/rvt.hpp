@@ -1,4 +1,6 @@
 #pragma once
+
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/scene/scene_types.hpp"
 #include <bit>
 #include <cmath>
@@ -39,6 +41,7 @@ struct RvtDebugOptions
 };
 [[nodiscard]] inline bool valid_rvt_settings(const schema::RvtSettingsT& s) noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     const auto& a = s.bounds.minimum();
     const auto& b = s.bounds.maximum();
     return std::isfinite(a.x()) && std::isfinite(a.y()) && std::isfinite(a.z()) &&

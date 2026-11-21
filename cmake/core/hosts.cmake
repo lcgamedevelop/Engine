@@ -100,7 +100,6 @@ if(ENGINE_BUILD_APP AND ENGINE_ENABLE_RUNTIME_DEPS AND NOT EMSCRIPTEN AND NOT IO
     engine_link_terrain_plugin(engine_app)
     engine_link_destruction_plugin(engine_app)
     engine_apply_options(engine_app)
-    engine_enable_profiling(engine_app)
     if(ANDROID)
         include(platforms/android/native_bundle.cmake)
     endif()

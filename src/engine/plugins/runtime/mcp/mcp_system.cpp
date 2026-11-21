@@ -1,4 +1,6 @@
 #include "plugins/runtime/mcp/mcp_system.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "plugins/runtime/mcp/mcp_schema.hpp"
 
@@ -15,16 +17,19 @@ using Json = nlohmann::json;
 
 Json rpc_error(const Json& id, int code, std::string_view message)
 {
+    ENGINE_PROFILE_FUNCTION();
     return {{"jsonrpc", "2.0"}, {"id", id}, {"error", {{"code", code}, {"message", message}}}};
 }
 
 Json rpc_result(const Json& id, Json result)
 {
+    ENGINE_PROFILE_FUNCTION();
     return {{"jsonrpc", "2.0"}, {"id", id}, {"result", std::move(result)}};
 }
 
 Json tool_result(Json content, bool failed = false)
 {
+    ENGINE_PROFILE_FUNCTION();
     return {
         {"content",
          Json::array({{{"type", "text"},
@@ -36,15 +41,21 @@ Json tool_result(Json content, bool failed = false)
 
 McpSystem::~McpSystem() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
 }
 
 bool McpSystem::register_tool(McpTool tool)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (is_initialized() || tool.name.empty() || tool.description.empty() || !tool.execute ||
         !protocol::valid_schema(tool.input_schema) ||
         std::any_of(tools_.begin(), tools_.end(),
-                    [&tool](const auto& current) { return current.name == tool.name; }))
+                    [&tool](const auto& current)
+                    {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
+                        return current.name == tool.name;
+                    }))
     {
         return false;
     }
@@ -54,6 +65,7 @@ bool McpSystem::register_tool(McpTool tool)
 
 Json McpSystem::list_tools() const
 {
+    ENGINE_PROFILE_FUNCTION();
     Json result = {{"tools", Json::array()}};
     for (const auto& tool : tools_)
     {
@@ -66,6 +78,7 @@ Json McpSystem::list_tools() const
 
 McpCallStatus McpSystem::call_tool(std::string_view name, const Json& arguments, Json& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = Json::object();
     if (!is_initialized())
     {
@@ -73,7 +86,11 @@ McpCallStatus McpSystem::call_tool(std::string_view name, const Json& arguments,
         return McpCallStatus::failed;
     }
     const auto tool = std::find_if(tools_.begin(), tools_.end(),
-                                   [name](const auto& item) { return item.name == name; });
+                                   [name](const auto& item)
+                                   {
+                                       ENGINE_PROFILE_FUNCTION_PROBE();
+                                       return item.name == name;
+                                   });
     if (tool == tools_.end())
     {
         return McpCallStatus::unknown_tool;
@@ -87,16 +104,19 @@ McpCallStatus McpSystem::call_tool(std::string_view name, const Json& arguments,
 
 bool McpSystem::on_initialize(const EngineConfig&)
 {
+    ENGINE_PROFILE_FUNCTION();
     return true;
 }
 
 void McpSystem::on_shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     tools_.clear();
 }
 
 bool McpSystem::run_stdio()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!is_initialized())
     {
         return false;

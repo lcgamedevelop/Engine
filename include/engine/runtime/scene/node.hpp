@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/scene/scene_types.hpp"
 
 #include <cstdint>
@@ -20,6 +22,7 @@ public:
     [[nodiscard]] bool valid() const noexcept;
     explicit operator bool() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return valid();
     }
     [[nodiscard]] bool operator==(const Node&) const noexcept = default;
@@ -47,10 +50,12 @@ public:
 
     template <class T> [[nodiscard]] T add_component()
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return T(add_component(T::component_type));
     }
     template <class T> [[nodiscard]] T get_component() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return T(get_component(T::component_type));
     }
     [[nodiscard]] Component add_component(ComponentType type);

@@ -1,5 +1,6 @@
 #include "runtime/task/task_system.hpp"
 
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/task/thread_priority.hpp"
 #include "runtime/task/thread_system.hpp"
@@ -30,12 +31,14 @@ thread_local bool in_task = false;
 
 bool valid_priority(TaskPriority priority)
 {
+    ENGINE_PROFILE_FUNCTION();
     return priority == TaskPriority::low || priority == TaskPriority::normal ||
            priority == TaskPriority::high;
 }
 
 tbb::task_arena::priority arena_priority(TaskPriority priority)
 {
+    ENGINE_PROFILE_FUNCTION();
     switch (priority)
     {
     case TaskPriority::low:
@@ -49,12 +52,14 @@ tbb::task_arena::priority arena_priority(TaskPriority priority)
 
 tbb::flow::node_priority_t node_priority(TaskPriority priority)
 {
+    ENGINE_PROFILE_FUNCTION();
     // 所有三档均为非零原生优先度；0 表示不参与图的优先队列。
     return static_cast<tbb::flow::node_priority_t>(priority) + 1;
 }
 
 bool validate_tasks(const std::vector<TaskDescription>& tasks, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::vector<std::size_t> incoming(tasks.size());
     std::vector<std::vector<std::size_t>> dependents(tasks.size());
     std::vector<std::size_t> pending;
@@ -138,15 +143,18 @@ struct TaskSystem::Impl
 
     Impl(ThreadSystem& budget, const TaskConfig& settings) : threads(budget), config(settings)
     {
+        ENGINE_PROFILE_FUNCTION();
     }
 
     bool on_owner() const
     {
+        ENGINE_PROFILE_FUNCTION();
         return !in_task && owner == std::this_thread::get_id();
     }
 
     void create_arena()
     {
+        ENGINE_PROFILE_FUNCTION();
         arena = std::make_unique<tbb::task_arena>(static_cast<int>(config.max_concurrency), 0,
                                                   arena_priority(config.priority));
         arena->initialize();
@@ -154,6 +162,7 @@ struct TaskSystem::Impl
         arena->execute(
             [this]
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 graph = std::make_unique<tbb::flow::graph>();
                 for (std::size_t index = 0; index < entries.size(); ++index)
                 {
@@ -162,10 +171,12 @@ struct TaskSystem::Impl
                         *graph, config.max_concurrency,
                         [this](const std::shared_ptr<Submission>& submission)
                         {
+                            ENGINE_PROFILE_ZONE("Task.worker");
                             const bool success = submission->execute();
                             // future 就绪前释放捕获数据；调度节点本身仍由 drain 收尾。
                             submission->execute = {};
                             {
+                                ENGINE_PROFILE_ZONE("Task.queueCompletion");
                                 const std::lock_guard lock(mutex);
                                 --pending;
                                 if (submission->callback)
@@ -177,8 +188,14 @@ struct TaskSystem::Impl
                                     --outstanding;
                                 }
                             }
-                            submission->completion.set_value(success);
-                            completed.notify_one();
+                            {
+                                ENGINE_PROFILE_ZONE("Task.resolvePromise");
+                                submission->completion.set_value(success);
+                            }
+                            {
+                                ENGINE_PROFILE_ZONE("Task.notifyWaiter");
+                                completed.notify_one();
+                            }
                             return tbb::flow::continue_msg{};
                         },
                         static_cast<tbb::flow::node_priority_t>(index + 1));
@@ -191,7 +208,11 @@ struct TaskSystem::Impl
         ENGINE_PROFILE_ZONE("Task.wait");
         {
             std::unique_lock lock(mutex);
-            completed.wait(lock, [this] { return pending == 0; });
+            completed.wait(lock, [this]
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return pending == 0;
+            });
         }
         // pending=0 表示用户函数已结束，不代表 TBB 节点已返回。
         // 只在这里做图的尾部回收，主线程不会代跑业务。
@@ -203,6 +224,7 @@ struct TaskSystem::Impl
 
     void release_arena()
     {
+        ENGINE_PROFILE_FUNCTION();
         for (auto& entry : entries)
         {
             entry.reset();
@@ -213,6 +235,7 @@ struct TaskSystem::Impl
 
     bool enqueue(const std::shared_ptr<Submission>& submission, TaskPriority priority)
     {
+        ENGINE_PROFILE_ZONE("Task.enqueue");
         // Hold through try_put: shutdown/configuration must not destroy the graph between
         // accepting a request and handing it to oneTBB. No caller waits for worker execution.
         const std::lock_guard lock(mutex);
@@ -233,6 +256,7 @@ struct TaskSystem::Impl
 
     std::future<bool> submit(std::function<bool()> execute, TaskPriority priority)
     {
+        ENGINE_PROFILE_FUNCTION();
         auto submission = std::make_shared<Submission>();
         submission->execute = std::move(execute);
         auto future = submission->completion.get_future();
@@ -251,6 +275,7 @@ struct TaskSystem::Impl
 #if defined(ENGINE_ENABLE_TRACY)
         thread_local const bool named = []
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             tracy::SetThreadName("Engine TBB worker");
             return true;
         }();
@@ -271,7 +296,11 @@ struct TaskSystem::Impl
             // 保持一条安全注释，使已有离线分析流程也能读取这些埋点。
             std::replace_if(
                 details.begin(), details.end(),
-                [](char value) { return value == '\t' || value == '\r' || value == '\n'; }, ' ');
+                [](char value)
+                {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
+                    return value == '\t' || value == '\r' || value == '\n';
+                }, ' ');
             ZoneText(details.data(), details.size());
         }
 #else
@@ -317,6 +346,7 @@ struct TaskSystem::Impl
                 batch,
                 [&, index](const tbb::flow::continue_msg&)
                 {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
                     const auto& task = tasks[index];
                     for (const auto dependency : task.dependencies)
                     {
@@ -347,22 +377,29 @@ struct TaskSystem::Impl
         }
         // 官方协作等待：此 worker 可推进图，而不是阻塞等待同池 future。
         batch.wait_for_all();
-        return std::all_of(success.begin(), success.end(), [](auto value) { return value != 0; });
+        return std::all_of(success.begin(), success.end(), [](auto value)
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return value != 0;
+        });
     }
 };
 
 TaskSystem::TaskSystem(ThreadSystem& threads, const TaskConfig& config)
     : impl_(std::make_unique<Impl>(threads, config))
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 TaskSystem::~TaskSystem() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
 }
 
 bool TaskSystem::on_initialize(const EngineConfig&)
 {
+    ENGINE_PROFILE_FUNCTION();
     impl_->error.clear();
     if (!impl_->threads.is_initialized() || impl_->config.name.empty() ||
         impl_->config.max_concurrency == 0 || impl_->config.max_concurrency > 64 ||
@@ -399,6 +436,7 @@ void TaskSystem::on_shutdown() noexcept
 
 bool TaskSystem::configure_concurrency(std::size_t count)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!impl_->on_owner())
     {
         return false;
@@ -430,6 +468,7 @@ bool TaskSystem::configure_concurrency(std::size_t count)
 std::future<bool> TaskSystem::submit(std::string name, std::function<bool()> task,
                                      TaskPriority priority)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!impl_->on_owner())
     {
         return {};
@@ -442,12 +481,16 @@ std::future<bool> TaskSystem::submit(std::string name, std::function<bool()> tas
     }
     return impl_->submit(
         [this, name = std::move(name), task = std::move(task), priority, submitted = Clock::now()]
-        { return impl_->execute_task(name, task, priority, submitted); }, priority);
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return impl_->execute_task(name, task, priority, submitted);
+        }, priority);
 }
 
 std::future<bool> TaskSystem::submit_batch(std::vector<TaskDescription> tasks,
                                            TaskPriority priority)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!impl_->on_owner())
     {
         return {};
@@ -469,12 +512,16 @@ std::future<bool> TaskSystem::submit_batch(std::vector<TaskDescription> tasks,
         return ready.get_future();
     }
     return impl_->submit([this, tasks = std::move(tasks), submitted = Clock::now()]
-                          { return impl_->execute_batch(tasks, submitted); }, priority);
+                          {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return impl_->execute_batch(tasks, submitted);
+    }, priority);
 }
 
 bool TaskSystem::submit(std::string name, std::function<bool()> task,
                         std::function<void(bool)> completed, TaskPriority priority)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!impl_->on_owner())
     {
         return false;
@@ -489,7 +536,10 @@ bool TaskSystem::submit(std::string name, std::function<bool()> task,
     submission->callback = std::move(completed);
     submission->execute =
         [this, name = std::move(name), task = std::move(task), priority, submitted = Clock::now()]
-        { return impl_->execute_task(name, task, priority, submitted); };
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return impl_->execute_task(name, task, priority, submitted);
+        };
     if (!impl_->enqueue(submission, priority))
     {
         impl_->error = "task domain is closed or its pending budget is exhausted";
@@ -500,6 +550,7 @@ bool TaskSystem::submit(std::string name, std::function<bool()> task,
 
 bool TaskSystem::enqueue(std::string name, std::function<void()> task, TaskPriority priority)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!task || !valid_priority(priority))
     {
         return false;
@@ -508,7 +559,12 @@ bool TaskSystem::enqueue(std::string name, std::function<void()> task, TaskPrior
     submission->execute =
         [this, name = std::move(name), task = std::move(task), priority, submitted = Clock::now()]
         {
-            return impl_->execute_task(name, [&] { task(); return true; }, priority, submitted);
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return impl_->execute_task(name, [&]
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                task(); return true;
+            }, priority, submitted);
         };
     return impl_->enqueue(submission, priority);
 }
@@ -547,7 +603,10 @@ std::size_t TaskSystem::dispatch_completions(std::size_t max_count, double max_s
             impl_->ready.pop_front();
             --impl_->outstanding;
         }
-        completion.callback(completion.success);
+        {
+            ENGINE_PROFILE_ZONE("Task.completionCallback");
+            completion.callback(completion.success);
+        }
         ++count;
     }
     impl_->dispatching = false;
@@ -556,6 +615,7 @@ std::size_t TaskSystem::dispatch_completions(std::size_t max_count, double max_s
 
 bool TaskSystem::run(const std::vector<TaskDescription>& tasks)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto future = submit_batch(tasks);
     if (!future.valid())
     {
@@ -571,6 +631,7 @@ bool TaskSystem::run(const std::vector<TaskDescription>& tasks)
 
 bool TaskSystem::wait()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!impl_->on_owner() || !impl_->accepting)
     {
         return false;
@@ -581,11 +642,13 @@ bool TaskSystem::wait()
 
 std::size_t TaskSystem::max_concurrency() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return impl_->config.max_concurrency;
 }
 
 const std::string& TaskSystem::last_error() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return impl_->error;
 }
 

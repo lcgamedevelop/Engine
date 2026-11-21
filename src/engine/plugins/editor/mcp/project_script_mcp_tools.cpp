@@ -1,4 +1,6 @@
 #include "plugins/editor/mcp/project_script_mcp_tools.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "editor/asset_pipeline/asset_io.hpp"
 #include "editor/asset_pipeline/editor_tools.hpp"
@@ -26,6 +28,7 @@ constexpr std::size_t script_limit = 256 * 1024;
 
 bool fail(Json& result, std::string error)
 {
+    ENGINE_PROFILE_FUNCTION();
     result = {{"error", std::move(error)}};
     return false;
 }
@@ -33,6 +36,7 @@ bool fail(Json& result, std::string error)
 bool execute(EditorMcpTools& editor, const fs::path& project, const McpTarget& target,
              const Json& arguments, Json& result)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!arguments.is_object() || arguments.size() < 4 || arguments.size() > 5 ||
         !arguments.contains("session") || !arguments["session"].is_string() ||
         !arguments.contains("runId") || !arguments["runId"].is_string() ||
@@ -113,6 +117,7 @@ bool execute(EditorMcpTools& editor, const fs::path& project, const McpTarget& t
 bool register_project_script_tools(McpSystem& system, EditorMcpTools& editor,
                                    const fs::path& project_root, const McpTarget& target)
 {
+    ENGINE_PROFILE_FUNCTION();
     return system.register_tool(
         {"execute_project_script",
          "Compile temporary TypeScript and call its default(args, gameplay) in the matching "
@@ -128,6 +133,9 @@ bool register_project_script_tools(McpSystem& system, EditorMcpTools& editor,
           {"required", {"session", "runId", "sourcePath", "source"}},
           {"additionalProperties", false}},
          [&editor, project_root, target](const Json& arguments, Json& result)
-         { return execute(editor, project_root, target, arguments, result); }});
+         {
+             ENGINE_PROFILE_FUNCTION_PROBE();
+             return execute(editor, project_root, target, arguments, result);
+         }});
 }
 } // namespace engine::plugins::mcp

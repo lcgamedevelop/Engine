@@ -1,4 +1,6 @@
 #include "runtime/render/rvt/virtual_texture_cache.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include <algorithm>
 #include <bit>
 #include <cmath>
@@ -8,6 +10,7 @@ namespace engine::render_detail
 {
 bool VirtualTextureCache::configure(const schema::RvtSettingsT& settings)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid_rvt_settings(settings))
     {
         return false;
@@ -25,11 +28,13 @@ bool VirtualTextureCache::configure(const schema::RvtSettingsT& settings)
 }
 std::uint8_t VirtualTextureCache::maximum_mip() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return static_cast<std::uint8_t>(
         std::bit_width(settings_.virtual_resolution / settings_.page_size) - 1);
 }
 Bounds3 VirtualTextureCache::bounds(RvtPageKey key) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const double n = double(settings_.virtual_resolution / settings_.page_size) / (1U << key.mip);
     const auto& low = settings_.bounds.minimum();
     const auto& high = settings_.bounds.maximum();
@@ -39,6 +44,7 @@ Bounds3 VirtualTextureCache::bounds(RvtPageKey key) const noexcept
 }
 void VirtualTextureCache::begin_frame(std::uint64_t device, std::uint32_t frame) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (device_ != device)
     {
         pages_.clear();
@@ -52,6 +58,7 @@ void VirtualTextureCache::begin_frame(std::uint64_t device, std::uint32_t frame)
 }
 bool VirtualTextureCache::request(const RvtPageDemand& request)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!configured_ || request.mip > maximum_mip())
     {
         return false;
@@ -74,7 +81,10 @@ bool VirtualTextureCache::request(const RvtPageDemand& request)
     {
         const auto count = (settings_.virtual_resolution / settings_.page_size) >> mip;
         const auto cell = [&](double value, double origin, double size)
-        { return std::clamp(int(std::floor((value - origin) / size * count)), 0, int(count) - 1); };
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return std::clamp(int(std::floor((value - origin) / size * count)), 0, int(count) - 1);
+        };
         const auto x0 = cell(a.x(), low.x(), high.x() - low.x()),
                    x1 = cell(b.x(), low.x(), high.x() - low.x());
         const auto y0 = cell(a.z(), low.z(), high.z() - low.z()),
@@ -93,7 +103,11 @@ bool VirtualTextureCache::request(const RvtPageDemand& request)
     }
     std::vector<RvtPageKey> next(wanted.begin(), wanted.end());
     std::sort(next.begin(), next.end(),
-              [](auto a, auto b) { return a.mip != b.mip ? a.mip > b.mip : a < b; });
+              [](auto a, auto b)
+              {
+                  ENGINE_PROFILE_FUNCTION_PROBE();
+                  return a.mip != b.mip ? a.mip > b.mip : a < b;
+              });
     if (next != demand_ || view_ != request.view_identity)
     {
         ++demand_revision_;
@@ -112,10 +126,12 @@ bool VirtualTextureCache::request(const RvtPageDemand& request)
 }
 void VirtualTextureCache::invalidate(const Bounds3& dirty, std::uint64_t revision)
 {
+    ENGINE_PROFILE_FUNCTION();
     bool changed = false;
     std::erase_if(pages_,
                   [&](const auto& entry)
                   {
+                      ENGINE_PROFILE_FUNCTION_PROBE();
                       const auto area = bounds(entry.first);
                       if (area.maximum().x() <= dirty.minimum().x() ||
                           area.minimum().x() >= dirty.maximum().x() ||
@@ -136,6 +152,7 @@ void VirtualTextureCache::invalidate(const Bounds3& dirty, std::uint64_t revisio
 }
 SceneWorkState VirtualTextureCache::prepare(const SceneWorkBudget& budget)
 {
+    ENGINE_PROFILE_FUNCTION();
     batch_ = {};
     batch_.device_generation = device_;
     batch_.demand_revision = demand_revision_;
@@ -165,7 +182,10 @@ SceneWorkState VirtualTextureCache::prepare(const SceneWorkBudget& budget)
                 continue;
             }
             const auto occupant = std::find_if(pages_.begin(), pages_.end(), [&](const auto& value)
-                                               { return value.second.slot == slot; });
+                                               {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return value.second.slot == slot;
+            });
             if (occupant != pages_.end() &&
                 std::find(demand_.begin(), demand_.end(), occupant->first) != demand_.end())
             {
@@ -185,17 +205,26 @@ SceneWorkState VirtualTextureCache::prepare(const SceneWorkBudget& budget)
         {
             break;
         }
-        std::erase_if(pages_, [&](const auto& value) { return value.second.slot == selected; });
+        std::erase_if(pages_, [&](const auto& value)
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return value.second.slot == selected;
+        });
         ++cache_revision_;
         used.insert(selected);
         batch_.pages.push_back({key, selected, ++versions_[selected]});
     }
     const bool ready =
-        std::all_of(demand_.begin(), demand_.end(), [&](auto key) { return pages_.contains(key); });
+        std::all_of(demand_.begin(), demand_.end(), [&](auto key)
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return pages_.contains(key);
+        });
     return ready ? SceneWorkState::ready : SceneWorkState::working;
 }
 bool VirtualTextureCache::publish(const RvtPageBatch& batch)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (batch.device_generation != device_ || batch.demand_revision != demand_revision_)
     {
         return false;
@@ -220,6 +249,7 @@ bool VirtualTextureCache::publish(const RvtPageBatch& batch)
 }
 bool VirtualTextureCache::status(RvtStatus& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     output.requested = configured_ && settings_.enabled;
     output.device_generation = device_;
@@ -237,6 +267,7 @@ bool VirtualTextureCache::status(RvtStatus& output) const
 }
 void VirtualTextureCache::release() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     pages_.clear();
     demand_.clear();
     touched_.clear();

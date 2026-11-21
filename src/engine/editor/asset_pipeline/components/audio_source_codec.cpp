@@ -1,4 +1,5 @@
 #include "editor/asset_pipeline/components/audio_source_codec.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/scene/audio_source.hpp"
 #include <array>
 #include <utility>
@@ -6,14 +7,17 @@ namespace engine::editor::asset_pipeline
 {
 schema::ComponentPayload AudioSourceCodec::type() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::ComponentPayload::AudioSourceData;
 }
 std::string_view AudioSourceCodec::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "audio_source";
 }
 bool AudioSourceCodec::validate(const schema::ComponentDataT& component, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* value = component.payload.AsAudioSourceData();
     if (value == nullptr || !engine::AudioSource::valid_settings(*value))
     {
@@ -25,6 +29,7 @@ bool AudioSourceCodec::validate(const schema::ComponentDataT& component, std::st
 bool AudioSourceCodec::read(const toml::table& table, schema::ComponentDataT& component,
                             std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     schema::AudioSourceDataT value;
     if (table.contains("clip"))
     {
@@ -103,12 +108,14 @@ bool AudioSourceCodec::read(const toml::table& table, schema::ComponentDataT& co
 }
 std::span<const std::string_view> AudioSourceCodec::resource_fields() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     static constexpr std::string_view fields[]{"clip"};
     return fields;
 }
 
 void AudioSourceCodec::write(const schema::ComponentDataT& component, toml::table& table) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* value = component.payload.AsAudioSourceData();
     table.insert("type", "audio_source");
     table.insert("clip", value->clip_guid);

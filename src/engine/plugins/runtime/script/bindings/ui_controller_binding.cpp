@@ -1,4 +1,5 @@
 #include "plugins/runtime/script/bindings/ui_controller_binding.hpp"
+#include "runtime/performance/profiling.hpp"
 
 namespace engine::plugins::script::bindings
 {
@@ -156,16 +157,19 @@ bindingCleanupHooks.push(clearUiControllers);
 
 std::string_view UiControllerBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "UiController";
 }
 
 std::string_view UiControllerBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 
 bool UiControllerBinding::register_functions(vm::ScriptVm&) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return true;
 }
 

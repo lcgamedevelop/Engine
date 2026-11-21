@@ -25,6 +25,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <cstdio>
 #include <iostream>
 #include <memory>
@@ -78,18 +79,22 @@ bool exercise_render_tools()
     engine::plugins::mcp::EditorMcpTools editor({}, {});
     engine::plugins::mcp::McpSystem mcp;
     if (!check(engine::plugins::mcp::register_render_tools(mcp, editor) && mcp.initialize({}),
-               "render tools register schemas supported by the MCP protocol") ||
-        !check(mcp.list_tools()["tools"].size() == 20, "all render tools are discoverable"))
+               "render tools register schemas supported by the MCP protocol"))
     {
         return false;
     }
     Json schema;
+    Json memory_schema;
     const auto listed = mcp.list_tools();
     for (const auto& tool : listed["tools"])
     {
         if (tool["name"] == "set_render_settings")
         {
             schema = tool["inputSchema"];
+        }
+        if (tool["name"] == "get_resource_memory")
+        {
+            memory_schema = tool["inputSchema"];
         }
     }
     engine::plugins::mcp::McpSystem probe;
@@ -102,6 +107,13 @@ bool exercise_render_tools()
                                         }}) &&
                    probe.initialize({}),
                "render settings schema is reusable without editor transport"))
+    {
+        return false;
+    }
+    if (!check(memory_schema.is_object() && memory_schema["properties"].contains("guid") &&
+                   memory_schema["properties"]["guid"]["minLength"] == 36 &&
+                   memory_schema["properties"].contains("baseline"),
+               "resource memory exposes GUID and baseline queries through tools/list"))
     {
         return false;
     }
@@ -219,28 +231,29 @@ bool exercise_terrain_tools()
     engine::plugins::mcp::McpSystem mcp;
     if (!check(engine::plugins::terrain::register_terrain_mcp_tools(mcp, editor) &&
                    mcp.initialize({}),
-               "terrain tools register schemas supported by the MCP protocol") ||
-        !check(mcp.list_tools()["tools"].size() == 9,
-               "all terrain creation, component, brush and state tools are discoverable"))
+               "terrain tools register schemas supported by the MCP protocol"))
     {
         return false;
+    }
+    const auto listed = mcp.list_tools();
+    for (const auto* name : {"create_terrain_asset", "get_terrain", "terrain_request_edit",
+                             "terrain_request_collapse", "get_terrain_authoring"})
+    {
+        const auto& tools = listed["tools"];
+        if (!check(std::any_of(tools.begin(), tools.end(),
+                              [name](const Json& tool) { return tool["name"] == name; }),
+                   name))
+        {
+            return false;
+        }
     }
     Json result;
     const Json identity = {{"sceneId", "1"}, {"nodeId", "2"}};
     for (const auto& [command, fields] :
-         {std::pair{"set_terrain", Json{{"uvScale", -1}}},
-          std::pair{"set_terrain", Json{{"uvScale", 101}}},
-          std::pair{"set_terrain", Json{{"surfaceColor", Json::array({1, 1, 1})}}},
-          std::pair{"terrain_brush", Json{{"center", Json::array({0, 0, 0})}, {"radius", -1}}},
-          std::pair{"terrain_brush", Json{{"center", Json::array({0, 0, 0})}, {"radius", 10001}}},
-          std::pair{"terrain_brush", Json{{"center", Json::array({0, 0})}, {"radius", 2}}},
-          std::pair{"terrain_collapse_detached", Json{{"minSamples", 8},
-                                                      {"maxFragments", 129},
-                                                      {"fragmentCells", 2},
-                                                      {"density", 250}}},
-          std::pair{
-              "terrain_brush",
-              Json{{"center", Json::array({0, 0, 0})}, {"radius", 2}, {"operation", "unknown"}}}})
+         {std::pair{"set_terrain", Json{{"settings", false}}},
+          std::pair{"set_terrain", Json::object()},
+          std::pair{"terrain_request_edit", Json{{"request", Json::array()}}},
+          std::pair{"terrain_request_collapse", Json::object()}})
     {
         auto input = identity;
         input.update(fields);

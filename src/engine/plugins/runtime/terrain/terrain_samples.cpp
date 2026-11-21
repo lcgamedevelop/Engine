@@ -1,4 +1,6 @@
 #include "plugins/runtime/terrain/terrain_samples.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include <algorithm>
 #include <limits>
@@ -11,6 +13,7 @@ namespace engine::plugins::terrain
 bool TerrainRegionLess::operator()(const TerrainRegionKey& a,
                                    const TerrainRegionKey& b) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::tuple{a.lod(), a.x(), a.y(), a.z()} < std::tuple{b.lod(), b.x(), b.y(), b.z()};
 }
 namespace terrain_detail
@@ -18,6 +21,7 @@ namespace terrain_detail
 schema::TerrainLayerSample blend_layers(const schema::TerrainLayerSample& a,
                                         const schema::TerrainLayerSample& b, double weight)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::map<std::uint32_t, double> values;
     for (const auto& [sample, scale] : {std::pair{a, 1 - weight}, std::pair{b, weight}})
     {
@@ -31,7 +35,10 @@ schema::TerrainLayerSample blend_layers(const schema::TerrainLayerSample& a,
     }
     std::vector<std::pair<std::uint32_t, double>> sorted(values.begin(), values.end());
     std::sort(sorted.begin(), sorted.end(), [](const auto& a, const auto& b)
-              { return a.second != b.second ? a.second > b.second : a.first < b.first; });
+              {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return a.second != b.second ? a.second > b.second : a.first < b.first;
+    });
     sorted.resize(4);
     const auto sum = sorted[0].second + sorted[1].second + sorted[2].second + sorted[3].second;
     return {sorted[0].first,
@@ -43,21 +50,25 @@ schema::TerrainLayerSample blend_layers(const schema::TerrainLayerSample& a,
 }
 bool finite(const Vec3& v) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::isfinite(v.x()) && std::isfinite(v.y()) && std::isfinite(v.z());
 }
 bool valid_bounds(const Bounds3& b) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return finite(b.minimum()) && finite(b.maximum()) && b.minimum().x() < b.maximum().x() &&
            b.minimum().y() < b.maximum().y() && b.minimum().z() < b.maximum().z();
 }
 bool intersects(const Bounds3& a, const Bounds3& b) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return a.minimum().x() < b.maximum().x() && b.minimum().x() < a.maximum().x() &&
            a.minimum().y() < b.maximum().y() && b.minimum().y() < a.maximum().y() &&
            a.minimum().z() < b.maximum().z() && b.minimum().z() < a.maximum().z();
 }
 Bounds3 region_bounds(const schema::TerrainAssetDataT& source, TerrainRegionKey key) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto size = std::ldexp(source.voxel_size * source.block_cells, key.lod());
     const Vec3 minimum{source.origin.x() + key.x() * size, source.origin.y() + key.y() * size,
                        source.origin.z() + key.z() * size};
@@ -66,14 +77,19 @@ Bounds3 region_bounds(const schema::TerrainAssetDataT& source, TerrainRegionKey 
 const schema::TerrainRegionEntryT* entry(const schema::TerrainAssetDataT& source,
                                          TerrainRegionKey key) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto found = std::lower_bound(source.regions.begin(), source.regions.end(), key,
                                         [](const auto& value, const auto& key)
-                                        { return TerrainRegionLess{}(value->key, key); });
+                                        {
+                                            ENGINE_PROFILE_FUNCTION_PROBE();
+                                            return TerrainRegionLess{}(value->key, key);
+                                        });
     return found != source.regions.end() && (*found)->key == key ? found->get() : nullptr;
 }
 bool enumerate(const schema::TerrainAssetDataT& source, const Bounds3& bounds, std::uint8_t lod,
                std::size_t limit, std::vector<TerrainRegionKey>& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     if (!valid_bounds(bounds) || lod > 15 || limit == 0 || limit > 65536)
     {
@@ -126,6 +142,7 @@ bool enumerate(const schema::TerrainAssetDataT& source, const Bounds3& bounds, s
 }
 bool layer_valid(const schema::TerrainLayerSample& value, std::size_t layer_count) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const std::array<std::uint32_t, 4> ids{value.layer0(), value.layer1(), value.layer2(),
                                            value.layer3()};
     const auto& w = value.weights();
@@ -144,6 +161,7 @@ bool layer_valid(const schema::TerrainLayerSample& value, std::size_t layer_coun
 }
 bool resident(const TerrainReadSnapshot& input, TerrainRegionKey key) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!input.source)
     {
         return false;
@@ -163,6 +181,7 @@ bool resident(const TerrainReadSnapshot& input, TerrainRegionKey key) noexcept
 bool sample(const TerrainReadSnapshot& input, std::int64_t x, std::int64_t y, std::int64_t z,
             std::uint8_t lod, float& density, schema::TerrainLayerSample* layer) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     density = 0;
     if (layer)
     {
@@ -175,10 +194,17 @@ bool sample(const TerrainReadSnapshot& input, std::int64_t x, std::int64_t y, st
     const auto& source = *input.source;
     const auto cells = static_cast<std::int64_t>(source.block_cells);
     const auto divide = [cells](std::int64_t value)
-    { return value / cells - (value % cells < 0 ? 1 : 0); };
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return value / cells - (value % cells < 0 ? 1 : 0);
+    };
     const std::array<std::int64_t, 3> block{divide(x), divide(y), divide(z)};
     if (std::any_of(block.begin(), block.end(),
-                    [](auto v) { return v < INT32_MIN || v > INT32_MAX; }))
+                    [](auto v)
+                    {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
+                        return v < INT32_MIN || v > INT32_MAX;
+                    }))
     {
         return false;
     }
@@ -226,6 +252,7 @@ bool sample(const TerrainReadSnapshot& input, std::int64_t x, std::int64_t y, st
 bool materialize_block(const TerrainReadSnapshot& input, TerrainRegionKey key,
                        schema::TerrainBlockDataT& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     output.key = key;
     const auto cells = input.source->block_cells;
@@ -255,6 +282,7 @@ bool materialize_block(const TerrainReadSnapshot& input, TerrainRegionKey key,
 
 bool propagate_lods(const TerrainReadSnapshot& input, TerrainDelta& candidate, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto cells = input.source->block_cells;
     std::set<TerrainRegionKey, TerrainRegionLess> changed;
     for (auto key : candidate.changed)
@@ -273,6 +301,7 @@ bool propagate_lods(const TerrainReadSnapshot& input, TerrainDelta& candidate, s
             const std::int64_t divisor = std::int64_t{1} << lod;
             const auto parent = [divisor](std::int32_t coordinate)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 return static_cast<std::int32_t>(coordinate / divisor -
                                                  (coordinate % divisor < 0 ? 1 : 0));
             };
@@ -306,6 +335,7 @@ bool propagate_lods(const TerrainReadSnapshot& input, TerrainDelta& candidate, s
                     const std::int64_t sz = (std::int64_t(key.z()) * cells + z) * scale;
                     const auto owner = [cells](std::int64_t coordinate)
                     {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
                         return static_cast<std::int32_t>(coordinate / cells -
                                                          (coordinate % cells < 0 ? 1 : 0));
                     };

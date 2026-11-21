@@ -1,4 +1,5 @@
 #include "plugins/editor/asset_import/fbx_authoring.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/resource/codecs/skeleton_resource_codec.hpp"
 
@@ -17,6 +18,7 @@ namespace
 bool fields(const toml::table& entry, std::initializer_list<std::string_view> allowed,
             std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (const auto& [key, unused] : entry)
     {
         (void)unused;
@@ -31,6 +33,7 @@ bool fields(const toml::table& entry, std::initializer_list<std::string_view> al
 
 bool text(const toml::table& entry, const char* field, std::string& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto value = entry[field].value<std::string>();
     if (!value || value->empty() || value->size() > 1024 || value->find('\0') != std::string::npos)
     {
@@ -42,6 +45,7 @@ bool text(const toml::table& entry, const char* field, std::string& output)
 
 bool number(const toml::table& entry, const char* field, float& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!entry.contains(field))
     {
         return true;
@@ -58,6 +62,7 @@ bool number(const toml::table& entry, const char* field, float& output)
 template <std::size_t Size>
 bool numbers(const toml::table& entry, const char* field, std::array<float, Size>& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!entry.contains(field))
     {
         return true;
@@ -82,11 +87,13 @@ bool numbers(const toml::table& entry, const char* field, std::array<float, Size
 
 schema::Vec3 vector(const std::array<float, 3>& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     return {value[0], value[1], value[2]};
 }
 
 bool order(const toml::table& entry, std::uint16_t& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!entry.contains("order"))
     {
         return true;
@@ -102,6 +109,7 @@ bool order(const toml::table& entry, std::uint16_t& output)
 
 bool socket(const toml::table& entry, FbxDocument& document, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = std::make_unique<schema::SkeletonSocketDataT>();
     std::array<float, 3> translation{}, scale{1, 1, 1};
     std::array<float, 4> rotation{0, 0, 0, 1};
@@ -120,6 +128,7 @@ bool socket(const toml::table& entry, FbxDocument& document, std::string& error)
 
 bool aim(const toml::table& entry, FbxDocument& document, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = std::make_unique<schema::SkeletonAimIkDataT>();
     std::array<float, 3> forward{0, 0, 1}, up{0, 1, 0}, offset{};
     if (!fields(entry, {"name", "joint_path", "order", "forward_joint", "up_joint", "offset_joint"},
@@ -139,6 +148,7 @@ bool aim(const toml::table& entry, FbxDocument& document, std::string& error)
 
 bool two_bone(const toml::table& entry, FbxDocument& document, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = std::make_unique<schema::SkeletonTwoBoneIkDataT>();
     std::array<float, 3> axis{0, 0, 1};
     if (!fields(entry,
@@ -160,6 +170,7 @@ bool two_bone(const toml::table& entry, FbxDocument& document, std::string& erro
 
 bool event(const toml::table& entry, FbxDocument& document, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = std::make_unique<schema::AnimationEventMarkerDataT>();
     std::string animation;
     const auto id = entry["marker_id"].value<std::int64_t>();
@@ -222,6 +233,7 @@ bool event(const toml::table& entry, FbxDocument& document, std::string& error)
 
 bool read_animation_authoring(const toml::table& meta, FbxDocument& document, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     document.skeleton_authoring = {};
     document.animation_authoring.clear();
     document.authoring_settings.clear();
@@ -270,6 +282,7 @@ bool read_animation_authoring(const toml::table& meta, FbxDocument& document, st
 
 bool validate_animation_authoring(const FbxDocument& document, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto& rig = document.skeleton_authoring;
     const bool has_rig = !rig.sockets.empty() || !rig.aim_ik.empty() || !rig.two_bone_ik.empty();
     if (has_rig)

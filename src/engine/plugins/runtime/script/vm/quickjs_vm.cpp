@@ -1,5 +1,8 @@
 #include "plugins/runtime/script/vm/script_vm.hpp"
 #include "plugins/runtime/script/vm/text_encoding.hpp"
+#include "runtime/performance/memory_profiling.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include <quickjs.h>
 
@@ -19,25 +22,55 @@ namespace engine::plugins::script::vm
 {
 namespace
 {
+#if defined(ENGINE_ENABLE_MEMORY_PROFILING)
+using memory_profile::BackingAllocation;
+constexpr auto quickjs_pool = memory_profile::Pool::quickjs;
+constexpr JSMallocFunctions tracked_malloc{
+    [](void*, std::size_t count, std::size_t size) -> void*
+    {
+        if (size == 0 || count > std::numeric_limits<std::size_t>::max() / size)
+        {
+            return nullptr;
+        }
+        return BackingAllocation::allocate_block(quickjs_pool, count * size, true);
+    },
+    [](void*, std::size_t size) -> void*
+    { return BackingAllocation::allocate_block(quickjs_pool, size); },
+    [](void*, void* address) { BackingAllocation::free_block(quickjs_pool, address); },
+    [](void*, void* address, std::size_t size) -> void*
+    { return BackingAllocation::reallocate_block(quickjs_pool, address, size); },
+#if defined(ENGINE_QUICKJS_NO_MALLOC_USABLE_SIZE)
+    // Keep the pinned QuickJS allocator's Web GC accounting independent of the profiler.
+    nullptr,
+#else
+    &BackingAllocation::capacity,
+#endif
+};
+#endif
+
 // 本地拥有的 JSValue 与所在 Context 配对，不能逃出虚拟机生命周期。
 class Value final
 {
 public:
     Value(JSContext* context, JSValue value) noexcept : context_(context), value_(value)
     {
+        ENGINE_PROFILE_FUNCTION();
     }
     ~Value() noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         JS_FreeValue(context_, value_);
     }
     Value(const Value&) = delete;
     Value& operator=(const Value&) = delete;
     [[nodiscard]] JSValueConst get() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         return value_;
     }
     [[nodiscard]] JSValue release() noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         return std::exchange(value_, JS_UNDEFINED);
     }
 
@@ -48,6 +81,7 @@ private:
 
 std::string value_text(JSContext* context, JSValueConst value)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::size_t length = 0;
     const char* text = JS_ToCStringLen(context, &length, value);
     if (text == nullptr)
@@ -61,9 +95,11 @@ std::string value_text(JSContext* context, JSValueConst value)
 
 JSValue native_value(JSContext* context, const NativeValue& input)
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::visit(
         [context](const auto& value) -> JSValue
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             using T = std::decay_t<decltype(value)>;
             if constexpr (std::is_same_v<T, std::monostate>)
             {
@@ -147,35 +183,43 @@ public:
                      std::int32_t data) noexcept
         : context_(context), count_(count), values_(values), owner_(owner), data_(data)
     {
+        ENGINE_PROFILE_FUNCTION();
     }
     QuickJsArguments(const QuickJsArguments&) = delete;
     QuickJsArguments& operator=(const QuickJsArguments&) = delete;
     ~QuickJsArguments() noexcept override
     {
+        ENGINE_PROFILE_FUNCTION();
         JS_FreeValue(context_, result_);
     }
     [[nodiscard]] int count() const noexcept override
     {
+        ENGINE_PROFILE_FUNCTION();
         return count_;
     }
     [[nodiscard]] void* owner() const noexcept override
     {
+        ENGINE_PROFILE_FUNCTION();
         return owner_;
     }
     [[nodiscard]] std::int32_t data() const noexcept override
     {
+        ENGINE_PROFILE_FUNCTION();
         return data_;
     }
     [[nodiscard]] bool is_boolean(int index) const override
     {
+        ENGINE_PROFILE_FUNCTION();
         return in_range(index) && JS_IsBool(values_[index]);
     }
     [[nodiscard]] bool boolean(int index) const override
     {
+        ENGINE_PROFILE_FUNCTION();
         return is_boolean(index) && JS_ToBool(context_, values_[index]) == 1;
     }
     [[nodiscard]] bool is_int32(int index) const override
     {
+        ENGINE_PROFILE_FUNCTION();
         double value = 0.0;
         return number(index, value) && value == std::trunc(value) &&
                value >= std::numeric_limits<std::int32_t>::min() &&
@@ -183,6 +227,7 @@ public:
     }
     [[nodiscard]] std::int32_t integer(int index) const override
     {
+        ENGINE_PROFILE_FUNCTION();
         std::int32_t value = 0;
         if (is_int32(index))
         {
@@ -192,12 +237,14 @@ public:
     }
     [[nodiscard]] bool is_uint32(int index) const override
     {
+        ENGINE_PROFILE_FUNCTION();
         double value = 0.0;
         return number(index, value) && value == std::trunc(value) && value >= 0 &&
                value <= std::numeric_limits<std::uint32_t>::max();
     }
     [[nodiscard]] std::uint32_t unsigned_integer(int index) const override
     {
+        ENGINE_PROFILE_FUNCTION();
         std::uint32_t value = 0;
         if (is_uint32(index))
         {
@@ -207,6 +254,7 @@ public:
     }
     [[nodiscard]] bool identifier(int index, std::uint64_t& output) const override
     {
+        ENGINE_PROFILE_FUNCTION();
         output = 0;
         if (!in_range(index) || !JS_IsBigInt(values_[index]))
         {
@@ -225,6 +273,7 @@ public:
     }
     [[nodiscard]] bool number(int index, double& output) const override
     {
+        ENGINE_PROFILE_FUNCTION();
         output = 0.0;
         double value = 0.0;
         if (!in_range(index) || !JS_IsNumber(values_[index]) ||
@@ -237,6 +286,7 @@ public:
     }
     [[nodiscard]] bool text(int index, std::string& output) const override
     {
+        ENGINE_PROFILE_FUNCTION();
         output.clear();
         if (!in_range(index) || !JS_IsString(values_[index]))
         {
@@ -271,6 +321,7 @@ public:
     }
     bool bytes(int index, ByteBuffer& output) const override
     {
+        ENGINE_PROFILE_FUNCTION();
         output.clear();
         if (!in_range(index) || JS_GetTypedArrayType(values_[index]) != JS_TYPED_ARRAY_UINT8)
         {
@@ -308,23 +359,27 @@ public:
     }
     void set_return(const NativeValue& value) const override
     {
+        ENGINE_PROFILE_FUNCTION();
         JS_FreeValue(context_, result_);
         result_ = native_value(context_, value);
     }
     void type_error(std::string_view message) const override
     {
+        ENGINE_PROFILE_FUNCTION();
         JS_FreeValue(context_, result_);
         result_ =
             JS_ThrowTypeError(context_, "%.*s", static_cast<int>(message.size()), message.data());
     }
     [[nodiscard]] JSValue release() noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         return std::exchange(result_, JS_UNDEFINED);
     }
 
 private:
     [[nodiscard]] bool in_range(int index) const noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         return index >= 0 && index < count_;
     }
     JSContext* context_;
@@ -345,6 +400,7 @@ public:
     QuickJsVm& operator=(QuickJsVm&&) = delete;
     ~QuickJsVm() noexcept override
     {
+        ENGINE_PROFILE_FUNCTION();
         if (context_ != nullptr)
         {
             JS_SetContextOpaque(context_, nullptr);
@@ -369,12 +425,17 @@ public:
 
     [[nodiscard]] bool initialize(void* owner) override
     {
+        ENGINE_PROFILE_FUNCTION();
         if (runtime_ != nullptr)
         {
             return fail("Script virtual machine is already initialized");
         }
         owner_ = owner;
+#if defined(ENGINE_ENABLE_MEMORY_PROFILING)
+        runtime_ = JS_NewRuntime2(&tracked_malloc, nullptr);
+#else
         runtime_ = JS_NewRuntime();
+#endif
         if (runtime_ == nullptr)
         {
             return fail("Cannot create QuickJS runtime");
@@ -395,6 +456,7 @@ public:
     [[nodiscard]] bool function(std::string_view name, NativeCallback callback,
                                 std::int32_t data) override
     {
+        ENGINE_PROFILE_FUNCTION();
         if (!can_register() || callback == nullptr ||
             functions_.size() >= static_cast<std::size_t>(INT32_MAX))
         {
@@ -406,6 +468,7 @@ public:
     }
     [[nodiscard]] bool integer(std::string_view name, std::int32_t value) override
     {
+        ENGINE_PROFILE_FUNCTION();
         if (!can_register())
         {
             return fail("Native constant registration requires an unsealed initialized VM");
@@ -414,6 +477,7 @@ public:
     }
     [[nodiscard]] bool string(std::string_view name, std::string_view value) override
     {
+        ENGINE_PROFILE_FUNCTION();
         if (!can_register() || value.size() > maximum_text_size)
         {
             return fail("Native string exceeds the size limit");
@@ -422,6 +486,7 @@ public:
     }
     [[nodiscard]] bool seal_bindings() override
     {
+        ENGINE_PROFILE_FUNCTION();
         if (!can_register() || JS_PreventExtensions(context_, native_) < 0)
         {
             return fail("Cannot freeze native bindings");
@@ -438,6 +503,7 @@ public:
 
     [[nodiscard]] bool prepare(std::string_view entry, SourceLoader loader) override
     {
+        ENGINE_PROFILE_FUNCTION();
         if (!sealed_ || !modules_.empty() || !loader || entry.empty())
         {
             return fail("Invalid gameplay preparation state");
@@ -465,6 +531,7 @@ public:
 
     [[nodiscard]] bool start() override
     {
+        ENGINE_PROFILE_FUNCTION();
         error_.clear();
         const auto module = modules_.find(entry_);
         if (module == modules_.end() || evaluated_)
@@ -501,10 +568,12 @@ public:
     }
     [[nodiscard]] bool call_gameplay(std::string_view name, bool require_true) override
     {
+        ENGINE_PROFILE_FUNCTION();
         return call(gameplay_, name, require_true);
     }
     [[nodiscard]] bool call_binding(std::string_view name) override
     {
+        ENGINE_PROFILE_FUNCTION();
         if (context_ == nullptr)
         {
             return fail("Script VM is not initialized");
@@ -523,6 +592,7 @@ public:
     }
     [[nodiscard]] bool drain_jobs() override
     {
+        ENGINE_PROFILE_FUNCTION();
         if (runtime_ == nullptr || context_ == nullptr)
         {
             return fail("Script VM is not initialized");
@@ -545,6 +615,7 @@ public:
     [[nodiscard]] bool execute_script(const ProjectScriptRequest& request,
                                       std::string& result_json) override
     {
+        ENGINE_PROFILE_FUNCTION();
         result_json.clear();
         error_.clear();
         if (context_ == nullptr || !evaluated_ || !JS_IsObject(gameplay_) || script_executing_ ||
@@ -594,10 +665,12 @@ public:
 
     [[nodiscard]] const std::string& last_error() const noexcept override
     {
+        ENGINE_PROFILE_FUNCTION();
         return error_;
     }
     [[nodiscard]] const std::vector<std::string>& loaded_modules() const noexcept override
     {
+        ENGINE_PROFILE_FUNCTION();
         return module_names_;
     }
 
@@ -606,6 +679,7 @@ private:
     static JSValue require_cached_module(JSContext* context, JSValueConst, int count,
                                          JSValueConst* values, int, JSValueConst* data)
     {
+        ENGINE_PROFILE_FUNCTION();
         auto* machine = static_cast<QuickJsVm*>(JS_GetContextOpaque(context));
         std::uint64_t serial = 0;
         if (machine == nullptr || !machine->script_executing_ || count != 1 ||
@@ -634,6 +708,7 @@ private:
 
     [[nodiscard]] bool can_register() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         return context_ != nullptr && !sealed_ && !JS_IsException(native_);
     }
 
@@ -645,11 +720,13 @@ private:
 
     [[nodiscard]] bool fail(std::string message)
     {
+        ENGINE_PROFILE_FUNCTION();
         error_ = std::move(message);
         return false;
     }
     [[nodiscard]] bool exception(std::string operation)
     {
+        ENGINE_PROFILE_FUNCTION();
         Value caught(context_, JS_GetException(context_));
         if (!JS_IsNull(caught.get()) && !JS_IsUndefined(caught.get()))
         {
@@ -667,6 +744,7 @@ private:
     }
     [[nodiscard]] bool define(std::string_view name, JSValue value)
     {
+        ENGINE_PROFILE_FUNCTION();
         Value owned(context_, value);
         if (sealed_ || name.empty() || name.find('\0') != std::string_view::npos ||
             JS_IsException(owned.get()))
@@ -687,6 +765,7 @@ private:
     }
     [[nodiscard]] JSValueConst compile(const std::string& path)
     {
+        ENGINE_PROFILE_FUNCTION();
         const auto found = modules_.find(path);
         if (found != modules_.end())
         {
@@ -713,10 +792,12 @@ private:
     }
     [[nodiscard]] JSValue module_namespace(JSValueConst module)
     {
+        ENGINE_PROFILE_FUNCTION();
         return JS_GetModuleNamespace(context_, static_cast<JSModuleDef*>(JS_VALUE_GET_PTR(module)));
     }
     [[nodiscard]] bool evaluate(JSValueConst module)
     {
+        ENGINE_PROFILE_FUNCTION();
         Value result(context_, JS_EvalFunction(context_, JS_DupValue(context_, module)));
         if (JS_IsException(result.get()))
         {
@@ -732,6 +813,7 @@ private:
     }
     [[nodiscard]] bool call(JSValueConst object, std::string_view name, bool require_true)
     {
+        ENGINE_PROFILE_FUNCTION();
         error_.clear();
         if (context_ == nullptr || !JS_IsObject(object))
         {
@@ -761,6 +843,7 @@ private:
     static JSValue invoke(JSContext* context, JSValueConst, int count, JSValueConst* values, int,
                           JSValueConst* data)
     {
+        ENGINE_PROFILE_FUNCTION();
         auto* machine = static_cast<QuickJsVm*>(JS_GetContextOpaque(context));
         std::int32_t index = -1;
         if (machine == nullptr || JS_ToInt32(context, &index, data[0]) < 0 || index < 0 ||
@@ -775,6 +858,7 @@ private:
     }
     static char* normalize(JSContext* context, const char* base, const char* name, void* opaque)
     {
+        ENGINE_PROFILE_FUNCTION();
         auto& machine = *static_cast<QuickJsVm*>(opaque);
         if (!machine.preparing_)
         {
@@ -801,6 +885,7 @@ private:
     }
     static int check_import_attributes(JSContext* context, void*, JSValueConst attributes)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (JS_IsUndefined(attributes))
         {
             return 0;
@@ -810,6 +895,7 @@ private:
     }
     static JSModuleDef* load(JSContext*, const char* name, void* opaque, JSValueConst)
     {
+        ENGINE_PROFILE_FUNCTION();
         auto& machine = *static_cast<QuickJsVm*>(opaque);
         const JSValueConst module = machine.compile(name);
         return JS_IsException(module) ? nullptr
@@ -818,10 +904,14 @@ private:
     static void rejection(JSContext* context, JSValueConst promise, JSValueConst reason,
                           bool handled, void* opaque)
     {
+        ENGINE_PROFILE_FUNCTION();
         auto& machine = *static_cast<QuickJsVm*>(opaque);
         const auto found = std::find_if(
             machine.rejections_.begin(), machine.rejections_.end(), [promise](const auto& rejected)
-            { return JS_VALUE_GET_PTR(rejected.first) == JS_VALUE_GET_PTR(promise); });
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return JS_VALUE_GET_PTR(rejected.first) == JS_VALUE_GET_PTR(promise);
+            });
         if (handled)
         {
             if (found != machine.rejections_.end())
@@ -864,6 +954,7 @@ private:
 
 std::unique_ptr<ScriptVm> create_script_vm()
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::make_unique<QuickJsVm>();
 }
 

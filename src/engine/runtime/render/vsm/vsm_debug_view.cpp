@@ -1,4 +1,6 @@
 #include "runtime/render/vsm/vsm_debug_view.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "fs_vsm_debug.bin.h"
 #include "runtime/font/font_system.hpp"
 #include "runtime/render/passes/clustered_lighting_pass.hpp"
@@ -16,13 +18,16 @@ namespace engine::render_detail
 {
 VsmDebugView::~VsmDebugView() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     release_gpu();
 }
 bool VsmDebugView::prepare_font(ResourceLoader& resources)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto prepare = [&](std::string_view path, ResourceReference& resource,
                              std::unique_ptr<ResourceLoad>& pending)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (resource)
         {
             return true;
@@ -60,6 +65,7 @@ bool VsmDebugView::draw(const VsmStatus& status, const VirtualShadowPass* pass,
                         const ClusteredLightingPass* lighting, const VsmDebugOptions& options,
                         const FrameOutput& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     const FontResource* font = nullptr;
     if (!font_ || !shader_ || font_.loader()->get(font_.handle(), font) != ResourceError::none)
     {
@@ -137,6 +143,7 @@ bool VsmDebugView::draw(const VsmStatus& status, const VirtualShadowPass* pass,
     const auto rectangle = [&](float left, float top, float size_x, float size_y, float mode,
                                bool available) -> bool
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         VsmGpuBinding binding;
         available = available && pass && lighting && pass->binding(binding);
         if (mode >= 0 && !available)
@@ -150,7 +157,10 @@ bool VsmDebugView::draw(const VsmStatus& status, const VirtualShadowPass* pass,
         bgfx::TransientVertexBuffer vertices;
         bgfx::allocTransientVertexBuffer(&vertices, 6, layout);
         const auto point = [&](float px, float py, float u, float v)
-        { return Vertex{px / width * 2 - 1, 1 - py / height * 2, 0, u, v}; };
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return Vertex{px / width * 2 - 1, 1 - py / height * 2, 0, u, v};
+        };
         const std::array data{point(left, top, 0, 0),
                               point(left, top + size_y, 0, 1),
                               point(left + size_x, top + size_y, 1, 1),
@@ -173,6 +183,7 @@ bool VsmDebugView::draw(const VsmStatus& status, const VirtualShadowPass* pass,
     };
     const auto text = [&](std::string_view value, float tx, float ty) -> bool
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         FontGeometry geometry;
         FontLayout settings;
         settings.size = 12 * scale;
@@ -233,6 +244,7 @@ bool VsmDebugView::draw(const VsmStatus& status, const VirtualShadowPass* pass,
 }
 void VsmDebugView::release_gpu() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (bgfx::isValid(program_))
     {
         bgfx::destroy(program_);

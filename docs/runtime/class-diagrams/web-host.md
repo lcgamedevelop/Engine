@@ -4,6 +4,8 @@
 
 [类图索引](../../class-diagrams/index.md) · [Web 导出](../../editor/class-diagrams/web-export.md) · [运行宿主](runtime-host.md) · [渲染系统](render-system.md)
 
+Wasm 构建分配线性内存与主线程启动栈，应用 worker 使用同样大小的独立栈。页面启动时预热应用 worker，日志、资源及其他 pthread worker 随模块的实际任务创建，并使用各自的默认栈。各容量由[构建配置](../../building.md#webgpu-游戏导出)提供。
+
 ## 最小改动与目录
 
 Web 适配不新增核心公开类、System 或项目脚本接口；既有平台参数增加 `web` 取值。新增两个 C++ 私有数据结构：`RuntimeAppState` 保存当前游戏入口已有的跨帧状态，`WebSurfaceState` 保活异步设备申请。存储增加一个私有文件发布函数；浏览器入口、存储桥和导出器使用模块函数。浏览器启动状态只记录页面装载与关闭，不复制 Gameplay、Scene、资源或任务状态。
@@ -185,10 +187,12 @@ RuntimeSettings、ResourceCatalog、MountList 均为现有类型。目录及挂�
 
 1. 平台异步申请 adapter／device，申请所选渲染能力需要且 adapter 支持的 features／limits；bgfx 按设备实际启用的能力报告 caps，不能将未启用功能报告为可用。
 2. bgfx 外部设备路径不得再次同步 requestAdapter／requestDevice。平台持有一个引用，bgfx 增加独立引用；先关闭 bgfx，再释放平台引用。
-3. Emscripten、Emdawnwebgpu、bgfx 补丁及桌面 shaderc／Tint 形成一组固定工具链。回读、编译完成等 API 仍须核对 Asyncify／JSPI 或非阻塞适配需求。实现第一步固定版本及必要选项，通过浏览器绘制／回读／退出门槛后再接入完整运行产物。
+3. Emscripten、Emdawnwebgpu、bgfx 补丁及桌面 shaderc／Tint 形成一组固定工具链。[GPU 回读](render-system.md#gpu-回读)由浏览器映射回调交付，等待读回期间应用 worker 继续执行。浏览器验证覆盖绘制、回读和退出。
 4. RenderSystem 同时补齐[通用暂缓传播](render-system.md#异步表面准备)：prepare_frame() 改用私有 FramePrepareStatus（ready／deferred／failed），准备就绪不等于已提交帧。影片呈现的返回值从 bool 收敛到既有 RenderSubmitStatus，场景、影片和空闲路径统一传播暂缓与故障，更新全部调用方；不新增 Web 参数，不通过修改窗口可见性掩盖等待。
 
 固定版本和补丁参与实际 Wasm 构建与浏览器验证；当前覆盖及限制统一见[测试文档](../../testing.md#webgpu-导出)。
+
+浏览器实时时钟和单调时钟继续使用 Emscripten 的时间源。Web 宿主在 Wasm 内将毫秒转换为 WASI 纳秒并写入调用方的时间戳地址，常用的读时钟路径只在 JavaScript 边界传递浮点数。WASI 时钟编号和状态契约与固定 SDK 一致，日期超出无符号纳秒范围时交还原入口处理。
 
 ## 异步 WebGPU 表面
 
@@ -224,8 +228,10 @@ classDiagram
 | --- | --- |
 | Canvas 或设备申请尚未就绪 | prepare 成功且 available=false；沿通用呈现链返回 deferred |
 | 设备与 Canvas 就绪 | 填入 WebGPU 后端、平台句柄及已就绪设备，再初始化已适配的 bgfx |
-| Canvas 像素尺寸改变 | 通过 SurfaceChange reset；DOM 替换或 worker 转交不作为普通 resize |
+| Canvas CSS 尺寸或设备像素比改变 | SDL 更新高 DPI 后备缓冲，由 SurfaceChange reset；DOM 替换或 worker 转交属于新一代启动 |
 | 申请失败、验证错误或实际设备丢失 | 返回 failed，宿主锁存原生故障并结束在途请求 |
+
+页面用 CSS 决定 Canvas 布局与宽高比。SDL 以 CSS 像素提供逻辑尺寸和输入坐标，以实际像素尺寸提供 WebGPU 渲染目标。
 
 暂缓不产生成功帧，也不丢弃候选或活动场景。首次设备申请期间，已受理的[范围准备](render-readiness.md)保持 working／queued，不创建 GPU 对象；实际申请失败才锁存领域错误。设备丢失在首版视为本次运行失败，完成清理后由页面显式重启，不自动降级后端或循环申请。
 

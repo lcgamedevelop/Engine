@@ -1,4 +1,6 @@
 #include "plugins/editor/destruction/destruction_mcp_tools.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "plugins/editor/mcp/editor_mcp_tools.hpp"
 #include "plugins/editor/mcp/editor_tool_registration.hpp"
@@ -9,6 +11,7 @@ namespace engine::plugins::destruction
 
 bool register_destruction_mcp_tools(mcp::McpSystem& system, mcp::EditorMcpTools& editor)
 {
+    ENGINE_PROFILE_FUNCTION();
     using Json = nlohmann::json;
     if (!system.register_tool(
             {"create_destruction_asset",
@@ -23,7 +26,10 @@ bool register_destruction_mcp_tools(mcp::McpSystem& system, mcp::EditorMcpTools&
               {"required", Json::array({"path", "source"})},
               {"additionalProperties", false}},
              [&editor](const Json& arguments, Json& reply)
-             { return editor.call_command("create_destruction_asset", arguments, reply); }}))
+             {
+                 ENGINE_PROFILE_FUNCTION_PROBE();
+                 return editor.call_command("create_destruction_asset", arguments, reply);
+             }}))
     {
         return false;
     }

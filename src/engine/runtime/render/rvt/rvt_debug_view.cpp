@@ -1,4 +1,6 @@
 #include "runtime/render/rvt/rvt_debug_view.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "fs_rvt_debug.bin.h"
 #include "runtime/font/font_system.hpp"
 #include "runtime/render/passes/frame_output.hpp"
@@ -15,13 +17,16 @@ namespace engine::render_detail
 {
 RvtDebugView::~RvtDebugView() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     release_gpu();
 }
 bool RvtDebugView::prepare_font(ResourceLoader& resources)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto prepare = [&](std::string_view path, ResourceReference& resource,
                              std::unique_ptr<ResourceLoad>& pending)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (resource)
         {
             return true;
@@ -58,6 +63,7 @@ bool RvtDebugView::prepare_font(ResourceLoader& resources)
 bool RvtDebugView::draw(const RvtStatus& status, const RvtPass* pass,
                         const RvtDebugOptions& options, const FrameOutput& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     const FontResource* font = nullptr;
     if (!font_ || !shader_ || font_.loader()->get(font_.handle(), font) != ResourceError::none)
     {
@@ -123,6 +129,7 @@ bool RvtDebugView::draw(const RvtStatus& status, const RvtPass* pass,
     const auto rectangle = [&](float left, float top, float size_x, float size_y, float mode,
                                bool available) -> bool
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (bgfx::getAvailTransientVertexBuffer(6, layout) < 6)
         {
             return false;
@@ -130,7 +137,10 @@ bool RvtDebugView::draw(const RvtStatus& status, const RvtPass* pass,
         bgfx::TransientVertexBuffer vertices;
         bgfx::allocTransientVertexBuffer(&vertices, 6, layout);
         const auto point = [&](float px, float py, float u, float v)
-        { return Vertex{px / width * 2 - 1, 1 - py / height * 2, 0, u, v}; };
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return Vertex{px / width * 2 - 1, 1 - py / height * 2, 0, u, v};
+        };
         const std::array data{point(left, top, 0, 0),
                               point(left, top + size_y, 0, 1),
                               point(left + size_x, top + size_y, 1, 1),
@@ -156,6 +166,7 @@ bool RvtDebugView::draw(const RvtStatus& status, const RvtPass* pass,
     };
     const auto text = [&](std::string_view value, float tx, float ty) -> bool
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         FontGeometry geometry;
         FontLayout settings;
         settings.size = 12;
@@ -209,6 +220,7 @@ bool RvtDebugView::draw(const RvtStatus& status, const RvtPass* pass,
 }
 void RvtDebugView::release_gpu() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (bgfx::isValid(program_))
     {
         bgfx::destroy(program_);

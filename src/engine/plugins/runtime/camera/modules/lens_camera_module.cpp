@@ -1,10 +1,12 @@
 #include "plugins/runtime/camera/modules/lens_camera_module.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/camera/camera_math.hpp"
 namespace engine::plugins::camera
 {
 bool LensCameraModule::validate(const Data& d, const schema::CameraControllerDataT& def,
                                 std::string& e)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (d.projection < schema::Projection::MIN || d.projection > schema::Projection::MAX ||
         !detail::valid_input(d.fov.get(), def) ||
         !detail::valid_input(d.orthographic_size.get(), def) ||
@@ -31,6 +33,7 @@ bool LensCameraModule::validate(const Data& d, const schema::CameraControllerDat
 bool LensCameraModule::evaluate(const Data& d, const Runtime&, Runtime& next,
                                 const CameraEvaluationContext& c, CameraPose& p)
 {
+    ENGINE_PROFILE_FUNCTION();
     p.lens.projection = d.projection;
     if (!detail::input(d.fov.get(), c, p.lens.fov_degrees) ||
         !detail::input(d.orthographic_size.get(), c, p.lens.orthographic_size) ||

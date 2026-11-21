@@ -1,4 +1,6 @@
 #include "runtime/render/render_math.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include <bgfx/bgfx.h>
 #include <bx/bounds.h>
@@ -15,6 +17,7 @@ namespace engine::render_detail
 bool build_frustum_planes(const float* view, const float* projection, bool homogeneous,
                           FrustumPlanes& output) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     if (!view || !projection || !finite_matrix(view) || !finite_matrix(projection))
     {
@@ -31,7 +34,11 @@ bool build_frustum_planes(const float* view, const float* projection, bool homog
         const auto& plane = extracted[index];
         output[index] = {plane.normal.x, plane.normal.y, plane.normal.z, plane.dist};
         if (!std::all_of(output[index].begin(), output[index].end(),
-                         [](float value) { return std::isfinite(value); }))
+                         [](float value)
+                         {
+                             ENGINE_PROFILE_FUNCTION_PROBE();
+                             return std::isfinite(value);
+                         }))
         {
             return false;
         }
@@ -42,6 +49,7 @@ bool build_frustum_planes(const float* view, const float* projection, bool homog
 bool aabb_visible(const FrustumPlanes& planes, const float* model,
                   const std::array<float, 3>& minimum, const std::array<float, 3>& maximum) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     // Unknown/degenerated bounds are visible. The test must never remove content
     // merely because its bounds could not be proved conservative.
     if (!model || !finite_matrix(model))
@@ -86,6 +94,7 @@ bool aabb_visible(const FrustumPlanes& planes, const float* model,
 bool projection_camera_settings(const float* projection, float aspect, bool homogeneous,
                                 CameraSettings& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     if (!projection || !finite_matrix(projection) || !std::isfinite(aspect) || aspect <= 0)
     {
@@ -152,11 +161,17 @@ bool projection_camera_settings(const float* projection, float aspect, bool homo
 
 bool finite_matrix(const float* matrix)
 {
-    return std::all_of(matrix, matrix + 16, [](float value) { return std::isfinite(value); });
+    ENGINE_PROFILE_FUNCTION();
+    return std::all_of(matrix, matrix + 16, [](float value)
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return std::isfinite(value);
+    });
 }
 
 double linear_determinant(const float* matrix)
 {
+    ENGINE_PROFILE_FUNCTION();
     return static_cast<double>(matrix[0]) * (static_cast<double>(matrix[5]) * matrix[10] -
                                              static_cast<double>(matrix[9]) * matrix[6]) -
            static_cast<double>(matrix[4]) * (static_cast<double>(matrix[1]) * matrix[10] -
@@ -167,6 +182,7 @@ double linear_determinant(const float* matrix)
 
 std::uint64_t cull_state(schema::CullMode mode, const float* model)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (mode == schema::CullMode::none)
     {
         return 0;
@@ -178,6 +194,7 @@ std::uint64_t cull_state(schema::CullMode mode, const float* model)
 std::array<float, 3> transform_point(const float* matrix,
                                      const std::array<float, 3>& point) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     std::array<float, 3> result{};
     for (std::size_t axis = 0; axis < 3; ++axis)
     {
@@ -189,6 +206,7 @@ std::array<float, 3> transform_point(const float* matrix,
 
 bool normal_matrix(const float* model, float* normal)
 {
+    ENGINE_PROFILE_FUNCTION();
     const double determinant = linear_determinant(model);
     if (determinant == 0.0)
     {

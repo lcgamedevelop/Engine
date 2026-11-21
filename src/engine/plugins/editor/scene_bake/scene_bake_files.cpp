@@ -1,4 +1,6 @@
 #include "plugins/editor/scene_bake/scene_bake_files.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/file_text.hpp"
 #include "runtime/resource/virtual_file_system.hpp"
 
@@ -37,6 +39,7 @@ namespace io = editor::asset_pipeline;
 
 bool write_lightmap(const fs::path& path, const schema::TextureDataT& image, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!TextureResourceCodec::validate(image) ||
         image.encoding != schema::TextureEncoding::native ||
         image.format != schema::TextureFormat::rgba16f || image.cube_map || image.srgb ||
@@ -64,6 +67,7 @@ bool write_lightmap(const fs::path& path, const schema::TextureDataT& image, std
 
 bool safe_path(const fs::path& root, const fs::path& relative, fs::path& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (relative.empty() || relative.is_absolute() || relative.has_root_name())
     {
         error = "Bake path must stay inside the project";
@@ -98,6 +102,7 @@ bool safe_path(const fs::path& root, const fs::path& relative, fs::path& output,
 bool asset_path(const fs::path& root, std::string_view logical, fs::path& output,
                 std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!GuidMap::valid_path(logical) || logical.find(':') != logical.npos)
     {
         error = "Scene baking requires assets-relative source resource paths";
@@ -108,6 +113,7 @@ bool asset_path(const fs::path& root, std::string_view logical, fs::path& output
 
 bool fingerprint(const fs::path& path, bool& exists, std::string& hash, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::error_code code;
     const auto status = fs::symlink_status(path, code);
     exists = !code && fs::exists(status);
@@ -133,6 +139,7 @@ bool fingerprint(const fs::path& path, bool& exists, std::string& hash, std::str
 
 bool same_file(const fs::path& path, bool existed, const std::string& expected, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     bool exists = false;
     std::string current;
     if (!fingerprint(path, exists, current, error))
@@ -152,6 +159,7 @@ bool SceneBakeFiles::initialize(const fs::path& root, std::string_view scene,
                                 std::string_view input, std::string_view job,
                                 ResourceSystem& resources, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::error_code code;
     root_ = fs::canonical(root, code);
     if (code || !asset_path(root_, scene, scene_, error) || scene_.extension() != ".scene" ||
@@ -274,6 +282,7 @@ bool SceneBakeFiles::initialize(const fs::path& root, std::string_view scene,
 
 bool SceneBakeFiles::unchanged(ResourceSystem& resources, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!catalog_revision_.empty())
     {
         if (resources.catalog().revision() != catalog_revision_)
@@ -320,6 +329,7 @@ bool SceneBakeFiles::unchanged(ResourceSystem& resources, std::string& error) co
 bool SceneBakeFiles::stage(const std::array<std::vector<std::uint8_t>, 3>& images,
                            std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (std::size_t index = 0; index < outputs_.size(); ++index)
     {
         if (images[index].empty() ||
@@ -422,6 +432,7 @@ bool SceneBakeFiles::stage(const std::array<std::vector<std::uint8_t>, 3>& image
 bool SceneBakeFiles::add_output(std::string_view filename, std::string_view importer,
                                 ResourceSystem& resources, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto path = scene_.parent_path() / scene_.stem() / PathUtils::from_utf8(filename);
     fs::path checked;
     if (!safe_path(root_, path.lexically_relative(root_), checked, error))
@@ -501,6 +512,7 @@ bool SceneBakeFiles::initialize_lighting(const fs::path& root, std::string_view 
                                          std::string_view job, ResourceSystem& resources,
                                          LightingBakeSettings& settings, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::error_code code;
     root_ = fs::canonical(root, code);
     if (code || !asset_path(root_, scene, scene_, error) || scene_.extension() != ".scene" ||
@@ -624,6 +636,7 @@ bool SceneBakeFiles::initialize_lighting(const fs::path& root, std::string_view 
 
 bool SceneBakeFiles::stage_meta(std::size_t index, std::string_view importer, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto& file = files_[index * 2 + 1];
     std::string text;
     if (file.existed)
@@ -648,6 +661,7 @@ bool SceneBakeFiles::stage_meta(std::size_t index, std::string_view importer, st
 
 bool SceneBakeFiles::stage_lighting(const LightingBakeOutputs& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (outputs_.size() != output.meshes.size() * 2 + output.probes.size())
     {
         error = "Lighting bake output identities changed";
@@ -819,6 +833,7 @@ bool SceneBakeFiles::stage_lighting(const LightingBakeOutputs& output, std::stri
 
 bool SceneBakeFiles::rollback(std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     bool success = true;
     for (auto item = files_.rbegin(); item != files_.rend(); ++item)
     {
@@ -853,6 +868,7 @@ bool SceneBakeFiles::rollback(std::string& error)
 
 bool SceneBakeFiles::publish(const std::function<bool(std::string&)>& refresh, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     {
         io::ProjectLock lock;
         bool acquired = false;
@@ -936,13 +952,19 @@ bool SceneBakeFiles::publish(const std::function<bool(std::string&)>& refresh, s
 
 const std::vector<BakeOutput>& SceneBakeFiles::outputs() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return outputs_;
 }
 void SceneBakeFiles::cleanup() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     // 回滚失败时保留备份，不让后续清理丢失用户源文件。
     if (std::any_of(files_.begin(), files_.end(),
-                    [](const auto& file) { return file.moved || file.installed; }))
+                    [](const auto& file)
+                    {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
+                        return file.moved || file.installed;
+                    }))
     {
         return;
     }

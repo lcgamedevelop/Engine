@@ -1,9 +1,12 @@
 #include "plugins/editor/mcp/component_mcp_tools.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 namespace engine::plugins::mcp
 {
 bool register_project_lifecycle_tools(McpSystem& system, EditorMcpTools& editor)
 {
+    ENGINE_PROFILE_FUNCTION();
     using Json = nlohmann::json;
     for (const auto& [name, description] :
          {std::pair{"start_project", "Start the loaded project in the existing editor window."},
@@ -17,7 +20,10 @@ bool register_project_lifecycle_tools(McpSystem& system, EditorMcpTools& editor)
                                     {"properties", Json::object()},
                                     {"additionalProperties", false}},
                                    [&editor, command](const Json& arguments, Json& output)
-                                   { return editor.call_command(command, arguments, output); }}))
+                                   {
+                                       ENGINE_PROFILE_FUNCTION_PROBE();
+                                       return editor.call_command(command, arguments, output);
+                                   }}))
         {
             return false;
         }
@@ -38,7 +44,10 @@ bool register_project_lifecycle_tools(McpSystem& system, EditorMcpTools& editor)
                   {"required", {"prepareId"}},
                   {"additionalProperties", false}},
                  [&editor, command](const Json& arguments, Json& output)
-                 { return editor.call_command(command, arguments, output); }}))
+                 {
+                     ENGINE_PROFILE_FUNCTION_PROBE();
+                     return editor.call_command(command, arguments, output);
+                 }}))
         {
             return false;
         }

@@ -1,4 +1,6 @@
 #include "plugins/runtime/destruction/destruction_component.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "plugins/runtime/destruction/destruction_component_runtime.hpp"
 
@@ -24,16 +26,19 @@ namespace engine::plugins::destruction
 
 bool DestructionComponent::register_type(ComponentRegistry& registry)
 {
+    ENGINE_PROFILE_FUNCTION();
     return register_component_storage<DestructionComponent, Data, Runtime>(registry);
 }
 
 DestructionComponent::Runtime* DestructionComponent::runtime() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return runtime_state<Runtime>();
 }
 
 bool DestructionComponent::valid_settings(const schema::DestructionDataT& value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return (value.destruction_guid.empty() || GuidMap::valid_guid(value.destruction_guid)) &&
            (value.material_guid.empty() || GuidMap::valid_guid(value.material_guid)) &&
            std::isfinite(value.density) && value.density > 0 && value.density <= 100000 &&
@@ -43,6 +48,7 @@ bool DestructionComponent::valid_settings(const schema::DestructionDataT& value)
 
 bool DestructionComponent::get_settings(Data& output) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* value = read_data<Data>();
     output = value ? *value : Data{};
     return value != nullptr;
@@ -50,6 +56,7 @@ bool DestructionComponent::get_settings(Data& output) const noexcept
 
 bool DestructionComponent::set_settings(const schema::DestructionDataT& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -131,6 +138,7 @@ bool DestructionComponent::set_settings(const schema::DestructionDataT& value)
 
 bool DestructionComponent::restore_data(const schema::ComponentDataT& data)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!data.flags)
     {
         return false;
@@ -154,6 +162,7 @@ bool DestructionComponent::restore_data(const schema::ComponentDataT& data)
 bool DestructionComponent::damage_sphere(const Vec3& center, float radius, float damage,
                                          float impulse)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -169,6 +178,7 @@ bool DestructionComponent::damage_sphere(const Vec3& center, float radius, float
 
 bool DestructionComponent::reset()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -180,6 +190,7 @@ bool DestructionComponent::reset()
 bool DestructionComponent::refresh_support(std::span<const Collider> supports, float max_gap,
                                            float min_coverage)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -196,6 +207,7 @@ bool DestructionComponent::refresh_support(std::span<const Collider> supports, f
 bool DestructionComponent::apply_stress(const Vec3& gravity, float elastic_limit, float fatal_limit,
                                         std::uint32_t iterations, std::uint32_t& broken_bonds)
 {
+    ENGINE_PROFILE_FUNCTION();
     broken_bonds = 0;
     if (!writable())
     {
@@ -213,6 +225,7 @@ bool DestructionComponent::apply_stress(const Vec3& gravity, float elastic_limit
 
 bool DestructionComponent::owns_fragment(std::uint64_t node_id) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return false;
@@ -224,6 +237,7 @@ bool DestructionComponent::owns_fragment(std::uint64_t node_id) const noexcept
 bool DestructionComponent::retire_fragments(std::uint32_t max_count, double max_age_seconds,
                                             std::uint32_t& retired_count)
 {
+    ENGINE_PROFILE_FUNCTION();
     retired_count = 0;
     if (!writable())
     {
@@ -240,6 +254,7 @@ bool DestructionComponent::retire_fragments(std::uint32_t max_count, double max_
 
 bool DestructionComponent::snapshot(ByteBuffer& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     if (!valid())
     {
@@ -261,6 +276,7 @@ bool DestructionComponent::snapshot(ByteBuffer& output) const
 
 bool DestructionComponent::restore(ByteView bytes)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -279,6 +295,7 @@ bool DestructionComponent::restore(ByteView bytes)
 
 bool DestructionComponent::ready() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return false;
@@ -287,6 +304,7 @@ bool DestructionComponent::ready() const noexcept
 }
 std::uint64_t DestructionComponent::revision() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return {};
@@ -295,6 +313,7 @@ std::uint64_t DestructionComponent::revision() const noexcept
 }
 std::size_t DestructionComponent::chunk_count() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return {};
@@ -303,6 +322,7 @@ std::size_t DestructionComponent::chunk_count() const noexcept
 }
 std::size_t DestructionComponent::group_count() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return {};
@@ -311,16 +331,22 @@ std::size_t DestructionComponent::group_count() const noexcept
 }
 std::size_t DestructionComponent::dynamic_groups() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return {};
     }
     return static_cast<std::size_t>(
         std::count_if(runtime()->graph_.groups().begin(), runtime()->graph_.groups().end(),
-                      [](const auto& group) { return !group.anchored; }));
+                      [](const auto& group)
+                      {
+                          ENGINE_PROFILE_FUNCTION_PROBE();
+                          return !group.anchored;
+                      }));
 }
 std::string DestructionComponent::last_error() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return {};

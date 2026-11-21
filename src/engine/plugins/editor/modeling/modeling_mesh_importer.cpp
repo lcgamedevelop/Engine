@@ -1,4 +1,5 @@
 #include "plugins/editor/modeling/modeling_mesh_importer.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/file_text.hpp"
 
 #include "editor/asset_pipeline/importer_utils.hpp"
@@ -25,6 +26,7 @@ namespace
 {
 int hex_digit(char value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (value >= '0' && value <= '9')
     {
         return value - '0';
@@ -43,6 +45,7 @@ int hex_digit(char value) noexcept
 bool write_mesh(const std::filesystem::path& path, const schema::MeshDataT& mesh,
                 std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     flatbuffers::FlatBufferBuilder builder;
     schema::FinishMeshDataBuffer(builder, schema::MeshData::Pack(builder, &mesh));
     SDL_IOStream* stream = SDL_IOFromFile(PathUtils::to_utf8(path).c_str(), "wb");
@@ -69,6 +72,7 @@ bool write_mesh(const std::filesystem::path& path, const schema::MeshDataT& mesh
 bool ModelingMeshImporter::inspect_batch(const editor::asset_pipeline::ImportContext& context,
                                          std::string& fingerprint, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!MeshImporter::inspect_batch(context, fingerprint, error))
     {
         return false;
@@ -87,6 +91,7 @@ bool ModelingMeshImporter::convert(const editor::asset_pipeline::ImportAsset& as
                                    const editor::asset_pipeline::ImportContext& context,
                                    std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string text;
     if (!engine::editor::file_detail::read_text(asset.source, text))
     {

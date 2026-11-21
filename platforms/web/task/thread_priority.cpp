@@ -1,4 +1,5 @@
 #include "runtime/task/thread_priority.hpp"
+#include "runtime/performance/profiling.hpp"
 
 namespace engine::task_detail
 {
@@ -10,6 +11,7 @@ thread_local int worker_identity;
 bool apply_current_thread_priority(ThreadPriority priority, ThreadPriorityState& state,
                                    std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     if (state.owner != nullptr || priority != ThreadPriority::normal)
     {
@@ -23,6 +25,7 @@ bool apply_current_thread_priority(ThreadPriority priority, ThreadPriorityState&
 
 bool restore_current_thread_priority(ThreadPriorityState& state, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     if (state.owner != nullptr && state.owner != &worker_identity)
     {

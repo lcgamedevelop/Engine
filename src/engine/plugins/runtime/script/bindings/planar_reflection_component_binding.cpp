@@ -1,4 +1,5 @@
 #include "plugins/runtime/script/bindings/planar_reflection_component_binding.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/script/bindings/binding_helpers.hpp"
 
 #include "plugins/runtime/script/bindings/binding_context.hpp"
@@ -25,6 +26,7 @@ Object.freeze(PlanarReflectionComponent);
 
 void settings(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto node = BindingContext::node(arguments);
     auto component =
@@ -41,14 +43,17 @@ void settings(const Arguments& arguments)
 
 std::string_view PlanarReflectionComponentBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "PlanarReflectionComponent";
 }
 std::string_view PlanarReflectionComponentBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 bool PlanarReflectionComponentBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.integer("PlanarReflectionKind",
                       static_cast<int>(PlanarReflectionComponent::component_type)) &&
            vm.function("PlanarReflectionAdd",

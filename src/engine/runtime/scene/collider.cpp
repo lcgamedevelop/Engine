@@ -1,4 +1,5 @@
 #include "runtime/scene/collider.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/resource/types/mesh_resource.hpp"
 #include "runtime/scene/collider_runtime.hpp"
@@ -21,6 +22,7 @@ namespace
 
 bool bounded(double value, double minimum, double maximum) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::isfinite(value) && value >= minimum && value <= maximum;
 }
 
@@ -28,11 +30,13 @@ bool bounded(double value, double minimum, double maximum) noexcept
 
 bool Collider::register_type(ComponentRegistry& registry)
 {
+    ENGINE_PROFILE_FUNCTION();
     return register_component_storage<Collider, Data, Runtime>(registry);
 }
 
 Collider::Runtime* Collider::runtime() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return runtime_state<Runtime>();
 }
 
@@ -40,6 +44,7 @@ bool Collider::valid_settings(const schema::ColliderDataT& value,
                               const schema::MeshDataT* transient_mesh,
                               const MeshCollisionData* mesh_parts) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     constexpr std::size_t maximum_hulls = 4096;
     constexpr std::size_t maximum_vertices = 1024U * 1024U;
     if (value.shape == schema::ColliderShape::compound)
@@ -91,6 +96,7 @@ bool Collider::valid_settings(const schema::ColliderDataT& value,
 
 bool Collider::get_settings(Data& output) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* value = read_data<Data>();
     output = value ? *value : Data{};
     return value != nullptr;
@@ -98,11 +104,13 @@ bool Collider::get_settings(Data& output) const noexcept
 
 bool Collider::set_settings(const schema::ColliderDataT& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     return apply_settings(value, {});
 }
 
 bool Collider::apply_settings(const Data& value, ResourceReference prepared)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -166,6 +174,7 @@ bool Collider::apply_settings(const Data& value, ResourceReference prepared)
 
 bool Collider::restore_data(const schema::ComponentDataT& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!value.flags)
     {
         return false;
@@ -188,6 +197,7 @@ bool Collider::restore_data(const schema::ComponentDataT& value)
 
 bool Collider::build_data(schema::ComponentDataT& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     if (!valid())
     {
@@ -199,6 +209,7 @@ bool Collider::build_data(schema::ComponentDataT& output) const
 
 const schema::MeshDataT* Collider::mesh_data() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return {};
@@ -210,6 +221,7 @@ const schema::MeshDataT* Collider::mesh_data() const noexcept
 
 bool Collider::set_mesh(std::string_view path)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -235,6 +247,7 @@ bool Collider::set_mesh(std::string_view path)
 
 std::string_view Collider::mesh_path() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return {};

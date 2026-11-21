@@ -1,4 +1,5 @@
 #include "plugins/runtime/script/bindings/storage_binding.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "plugins/runtime/script/bindings/binding_context.hpp"
 
@@ -23,6 +24,7 @@ Object.freeze(Storage);
 
 BindingContext* begin_call(const Arguments& arguments, int count, std::string_view signature)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* context = BindingContext::current(arguments);
     if (context == nullptr)
     {
@@ -39,6 +41,7 @@ BindingContext* begin_call(const Arguments& arguments, int count, std::string_vi
 
 bool read_text(BindingContext& context, const Arguments& arguments, int index, std::string& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!BindingContext::text(arguments, index, output))
     {
         context.set_storage_error("Storage arguments must be strings of at most 4 MiB");
@@ -49,6 +52,7 @@ bool read_text(BindingContext& context, const Arguments& arguments, int index, s
 
 void get_string(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     auto* context = begin_call(arguments, 1, "Storage.GetString(key)");
     std::string key;
@@ -62,6 +66,7 @@ void get_string(const Arguments& arguments)
 
 void set_string(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto* context = begin_call(arguments, 2, "Storage.SetString(key, value)");
     std::string key;
@@ -75,6 +80,7 @@ void set_string(const Arguments& arguments)
 
 void has_key(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto* context = begin_call(arguments, 1, "Storage.HasKey(key)");
     std::string key;
@@ -86,6 +92,7 @@ void has_key(const Arguments& arguments)
 
 void delete_key(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto* context = begin_call(arguments, 1, "Storage.DeleteKey(key)");
     std::string key;
@@ -97,6 +104,7 @@ void delete_key(const Arguments& arguments)
 
 void save(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto* context = begin_call(arguments, 0, "Storage.Save()");
     if (context != nullptr)
@@ -107,6 +115,7 @@ void save(const Arguments& arguments)
 
 void is_ready(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto* context = BindingContext::current(arguments);
     if (context != nullptr && arguments.count() == 0)
@@ -117,6 +126,7 @@ void is_ready(const Arguments& arguments)
 
 void last_error(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     auto* context = BindingContext::current(arguments);
     if (context != nullptr && arguments.count() == 0)
@@ -128,16 +138,19 @@ void last_error(const Arguments& arguments)
 
 std::string_view StorageBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "Storage";
 }
 
 std::string_view StorageBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 
 bool StorageBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.function("StorageGetString", get_string) &&
            vm.function("StorageSetString", set_string) && vm.function("StorageHasKey", has_key) &&
            vm.function("StorageDeleteKey", delete_key) && vm.function("StorageSave", save) &&

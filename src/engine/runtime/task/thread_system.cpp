@@ -1,4 +1,6 @@
 #include "runtime/task/thread_system.hpp"
+#include "runtime/performance/profiling.hpp"
+
 
 #include <oneapi/tbb/global_control.h>
 #include <oneapi/tbb/info.h>
@@ -15,6 +17,7 @@ std::atomic<ThreadSystem*> budget_owner{nullptr};
 
 bool valid_priority(ThreadPriority priority)
 {
+    ENGINE_PROFILE_FUNCTION();
     return priority == ThreadPriority::low || priority == ThreadPriority::normal ||
            priority == ThreadPriority::high;
 }
@@ -31,16 +34,19 @@ struct ThreadSystem::Impl
 
 ThreadSystem::ThreadSystem(const ThreadConfig& config) : impl_(std::make_unique<Impl>())
 {
+    ENGINE_PROFILE_FUNCTION();
     impl_->config = config;
 }
 
 ThreadSystem::~ThreadSystem() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
 }
 
 bool ThreadSystem::on_initialize(const EngineConfig&)
 {
+    ENGINE_PROFILE_ZONE("Thread.initialize");
     impl_->error.clear();
     if (impl_->config.worker_limit > 64 || !valid_priority(impl_->config.worker_priority))
     {
@@ -67,6 +73,7 @@ bool ThreadSystem::on_initialize(const EngineConfig&)
 
 void ThreadSystem::on_shutdown() noexcept
 {
+    ENGINE_PROFILE_ZONE("Thread.shutdown");
     impl_->control.reset();
     impl_->workers = 0;
     ThreadSystem* expected = this;
@@ -75,16 +82,19 @@ void ThreadSystem::on_shutdown() noexcept
 
 std::size_t ThreadSystem::worker_count() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return impl_->workers;
 }
 
 ThreadPriority ThreadSystem::worker_priority() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return impl_->config.worker_priority;
 }
 
 const std::string& ThreadSystem::last_error() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return impl_->error;
 }
 

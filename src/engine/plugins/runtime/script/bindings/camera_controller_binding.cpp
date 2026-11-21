@@ -1,3 +1,5 @@
+#include "runtime/performance/profiling.hpp"
+
 #if ENGINE_HAS_CAMERA_PLUGIN
 #include "plugins/runtime/script/bindings/camera_controller_binding.hpp"
 #include "plugins/runtime/camera/camera_status_json.hpp"
@@ -29,6 +31,7 @@ Object.freeze(CameraController.prototype);Object.freeze(CameraController);
 )js";
 void parameters(const Arguments& a)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto c = binding_detail::component<Controller>(a, 3);
     control_detail::Json j;
     std::vector<schema::CameraParameterValueT> values;
@@ -39,6 +42,7 @@ void parameters(const Arguments& a)
 }
 void parameter(const Arguments& a)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto c = binding_detail::component<Controller>(a, 3);
     a.set_return({});
     std::string name;
@@ -62,6 +66,7 @@ void parameter(const Arguments& a)
 }
 void trigger(const Arguments& a)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto c = binding_detail::component<Controller>(a, 4);
     std::string name;
     if (c && BindingContext::text(a, 2, name) && a.is_boolean(3))
@@ -71,11 +76,13 @@ void trigger(const Arguments& a)
 }
 void reset(const Arguments& a)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto c = binding_detail::component<Controller>(a, 2);
     a.set_return(c && c.reset());
 }
 void clear_target(const Arguments& a)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto c = binding_detail::component<Controller>(a, 3);
     std::string slot;
     if (c && BindingContext::text(a, 2, slot))
@@ -85,6 +92,7 @@ void clear_target(const Arguments& a)
 }
 void set_target(const Arguments& a)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto c = binding_detail::component<Controller>(a, 5);
     std::string slot;
     std::uint64_t scene = 0, id = 0;
@@ -110,6 +118,7 @@ void set_target(const Arguments& a)
 }
 void target(const Arguments& a)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto c = binding_detail::component<Controller>(a, 3);
     a.set_return({});
     std::string slot;
@@ -121,6 +130,7 @@ void target(const Arguments& a)
 }
 void status(const Arguments& a)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto c = binding_detail::component<Controller>(a, 2);
     a.set_return({});
     camera::CameraStatus value;
@@ -132,14 +142,17 @@ void status(const Arguments& a)
 } // namespace
 std::string_view CameraControllerBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "CameraController";
 }
 std::string_view CameraControllerBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 bool CameraControllerBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.integer("CameraControllerKind", static_cast<int>(Controller::component_type)) &&
            vm.function("CameraControllerAdd", binding_detail::add_component<Controller>) &&
            vm.function("CameraControllerSettings", control_detail::get_settings<Controller>) &&

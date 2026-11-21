@@ -1,4 +1,5 @@
 #include "plugins/editor/terrain/terrain_codec.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/asset_pipeline/control_toml.hpp"
 #include "editor/asset_pipeline/importer_utils.hpp"
 #include "plugins/runtime/terrain/terrain_component.hpp"
@@ -8,14 +9,17 @@ namespace engine::plugins::terrain
 {
 schema::ComponentPayload TerrainCodec::type() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::ComponentPayload::TerrainData;
 }
 std::string_view TerrainCodec::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "terrain";
 }
 bool TerrainCodec::validate(const schema::ComponentDataT& component, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* data = component.payload.AsTerrainData();
     if (!data || !TerrainComponent::valid_settings(*data))
     {
@@ -27,6 +31,7 @@ bool TerrainCodec::validate(const schema::ComponentDataT& component, std::string
 bool TerrainCodec::read(const toml::table& table, schema::ComponentDataT& component,
                         std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     nlohmann::json json;
     schema::TerrainDataT data;
     if (!editor::asset_pipeline::control_toml::read_component(table, json, error) ||
@@ -57,6 +62,7 @@ bool TerrainCodec::scan_dependencies(const schema::ComponentDataT& component,
                                      const editor::asset_pipeline::ImportContext& context,
                                      std::vector<Guid>& dependencies, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!validate(component, error))
     {
         return false;
@@ -72,17 +78,20 @@ bool TerrainCodec::scan_dependencies(const schema::ComponentDataT& component,
 }
 std::span<const std::string_view> TerrainCodec::resource_fields() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     static constexpr std::string_view fields[]{"terrain_guid", "surface_material_guid"};
     return fields;
 }
 void TerrainCodec::write(const schema::ComponentDataT& component, toml::table& table) const
 {
+    ENGINE_PROFILE_FUNCTION();
     table.insert_or_assign("type", "terrain");
     editor::asset_pipeline::control_toml::write_table(
         schema::control_json::write(*component.payload.AsTerrainData()), table);
 }
 bool register_terrain_codec()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (editor::asset_pipeline::find_scene_component_codec(schema::ComponentPayload::TerrainData))
     {
         return true;

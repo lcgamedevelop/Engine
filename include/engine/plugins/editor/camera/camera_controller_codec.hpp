@@ -1,4 +1,6 @@
 #pragma once
+
+#include "runtime/performance/function_profile.hpp"
 #include "editor/asset_pipeline/components/scene_component_codec.hpp"
 #include "plugins/runtime/camera/camera_type_registry.hpp"
 namespace engine::plugins::camera_editor
@@ -8,6 +10,7 @@ class CameraControllerCodec final : public editor::asset_pipeline::SceneComponen
 public:
     explicit CameraControllerCodec(const camera::CameraTypeRegistry& types) : types_(types)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
     }
     [[nodiscard]] schema::ComponentPayload type() const noexcept override;
     [[nodiscard]] std::string_view name() const noexcept override;

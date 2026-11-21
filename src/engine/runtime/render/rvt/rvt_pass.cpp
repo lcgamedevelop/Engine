@@ -1,4 +1,5 @@
 #include "runtime/render/rvt/rvt_pass.hpp"
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/render/render_constants.hpp"
 #include "runtime/render/render_math.hpp"
@@ -15,10 +16,12 @@ namespace
 {
 bool writer(schema::RvtRole role)
 {
+    ENGINE_PROFILE_FUNCTION();
     return role == schema::RvtRole::writer || role == schema::RvtRole::writer_reader;
 }
 Bounds3 mesh_bounds(const RenderFrameData::Mesh& mesh)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::array<double, 3> low{INFINITY, INFINITY, INFINITY}, high{-INFINITY, -INFINITY, -INFINITY};
     for (unsigned corner = 0; corner < 8; ++corner)
     {
@@ -40,16 +43,19 @@ Bounds3 mesh_bounds(const RenderFrameData::Mesh& mesh)
 }
 bool overlap(const Bounds3& a, const Bounds3& b)
 {
+    ENGINE_PROFILE_FUNCTION();
     return a.minimum().x() <= b.maximum().x() && a.maximum().x() >= b.minimum().x() &&
            a.minimum().z() <= b.maximum().z() && a.maximum().z() >= b.minimum().z();
 }
 } // namespace
 RvtPass::~RvtPass() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     release_gpu();
 }
 bool RvtPass::configure(const schema::RvtSettingsT& settings, std::uint64_t device)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (available() && settings_ == settings && device_ == device)
     {
         return true;
@@ -187,7 +193,11 @@ bool RvtPass::prepare_pages(VirtualTextureCache& cache, const RenderFrameData& s
         }
     }
     std::sort(writers.begin(), writers.end(),
-              [](auto a, auto b) { return a->gpu->node_id < b->gpu->node_id; });
+              [](auto a, auto b)
+              {
+                  ENGINE_PROFILE_FUNCTION_PROBE();
+                  return a->gpu->node_id < b->gpu->node_id;
+              });
     const auto& batch = cache.batch();
     if (batch.device_generation != device_ || batch.pages.size() > maximum_rvt_views)
     {
@@ -296,6 +306,7 @@ bool RvtPass::prepare_pages(VirtualTextureCache& cache, const RenderFrameData& s
 }
 void RvtPass::bind(bool receiver, const Vec3& origin) const
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!available())
     {
         bind_disabled();
@@ -321,6 +332,7 @@ void RvtPass::bind(bool receiver, const Vec3& origin) const
 }
 void RvtPass::bind_disabled()
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto handle = bgfx::createUniform("u_rvt_parameters", bgfx::UniformType::Vec4);
     const float parameters[]{0, 0, 0, 0};
     bgfx::setUniform(handle, parameters);
@@ -328,6 +340,7 @@ void RvtPass::bind_disabled()
 }
 std::uint64_t RvtPass::resident_bytes() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return available() ? std::uint64_t(atlas_size_) * atlas_size_ * 28 +
                              std::uint64_t(settings_.virtual_resolution / settings_.page_size) *
                                  (settings_.virtual_resolution / settings_.page_size) * 64 / 3
@@ -335,6 +348,7 @@ std::uint64_t RvtPass::resident_bytes() const noexcept
 }
 void RvtPass::release_gpu() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (bgfx::isValid(target_))
     {
         bgfx::destroy(target_);

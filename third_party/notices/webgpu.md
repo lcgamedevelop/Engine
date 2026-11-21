@@ -10,7 +10,7 @@
 - [102a549d34615da5009ce2ecc681b2a2e895b15e](https://github.com/bkaradzic/bgfx/commit/102a549d34615da5009ce2ecc681b2a2e895b15e)
 - [f5ce45e39d6381093e577e80adb1abb2c611302c](https://github.com/bkaradzic/bgfx/commit/f5ce45e39d6381093e577e80adb1abb2c611302c)
 
-外部设备引用、实际功能与限制查询、浏览器表面和采样器等修正沿用上述实现。`webgpu-emscripten.patch` 连接官方 Emdawnwebgpu port，并在 Web 目标只编译 WebGPU 后端。`webgpu-readback-yield.patch` 是本仓库的浏览器适配：回读使用浏览器可交付的回调模式，并通过 Emscripten Asyncify 让出应用 worker，保留上游同步回读完成及数据生命周期；原生回读路径不变。机制说明见 [Emscripten Asyncify](https://emscripten.org/docs/porting/asyncify.html)。
+外部设备引用、实际功能与限制查询、浏览器表面和采样器等修正沿用上述实现。`webgpu-emscripten.patch` 连接官方 Emdawnwebgpu port，并在 Web 目标只编译 WebGPU 后端。`webgpu-readback-async.patch` 在应用 worker 上提交缓冲映射，映射回调交付数据并释放暂存缓冲。回读契约见 [WebGPU 的 GPUBuffer.mapAsync](https://www.w3.org/TR/webgpu/#dom-gpubuffer-mapasync)。
 
 `wgsl-tools.patch` 启用当前 bgfx 自带的 Tint，使用同版本 SPIRV-Tools 库和其内部头文件，以及 glslang 公开查询接口。asm.js 目标按 WGSL 宏预处理；不再编译一份不匹配的 SPIRV-Tools。
 

@@ -1,4 +1,6 @@
 #include "plugins/editor/animation_tools/animation_authoring_commands.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/file_text.hpp"
 
 #include "editor/asset_pipeline/asset_io.hpp"
@@ -35,6 +37,7 @@ constexpr std::array sections{"skeleton_sockets", "skeleton_aim_ik", "skeleton_t
 bool paths(const fs::path& project, const std::string& path, fs::path& source, fs::path& meta,
            std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto extension = PathUtils::to_utf8(PathUtils::from_utf8(path).extension());
     if (io::source_extension(PathUtils::from_utf8(path)) != ".fbx")
     {
@@ -48,6 +51,7 @@ bool paths(const fs::path& project, const std::string& path, fs::path& source, f
 bool snapshot(const fs::path& project, const std::string& path, std::string& source_hash,
               std::string& metadata, toml::table& table, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     fs::path source, meta;
     ByteBuffer bytes;
     if (!paths(project, path, source, meta, error) || !io::read_bytes(source, bytes, error) ||
@@ -74,6 +78,7 @@ bool snapshot(const fs::path& project, const std::string& path, std::string& sou
 
 Json value_json(const toml::node& node)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (const auto* values = node.as_array())
     {
         Json output = Json::array();
@@ -113,6 +118,7 @@ Json value_json(const toml::node& node)
 
 bool table_json(const Json& input, toml::table& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!input.is_object())
     {
         error = "Animation authoring entries must be objects";
@@ -167,6 +173,7 @@ bool table_json(const Json& input, toml::table& output, std::string& error)
 
 bool arguments(const Json& input, bool writing, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!input.is_object() || !input.contains("path") || !input["path"].is_string())
     {
         error = "Animation authoring requires a source asset path";
@@ -204,23 +211,28 @@ public:
         : project_(std::move(project)), path_(std::move(path)),
           source_hash_(std::move(source_hash)), before_(std::move(before)), after_(std::move(after))
     {
+        ENGINE_PROFILE_FUNCTION();
     }
     bool affects_scene() const noexcept override
     {
+        ENGINE_PROFILE_FUNCTION();
         return false;
     }
     bool apply(std::string& error) override
     {
+        ENGINE_PROFILE_FUNCTION();
         return replace(before_, after_, error);
     }
     bool revert(std::string& error) override
     {
+        ENGINE_PROFILE_FUNCTION();
         return replace(after_, before_, error);
     }
 
 private:
     bool replace(const std::string& expected, const std::string& replacement, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         io::ProjectLock lock;
         if (!lock.acquire(project_ / "cache/.asset-build.lock", error))
         {
@@ -274,6 +286,7 @@ private:
 bool authoring(const fs::path& project, const Json& input, bool writing, Json& result,
                std::unique_ptr<editor::EditorEdit>& edit, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!arguments(input, writing, error))
     {
         return false;
@@ -373,15 +386,22 @@ bool authoring(const fs::path& project, const Json& input, bool writing, Json& r
 bool register_animation_authoring_commands(editor::EditorCommands& commands,
                                            const fs::path& project)
 {
+    ENGINE_PROFILE_FUNCTION();
     return commands.register_command(
                "get_animation_authoring", false,
                [project](const Json& input, Json& output, std::unique_ptr<editor::EditorEdit>& edit,
                          std::string& error)
-               { return authoring(project, input, false, output, edit, error); }) &&
+               {
+                   ENGINE_PROFILE_FUNCTION_PROBE();
+                   return authoring(project, input, false, output, edit, error);
+               }) &&
            commands.register_command(
                "set_animation_authoring", true,
                [project](const Json& input, Json& output, std::unique_ptr<editor::EditorEdit>& edit,
                          std::string& error)
-               { return authoring(project, input, true, output, edit, error); });
+               {
+                   ENGINE_PROFILE_FUNCTION_PROBE();
+                   return authoring(project, input, true, output, edit, error);
+               });
 }
 } // namespace engine::plugins::animation_tools

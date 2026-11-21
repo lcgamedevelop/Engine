@@ -1,4 +1,5 @@
 #include "plugins/editor/character_controller/character_visual_codec.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "editor/asset_pipeline/toml_helpers.hpp"
 #include "plugins/runtime/character_controller/character_visual.hpp"
@@ -11,17 +12,20 @@ namespace engine::plugins::character_controller
 
 schema::ComponentPayload CharacterVisualCodec::type() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::ComponentPayload::CharacterVisualData;
 }
 
 std::string_view CharacterVisualCodec::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "character_visual";
 }
 
 bool CharacterVisualCodec::validate(const schema::ComponentDataT& component,
                                     std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* value = component.payload.AsCharacterVisualData();
     if (value == nullptr || !CharacterVisual::valid_settings(*value))
     {
@@ -34,6 +38,7 @@ bool CharacterVisualCodec::validate(const schema::ComponentDataT& component,
 bool CharacterVisualCodec::read(const toml::table& table, schema::ComponentDataT& component,
                                 std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     schema::CharacterVisualDataT value;
     if (table.contains("kind"))
     {
@@ -67,6 +72,7 @@ bool CharacterVisualCodec::read(const toml::table& table, schema::ComponentDataT
 
 void CharacterVisualCodec::write(const schema::ComponentDataT& component, toml::table& table) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* value = component.payload.AsCharacterVisualData();
     table.insert("type", "character_visual");
     table.insert("kind", schema::EnumNameCharacterVisualKind(value->kind));
@@ -74,6 +80,7 @@ void CharacterVisualCodec::write(const schema::ComponentDataT& component, toml::
 
 bool register_character_visual_codec()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (editor::asset_pipeline::find_scene_component_codec(
             schema::ComponentPayload::CharacterVisualData))
     {

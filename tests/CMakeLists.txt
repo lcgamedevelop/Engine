@@ -60,7 +60,8 @@ endif()
 
 if(TARGET engine_resource)
     add_executable(engine_resource_read_test runtime/resource/resource_read_test.cpp)
-    target_link_libraries(engine_resource_read_test PRIVATE engine::resource SDL3::SDL3)
+    target_include_directories(engine_resource_read_test PRIVATE "${PROJECT_SOURCE_DIR}/src/engine")
+    target_link_libraries(engine_resource_read_test PRIVATE engine::resource engine::memory_profile SDL3::SDL3)
     engine_apply_options(engine_resource_read_test)
     add_test(NAME engine.resource_read
              COMMAND engine_resource_read_test
@@ -131,6 +132,7 @@ if(TARGET engine_script)
         target_link_libraries(
             engine_script_runtime_test
             PRIVATE engine::script
+                    engine::memory_profile
                     engine::input
                     engine::window
                     SDL3::SDL3
@@ -594,7 +596,7 @@ if(ENGINE_ENABLE_ASSET_PIPELINE_DEPS)
     set_tests_properties(editor.audio_pipeline PROPERTIES TIMEOUT 120)
     if(TARGET engine_resource_graph)
         add_executable(engine_texture_pipeline_test editor/asset_pipeline/texture_pipeline_test.cpp)
-        target_link_libraries(engine_texture_pipeline_test PRIVATE engine::resource_graph)
+        target_link_libraries(engine_texture_pipeline_test PRIVATE engine::resource_graph engine::memory_profile)
         target_include_directories(engine_texture_pipeline_test PRIVATE "${PROJECT_SOURCE_DIR}/src/engine")
         target_link_libraries(
             engine_texture_pipeline_test PRIVATE engine::asset_pipeline engine::resource engine::world

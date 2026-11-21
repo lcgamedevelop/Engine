@@ -1,4 +1,6 @@
 #include "plugins/editor/asset_import/font_importer.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "editor/asset_pipeline/asset_io.hpp"
 #include "editor/asset_pipeline/importer_utils.hpp"
@@ -46,6 +48,7 @@ struct FontSource
 
     ~FontSource()
     {
+        ENGINE_PROFILE_FUNCTION();
         if (face != nullptr)
         {
             FT_Done_Face(face);
@@ -59,6 +62,7 @@ struct FontSource
 
 bool parse_range(std::string_view text, std::pair<std::uint32_t, std::uint32_t>& range)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto separator = text.find('-');
     if (separator == std::string_view::npos)
     {
@@ -68,6 +72,7 @@ bool parse_range(std::string_view text, std::pair<std::uint32_t, std::uint32_t>&
     const auto right = text.substr(separator + 1);
     const auto parse = [](std::string_view value, std::uint32_t& output)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (value.size() < 4 || value.size() > 6)
         {
             return false;
@@ -82,6 +87,7 @@ bool parse_range(std::string_view text, std::pair<std::uint32_t, std::uint32_t>&
 
 bool read_settings(const std::filesystem::path& source, FontSettings& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto meta = source;
     meta += ".meta";
     toml::table root;
@@ -176,6 +182,7 @@ struct OutlineBuilder
 
     int quadratic(const FT_Vector& control, const FT_Vector& end)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (curves.size() >= maximum_curves)
         {
             return 1;
@@ -190,6 +197,7 @@ struct OutlineBuilder
 
     int line(const FT_Vector& end)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (current.x == end.x && current.y == end.y)
         {
             return 0;
@@ -210,12 +218,14 @@ struct OutlineBuilder
 
     int close()
     {
+        ENGINE_PROFILE_FUNCTION();
         return contour ? line(start) : 0;
     }
 };
 
 int move_to(const FT_Vector* point, void* user)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto& builder = *static_cast<OutlineBuilder*>(user);
     if (builder.close() != 0)
     {
@@ -229,16 +239,19 @@ int move_to(const FT_Vector* point, void* user)
 
 int line_to(const FT_Vector* point, void* user)
 {
+    ENGINE_PROFILE_FUNCTION();
     return static_cast<OutlineBuilder*>(user)->line(*point);
 }
 
 int conic_to(const FT_Vector* control, const FT_Vector* point, void* user)
 {
+    ENGINE_PROFILE_FUNCTION();
     return static_cast<OutlineBuilder*>(user)->quadratic(*control, *point);
 }
 
 int cubic_to(const FT_Vector*, const FT_Vector*, const FT_Vector*, void* user)
 {
+    ENGINE_PROFILE_FUNCTION();
     static_cast<OutlineBuilder*>(user)->cubic = true;
     return 1;
 }
@@ -246,6 +259,7 @@ int cubic_to(const FT_Vector*, const FT_Vector*, const FT_Vector*, void* user)
 bool append_glyph(FT_Face face, std::uint32_t codepoint, FT_UInt glyph_index,
                   schema::FontDataT& font, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (font.glyphs.size() >= maximum_glyphs)
     {
         error = "font import exceeds the 4096 glyph limit";
@@ -292,6 +306,7 @@ bool append_glyph(FT_Face face, std::uint32_t codepoint, FT_UInt glyph_index,
 bool convert_font(FT_Face face, const FontSettings& settings, schema::FontDataT& font,
                   std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const char* format = FT_Get_Font_Format(face);
     if (format == nullptr || std::strcmp(format, "TrueType") != 0 || !FT_IS_SCALABLE(face) ||
         face->units_per_EM < 16 || face->units_per_EM > 16384 ||
@@ -361,22 +376,26 @@ bool convert_font(FT_Face face, const FontSettings& settings, schema::FontDataT&
 
 std::string_view FontImporter::id() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "font";
 }
 
 schema::AssetKind FontImporter::kind() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::font;
 }
 
 bool FontImporter::matches(const std::filesystem::path& source) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto extension = editor::asset_pipeline::source_extension(source);
     return extension == ".ttf" || extension == ".ttc" || extension == ".otf";
 }
 
 std::string_view FontImporter::default_meta() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "\n[font]\nface_index = 0\nunicode_ranges = [\"0020-007E\", \"00A0-00FF\"]\n"
            "kerning = true\n";
 }
@@ -384,6 +403,7 @@ std::string_view FontImporter::default_meta() const noexcept
 bool FontImporter::inspect_batch(const editor::asset_pipeline::ImportContext&,
                                  std::string& fingerprint, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!editor::asset_pipeline::schema_fingerprint({"runtime/font.fbs"}, fingerprint, error))
     {
         return false;
@@ -407,6 +427,7 @@ bool FontImporter::convert(const editor::asset_pipeline::ImportAsset& asset,
                            const editor::asset_pipeline::ImportContext& context,
                            std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     FontSettings settings;
     std::vector<std::byte> bytes;
     if (!read_settings(asset.source, settings, error) ||

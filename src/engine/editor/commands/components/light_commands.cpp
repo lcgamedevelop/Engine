@@ -1,4 +1,6 @@
 #include "editor/commands/components/component_edit.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/scene/light.hpp"
 #include "runtime/schema/control_json_generated.hpp"
@@ -23,6 +25,7 @@ constexpr std::uint64_t virtual_shadow_field = std::uint64_t{1} << 10;
 
 bool same_vsm(const LightSettings& a, const LightSettings& b)
 {
+    ENGINE_PROFILE_FUNCTION();
     const schema::VsmSettingsT defaults;
     return (a.virtual_shadow ? *a.virtual_shadow : defaults) ==
            (b.virtual_shadow ? *b.virtual_shadow : defaults);
@@ -32,6 +35,7 @@ bool same_vsm(const LightSettings& a, const LightSettings& b)
                                 const LightSettings& replacement, std::uint64_t selected,
                                 std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto node = target.node(error);
     auto component = node.valid() ? node.get_component<Light>() : Light{};
     if (!component)
@@ -121,6 +125,7 @@ bool same_vsm(const LightSettings& a, const LightSettings& b)
 bool prepare_light(WorldSystem& world, NodeAliases& aliases, const Json& arguments, Json& result,
                    std::unique_ptr<EditorEdit>& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     Target target(world, &aliases);
     if (!fields(arguments, {"sceneId", "nodeId", "color", "intensity", "kind", "range",
                             "innerAngle", "outerAngle", "castShadows", "shadowResolution",
@@ -152,7 +157,11 @@ bool prepare_light(WorldSystem& world, NodeAliases& aliases, const Json& argumen
         std::array<double, 4> values{};
         if (!vector(arguments["color"], 4, values) ||
             !std::all_of(values.begin(), values.end(),
-                         [](double value) { return value >= 0 && value <= 1; }))
+                         [](double value)
+                         {
+                             ENGINE_PROFILE_FUNCTION_PROBE();
+                             return value >= 0 && value <= 1;
+                         }))
         {
             error = "Light color requires four numbers in [0, 1]";
             return false;

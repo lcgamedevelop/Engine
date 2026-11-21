@@ -1,4 +1,6 @@
 #include "plugins/editor/terrain/terrain_authoring_commands.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/asset_pipeline/asset_io.hpp"
 #include "editor/commands/editor_commands.hpp"
 #include "editor/commands/editor_edit.hpp"
@@ -15,6 +17,7 @@ namespace
 using Json = nlohmann::json;
 bool decimal(const Json& value, std::uint64_t& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = 0;
     if (!value.is_string())
     {
@@ -26,12 +29,14 @@ bool decimal(const Json& value, std::uint64_t& output)
 }
 bool identity(const Json& json, TerrainAuthoringId& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     return json.is_object() && json.size() == 2 && json.contains("session") &&
            json.contains("sequence") && decimal(json["session"], output.session) &&
            decimal(json["sequence"], output.sequence);
 }
 Json snapshot(const TerrainAuthoringSnapshot& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     constexpr const char* states[]{"queued",    "preparing", "ready_to_publish",
                                    "published", "failed",    "cancelled"};
     return {{"id",
@@ -54,10 +59,12 @@ bool register_terrain_authoring_commands(TerrainAuthoringSystem& authoring,
                                          editor::EditorCommands& commands,
                                          const std::filesystem::path& project)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!commands.register_command(
             "get_terrain_capabilities", false,
             [](const Json& args, Json& result, std::unique_ptr<editor::EditorEdit>&, std::string&)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 if (!args.empty())
                 {
                     return false;
@@ -78,6 +85,7 @@ bool register_terrain_authoring_commands(TerrainAuthoringSystem& authoring,
             [project](const Json& args, Json& result, std::unique_ptr<editor::EditorEdit>&,
                       std::string& error)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 if (!args.is_object() || args.size() != 1 || !args.contains("path") ||
                     !args["path"].is_string())
                 {
@@ -104,6 +112,7 @@ bool register_terrain_authoring_commands(TerrainAuthoringSystem& authoring,
             [&authoring](const Json& args, Json& result, std::unique_ptr<editor::EditorEdit>&,
                          std::string& error)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 if (!args.is_object() || args.size() != 3 || !args.contains("path") ||
                     !args["path"].is_string() || !args.contains("source") ||
                     !args["source"].is_string() || !args.contains("expectedSourceRevision"))
@@ -129,6 +138,7 @@ bool register_terrain_authoring_commands(TerrainAuthoringSystem& authoring,
                                                 std::unique_ptr<editor::EditorEdit>&,
                                                 std::string& error)
                                    {
+                                       ENGINE_PROFILE_FUNCTION_PROBE();
                                        TerrainAuthoringId id;
                                        TerrainAuthoringSnapshot value;
                                        if (!identity(args, id) || !authoring.status(id, value))
@@ -144,6 +154,7 @@ bool register_terrain_authoring_commands(TerrainAuthoringSystem& authoring,
             [&authoring](const Json& args, Json& result, std::unique_ptr<editor::EditorEdit>& edit,
                          std::string& error)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 TerrainAuthoringId id;
                 TerrainAuthoringSnapshot value;
                 if (!identity(args, id) || !authoring.status(id, value) ||
@@ -170,6 +181,7 @@ bool register_terrain_authoring_commands(TerrainAuthoringSystem& authoring,
                 [&authoring, cancel](const Json& args, Json& result,
                                      std::unique_ptr<editor::EditorEdit>&, std::string& error)
                 {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
                     TerrainAuthoringId id;
                     if (!identity(args, id) ||
                         (cancel ? !authoring.cancel(id) : !authoring.release(id)))

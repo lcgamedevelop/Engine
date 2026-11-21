@@ -1,10 +1,13 @@
 #pragma once
+
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/resource/resource.hpp"
 
 namespace engine::resource_codec_detail
 {
 inline bool valid_utf8(ByteView bytes) noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     std::size_t index = 0;
     while (index < bytes.size())
     {

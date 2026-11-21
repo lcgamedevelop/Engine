@@ -1,4 +1,6 @@
 #pragma once
+
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/render/render_submission.hpp"
 #include "runtime/render/rvt/virtual_texture_cache.hpp"
 #include <bgfx/bgfx.h>
@@ -19,19 +21,23 @@ public:
     void release_gpu() noexcept;
     [[nodiscard]] bool available() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return bgfx::isValid(target_);
     }
     [[nodiscard]] std::uint64_t resident_bytes() const noexcept;
     [[nodiscard]] const std::string& reason() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return reason_;
     }
     void set_diagnostics(std::uint32_t flags) noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         diagnostics_ = flags;
     }
     [[nodiscard]] const schema::RvtSettingsT& settings() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return settings_;
     }
 

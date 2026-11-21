@@ -6,10 +6,13 @@
 #include "runtime/render/vsm/vsm_debug_view.hpp"
 
 #include "runtime/render/frame_counters.hpp"
+#include "runtime/render/gpu_memory_tracker.hpp"
 #include "runtime/render/passes/frame_output.hpp"
 #include "runtime/render/passes/meshlet_cull_pass.hpp"
 
 #include "runtime/font/font_system.hpp"
+#include "runtime/performance/memory_profiling.hpp"
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/render/movie_pass.hpp"
 #include "runtime/render/render_constants.hpp"
@@ -25,6 +28,7 @@
 #include "runtime/world/world_system.hpp"
 
 #include <SDL3/SDL.h>
+#include <bx/allocator.h>
 
 #include <algorithm>
 #include <array>
@@ -43,9 +47,24 @@ namespace
 {
 RenderSystem* active_renderer = nullptr;
 
+#if defined(ENGINE_ENABLE_MEMORY_PROFILING)
+class BgfxCpuAllocator final : public bx::AllocatorI
+{
+public:
+    void* realloc(void* address, std::size_t bytes, std::size_t alignment, const char*,
+                  std::uint32_t) noexcept override
+    {
+        ENGINE_PROFILE_FUNCTION();
+        return memory_profile::BackingAllocation::reallocate_block(memory_profile::Pool::bgfx_cpu,
+                                                                   address, bytes, alignment);
+    }
+};
+#endif
+
 #if defined(ENGINE_ENABLE_TRACY)
 std::size_t profile_view_group(bgfx::ViewId id)
 {
+    ENGINE_PROFILE_FUNCTION();
     using namespace render_detail;
     if (id >= 3 && id <= 72)
     {
@@ -119,6 +138,7 @@ std::size_t profile_view_group(bgfx::ViewId id)
 void profile_view_record(const char* kind, std::uint16_t id, const char* name, std::int64_t frame,
                          std::int64_t begin, std::int64_t end, std::int64_t frequency)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string escaped;
     for (const unsigned char value : std::string_view(name))
     {
@@ -329,10 +349,12 @@ RenderSystem::RenderSystem(WindowSystem& windows, WorldSystem* world, FontSystem
                            UiSystem* ui, TaskSystem* tasks, const RenderConfig& config) noexcept
     : windows_(windows), world_(world), fonts_(fonts), ui_(ui), tasks_(tasks), config_(config)
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 RenderSystem::~RenderSystem() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
     for (auto* extension : extensions_)
     {
@@ -343,6 +365,7 @@ RenderSystem::~RenderSystem() noexcept
 
 bool RenderSystem::bind_world(WorldSystem* world, FontSystem* fonts, UiSystem* ui)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!is_initialized() || invoking_extensions_ ||
         ((world == nullptr || fonts == nullptr || ui == nullptr) &&
          (world != nullptr || fonts != nullptr || ui != nullptr)) ||
@@ -363,6 +386,7 @@ bool RenderSystem::bind_world(WorldSystem* world, FontSystem* fonts, UiSystem* u
 
 bool RenderSystem::add_extension(RenderExtension& extension)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (invoking_extensions_ || extension.renderer_ != nullptr)
     {
         return false;
@@ -378,6 +402,7 @@ bool RenderSystem::add_extension(RenderExtension& extension)
 
 bool RenderSystem::remove_extension(RenderExtension& extension) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (invoking_extensions_ || extension.renderer_ != this)
     {
         return false;
@@ -392,6 +417,7 @@ bool RenderSystem::remove_extension(RenderExtension& extension) noexcept
 
 void RenderSystem::detach_extension(RenderExtension& extension) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     std::erase(extensions_, &extension);
     extension.renderer_ = nullptr;
     if (preparation_ && preparation_->status == RenderPrepareStatus::ready)
@@ -402,6 +428,8 @@ void RenderSystem::detach_extension(RenderExtension& extension) noexcept
 
 void RenderSystem::release_extensions_scene() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
+    published_extension_scope_ = {};
     invoking_extensions_ = true;
     for (auto* extension : extensions_)
     {
@@ -412,6 +440,7 @@ void RenderSystem::release_extensions_scene() noexcept
 
 bool RenderSystem::on_initialize(const EngineConfig&)
 {
+    ENGINE_PROFILE_FUNCTION();
     // 初始化前的非法准备请求不能把新的渲染生命周期永久留在 failed。
     preparation_.reset();
     if (config_.cluster_tile_size < 16 || config_.cluster_tile_size > 256 ||
@@ -455,11 +484,13 @@ bool RenderSystem::on_initialize(const EngineConfig&)
 
 void RenderSystem::suspend_renderer(void* context) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     static_cast<RenderSystem*>(context)->shutdown_renderer(false);
 }
 
 bool RenderSystem::initialize_renderer()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (active_renderer != nullptr || !windows_.is_initialized() ||
         windows_.native_window() == nullptr)
     {
@@ -485,6 +516,14 @@ bool RenderSystem::initialize_renderer()
     init.reset = render_detail::reset_flags |
                  (vsync_enabled_ ? BGFX_RESET_VSYNC : BGFX_RESET_NONE) |
                  (config_.max_anisotropy ? BGFX_RESET_MAXANISOTROPY : BGFX_RESET_NONE);
+    if (config_.transient_vertex_bytes != 0)
+    {
+        init.limits.maxTransientVbSize = config_.transient_vertex_bytes;
+    }
+    if (config_.transient_index_bytes != 0)
+    {
+        init.limits.maxTransientIbSize = config_.transient_index_bytes;
+    }
     if (callbacks_ == nullptr)
     {
         callbacks_.reset(new (std::nothrow) RendererCallbacks{});
@@ -494,6 +533,10 @@ bool RenderSystem::initialize_renderer()
         }
     }
     init.callback = callbacks_.get();
+#if defined(ENGINE_ENABLE_MEMORY_PROFILING)
+    static BgfxCpuAllocator cpu_allocator;
+    init.allocator = &cpu_allocator;
+#endif
     if (!bgfx::init(init))
     {
         SDL_LogError(SDL_LOG_CATEGORY_RENDER, "bgfx initialization failed");
@@ -501,6 +544,10 @@ bool RenderSystem::initialize_renderer()
     }
     renderer_initialized_ = true;
     ++device_generation_;
+#if defined(ENGINE_ENABLE_MEMORY_PROFILING)
+    const bool threaded = (bgfx::getCaps()->supported & BGFX_CAPS_RENDERER_MULTITHREADED) != 0;
+    gpu_memory_ = std::make_unique<render_detail::GpuMemoryTracker>(device_generation_, threaded);
+#endif
     vsync_applied_ = vsync_enabled_;
     max_anisotropy_applied_ = config_.max_anisotropy;
     active_renderer = this;
@@ -522,7 +569,7 @@ bool RenderSystem::initialize_renderer()
 
     if (!frame_output_)
     {
-        frame_output_ = std::make_unique<render_detail::FrameOutput>();
+        frame_output_ = std::make_unique<render_detail::FrameOutput>(gpu_memory_.get());
     }
     if (!frame_output_->prepare(static_cast<std::uint16_t>(width_),
                                 static_cast<std::uint16_t>(height_)))
@@ -546,16 +593,19 @@ bool RenderSystem::initialize_renderer()
 
 bool RenderSystem::gpu_ready() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return renderer_initialized_;
 }
 
 std::uint32_t RenderSystem::frame_number() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return frame_number_;
 }
 
 bool RenderSystem::viewport_size(Vec2& output) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     if (!is_initialized() || !renderer_initialized_ || width_ == 0 || height_ == 0)
     {
@@ -567,6 +617,7 @@ bool RenderSystem::viewport_size(Vec2& output) const noexcept
 
 void RenderSystem::apply_debug_state()
 {
+    ENGINE_PROFILE_FUNCTION();
     std::uint32_t flags = stats_visible() ? BGFX_DEBUG_STATS : BGFX_DEBUG_NONE;
 #if defined(ENGINE_ENABLE_TRACY)
     // Stage-boundary sampling changes native pass scheduling; keep it scoped to a capture.
@@ -580,11 +631,13 @@ void RenderSystem::apply_debug_state()
 
 void RenderSystem::set_stats_visible(bool visible)
 {
+    ENGINE_PROFILE_FUNCTION();
     (void)set_debug_feature(RenderFeature::stats, visible);
 }
 
 bool RenderSystem::set_vsync(bool enabled)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!is_initialized())
     {
         return false;
@@ -595,11 +648,13 @@ bool RenderSystem::set_vsync(bool enabled)
 
 bool RenderSystem::vsync() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return vsync_enabled_;
 }
 
 bool RenderSystem::set_msaa_samples(std::uint8_t samples)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!is_initialized() || !supports_msaa_samples(samples))
     {
         return false;
@@ -610,11 +665,13 @@ bool RenderSystem::set_msaa_samples(std::uint8_t samples)
 
 std::uint8_t RenderSystem::msaa_samples() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return config_.msaa_samples;
 }
 
 bool RenderSystem::supports_msaa_samples(std::uint8_t samples) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!renderer_initialized_ || !render_detail::valid_msaa_samples(samples))
     {
         return false;
@@ -641,6 +698,7 @@ bool RenderSystem::supports_msaa_samples(std::uint8_t samples) const noexcept
 
 bool RenderSystem::set_max_anisotropy(bool enabled)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!is_initialized() || !renderer_initialized_ || (enabled && !supports_max_anisotropy()))
     {
         return false;
@@ -651,17 +709,20 @@ bool RenderSystem::set_max_anisotropy(bool enabled)
 
 bool RenderSystem::max_anisotropy() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return config_.max_anisotropy;
 }
 
 bool RenderSystem::supports_max_anisotropy() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* caps = renderer_initialized_ ? bgfx::getCaps() : nullptr;
     return caps != nullptr && caps->maxAnisotropy > 1;
 }
 
 bool RenderSystem::stats_visible() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return debug_requests_[static_cast<std::size_t>(RenderFeature::stats)];
 }
 
@@ -742,7 +803,7 @@ render_detail::FramePrepareStatus RenderSystem::prepare_frame()
 
     if (!frame_output_)
     {
-        frame_output_ = std::make_unique<render_detail::FrameOutput>();
+        frame_output_ = std::make_unique<render_detail::FrameOutput>(gpu_memory_.get());
     }
     if (!frame_output_->prepare(static_cast<std::uint16_t>(width_),
                                 static_cast<std::uint16_t>(height_)))
@@ -795,6 +856,7 @@ RenderSubmitStatus RenderSystem::render(Camera camera)
     std::size_t next_view = 0;
     const auto append = [&](bgfx::ViewId id)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (!used[id])
         {
             order[next_view++] = id;
@@ -905,10 +967,7 @@ RenderSubmitStatus RenderSystem::render(Camera camera)
             submit_screenshot(world_ && world_->scene() ? RenderFrameKind::scene
                                                         : RenderFrameKind::clear);
         }
-        {
-            ENGINE_PROFILE_ZONE("Render.bgfxFrame");
-            frame_number_ = bgfx::frame();
-        }
+        submit_frame();
         if (meshlet_culling_)
         {
             meshlet_culling_->poll(frame_number_);
@@ -942,6 +1001,7 @@ RenderSubmitStatus RenderSystem::render(Camera camera)
 
 RenderSubmitStatus RenderSystem::present_movie_frame(const MovieFrame& frame)
 {
+    ENGINE_PROFILE_FUNCTION();
     render_detail::ui_draws = 0;
     rvt_status_.effective = false;
     rvt_debug_visible_ = vsm_debug_visible_ = false;
@@ -967,7 +1027,7 @@ RenderSubmitStatus RenderSystem::present_movie_frame(const MovieFrame& frame)
     }
     frame_output_->present(0x000000ff, true);
     submit_screenshot(RenderFrameKind::movie);
-    frame_number_ = bgfx::frame();
+    submit_frame();
     if (meshlet_culling_)
     {
         meshlet_culling_->poll(frame_number_);
@@ -982,8 +1042,24 @@ RenderSubmitStatus RenderSystem::present_movie_frame(const MovieFrame& frame)
     return RenderSubmitStatus::submitted;
 }
 
+void RenderSystem::submit_frame() noexcept
+{
+    ENGINE_PROFILE_FUNCTION();
+    {
+        ENGINE_PROFILE_ZONE("Render.bgfxFrame");
+        frame_number_ = bgfx::frame();
+    }
+#if defined(ENGINE_ENABLE_MEMORY_PROFILING)
+    if (gpu_memory_)
+    {
+        gpu_memory_->frame_submitted(frame_number_);
+    }
+#endif
+}
+
 void RenderSystem::on_shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown_renderer();
     preparation_.reset();
     if (surface_ != nullptr)
@@ -995,14 +1071,13 @@ void RenderSystem::on_shutdown() noexcept
 
 void RenderSystem::shutdown_renderer(bool drain_screenshots) noexcept
 {
-    if (drain_screenshots && renderer_initialized_ && active_screenshot_)
+    ENGINE_PROFILE_FUNCTION();
+    if (!render_detail::web_readbacks && drain_screenshots && renderer_initialized_ &&
+        active_screenshot_)
     {
         for (int attempt = 0; attempt < 16 && active_screenshot_; ++attempt)
         {
-            {
-                ENGINE_PROFILE_ZONE("Render.bgfxFrame");
-                frame_number_ = bgfx::frame();
-            }
+            submit_frame();
             if (meshlet_culling_)
             {
                 meshlet_culling_->poll(frame_number_);
@@ -1052,6 +1127,12 @@ void RenderSystem::shutdown_renderer(bool drain_screenshots) noexcept
             frame_output_->release();
         }
         bgfx::shutdown();
+#if defined(ENGINE_ENABLE_MEMORY_PROFILING)
+        if (gpu_memory_)
+        {
+            gpu_memory_->device_drained();
+        }
+#endif
         meshlet_culling_.reset();
         vsm_pass_.reset();
         vsm_cache_.reset();

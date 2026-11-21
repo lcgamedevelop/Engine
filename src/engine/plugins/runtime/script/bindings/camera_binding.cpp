@@ -1,4 +1,5 @@
 #include "plugins/runtime/script/bindings/camera_binding.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/script/bindings/binding_helpers.hpp"
 
 #include "plugins/runtime/script/bindings/binding_context.hpp"
@@ -40,6 +41,7 @@ Object.freeze(Camera);
 
 void settings(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto node = BindingContext::node(arguments);
     auto camera = !node ? Camera{} : node.get_component<Camera>();
@@ -59,6 +61,7 @@ void settings(const Arguments& arguments)
 }
 void orthographic(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto node = BindingContext::node(arguments);
     auto camera = !node ? Camera{} : node.get_component<Camera>();
@@ -79,6 +82,7 @@ void orthographic(const Arguments& arguments)
 
 void get_frustum_culling(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto node = BindingContext::node(arguments);
     const auto camera = node ? node.get_component<Camera>() : Camera{};
     CameraSettings settings;
@@ -88,6 +92,7 @@ void get_frustum_culling(const Arguments& arguments)
 
 void set_frustum_culling(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     const auto node = BindingContext::node(arguments);
     auto camera = node ? node.get_component<Camera>() : Camera{};
@@ -107,6 +112,7 @@ void set_frustum_culling(const Arguments& arguments)
 
 void point_to_ray(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     const auto node = BindingContext::node(arguments);
     const auto camera = !node ? Camera{} : node.get_component<Camera>();
@@ -141,16 +147,19 @@ void point_to_ray(const Arguments& arguments)
 
 std::string_view CameraBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "Camera";
 }
 
 std::string_view CameraBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 
 bool CameraBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.integer("CameraKind", static_cast<int>(Camera::component_type)) &&
            vm.function("CameraAdd", binding_detail::add_component<Camera>) &&
            vm.function("CameraSettings", settings) &&

@@ -1,4 +1,5 @@
 #include "editor/asset_pipeline/components/post_process_codec.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "editor/asset_pipeline/toml_helpers.hpp"
 #include "runtime/scene/scene_settings_validation.hpp"
@@ -10,16 +11,19 @@ namespace engine::editor::asset_pipeline
 
 schema::ComponentPayload PostProcessCodec::type() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::ComponentPayload::PostProcessData;
 }
 
 std::string_view PostProcessCodec::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "post_process";
 }
 
 bool PostProcessCodec::validate(const schema::ComponentDataT& component, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* settings = component.payload.AsPostProcessData();
     if (settings == nullptr || !scene_detail::valid_post_process(*settings))
     {
@@ -32,6 +36,7 @@ bool PostProcessCodec::validate(const schema::ComponentDataT& component, std::st
 bool PostProcessCodec::read(const toml::table& table, schema::ComponentDataT& component,
                             std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     PostProcessSettings settings;
     if ((table.contains("exposure") && !float_number(table.get("exposure"), settings.exposure)) ||
         (table.contains("ao_radius") &&
@@ -136,6 +141,7 @@ bool PostProcessCodec::read(const toml::table& table, schema::ComponentDataT& co
 
 void PostProcessCodec::write(const schema::ComponentDataT& component, toml::table& table) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto& settings = *component.payload.AsPostProcessData();
     table.insert("type", "post_process");
     table.insert("exposure", settings.exposure);

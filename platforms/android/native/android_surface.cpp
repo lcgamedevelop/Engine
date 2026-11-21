@@ -1,4 +1,5 @@
 #include "android/native/android_surface.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include <SDL3/SDL.h>
 #include <jni.h>
@@ -16,6 +17,7 @@ bool rendering = false;
 
 void SDLCALL suspend_on_main_thread(void* userdata)
 {
+    ENGINE_PROFILE_FUNCTION();
     // SDL 退出后 RunOnMainThread 可能直接在调用线程执行；此时不访问 renderer。
     if (!SDL_IsMainThread())
     {
@@ -29,6 +31,7 @@ void SDLCALL suspend_on_main_thread(void* userdata)
 
 bool pause_surface()
 {
+    ENGINE_PROFILE_FUNCTION();
     {
         const std::lock_guard lock(surface_mutex);
         paused = true;
@@ -56,6 +59,7 @@ bool pause_surface()
 
 void resume_surface()
 {
+    ENGINE_PROFILE_FUNCTION();
     const std::lock_guard lock(surface_mutex);
     paused = false;
 }
@@ -64,12 +68,14 @@ void resume_surface()
 
 bool surface_paused() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const std::lock_guard lock(surface_mutex);
     return paused;
 }
 
 bool begin_rendering() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const std::lock_guard lock(surface_mutex);
     if (paused)
     {
@@ -81,6 +87,7 @@ bool begin_rendering() noexcept
 
 void end_rendering() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const std::lock_guard lock(surface_mutex);
     rendering = false;
 }
@@ -90,11 +97,13 @@ void end_rendering() noexcept
 extern "C" JNIEXPORT jboolean JNICALL
 Java_org_engine_minimal_EngineActivity_nativePauseRendering(JNIEnv*, jclass)
 {
+    ENGINE_PROFILE_FUNCTION();
     return engine::android::pause_surface() ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_org_engine_minimal_EngineActivity_nativeResumeRendering(JNIEnv*, jclass)
 {
+    ENGINE_PROFILE_FUNCTION();
     engine::android::resume_surface();
 }

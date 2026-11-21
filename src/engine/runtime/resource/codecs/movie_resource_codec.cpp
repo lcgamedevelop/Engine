@@ -1,4 +1,6 @@
 #include "runtime/resource/codecs/movie_resource_codec.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/resource/codecs/resource_decode.hpp"
 
 #include "runtime/resource/types/audio_resource.hpp"
@@ -16,20 +18,24 @@ namespace
 {
 std::uint16_t read16(const std::uint8_t* p) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return static_cast<std::uint16_t>(p[0] | (std::uint16_t{p[1]} << 8));
 }
 std::uint32_t read32(const std::uint8_t* p) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::uint32_t{p[0]} | (std::uint32_t{p[1]} << 8) | (std::uint32_t{p[2]} << 16) |
            (std::uint32_t{p[3]} << 24);
 }
 std::uint64_t read64(const std::uint8_t* p) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return read32(p) | (std::uint64_t{read32(p + 4)} << 32);
 }
 
 bool valid_video(const schema::MovieVideoDataT& video) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* color = video.color.get();
     const auto& payload = video.payload;
     if (payload.empty() || !color || video.width == 0 || video.height == 0 || video.width > 1920 ||
@@ -86,24 +92,32 @@ bool valid_video(const schema::MovieVideoDataT& video) noexcept
 
 schema::AssetKind MovieResourceCodec::kind() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::movie;
 }
 
 bool MovieResourceCodec::decode(const schema::AssetEntryT& entry, ByteView payload,
                                 std::unique_ptr<Resource>& output, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto validate = [](ByteView payload, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return resource_decode_detail::verify_flatbuffer(payload, schema::VerifyMovieDataBuffer,
                                                          "Invalid Movie FlatBuffer", error);
     };
     return resource_decode_detail::decode_flatbuffer<ResourceType>(
         entry, payload, 64U * 1024U * 1024U, validate,
-        [](const std::uint8_t* bytes) { return schema::UnPackMovieData(bytes); }, output, error);
+        [](const std::uint8_t* bytes)
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return schema::UnPackMovieData(bytes);
+        }, output, error);
 }
 
 bool MovieResourceCodec::validate_data(const Resource& resource, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     const auto* data = resource_detail::data<ResourceType>(&resource);
     if (!data || data->schema_version != 1 || data->encoding_version != 1 || !data->video ||
@@ -120,6 +134,7 @@ bool MovieResourceCodec::validate_data(const Resource& resource, std::string& er
 bool MovieResourceCodec::validate_dependencies(const Resource& resource, ResourceView dependencies,
                                                std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     const auto* movie = resource_detail::data<ResourceType>(&resource);
     if (!movie || !movie->video)

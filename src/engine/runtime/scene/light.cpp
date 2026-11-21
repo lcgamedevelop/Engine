@@ -1,4 +1,5 @@
 #include "runtime/scene/light.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/scene/ecs_storage.hpp"
 
@@ -8,11 +9,13 @@ namespace engine
 {
 bool Light::register_type(ComponentRegistry& registry)
 {
+    ENGINE_PROFILE_FUNCTION();
     return register_component_storage<Light, Data>(registry);
 }
 
 bool Light::get_settings(Data& output) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* value = read_data<Data>();
     output = value ? *value : Data{};
     return value != nullptr;
@@ -20,6 +23,7 @@ bool Light::get_settings(Data& output) const noexcept
 
 bool Light::set_settings(const LightSettings& settings) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -35,6 +39,7 @@ bool Light::set_settings(const LightSettings& settings) noexcept
 
 bool Light::restore_data(const schema::ComponentDataT& data)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!data.flags)
     {
         return false;

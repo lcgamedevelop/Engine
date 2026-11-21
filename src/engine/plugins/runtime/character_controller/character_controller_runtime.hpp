@@ -1,4 +1,6 @@
 #pragma once
+
+#include "runtime/performance/function_profile.hpp"
 #include "plugins/runtime/character_controller/character_ability_registry.hpp"
 #include "plugins/runtime/character_controller/character_controller.hpp"
 #include "runtime/scene/component_runtime.hpp"
@@ -10,6 +12,7 @@ struct CharacterWorldRuntime
 };
 inline const CharacterAbilityRegistry* character_abilities(WorldSystem& world)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     const auto* r = flecs::world(world.native_world()).try_get<CharacterWorldRuntime>();
     return r ? r->abilities : nullptr;
 }

@@ -1,4 +1,6 @@
 #include "plugins/editor/asset_build/builtin_resources.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/file_text.hpp"
 #include "runtime/resource/virtual_file_system.hpp"
 
@@ -28,6 +30,7 @@ namespace pipeline = engine::editor::asset_pipeline;
 
 bool inspect_cache_path(const std::filesystem::path& path, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::filesystem::path current;
     std::error_code code;
     for (const auto& part : path)
@@ -52,6 +55,7 @@ bool inspect_cache_path(const std::filesystem::path& path, std::string& error)
 bool compile_shaders(std::string_view target, const std::filesystem::path& cache,
                      std::map<std::string, std::vector<std::uint8_t>>& shaders, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::filesystem::path compiler;
     std::filesystem::path includes;
     std::filesystem::path sources;
@@ -201,7 +205,11 @@ bool compile_shaders(std::string_view target, const std::filesystem::path& cache
         auto& destination = shaders[shader_name];
         destination.resize(bytes.size());
         std::transform(bytes.begin(), bytes.end(), destination.begin(),
-                       [](std::byte value) { return std::to_integer<std::uint8_t>(value); });
+                       [](std::byte value)
+                       {
+                           ENGINE_PROFILE_FUNCTION_PROBE();
+                           return std::to_integer<std::uint8_t>(value);
+                       });
     }
     return true;
 }
@@ -212,6 +220,7 @@ bool prepare_builtin_resources(std::string_view target, const std::filesystem::p
                                schema::AssetCatalogDataT& catalog,
                                std::map<Guid, ByteBuffer>& entities, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     entities.clear();
     std::map<std::string, std::vector<std::uint8_t>> shaders;
     if (!compile_shaders(target, cache, shaders, error))

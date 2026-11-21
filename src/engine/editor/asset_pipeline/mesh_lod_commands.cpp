@@ -1,4 +1,6 @@
 #include "editor/asset_pipeline/mesh_lod_commands.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/file_text.hpp"
 
 #include "editor/asset_pipeline/asset_io.hpp"
@@ -33,6 +35,7 @@ bool source_meta(const fs::path& project, const Json& arguments, bool writing, f
                  fs::path& meta_path, toml::table& meta, MeshLodSettings& settings,
                  std::string& error, bool meshlets = false)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!arguments.is_object() || !arguments.contains("path") || !arguments["path"].is_string())
     {
         error = "Mesh LOD import commands require a source asset path";
@@ -53,7 +56,11 @@ bool source_meta(const fs::path& project, const Json& arguments, bool writing, f
     const auto path = arguments["path"].get<std::string>();
     auto extension = PathUtils::to_utf8(PathUtils::from_utf8(path).extension());
     std::transform(extension.begin(), extension.end(), extension.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                   [](unsigned char c)
+                   {
+                       ENGINE_PROFILE_FUNCTION_PROBE();
+                       return static_cast<char>(std::tolower(c));
+                   });
     if (extension != ".mesh" && extension != ".fbx" && extension != ".usd" &&
         extension != ".usda" && extension != ".usdc")
     {
@@ -118,6 +125,7 @@ bool source_meta(const fs::path& project, const Json& arguments, bool writing, f
 
 Json settings_json(const MeshLodSettings& settings, bool meshlets = false)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (meshlets)
     {
         return {{"enabled", settings.enabled}};
@@ -131,6 +139,7 @@ Json settings_json(const MeshLodSettings& settings, bool meshlets = false)
 bool mesh_results(const fs::path& project, std::string_view path, const MeshLodSettings& settings,
                   Json& meshes, std::string& error, bool meshlets = false)
 {
+    ENGINE_PROFILE_FUNCTION();
     meshes = Json::array();
     ResourceCatalog catalog;
     if (!ResourceSystem::read_catalog(project / "cache", catalog))
@@ -204,6 +213,7 @@ bool mesh_results(const fs::path& project, std::string_view path, const MeshLodS
 bool read(const fs::path& project, const Json& arguments, Json& result, std::string& error,
           bool meshlets = false)
 {
+    ENGINE_PROFILE_FUNCTION();
     fs::path source, meta_path;
     toml::table meta;
     MeshLodSettings settings;
@@ -227,6 +237,7 @@ bool read(const fs::path& project, const Json& arguments, Json& result, std::str
 bool write(AssetPipelineSystem& pipeline, const fs::path& project, const Json& arguments,
            Json& result, std::string& error, bool meshlets = false)
 {
+    ENGINE_PROFILE_FUNCTION();
     bool changed = false;
     {
         asset_pipeline::ProjectLock lock;
@@ -355,26 +366,39 @@ bool write(AssetPipelineSystem& pipeline, const fs::path& project, const Json& a
 bool register_mesh_lod_commands(EditorCommands& commands, AssetPipelineSystem& pipeline,
                                 fs::path project_root)
 {
+    ENGINE_PROFILE_FUNCTION();
     return commands.register_command(
                "get_meshlet_import", false,
                [project_root](const Json& arguments, Json& result, std::unique_ptr<EditorEdit>&,
                               std::string& error)
-               { return read(project_root, arguments, result, error, true); }) &&
+               {
+                   ENGINE_PROFILE_FUNCTION_PROBE();
+                   return read(project_root, arguments, result, error, true);
+               }) &&
            commands.register_command(
                "set_meshlet_import", false,
                [project_root, &pipeline](const Json& arguments, Json& result,
                                          std::unique_ptr<EditorEdit>&, std::string& error)
-               { return write(pipeline, project_root, arguments, result, error, true); }) &&
+               {
+                   ENGINE_PROFILE_FUNCTION_PROBE();
+                   return write(pipeline, project_root, arguments, result, error, true);
+               }) &&
            commands.register_command("get_mesh_lod_import", false,
                                      [project_root](const Json& arguments, Json& result,
                                                     std::unique_ptr<EditorEdit>&,
                                                     std::string& error)
-                                     { return read(project_root, arguments, result, error); }) &&
+                                     {
+                                         ENGINE_PROFILE_FUNCTION_PROBE();
+                                         return read(project_root, arguments, result, error);
+                                     }) &&
            commands.register_command(
                "set_mesh_lod_import", false,
                [project_root, &pipeline](const Json& arguments, Json& result,
                                          std::unique_ptr<EditorEdit>&, std::string& error)
-               { return write(pipeline, project_root, arguments, result, error); });
+               {
+                   ENGINE_PROFILE_FUNCTION_PROBE();
+                   return write(pipeline, project_root, arguments, result, error);
+               });
 }
 
 } // namespace engine::editor

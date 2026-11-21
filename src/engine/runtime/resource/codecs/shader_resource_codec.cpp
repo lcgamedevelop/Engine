@@ -1,4 +1,6 @@
 #include "runtime/resource/codecs/shader_resource_codec.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/resource/codecs/resource_decode.hpp"
 
 #include "runtime/core/guid_map.hpp"
@@ -17,18 +19,26 @@ namespace
 
 bool valid_uniform_name(std::string_view name)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto letter = [](char value)
-    { return (value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z') || value == '_'; };
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return (value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z') || value == '_';
+    };
     if (name.empty() || !letter(name.front()))
     {
         return false;
     }
     return std::all_of(name.begin(), name.end(), [letter](char value)
-                       { return letter(value) || (value >= '0' && value <= '9'); });
+                       {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return letter(value) || (value >= '0' && value <= '9');
+    });
 }
 
 bool reserved_uniform(std::string_view name)
 {
+    ENGINE_PROFILE_FUNCTION();
     constexpr std::array names = {std::string_view("u_normal_transform"),
                                   std::string_view("u_ambient"),
                                   std::string_view("u_ambient_sky"),
@@ -108,6 +118,7 @@ bool reserved_uniform(std::string_view name)
 
 bool ShaderResourceCodec::validate(const schema::ShaderDataT& data)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid_path(data.path) || data.schema_version != 3 || data.vertex_code.empty() ||
         data.fragment_code.empty())
     {
@@ -174,24 +185,32 @@ bool ShaderResourceCodec::validate(const schema::ShaderDataT& data)
 
 schema::AssetKind ShaderResourceCodec::kind() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::shader;
 }
 
 bool ShaderResourceCodec::decode(const schema::AssetEntryT& entry, ByteView payload,
                                  std::unique_ptr<Resource>& output, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto validate = [](ByteView payload, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return resource_decode_detail::verify_flatbuffer(payload, schema::VerifyShaderDataBuffer,
                                                          "Invalid Shader FlatBuffer", error);
     };
     return resource_decode_detail::decode_flatbuffer<ResourceType>(
         entry, payload, 64U * 1024U * 1024U, validate,
-        [](const std::uint8_t* bytes) { return schema::UnPackShaderData(bytes); }, output, error);
+        [](const std::uint8_t* bytes)
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return schema::UnPackShaderData(bytes);
+        }, output, error);
 }
 
 bool ShaderResourceCodec::validate_data(const Resource& resource, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* data = resource_detail::data<ResourceType>(&resource);
     if (!data || !(data->path == resource.info().path && validate(*data)))
     {
@@ -205,6 +224,7 @@ bool ShaderResourceCodec::validate_data(const Resource& resource, std::string& e
 bool ShaderResourceCodec::validate_dependencies(const Resource& resource, ResourceView dependencies,
                                                 std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     const auto* shader = resource_detail::data<ResourceType>(&resource);
     if (!shader)

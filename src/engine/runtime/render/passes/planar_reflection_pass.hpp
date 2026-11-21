@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include <array>
 #include <bgfx/bgfx.h>
 #include <cstdint>
@@ -26,6 +28,7 @@ public:
     [[nodiscard]] std::uint32_t resource_count() const noexcept;
     [[nodiscard]] bgfx::TextureHandle texture() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return color_;
     }
     std::uint64_t node_id = 0;

@@ -31,10 +31,12 @@ class UiSystem;
 class RenderExtension;
 class TaskSystem;
 struct MovieFrame;
+struct GpuMemorySnapshot;
 
 namespace render_detail
 {
 class FrameOutput;
+class GpuMemoryTracker;
 class RenderSurface;
 class MoviePass;
 class MeshletCullPass;
@@ -81,6 +83,8 @@ struct RenderConfig
     // 1 关闭 MSAA；只接受 1、2、4、8。设备不支持时初始化明确失败。
     std::uint8_t msaa_samples = 1;
     bool max_anisotropy = false;
+    std::uint32_t transient_vertex_bytes = 0;
+    std::uint32_t transient_index_bytes = 0;
 };
 
 class RenderSystem final : public System
@@ -120,6 +124,9 @@ public:
     void cancel_hdr_capture() noexcept;
     void release_scene() noexcept;
     [[nodiscard]] std::uint32_t gpu_resource_count() const noexcept;
+    // Coordinator thread, while the device observation session is available.
+    [[nodiscard]] bool memory_snapshot(std::string_view guid, std::uint32_t limit,
+                                        GpuMemorySnapshot& output) const;
     // 通用 GPU 生命周期与提交进度；帧号为当前图形设备的 bgfx 提交帧号。
     [[nodiscard]] bool gpu_ready() const noexcept;
     [[nodiscard]] std::uint32_t frame_number() const noexcept;
@@ -172,6 +179,7 @@ private:
     [[nodiscard]] RenderPrepareStatus prepare_resources(RenderPrepareProgress& output,
                                                         double max_seconds, Camera camera);
     [[nodiscard]] render_detail::FramePrepareStatus prepare_frame();
+    void submit_frame() noexcept;
     friend class RenderExtension;
     void detach_extension(RenderExtension& extension) noexcept;
     void release_extensions_scene() noexcept;
@@ -200,6 +208,7 @@ private:
         std::uint64_t started_ns = 0;
     };
     std::map<SceneScopeId, ScopePreparation> scope_preparations_;
+    SceneScopeId published_extension_scope_{};
     Scene* scope_preparing_scene_ = nullptr;
     RenderFrameSnapshot last_frame_;
     bool scene_collected_ = false;
@@ -220,6 +229,7 @@ private:
     std::uint64_t active_screenshot_ = 0;
     void advance_screenshots();
     void submit_screenshot(RenderFrameKind kind);
+    std::unique_ptr<render_detail::GpuMemoryTracker> gpu_memory_;
     std::unique_ptr<render_detail::FrameOutput> frame_output_;
     void prepare_rvt(const RenderSettings& settings, const render_detail::RenderFrameData& frame,
                      const render_detail::SceneDrawView& draw);

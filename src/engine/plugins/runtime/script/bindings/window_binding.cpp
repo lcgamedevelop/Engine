@@ -1,4 +1,5 @@
 #include "plugins/runtime/script/bindings/window_binding.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "plugins/runtime/script/bindings/binding_context.hpp"
 #include "runtime/window/window_system.hpp"
@@ -39,12 +40,14 @@ Object.freeze(Window);
 
 WindowSystem* window(const Arguments& arguments, int count)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* context = BindingContext::current(arguments);
     return context != nullptr && arguments.count() == count ? context->window() : nullptr;
 }
 
 void size(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     const auto* target = window(arguments, 0);
     WindowSize value;
@@ -59,6 +62,7 @@ void size(const Arguments& arguments)
 
 void safe_area(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     const auto* target = window(arguments, 0);
     WindowRect value;
@@ -71,6 +75,7 @@ void safe_area(const Arguments& arguments)
 
 void display_modes(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     const auto* target = window(arguments, 0);
     std::vector<DisplayMode> modes;
@@ -93,6 +98,7 @@ void display_modes(const Arguments& arguments)
 
 void mode(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     const auto* target = window(arguments, 0);
     WindowMode value;
@@ -116,6 +122,7 @@ void mode(const Arguments& arguments)
 
 void set_size(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto* target = window(arguments, 2);
     if (target != nullptr && arguments.is_uint32(0) && arguments.is_uint32(1))
@@ -127,6 +134,7 @@ void set_size(const Arguments& arguments)
 
 void set_mode(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto* context = BindingContext::current(arguments);
     auto* target = context != nullptr ? context->window() : nullptr;
@@ -157,6 +165,7 @@ void set_mode(const Arguments& arguments)
 
 void mouse_mode(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     const auto* target = window(arguments, 0);
     MouseMode value;
@@ -180,6 +189,7 @@ void mouse_mode(const Arguments& arguments)
 
 void set_mouse_mode(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto* context = BindingContext::current(arguments);
     std::string requested;
@@ -200,16 +210,19 @@ void set_mouse_mode(const Arguments& arguments)
 
 std::string_view WindowBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "Window";
 }
 
 std::string_view WindowBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 
 bool WindowBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.function("WindowGetSize", size) && vm.function("WindowGetSafeArea", safe_area) &&
            vm.function("WindowGetDisplayModes", display_modes) &&
            vm.function("WindowGetMode", mode) && vm.function("WindowSetSize", set_size) &&

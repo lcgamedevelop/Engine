@@ -1,6 +1,7 @@
 #include "runtime/render/scene_draw.hpp"
 #include "runtime/render/rvt/rvt_pass.hpp"
 
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/render/render_constants.hpp"
 #include "runtime/render/render_math.hpp"
@@ -22,6 +23,7 @@ constexpr std::uint16_t instance_stride = 7 * 4 * sizeof(float);
 
 bool can_submit_opaque_depth(const RenderFrameData& frame_data, const ViewDrawList& list)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (list.opaque.empty())
     {
         return false;
@@ -67,6 +69,7 @@ bool prepare_draw_batches(const RenderFrameData& frame_data, const ViewDrawList&
                           const SceneDrawView& draw, SceneDrawMode mode,
                           std::vector<DrawBatch>& batches)
 {
+    ENGINE_PROFILE_FUNCTION();
     const bool transparent = mode == SceneDrawMode::transparent;
     const bool depth_only = mode == SceneDrawMode::depth;
     const bool capture = mode == SceneDrawMode::capture;
@@ -185,8 +188,10 @@ bool RenderSystem::SceneGpuResources::prepare_lighting(
     render_detail::ShadowFrame& frame, std::size_t cluster_index, bgfx::ViewId base,
     const SceneCaptureRequest* capture, const render_detail::VsmPageBatch* vsm)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto fail = [](const char* message)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         SDL_LogError(SDL_LOG_CATEGORY_RENDER, "Lighting preparation failed: %s", message);
         return false;
     };
@@ -266,7 +271,11 @@ bool RenderSystem::SceneGpuResources::prepare_lighting(
         {
             const auto found =
                 std::find_if(frame_data.meshes.begin(), frame_data.meshes.end(),
-                             [&](const auto& mesh) { return mesh.gpu->node_id == id; });
+                             [&](const auto& mesh)
+                             {
+                                 ENGINE_PROFILE_FUNCTION_PROBE();
+                                 return mesh.gpu->node_id == id;
+                             });
             if (found == frame_data.meshes.end())
             {
                 return fail("A capture mesh is absent from the prepared scene");
@@ -379,7 +388,11 @@ bool RenderSystem::SceneGpuResources::draw_meshes(const render_detail::RenderFra
     const bool ibl_ready =
         settings.ibl_enabled &&
         std::all_of(targets().ibl_textures.begin(), targets().ibl_textures.end(),
-                    [](const auto* texture) { return texture && bgfx::isValid(texture->handle); });
+                    [](const auto* texture)
+                    {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
+                        return texture && bgfx::isValid(texture->handle);
+                    });
     const float camera_position_value[]{draw.world[12], draw.world[13], draw.world[14], 1};
     const float ambient_value[]{settings.ambient_color[0], settings.ambient_color[1],
                                 settings.ambient_color[2], settings.ambient_intensity};
@@ -751,7 +764,11 @@ bool RenderSystem::SceneGpuResources::draw_meshes(const render_detail::RenderFra
     }
     const auto previous =
         std::find_if(view_stats.begin(), view_stats.end(),
-                     [&stats](const auto& row) { return row.view_id == stats.view_id; });
+                     [&stats](const auto& row)
+                     {
+                         ENGINE_PROFILE_FUNCTION_PROBE();
+                         return row.view_id == stats.view_id;
+                     });
     if (previous == view_stats.end())
     {
         view_stats.push_back(stats);

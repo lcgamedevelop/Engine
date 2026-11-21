@@ -10,6 +10,7 @@
 #include "plugins/runtime/effects/effect_model_loader.hpp"
 #include "plugins/runtime/effects/effect_resource_path.hpp"
 #include "plugins/runtime/effects/effect_resources.hpp"
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/render/render_context.hpp"
 #include "runtime/render/render_system.hpp"
@@ -38,17 +39,23 @@ namespace
 
 bool has_effect_resources(const WorldSystem& world)
 {
+    ENGINE_PROFILE_FUNCTION();
     bool found = false;
     auto query = flecs::world(world.native_world())
                      .query_builder<const ecs_detail::ComponentStorage<EffectComponent::Data>>()
                      .with<ecs_detail::Published>()
                      .build();
-    query.each([&](const auto& stored) { found = found || !stored.data.effect_guid.empty(); });
+    query.each([&](const auto& stored)
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        found = found || !stored.data.effect_guid.empty();
+    });
     return found;
 }
 
 bool effect_transform(const Node& node, const Vec3& origin, Effekseer::Matrix43& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto transform = node.get_component<Transform>();
     double matrix[16]{};
     if (!transform || !transform.world_matrix(matrix))
@@ -71,6 +78,7 @@ bool effect_transform(const Node& node, const Vec3& origin, Effekseer::Matrix43&
 
 void set_effect_light(const Scene& scene, EffekseerRenderer::Renderer& renderer)
 {
+    ENGINE_PROFILE_FUNCTION();
     renderer.SetLightDirection({0.0F, 1.0F, 0.0F});
     renderer.SetLightColor({255, 255, 255, 255});
     renderer.SetLightAmbientColor({0, 0, 0, 255});
@@ -89,6 +97,7 @@ void set_effect_light(const Scene& scene, EffekseerRenderer::Renderer& renderer)
         [&](const auto& stored, const ecs_detail::NodeRuntime& state,
             const ecs_detail::WorldTransform& pose)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             if (state.scene != &scene || !state.active || !state.visible_in_hierarchy ||
                 !stored.state.flags.enabled || !stored.state.flags.visible || !pose.valid ||
                 stored.data.kind != schema::LightKind::directional || state.order >= selected_order)
@@ -99,6 +108,7 @@ void set_effect_light(const Scene& scene, EffekseerRenderer::Renderer& renderer)
             const auto& settings = stored.data;
             const auto channel = [&settings](float value)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 return static_cast<std::uint8_t>(
                     std::clamp(value * settings.intensity, 0.0F, 1.0F) * 255.0F);
             };
@@ -146,11 +156,13 @@ struct EffectSystem::State
 
     ~State() noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         release_gpu();
     }
 
     void release_playback() noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         manager.Reset();
         instances.clear();
         effects.clear();
@@ -161,6 +173,7 @@ struct EffectSystem::State
 
     void release_scene() noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         preparing.clear();
         prepared_effects.clear();
         release_playback();
@@ -168,6 +181,7 @@ struct EffectSystem::State
 
     void release_gpu() noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         release_scene();
         renderer.Reset();
         // efkbgfx 程序不拥有 shader；须在 renderer 销毁后配对释放。
@@ -176,6 +190,7 @@ struct EffectSystem::State
 
     bool initialize(std::uint16_t view)
     {
+        ENGINE_PROFILE_FUNCTION();
         resources.error.clear();
         if (!renderer)
         {
@@ -229,6 +244,7 @@ struct EffectSystem::State
 
     std::shared_ptr<CompiledEffect> compile(const ResourceReference& resource)
     {
+        ENGINE_PROFILE_FUNCTION();
         const auto key = std::make_pair(resource->info().guid, resource->generation());
         const auto existing = effects.find(key);
         if (existing != effects.end())
@@ -273,6 +289,7 @@ struct EffectSystem::State
         const auto& effect = result->effect;
         const auto loaded = [](int count, const auto& get)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             for (int index = 0; index < count; ++index)
             {
                 if (!get(index))
@@ -283,12 +300,28 @@ struct EffectSystem::State
             return true;
         };
         if (!loaded(effect->GetColorImageCount(),
-                    [&](int index) { return effect->GetColorImage(index); }) ||
+                    [&](int index)
+                    {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
+                        return effect->GetColorImage(index);
+                    }) ||
             !loaded(effect->GetNormalImageCount(),
-                    [&](int index) { return effect->GetNormalImage(index); }) ||
+                    [&](int index)
+                    {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
+                        return effect->GetNormalImage(index);
+                    }) ||
             !loaded(effect->GetDistortionImageCount(),
-                    [&](int index) { return effect->GetDistortionImage(index); }) ||
-            !loaded(effect->GetModelCount(), [&](int index) { return effect->GetModel(index); }))
+                    [&](int index)
+                    {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
+                        return effect->GetDistortionImage(index);
+                    }) ||
+            !loaded(effect->GetModelCount(), [&](int index)
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return effect->GetModel(index);
+            }))
         {
             resources.error = "Effect dependencies were not fully loaded: " + resource->info().path;
             return nullptr;
@@ -299,6 +332,7 @@ struct EffectSystem::State
 
     void stop(Instance& instance) noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         if (manager && instance.handle >= 0)
         {
             manager->StopEffect(instance.handle);
@@ -308,9 +342,11 @@ struct EffectSystem::State
 
     void prune_prepared()
     {
+        ENGINE_PROFILE_FUNCTION();
         std::erase_if(prepared_effects,
                       [&](const auto& entry)
                       {
+                          ENGINE_PROFILE_FUNCTION_PROBE();
                           const auto& prepared = entry.second;
                           const auto* runtime =
                               engine::ecs_detail::component_runtime(prepared.component);
@@ -324,6 +360,7 @@ struct EffectSystem::State
 
     bool start(Instance& instance, EffectComponent& component)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (!instance.compiled)
         {
             const auto prepared = prepared_effects.find(component.instance_id());
@@ -368,6 +405,7 @@ struct EffectSystem::State
                 [&](Node node,
                     const ecs_detail::ComponentStorage<EffectComponent::Data>& stored) -> bool
             {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
                 const auto* scene = node.scene();
                 (void)scene;
                 (void)stored;
@@ -451,6 +489,7 @@ struct EffectSystem::State
                 [&](flecs::entity entity,
                     const ecs_detail::ComponentStorage<EffectComponent::Data>& stored)
                 {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
                     if (query_success)
                     {
                         query_success = process(world.find_node(entity.id()), stored);
@@ -523,7 +562,11 @@ struct EffectSystem::State
         {
             manager->Update(0.0F);
         }
-        std::erase_if(effects, [](const auto& item) { return item.second.expired(); });
+        std::erase_if(effects, [](const auto& item)
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return item.second.expired();
+        });
         prepared = true;
         return true;
     }
@@ -532,16 +575,19 @@ struct EffectSystem::State
 EffectSystem::EffectSystem(WorldSystem& world, RenderSystem& renderer) noexcept
     : world_(world), registration_target_(&renderer)
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 EffectSystem::~EffectSystem() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
     release_gpu();
 }
 
 bool EffectSystem::on_initialize(const EngineConfig&)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto& registry = world_.component_registry();
     if ((!registry.contains(EffectComponent::component_type) && !registry.add<EffectComponent>()) ||
         (registration_target_ && !registration_target_->add_extension(*this)))
@@ -592,6 +638,7 @@ bool EffectSystem::on_tick(double delta_time)
 
 SceneWorkState EffectSystem::prepare_scope(SceneScopeId scope, const SceneWorkBudget& budget)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!world_.scope_candidate(scope))
     {
         return SceneWorkState::failed;
@@ -614,6 +661,7 @@ SceneWorkState EffectSystem::prepare_scope(SceneScopeId scope, const SceneWorkBu
         found->second, budget,
         [&](Node node)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             auto component = node.get_component<EffectComponent>();
             if (!component || !component.active())
             {
@@ -645,6 +693,7 @@ SceneWorkState EffectSystem::prepare_scope(SceneScopeId scope, const SceneWorkBu
 }
 bool EffectSystem::scope_status(SceneScopeId scope, ScenePreparationSnapshot& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     if (!state_)
     {
@@ -660,6 +709,7 @@ bool EffectSystem::scope_status(SceneScopeId scope, ScenePreparationSnapshot& ou
 }
 void EffectSystem::release_scope(SceneScopeId scope) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!state_)
     {
         return;
@@ -745,12 +795,17 @@ bool EffectSystem::draw(const RenderContext& context)
     }
     const auto distance = [&](const auto* instance)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return std::hypot(instance->origin.x() - context.world_origin.x(),
                           instance->origin.y() - context.world_origin.y(),
                           instance->origin.z() - context.world_origin.z());
     };
     std::stable_sort(visible.begin(), visible.end(),
-                     [&](auto a, auto b) { return distance(a) > distance(b); });
+                     [&](auto a, auto b)
+                     {
+                         ENGINE_PROFILE_FUNCTION_PROBE();
+                         return distance(a) > distance(b);
+                     });
     for (const auto* instance : visible)
     {
         auto local_camera = camera;
@@ -791,6 +846,7 @@ bool EffectSystem::draw(const RenderContext& context)
 
 void EffectSystem::release_scene() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     // 只查询世界当前仍存活的节点；从不保存跨帧的组件指针。
     if (world_.native_world())
     {
@@ -798,6 +854,7 @@ void EffectSystem::release_scene() noexcept
             [&](Node node,
                 const ecs_detail::ComponentStorage<EffectComponent::Data>& stored) -> bool
         {
+                ENGINE_PROFILE_FUNCTION_PROBE();
             const auto* scene = node.scene();
             (void)scene;
             (void)stored;
@@ -819,6 +876,7 @@ void EffectSystem::release_scene() noexcept
             [&](flecs::entity entity,
                 const ecs_detail::ComponentStorage<EffectComponent::Data>& stored)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 if (query_success)
                 {
                     query_success = process(world_.find_node(entity.id()), stored);
@@ -835,6 +893,7 @@ void EffectSystem::release_scene() noexcept
 
 void EffectSystem::release_gpu() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     release_scene();
     if (state_)
     {
@@ -845,6 +904,7 @@ void EffectSystem::release_gpu() noexcept
 
 void EffectSystem::on_shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     release_gpu();
     state_.reset();
     last_error_.clear();
@@ -852,6 +912,7 @@ void EffectSystem::on_shutdown() noexcept
 
 const std::string& EffectSystem::last_error() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return last_error_;
 }
 

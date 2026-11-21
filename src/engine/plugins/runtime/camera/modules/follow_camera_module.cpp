@@ -1,10 +1,12 @@
 #include "plugins/runtime/camera/modules/follow_camera_module.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/camera/camera_math.hpp"
 namespace engine::plugins::camera
 {
 bool FollowCameraModule::validate(const Data& d, const schema::CameraControllerDataT& def,
                                   std::string& e)
 {
+    ENGINE_PROFILE_FUNCTION();
     return (detail::slot(def, d.follow_slot) && detail::finite(d.offset) &&
             detail::nonnegative(d.position_damping) &&
             detail::bounded(d.teleport_distance, 0, 1e9)) ||
@@ -13,6 +15,7 @@ bool FollowCameraModule::validate(const Data& d, const schema::CameraControllerD
 bool FollowCameraModule::evaluate(const Data& d, const Runtime& current, Runtime& next,
                                   const CameraEvaluationContext& c, CameraPose& p)
 {
+    ENGINE_PROFILE_FUNCTION();
     CameraTargetPose t;
     if (!c.target(d.follow_slot, t))
     {

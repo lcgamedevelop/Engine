@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/resource/resource_handle.hpp"
 
 #include "runtime/scene/component.hpp"
@@ -31,6 +33,7 @@ public:
     [[nodiscard]] std::uint64_t instance_id() const noexcept;
     explicit operator bool() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return valid();
     }
     [[nodiscard]] std::string type_path() const noexcept;

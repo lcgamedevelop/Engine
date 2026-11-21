@@ -1,4 +1,6 @@
 #include "plugins/runtime/mcp/mcp_schema.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -17,6 +19,7 @@ using Json = nlohmann::json;
 
 bool typed_value(std::string_view type, const Json& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (type == "object")
     {
         return value.is_object();
@@ -46,8 +49,10 @@ bool typed_value(std::string_view type, const Json& value)
 
 bool allows_type(const Json& type, std::string_view name)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto matches_name = [name](const Json& item)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return std::string_view(item.get_ref<const std::string&>()) == name;
     };
     return type.is_string() ? matches_name(type)
@@ -56,6 +61,7 @@ bool allows_type(const Json& type, std::string_view name)
 
 bool typed_value(const Json& type, const Json& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (type.is_string())
     {
         return typed_value(std::string_view(type.get_ref<const std::string&>()), value);
@@ -63,6 +69,7 @@ bool typed_value(const Json& type, const Json& value)
     return std::any_of(type.begin(), type.end(),
                        [&](const auto& item)
                        {
+                           ENGINE_PROFILE_FUNCTION_PROBE();
                            return typed_value(
                                std::string_view(item.template get_ref<const std::string&>()),
                                value);
@@ -71,6 +78,7 @@ bool typed_value(const Json& type, const Json& value)
 
 bool inspect_schema(const Json& schema, std::size_t depth)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (schema.is_object() && schema.empty())
     {
         return true;
@@ -82,6 +90,7 @@ bool inspect_schema(const Json& schema, std::size_t depth)
     const auto& type = schema["type"];
     const auto known = [](const Json& item)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return item.is_string() &&
                (item == "object" || item == "array" || item == "string" || item == "boolean" ||
                 item == "integer" || item == "number" || item == "null");
@@ -115,7 +124,10 @@ bool inspect_schema(const Json& schema, std::size_t depth)
         {
             if (!value.is_array() || value.empty() ||
                 !std::all_of(value.begin(), value.end(), [depth](const auto& branch)
-                             { return inspect_schema(branch, depth + 1); }))
+                             {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
+                    return inspect_schema(branch, depth + 1);
+                }))
             {
                 return false;
             }
@@ -124,7 +136,11 @@ bool inspect_schema(const Json& schema, std::size_t depth)
         {
             if (!value.is_array() || value.empty() ||
                 !std::all_of(value.begin(), value.end(),
-                             [&type](const auto& item) { return typed_value(type, item); }))
+                             [&type](const auto& item)
+                             {
+                                 ENGINE_PROFILE_FUNCTION_PROBE();
+                                 return typed_value(type, item);
+                             }))
             {
                 return false;
             }
@@ -208,6 +224,7 @@ bool inspect_schema(const Json& schema, std::size_t depth)
 
 bool matches(const Json& schema, const Json& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (schema.empty())
     {
         return true;
@@ -224,7 +241,11 @@ bool matches(const Json& schema, const Json& value)
     }
     if (schema.contains("oneOf") &&
         std::count_if(schema["oneOf"].begin(), schema["oneOf"].end(),
-                      [&value](const auto& branch) { return matches(branch, value); }) != 1)
+                      [&value](const auto& branch)
+                      {
+                          ENGINE_PROFILE_FUNCTION_PROBE();
+                          return matches(branch, value);
+                      }) != 1)
     {
         return false;
     }
@@ -281,7 +302,11 @@ bool matches(const Json& schema, const Json& value)
     {
         const auto& text = value.get_ref<const std::string&>();
         const auto length = static_cast<std::size_t>(std::count_if(
-            text.begin(), text.end(), [](unsigned char byte) { return (byte & 0xc0) != 0x80; }));
+            text.begin(), text.end(), [](unsigned char byte)
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return (byte & 0xc0) != 0x80;
+            }));
         if ((schema.contains("minLength") && length < schema["minLength"].get<std::size_t>()) ||
             (schema.contains("maxLength") && length > schema["maxLength"].get<std::size_t>()))
         {
@@ -304,11 +329,13 @@ bool matches(const Json& schema, const Json& value)
 
 bool valid_schema(const Json& schema)
 {
+    ENGINE_PROFILE_FUNCTION();
     return inspect_schema(schema, 0) && schema.contains("type") && schema["type"] == "object";
 }
 
 bool valid_arguments(const Json& schema, const Json& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     return matches(schema, arguments);
 }
 

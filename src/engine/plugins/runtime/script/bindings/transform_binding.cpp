@@ -1,4 +1,5 @@
 #include "plugins/runtime/script/bindings/transform_binding.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/script/bindings/binding_helpers.hpp"
 
 #include "plugins/runtime/script/bindings/binding_context.hpp"
@@ -37,6 +38,7 @@ Object.freeze(Transform);
 
 void set_vector(const Arguments& arguments, Vec3 TransformSettings::* field)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto node = BindingContext::node(arguments);
     auto transform = !node ? Transform{} : node.get_component<Transform>();
@@ -60,19 +62,23 @@ void set_vector(const Arguments& arguments, Vec3 TransformSettings::* field)
 
 void position(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     set_vector(arguments, &TransformSettings::position);
 }
 void rotation(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     set_vector(arguments, &TransformSettings::rotation);
 }
 void scale(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     set_vector(arguments, &TransformSettings::scale);
 }
 
 void world_vector(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     const auto node = BindingContext::node(arguments);
     const auto transform = node ? node.get_component<Transform>() : Transform{};
@@ -105,16 +111,19 @@ void world_vector(const Arguments& arguments)
 
 std::string_view TransformBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "Transform";
 }
 
 std::string_view TransformBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 
 bool TransformBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.integer("TransformKind", static_cast<int>(Transform::component_type)) &&
            vm.function("TransformAdd", binding_detail::add_component<Transform>) &&
            vm.function("TransformPosition", position) &&

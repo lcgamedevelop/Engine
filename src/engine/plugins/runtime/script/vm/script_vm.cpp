@@ -1,4 +1,5 @@
 #include "plugins/runtime/script/vm/script_vm.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/utils/path_utils.hpp"
 
@@ -10,6 +11,7 @@ namespace engine::plugins::script::vm
 #if defined(ENGINE_ENABLE_TEST_SUPPORT)
 std::string project_script_wrapper(std::string_view javascript)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string source = R"JS((function(require, gameplay, argumentsJson) {
 "use strict";
 const parse = JSON.parse;
@@ -84,6 +86,7 @@ return stringify(value);
 
 bool resolve_module_path(std::string_view referrer, std::string_view request, std::string& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     if (request == "engine")
     {

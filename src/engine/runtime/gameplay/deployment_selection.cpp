@@ -1,4 +1,5 @@
 #include "runtime/gameplay/deployment_selection.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/gameplay/deployment_internal.hpp"
 
 namespace engine::gameplay_detail
@@ -8,6 +9,7 @@ bool select_published_deployment(const std::filesystem::path& persistent_root,
                                  MountList& mounts, std::string& revision, std::string& entry,
                                  std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     catalog = {};
     mounts.clear();
     entry.clear();

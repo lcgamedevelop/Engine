@@ -1,4 +1,5 @@
 #include "plugins/runtime/script/bindings/collider_binding.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/script/bindings/binding_helpers.hpp"
 
 #include "plugins/runtime/script/bindings/binding_context.hpp"
@@ -50,6 +51,7 @@ Object.freeze(Collider);
 
 void box(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<Collider>(arguments, 5);
     double x = 0.0;
     double y = 0.0;
@@ -73,6 +75,7 @@ void box(const Arguments& arguments)
 
 void sphere(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<Collider>(arguments, 3);
     float radius = 0.0F;
     if (value.valid() && BindingContext::scalar(arguments, 2, radius))
@@ -93,6 +96,7 @@ void sphere(const Arguments& arguments)
 
 void capsule(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<Collider>(arguments, 4);
     float radius = 0.0F;
     float half_height = 0.0F;
@@ -116,6 +120,7 @@ void capsule(const Arguments& arguments)
 
 void mesh(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<Collider>(arguments, 3);
     std::string path;
     if (value.valid() && BindingContext::text(arguments, 2, path))
@@ -126,6 +131,7 @@ void mesh(const Arguments& arguments)
 
 void set_scalar(const Arguments& arguments, float schema::ColliderDataT::* field)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<Collider>(arguments, 3);
     float number = 0.0F;
     if (value.valid() && BindingContext::scalar(arguments, 2, number))
@@ -143,16 +149,19 @@ void set_scalar(const Arguments& arguments, float schema::ColliderDataT::* field
 
 void friction(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     set_scalar(arguments, &schema::ColliderDataT::friction);
 }
 
 void restitution(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     set_scalar(arguments, &schema::ColliderDataT::restitution);
 }
 
 void trigger(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<Collider>(arguments, 3);
     if (value.valid() && arguments.is_boolean(2))
     {
@@ -170,16 +179,19 @@ void trigger(const Arguments& arguments)
 
 std::string_view ColliderBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "Collider";
 }
 
 std::string_view ColliderBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 
 bool ColliderBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.integer("ColliderKind", static_cast<int>(Collider::component_type)) &&
            vm.function("ColliderAdd", binding_detail::add_component<Collider>) &&
            vm.function("ColliderBox", box) && vm.function("ColliderSphere", sphere) &&

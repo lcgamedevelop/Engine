@@ -1,4 +1,5 @@
 #include "plugins/runtime/character_controller/abilities/jump_ability.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/character_controller/abilities/ability_validation.hpp"
 #include <algorithm>
 namespace engine::plugins::character_controller
@@ -6,6 +7,7 @@ namespace engine::plugins::character_controller
 const JumpAbility::Data* JumpAbility::find(const schema::CharacterControllerDataT& d,
                                            std::string_view id)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (d.ability_data)
     {
         for (const auto& v : d.ability_data->jump)
@@ -21,6 +23,7 @@ const JumpAbility::Data* JumpAbility::find(const schema::CharacterControllerData
 bool JumpAbility::validate(const Data& d, const schema::CharacterControllerDataT& definition,
                            std::string& e)
 {
+    ENGINE_PROFILE_FUNCTION();
     return (detail::action_exists(definition, d.action) &&
             detail::bounded(d.launch_delta_speed, 0.01, 1000) &&
             detail::bounded(d.coyote_seconds, 0, 1) && detail::bounded(d.hold_seconds, 0, 10) &&
@@ -31,6 +34,7 @@ bool JumpAbility::validate(const Data& d, const schema::CharacterControllerDataT
 bool JumpAbility::query(const Data& d, const Runtime& r, const CharacterAbilityContext& c,
                         const CharacterMotionPlan& p, CharacterAbilityRequest& out)
 {
+    ENGINE_PROFILE_FUNCTION();
     out = {};
     CharacterActionState a;
     if (!c.motor || !c.motor->settings || !c.action(d.action, a))
@@ -66,6 +70,7 @@ void JumpAbility::finish(const Data& d, const Runtime& r, const CharacterAbility
                          const CharacterAbilityDecision& decision,
                          const CharacterMotorStepResult& result, Runtime& next, bool& consume)
 {
+    ENGINE_PROFILE_FUNCTION();
     next = r;
     consume = false;
     if (c.motor->before.grounded)
@@ -113,6 +118,7 @@ void JumpAbility::finish(const Data& d, const Runtime& r, const CharacterAbility
 }
 void JumpAbility::status(const Data& d, const Runtime& r, CharacterAbilityStatus& out)
 {
+    ENGINE_PROFILE_FUNCTION();
     out = {};
     out.id = d.id;
     out.active = r.active;

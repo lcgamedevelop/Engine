@@ -1,4 +1,6 @@
 #include "plugins/editor/mcp/project_mcp_tools.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "editor/asset_pipeline/asset_pipeline_system.hpp"
 #include "plugins/editor/asset_build/asset_build_system.hpp"
@@ -19,6 +21,7 @@ namespace engine::plugins::mcp
 
 bool ProjectMcpTools::register_resource_tools(McpSystem& mcp)
 {
+    ENGINE_PROFILE_FUNCTION();
     using Json = nlohmann::json;
     const std::string platform = !target_.ios_udid.empty()         ? "ios"
                                  : !target_.android_serial.empty() ? "android"
@@ -35,6 +38,7 @@ bool ProjectMcpTools::register_resource_tools(McpSystem& mcp)
           {"additionalProperties", false}},
          [this, platform](const Json& arguments, Json& output)
          {
+             ENGINE_PROFILE_FUNCTION_PROBE();
              std::vector<std::string> items;
              if (arguments.contains("items"))
              {
@@ -74,6 +78,7 @@ bool ProjectMcpTools::register_resource_tools(McpSystem& mcp)
           {"additionalProperties", false}},
          [this, platform](const Json& arguments, Json& output)
          {
+             ENGINE_PROFILE_FUNCTION_PROBE();
              std::filesystem::path source = project_root_ / "cache";
              if (arguments.contains("source"))
              {

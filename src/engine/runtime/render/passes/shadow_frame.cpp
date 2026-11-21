@@ -1,4 +1,6 @@
 #include "runtime/render/passes/shadow_frame.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/render/render_math.hpp"
 
@@ -15,6 +17,7 @@ bool prepare_shadow_frame(const CameraSettings& camera, const RenderSettings& se
                           const float* receiver_projection, const std::array<float, 4>& direction,
                           ShadowFrame& frame)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* caps = bgfx::getCaps();
     const float near_clip = camera.near_clip;
     const float far_clip = std::min(camera.far_clip, settings.shadow_distance);
@@ -56,6 +59,7 @@ bool prepare_shadow_frame(const CameraSettings& camera, const RenderSettings& se
         projection[15] == (orthographic ? 1.0F : 0.0F);
     const auto light_space_point = [&](float x, float y, float depth)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         std::array<float, 3> point{};
         for (std::size_t axis = 0; axis < 3; ++axis)
         {

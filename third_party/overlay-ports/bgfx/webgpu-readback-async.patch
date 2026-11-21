@@ -1,0 +1,503 @@
+--- a/bgfx/include/bgfx/bgfx.h
++++ b/bgfx/include/bgfx/bgfx.h
+@@ -2880,6 +2880,22 @@
+ 		, void* _data
+ 		);
+ 
++#if defined(__EMSCRIPTEN__)
++	/// The request is borrowed until complete is called on the WebGPU worker.
++	/// Clear data on that worker to abandon the destination before completion.
++	struct WebGpuReadback
++	{
++		void* data;
++		void (*complete)(void* _userData, bool _success);
++		void* userData;
++	};
++
++	/// Return false when no command was queued and no callback will be invoked.
++	bool readAsync(const TextureRegion& _src, WebGpuReadback& _request);
++	bool readAsync(const BufferRegion& _src, WebGpuReadback& _request);
++	bool webReadbacksPending();
++#endif // defined(__EMSCRIPTEN__)
++
+ 	/// Set static index buffer debug name.
+ 	///
+ 	/// @param[in] _handle Static index buffer handle.
+--- a/bgfx/src/bgfx.cpp
++++ b/bgfx/src/bgfx.cpp
+@@ -7002,7 +7002,7 @@
+ 		}
+ 	}
+ 
+-	uint32_t read(const TextureRegion& _src, void* _data)
++	static uint32_t readTextureRegion(const TextureRegion& _src, void* _data)
+ 	{
+ 		BX_ASSERT(NULL != _data, "_data can't be NULL");
+ 		BGFX_CHECK_HANDLE("read TextureHandle", s_ctx->m_textureHandle, _src.handle);
+@@ -7029,6 +7029,29 @@
+ 		return s_ctx->readTexture(_src.handle, _data, _src.z, _src.mip);
+ 	}
+ 
++	uint32_t read(const TextureRegion& _src, void* _data)
++	{
++#if BX_PLATFORM_EMSCRIPTEN && BGFX_CONFIG_RENDERER_WEBGPU
++		if (RendererType::WebGPU == getRendererType() )
++		{
++			return UINT32_MAX;
++		}
++#endif // BX_PLATFORM_EMSCRIPTEN && BGFX_CONFIG_RENDERER_WEBGPU
++		return readTextureRegion(_src, _data);
++	}
++
++#if BX_PLATFORM_EMSCRIPTEN && BGFX_CONFIG_RENDERER_WEBGPU
++	bool readAsync(const TextureRegion& _src, WebGpuReadback& _request)
++	{
++		if (RendererType::WebGPU != getRendererType() || NULL == _request.data || NULL == _request.complete)
++		{
++			return false;
++		}
++		readTextureRegion(_src, &_request);
++		return true;
++	}
++#endif // BX_PLATFORM_EMSCRIPTEN && BGFX_CONFIG_RENDERER_WEBGPU
++
+ 	void clear(TextureHandle _handle, uint8_t _mip, uint8_t _numMips, uint16_t _layer, uint16_t _numLayers)
+ 	{
+ 		BGFX_CHECK_HANDLE("clearTexture", s_ctx->m_textureHandle, _handle);
+@@ -7058,9 +7081,33 @@
+ 
+ 	uint32_t read(const BufferRegion& _src, void* _data)
+ 	{
++#if BX_PLATFORM_EMSCRIPTEN && BGFX_CONFIG_RENDERER_WEBGPU
++		if (RendererType::WebGPU == getRendererType() )
++		{
++			return UINT32_MAX;
++		}
++#endif // BX_PLATFORM_EMSCRIPTEN && BGFX_CONFIG_RENDERER_WEBGPU
+ 		BX_ASSERT(NULL != _data, "_data can't be NULL");
+ 		return s_ctx->readBuffer(_src.handle, _data, _src.offset, 0 == _src.size ? UINT32_MAX : _src.size);
+ 	}
++
++#if BX_PLATFORM_EMSCRIPTEN && BGFX_CONFIG_RENDERER_WEBGPU
++	bool readAsync(const BufferRegion& _src, WebGpuReadback& _request)
++	{
++		if (RendererType::WebGPU != getRendererType() || NULL == _request.data || NULL == _request.complete)
++		{
++			return false;
++		}
++		// Require an explicit nonempty range so queuing always produces a callback.
++		const BufferRef ref = s_ctx->getBufferRef("readAsync", _src.handle);
++		if (0 == _src.size || _src.offset >= ref.m_size || _src.size > ref.m_size - _src.offset)
++		{
++			return false;
++		}
++		s_ctx->readBuffer(_src.handle, &_request, _src.offset, _src.size);
++		return true;
++	}
++#endif // BX_PLATFORM_EMSCRIPTEN && BGFX_CONFIG_RENDERER_WEBGPU
+ 
+ 	FrameBufferHandle createFrameBuffer(uint16_t _width, uint16_t _height, TextureFormat::Enum _format, uint64_t _textureFlags)
+ 	{
+--- a/bgfx/src/renderer_webgpu.cpp
++++ b/bgfx/src/renderer_webgpu.cpp
+@@ -12,9 +12,19 @@
+ #	endif // BX_PLATFORM_OSX
+ #	include <bx/pixelformat.h>
+ #	include "renderer_webgpu.h"
++#	if BX_PLATFORM_EMSCRIPTEN
++#		include <cstdlib>
++#		include <new>
++#	endif // BX_PLATFORM_EMSCRIPTEN
+ 
+ namespace bgfx { namespace wgpu
+ {
++#if BX_PLATFORM_EMSCRIPTEN
++	// All WebGPU command and map callbacks run on the same application worker.
++	static uint32_t s_webReadbackCount;
++	static uint64_t s_webRendererEpoch;
++#endif // BX_PLATFORM_EMSCRIPTEN
++
+ 	struct PrimInfo
+ 	{
+ 		WGPUPrimitiveTopology m_topology;
+@@ -1676,6 +1686,9 @@
+ 
+ 		void shutdown()
+ 		{
++#if BX_PLATFORM_EMSCRIPTEN
++			++s_webRendererEpoch;
++#endif // BX_PLATFORM_EMSCRIPTEN
+ 			preReset();
+ 
+ 			invalidateBindGroupCache();
+@@ -1925,10 +1938,9 @@
+ 			}
+ 		}
+ 
+-		static void readTextureCb(WGPUMapAsyncStatus _status, WGPUStringView _message, void* _userdata1, void* _userdata2)
+-		{
+-			ReadTexture& readTexture = *(ReadTexture*)_userdata1;
+-
++		static bool finishMap(WGPUMapAsyncStatus _status, WGPUStringView _message, ReadTexture& _readTexture)
++		{
++			bool copied = false;
+ 			if (WGPUMapAsyncStatus_Success != _status)
+ 			{
+ 				BX_TRACE("readTexture: map failed %d.", _status);
+@@ -1936,33 +1948,33 @@
+ 			}
+ 			else
+ 			{
+-				const void* result = (const void*)WGPU_CHECK(wgpuBufferGetConstMappedRange(
+-					  readTexture.buffer
+-					, 0
+-					, readTexture.size
+-					) );
+-
+-				if (0 != readTexture.stencilPitch)
+-				{
+-					interleaveDepthStencil(readTexture, result);
+-				}
+-				else
+-				{
+-					bx::gather(
+-						  readTexture.data
+-						, result
+-						, readTexture.pitch
+-						, readTexture.dataPitch
+-						, readTexture.height
+-						);
+-				}
+-
+-				WGPU_CHECK(wgpuBufferUnmap(readTexture.buffer) );
+-			}
+-
+-			wgpuRelease(readTexture.buffer);
+-
+-			*(bool*)(_userdata2) = true;
++				if (NULL != _readTexture.data)
++				{
++					const void* result = WGPU_CHECK(wgpuBufferGetConstMappedRange(_readTexture.buffer, 0, _readTexture.size) );
++					if (NULL != result)
++					{
++						if (0 != _readTexture.stencilPitch)
++						{
++							interleaveDepthStencil(_readTexture, result);
++						}
++						else
++						{
++							bx::gather(_readTexture.data, result, _readTexture.pitch,
++								_readTexture.dataPitch, _readTexture.height);
++						}
++						copied = true;
++					}
++				}
++				WGPU_CHECK(wgpuBufferUnmap(_readTexture.buffer) );
++			}
++			wgpuRelease(_readTexture.buffer);
++			return copied;
++		}
++
++		static void readTextureCb(WGPUMapAsyncStatus _status, WGPUStringView _message, void* _userdata1, void* _userdata2)
++		{
++			finishMap(_status, _message, *(ReadTexture*)_userdata1);
++			*(bool*)_userdata2 = true;
+ 		}
+ 
+ 		struct ReadBuffer
+@@ -1972,10 +1984,9 @@
+ 			void* data;
+ 		};
+ 
+-		static void readBufferCb(WGPUMapAsyncStatus _status, WGPUStringView _message, void* _userdata1, void* _userdata2)
+-		{
+-			ReadBuffer& readBuffer = *(ReadBuffer*)_userdata1;
+-
++		static bool finishMap(WGPUMapAsyncStatus _status, WGPUStringView _message, ReadBuffer& _readBuffer)
++		{
++			bool copied = false;
+ 			if (WGPUMapAsyncStatus_Success != _status)
+ 			{
+ 				BX_TRACE("readBuffer: map failed %d.", _status);
+@@ -1983,24 +1994,101 @@
+ 			}
+ 			else
+ 			{
+-				const void* result = (const void*)WGPU_CHECK(wgpuBufferGetConstMappedRange(
+-					  readBuffer.buffer
+-					, 0
+-					, readBuffer.size
+-					) );
+-
+-				bx::memCopy(readBuffer.data, result, readBuffer.size);
+-
+-				WGPU_CHECK(wgpuBufferUnmap(readBuffer.buffer) );
+-			}
+-
+-			wgpuRelease(readBuffer.buffer);
+-
+-			*(bool*)(_userdata2) = true;
+-		}
++				if (NULL != _readBuffer.data)
++				{
++					const void* result = WGPU_CHECK(wgpuBufferGetConstMappedRange(_readBuffer.buffer, 0, _readBuffer.size) );
++					if (NULL != result)
++					{
++						bx::memCopy(_readBuffer.data, result, _readBuffer.size);
++						copied = true;
++					}
++				}
++				WGPU_CHECK(wgpuBufferUnmap(_readBuffer.buffer) );
++			}
++			wgpuRelease(_readBuffer.buffer);
++			return copied;
++		}
++
++		static void readBufferCb(WGPUMapAsyncStatus _status, WGPUStringView _message, void* _userdata1, void* _userdata2)
++		{
++			finishMap(_status, _message, *(ReadBuffer*)_userdata1);
++			*(bool*)_userdata2 = true;
++		}
++
++#if BX_PLATFORM_EMSCRIPTEN
++		template<typename Read>
++		struct WebMap
++		{
++			Read state;
++			WebGpuReadback* request;
++		};
++
++		template<typename Read>
++		static void webMapped(WGPUMapAsyncStatus _status, WGPUStringView _message, void* _userdata1, void*)
++		{
++			auto* map = (WebMap<Read>*)_userdata1;
++			WebGpuReadback* request = map->request;
++			map->state.data = request->data;
++			const bool copied = finishMap(_status, _message, map->state);
++			delete map;
++			request->complete(request->userData, copied);
++			--s_webReadbackCount;
++		}
++
++		template<typename Read>
++		void mapOnWorker(const Read& _copy, WebGpuReadback& _request)
++		{
++			auto* map = new (std::nothrow) WebMap<Read>{ _copy, &_request };
++			if (NULL == map)
++			{
++				wgpuBufferRelease(_copy.buffer);
++				_request.complete(_request.userData, false);
++				return;
++			}
++
++			++s_webReadbackCount;
++			WGPU_CHECK(wgpuBufferMapAsync(_copy.buffer, WGPUMapMode_Read, 0, _copy.size,
++				{
++					.nextInChain = NULL,
++					.mode = m_callbackMode,
++					.callback = webMapped<Read>,
++					.userdata1 = map,
++					.userdata2 = NULL,
++				}) );
++		}
++
++		struct WebScreenShot
++		{
++			WebGpuReadback request;
++			bx::FilePath path;
++			uint64_t epoch;
++			uint32_t width, height, pitch;
++			TextureFormat::Enum format;
++
++			static void deliver(void* _opaque, bool _success)
++			{
++				auto* shot = (WebScreenShot*)_opaque;
++				if (_success && NULL != g_callback && s_webRendererEpoch == shot->epoch)
++				{
++					g_callback->screenShot(shot->path.getCPtr(), shot->width, shot->height,
++						shot->pitch, shot->format, shot->request.data, shot->pitch * shot->height, false);
++				}
++				std::free(shot->request.data);
++				delete shot;
++			}
++		};
++#endif // BX_PLATFORM_EMSCRIPTEN
+ 
+ 		void readTexture(TextureHandle _handle, void* _data, uint16_t _layer, uint8_t _mip) override
+ 		{
++#if BX_PLATFORM_EMSCRIPTEN
++			WebGpuReadback& request = *(WebGpuReadback*)_data;
++			if (NULL == request.data)
++			{
++				request.complete(request.userData, false);
++				return;
++			}
++#endif // BX_PLATFORM_EMSCRIPTEN
+ 			const TextureWGPU& texture = m_textures[_handle.idx];
+ 
+ 			const bimg::TextureFormat::Enum format = bimg::TextureFormat::Enum(texture.m_textureFormat);
+@@ -2044,6 +2132,13 @@
+ 			};
+ 
+ 			WGPUBuffer readTextureBuffer = WGPU_CHECK(wgpuDeviceCreateBuffer(m_device, &readTextureBufferDesc) );
++#if BX_PLATFORM_EMSCRIPTEN
++			if (NULL == readTextureBuffer)
++			{
++				request.complete(request.userData, false);
++				return;
++			}
++#endif // BX_PLATFORM_EMSCRIPTEN
+ 
+ 			s_done = false;
+ 
+@@ -2110,7 +2205,9 @@
+ 			}
+ 
+ 			m_cmd.kick();
++#if !BX_PLATFORM_EMSCRIPTEN
+ 			m_cmd.wait();
++#endif // !BX_PLATFORM_EMSCRIPTEN
+ 
+ 			ReadTexture readTexture =
+ 			{
+@@ -2126,6 +2223,9 @@
+ 				.texelSize     = blockInfo.blockSize,
+ 			};
+ 
++#if BX_PLATFORM_EMSCRIPTEN
++			mapOnWorker(readTexture, request);
++#else
+ 			WGPU_CHECK(wgpuBufferMapAsync(
+ 				  readTextureBuffer
+ 				, WGPUMapMode_Read
+@@ -2143,6 +2243,7 @@
+ 			{
+ 				wgpuInstanceProcessEvents(m_instance);
+ 			}
++#endif // BX_PLATFORM_EMSCRIPTEN
+ 		}
+ 
+ 		BufferWGPU& getBuffer(Handle _handle)
+@@ -2157,6 +2258,14 @@
+ 
+ 		void readBuffer(Handle _handle, void* _data, uint32_t _offset, uint32_t _size) override
+ 		{
++#if BX_PLATFORM_EMSCRIPTEN
++			WebGpuReadback& request = *(WebGpuReadback*)_data;
++			if (NULL == request.data)
++			{
++				request.complete(request.userData, false);
++				return;
++			}
++#endif // BX_PLATFORM_EMSCRIPTEN
+ 			const BufferWGPU& buffer = getBuffer(_handle);
+ 
+ 			WGPUBufferDescriptor readBufferDesc =
+@@ -2172,6 +2281,13 @@
+ 			};
+ 
+ 			WGPUBuffer readBufferDst = WGPU_CHECK(wgpuDeviceCreateBuffer(m_device, &readBufferDesc) );
++#if BX_PLATFORM_EMSCRIPTEN
++			if (NULL == readBufferDst)
++			{
++				request.complete(request.userData, false);
++				return;
++			}
++#endif // BX_PLATFORM_EMSCRIPTEN
+ 
+ 			s_done = false;
+ 
+@@ -2186,6 +2302,9 @@
+ 				.data   = _data,
+ 			};
+ 
++#if BX_PLATFORM_EMSCRIPTEN
++			mapOnWorker(readBuffer, request);
++#else
+ 			WGPU_CHECK(wgpuBufferMapAsync(
+ 				  readBufferDst
+ 				, WGPUMapMode_Read
+@@ -2203,6 +2322,7 @@
+ 			{
+ 				wgpuInstanceProcessEvents(m_instance);
+ 			}
++#endif // BX_PLATFORM_EMSCRIPTEN
+ 		}
+ 
+ 		void resizeTexture(TextureHandle _handle, uint16_t _width, uint16_t _height, uint8_t _numMips, uint16_t _numLayers) override
+@@ -2346,7 +2466,30 @@
+ 
+ 			WGPUBuffer readTextureBuffer = WGPU_CHECK(wgpuDeviceCreateBuffer(m_device, &readTextureBufferDesc) );
+ 
++#if BX_PLATFORM_EMSCRIPTEN
++			if (NULL == readTextureBuffer)
++			{
++				return;
++			}
++			auto* shot = new (std::nothrow) WebScreenShot{
++				{}, bx::FilePath(_filePath), s_webRendererEpoch, width, height, dstPitch, format
++			};
++			if (NULL == shot)
++			{
++				wgpuRelease(readTextureBuffer);
++				return;
++			}
++			void* data = std::malloc(dstPitch*height);
++			if (NULL == data)
++			{
++				delete shot;
++				wgpuRelease(readTextureBuffer);
++				return;
++			}
++			shot->request = { data, WebScreenShot::deliver, shot };
++#else
+ 			void* data = bx::alloc(g_allocator, dstPitch*height);
++#endif // BX_PLATFORM_EMSCRIPTEN
+ 
+ 			s_done = false;
+ 
+@@ -2379,7 +2522,9 @@
+ 				);
+ 
+ 			m_cmd.kick();
++#if !BX_PLATFORM_EMSCRIPTEN
+ 			m_cmd.wait();
++#endif // !BX_PLATFORM_EMSCRIPTEN
+ 
+ 			ReadTexture readTexture =
+ 			{
+@@ -2395,6 +2540,9 @@
+ 				.texelSize     = uint32_t(bpp/8),
+ 			};
+ 
++#if BX_PLATFORM_EMSCRIPTEN
++			mapOnWorker(readTexture, shot->request);
++#else
+ 			WGPU_CHECK(wgpuBufferMapAsync(
+ 				  readTextureBuffer
+ 				, WGPUMapMode_Read
+@@ -2425,6 +2573,7 @@
+ 				);
+ 
+ 			bx::free(g_allocator, data);
++#endif // BX_PLATFORM_EMSCRIPTEN
+ 		}
+ 
+ 		void invalidateOcclusionQuery(OcclusionQueryHandle _handle) override
+@@ -9129,6 +9278,16 @@
+ 
+ } /* namespace wgpu */ } // namespace bgfx
+ 
++#if BX_PLATFORM_EMSCRIPTEN
++namespace bgfx
++{
++	bool webReadbacksPending()
++	{
++		return 0 != wgpu::s_webReadbackCount;
++	}
++}
++#endif // BX_PLATFORM_EMSCRIPTEN
++
+ #else
+ 
+ namespace bgfx { namespace wgpu

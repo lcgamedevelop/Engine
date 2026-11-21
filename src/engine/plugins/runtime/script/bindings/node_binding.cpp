@@ -1,4 +1,5 @@
 #include "plugins/runtime/script/bindings/node_binding.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "plugins/runtime/script/bindings/binding_context.hpp"
 #include "runtime/scene/scene.hpp"
@@ -62,6 +63,7 @@ Object.freeze(Node);
 
 void create(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     auto* scene = BindingContext::scene(arguments);
     std::string name;
@@ -77,11 +79,13 @@ void create(const Arguments& arguments)
 
 void valid(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(arguments.count() == 2 && BindingContext::node(arguments).valid());
 }
 
 void destroy(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto node = BindingContext::node(arguments);
     arguments.set_return(arguments.count() == 2 && node.valid() &&
                          node.scene()->destroy_node(node.id()));
@@ -89,6 +93,7 @@ void destroy(const Arguments& arguments)
 
 void set_persistent(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto node = BindingContext::node(arguments);
     arguments.set_return(arguments.count() == 3 && node && arguments.is_boolean(2) &&
                          node.set_persistent(arguments.boolean(2)));
@@ -96,12 +101,14 @@ void set_persistent(const Arguments& arguments)
 
 void persistent(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto node = BindingContext::node(arguments);
     arguments.set_return(arguments.count() == 2 && node && node.persistent());
 }
 
 void set_parent(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto node = BindingContext::node(arguments);
     std::uint64_t id = 0;
@@ -115,6 +122,7 @@ void set_parent(const Arguments& arguments)
 
 void find_child(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     const auto current = BindingContext::node(arguments);
     std::string path;
@@ -129,6 +137,7 @@ void find_child(const Arguments& arguments)
 }
 void state(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     const auto target = BindingContext::node(arguments);
     if (!target || arguments.count() != 2)
@@ -154,6 +163,7 @@ void state(const Arguments& arguments)
 
 void set_visible(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto target = BindingContext::node(arguments);
     if (target.valid() && arguments.count() == 3 && arguments.is_boolean(2))
@@ -164,6 +174,7 @@ void set_visible(const Arguments& arguments)
 
 void enabled(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto node = BindingContext::node(arguments);
     if (node.valid() && arguments.count() == 3 && arguments.is_boolean(2))
@@ -176,16 +187,19 @@ void enabled(const Arguments& arguments)
 
 std::string_view NodeBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "Node";
 }
 
 std::string_view NodeBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 
 bool NodeBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.function("NodeCreate", create) && vm.function("NodeValid", valid) &&
            vm.function("NodePersistentSet", set_persistent) &&
            vm.function("NodePersistent", persistent) && vm.function("NodeDestroy", destroy) &&

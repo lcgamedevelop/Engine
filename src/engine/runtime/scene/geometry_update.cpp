@@ -1,4 +1,6 @@
 #include "runtime/scene/geometry_update.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/physics/physics_system.hpp"
 #include "runtime/render/render_system.hpp"
@@ -31,6 +33,7 @@ constexpr std::uint64_t maximum_staging_bytes = 128ULL * 1024 * 1024;
 
 bool complete(SceneWorkState state)
 {
+    ENGINE_PROFILE_FUNCTION();
     return state == SceneWorkState::ready || state == SceneWorkState::not_required;
 }
 } // namespace
@@ -85,6 +88,7 @@ struct GeometryUpdate::State
 
     SceneWorkState fail(std::string code)
     {
+        ENGINE_PROFILE_FUNCTION();
         snapshot.state = SceneWorkState::failed;
         snapshot.error_code = std::move(code);
         return snapshot.state;
@@ -95,15 +99,18 @@ GeometryUpdate::GeometryUpdate(WorldSystem& world, RenderSystem& renderer, Physi
                                TaskSystem& tasks) noexcept
     : world_(world), renderer_(renderer), physics_(physics), tasks_(tasks)
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 GeometryUpdate::~GeometryUpdate() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     release();
 }
 
 bool GeometryUpdate::begin(const GeometryUpdateSpec& spec)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (state_ || !world_.can_modify() || !world_.is_initialized() || !renderer_.is_initialized() ||
         !physics_.is_initialized() || !tasks_.is_initialized() ||
         spec.world_epoch != world_.epoch() || !world_.scene() ||
@@ -134,6 +141,7 @@ bool GeometryUpdate::begin(const GeometryUpdateSpec& spec)
     candidate->snapshot.state = SceneWorkState::working;
     const auto owned = [&](Node node)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return node && node.world() == &world_ &&
                (node.scene() == world_.scene() || node.scene() == additions);
     };
@@ -154,7 +162,10 @@ bool GeometryUpdate::begin(const GeometryUpdateSpec& spec)
         flecs::world(world_.native_world())
             .entity(node.id())
             .children([&](flecs::entity child)
-                      { pending.push_back(node.scene()->find_node(child.id())); });
+                      {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                pending.push_back(node.scene()->find_node(child.id()));
+            });
     }
     auto render_changes = spec.render_changes;
     auto collision_changes = spec.collision_changes;
@@ -177,6 +188,7 @@ bool GeometryUpdate::begin(const GeometryUpdateSpec& spec)
     std::set<std::uint64_t> poses;
     const auto capture_pose = [&](Node node)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         for (auto current = node; current; current = current.parent())
         {
             if (poses.contains(current.id()))
@@ -210,8 +222,13 @@ bool GeometryUpdate::begin(const GeometryUpdateSpec& spec)
     std::array<double, 3> maximum{-INFINITY, -INFINITY, -INFINITY};
     const auto include_point = [&](Node node, double x, double y, double z)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const auto pose = std::find_if(candidate->poses.begin(), candidate->poses.end(),
-                                       [&](const auto& item) { return item.node == node; });
+                                       [&](const auto& item)
+                                       {
+                                           ENGINE_PROFILE_FUNCTION_PROBE();
+                                           return item.node == node;
+                                       });
         const auto& matrix = pose->matrix;
         for (std::size_t axis = 0; axis < 3; ++axis)
         {
@@ -223,6 +240,7 @@ bool GeometryUpdate::begin(const GeometryUpdateSpec& spec)
     };
     const auto include_mesh = [&](Node node, const schema::MeshDataT* mesh)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (mesh)
         {
             for (const auto& vertex : mesh->vertices)
@@ -233,6 +251,7 @@ bool GeometryUpdate::begin(const GeometryUpdateSpec& spec)
     };
     const auto include_collider = [&](Node node, const schema::ColliderDataT& data)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const double radius = std::max(data.radius, 0.0f);
         const std::array<double, 3> extent{
             std::max(data.half_extents.x(), radius),
@@ -391,6 +410,7 @@ bool GeometryUpdate::begin(const GeometryUpdateSpec& spec)
 
 SceneWorkState GeometryUpdate::prepare(const SceneWorkBudget& budget)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!state_)
     {
         return SceneWorkState::failed;
@@ -419,6 +439,7 @@ SceneWorkState GeometryUpdate::prepare(const SceneWorkBudget& budget)
     auto step = budget;
     const auto remaining = [&]()
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         step.seconds =
             budget.seconds -
             std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
@@ -426,12 +447,17 @@ SceneWorkState GeometryUpdate::prepare(const SceneWorkBudget& budget)
     };
     const auto mirror = [&](Node source, auto&& self, Scene& candidate) -> Node
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (const auto found = value.mirrors.find(source.id()); found != value.mirrors.end())
         {
             return found->second;
         }
         const auto pose = std::find_if(value.poses.begin(), value.poses.end(),
-                                       [&](const auto& item) { return item.node == source; });
+                                       [&](const auto& item)
+                                       {
+                                           ENGINE_PROFILE_FUNCTION_PROBE();
+                                           return item.node == source;
+                                       });
         if (pose == value.poses.end())
         {
             return {};
@@ -457,6 +483,7 @@ SceneWorkState GeometryUpdate::prepare(const SceneWorkBudget& budget)
     };
     const auto prepare_render = [&](State::Render& record, Scene& candidate)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         auto source = record.change.target;
         auto node = mirror(source.node(), mirror, candidate);
         auto prepared = node ? node.add_component<MeshRenderer>() : MeshRenderer{};
@@ -508,6 +535,7 @@ SceneWorkState GeometryUpdate::prepare(const SceneWorkBudget& budget)
     };
     const auto prepare_collision = [&](State::Collision& record, Scene& candidate)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const auto source = record.change.target;
         auto node = mirror(source.node(), mirror, candidate);
         auto prepared = node ? node.add_component<Collider>() : Collider{};
@@ -555,14 +583,20 @@ SceneWorkState GeometryUpdate::prepare(const SceneWorkBudget& budget)
             {
                 accepted = world_.with_scope_write(
                     value.staging, [&](Scene& scene)
-                    { return prepare_render(value.renders[value.next_render], scene); });
+                    {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
+                        return prepare_render(value.renders[value.next_render], scene);
+                    });
                 ++value.next_render;
             }
             else if (value.next_collision < value.collisions.size())
             {
                 accepted = world_.with_scope_write(
                     value.staging, [&](Scene& scene)
-                    { return prepare_collision(value.collisions[value.next_collision], scene); });
+                    {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
+                        return prepare_collision(value.collisions[value.next_collision], scene);
+                    });
                 ++value.next_collision;
             }
             else
@@ -603,6 +637,7 @@ SceneWorkState GeometryUpdate::prepare(const SceneWorkBudget& budget)
             ScenePreparationSnapshot status;
             const auto run = [&](auto& system, auto invoke)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 if (!ready || !remaining())
                 {
                     ready = false;
@@ -623,9 +658,21 @@ SceneWorkState GeometryUpdate::prepare(const SceneWorkBudget& budget)
                 }
                 ready = ready && complete(state);
             };
-            run(world_, [&]() { return world_.step_scope(scope, step); });
-            run(physics_, [&]() { return physics_.prepare_scope(scope, step); });
-            run(renderer_, [&]() { return renderer_.prepare_scope(scope, step); });
+            run(world_, [&]()
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return world_.step_scope(scope, step);
+            });
+            run(physics_, [&]()
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return physics_.prepare_scope(scope, step);
+            });
+            run(renderer_, [&]()
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return renderer_.prepare_scope(scope, step);
+            });
         }
         if (ready)
         {
@@ -664,12 +711,14 @@ SceneWorkState GeometryUpdate::prepare(const SceneWorkBudget& budget)
 
 bool GeometryUpdate::status(GeometryUpdateSnapshot& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = state_ ? state_->snapshot : GeometryUpdateSnapshot{};
     return state_ != nullptr;
 }
 
 bool GeometryUpdate::publish(GeometryPublication& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     if (!state_ || state_->published || state_->snapshot.state != SceneWorkState::ready ||
         state_->device_generation != renderer_.device_generation_ || !renderer_.gpu_ready() ||
@@ -824,6 +873,7 @@ bool GeometryUpdate::publish(GeometryPublication& output)
 
 bool GeometryUpdate::cancel()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!state_ || state_->published)
     {
         return false;
@@ -834,6 +884,7 @@ bool GeometryUpdate::cancel()
 
 void GeometryUpdate::release() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!state_)
     {
         return;

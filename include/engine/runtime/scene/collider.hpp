@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/scene/component.hpp"
 
 #include <cstdint>
@@ -31,6 +33,7 @@ public:
     Collider() noexcept = default;
     explicit Collider(Component component) noexcept : Component(component, component_type)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
     }
     [[nodiscard]] static bool register_type(ComponentRegistry& registry);
     using Runtime = ColliderRuntime;

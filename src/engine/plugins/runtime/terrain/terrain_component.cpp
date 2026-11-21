@@ -1,4 +1,6 @@
 #include "plugins/runtime/terrain/terrain_component.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "plugins/runtime/terrain/terrain_component_runtime.hpp"
 #include "plugins/runtime/terrain/terrain_resource.hpp"
@@ -20,6 +22,7 @@ namespace
 {
 bool valid_view(const TerrainView& view)
 {
+    ENGINE_PROFILE_FUNCTION();
     return terrain_detail::finite(view.center) && std::isfinite(view.visual_radius) &&
            std::isfinite(view.collision_radius) && view.visual_radius > 0 &&
            view.visual_radius <= 100000 && view.collision_radius >= 0 &&
@@ -29,6 +32,7 @@ bool valid_view(const TerrainView& view)
 
 template <class Id> bool owner(TerrainComponent component, const Id& id)
 {
+    ENGINE_PROFILE_FUNCTION();
     return component && component.node().world()->epoch() == id.world_epoch &&
            component.node().id() == id.node_id &&
            component.instance_id() == id.component_instance && id.sequence != 0;
@@ -37,6 +41,7 @@ template <class Id> bool owner(TerrainComponent component, const Id& id)
 bool local_query(TerrainComponent component, const TerrainRegionQuery& query,
                  TerrainRegionQuery& result)
 {
+    ENGINE_PROFILE_FUNCTION();
     TransformSettings pose;
     if (!terrain_detail::valid_bounds(query.bounds) || component.node().parent() ||
         !component.node().get_component<Transform>().get_settings(pose) ||
@@ -47,6 +52,7 @@ bool local_query(TerrainComponent component, const TerrainRegionQuery& query,
     }
     const auto local = [&](Vec3 value)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return Vec3{(value.x() - pose.position.x()) / pose.scale.x(),
                     (value.y() - pose.position.y()) / pose.scale.x(),
                     (value.z() - pose.position.z()) / pose.scale.x()};
@@ -59,14 +65,17 @@ bool local_query(TerrainComponent component, const TerrainRegionQuery& query,
 
 bool TerrainComponent::register_type(ComponentRegistry& registry)
 {
+    ENGINE_PROFILE_FUNCTION();
     return register_component_storage<TerrainComponent, Data, Runtime>(registry);
 }
 TerrainComponent::Runtime* TerrainComponent::runtime() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return runtime_state<Runtime>();
 }
 bool TerrainComponent::valid_settings(const Data& value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if ((!value.terrain_guid.empty() && !GuidMap::valid_guid(value.terrain_guid)) ||
         (!value.surface_material_guid.empty() &&
          !GuidMap::valid_guid(value.surface_material_guid)) ||
@@ -84,12 +93,14 @@ bool TerrainComponent::valid_settings(const Data& value) noexcept
 }
 bool TerrainComponent::get_settings(Data& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* data = read_data<Data>();
     output = data ? *data : Data{};
     return data != nullptr;
 }
 bool TerrainComponent::set_settings(const Data& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable() || !valid_settings(value) || runtime()->settings_revision_ == UINT64_MAX)
     {
         return false;
@@ -110,11 +121,13 @@ bool TerrainComponent::set_settings(const Data& value)
 }
 bool TerrainComponent::restore_data(const schema::ComponentDataT& data)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* settings = data.payload.AsTerrainData();
     return settings && data.flags && set_settings(*settings) && restore_flags(data);
 }
 bool TerrainComponent::set_view(std::uint64_t key, const TerrainView& view)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable() || key == 0 || !valid_view(view))
     {
         return false;
@@ -139,6 +152,7 @@ bool TerrainComponent::set_view(std::uint64_t key, const TerrainView& view)
 }
 bool TerrainComponent::remove_view(std::uint64_t key)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable() || key == 0 || runtime()->views_.erase(key) == 0)
     {
         return false;
@@ -151,6 +165,7 @@ bool TerrainComponent::remove_view(std::uint64_t key)
 }
 bool TerrainComponent::pin_regions(const TerrainPinSpec& spec, TerrainPinId& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     if (!writable() || spec.owner_key == 0 || spec.regions.empty() || spec.regions.size() > 256 ||
         spec.reason.empty() || spec.reason.size() > 256)
@@ -181,6 +196,7 @@ bool TerrainComponent::pin_regions(const TerrainPinSpec& spec, TerrainPinId& out
 }
 bool TerrainComponent::release_pin(TerrainPinId id)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable() || !owner(*this, id) || runtime()->pins_.erase(id.sequence) == 0)
     {
         return false;
@@ -193,37 +209,44 @@ bool TerrainComponent::release_pin(TerrainPinId id)
 }
 bool TerrainComponent::request_edit(const TerrainEditSpec& spec, TerrainOperationId& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     return writable() && runtime()->system_ && runtime()->system_->request(*this, spec, output);
 }
 bool TerrainComponent::request_collapse(const TerrainCollapseSpec& spec, TerrainOperationId& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     return writable() && runtime()->system_ && runtime()->system_->request(*this, spec, output);
 }
 bool TerrainComponent::request_reset(const TerrainResetSpec& spec, TerrainOperationId& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     return writable() && runtime()->system_ && runtime()->system_->request(*this, spec, output);
 }
 bool TerrainComponent::request_retire(const TerrainRetireSpec& spec, TerrainOperationId& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     return writable() && runtime()->system_ && runtime()->system_->request(*this, spec, output);
 }
 bool TerrainComponent::request_save(const TerrainSaveSpec& spec, TerrainOperationId& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     return writable() && runtime()->system_ && runtime()->system_->request(*this, spec, output);
 }
 bool TerrainComponent::request_load(const TerrainLoadSpec& spec, TerrainOperationId& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     return writable() && runtime()->system_ && runtime()->system_->request(*this, spec, output);
 }
 bool TerrainComponent::operation_status(TerrainOperationId id,
                                         TerrainOperationSnapshot& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     if (!owner(*this, id))
     {
@@ -239,6 +262,7 @@ bool TerrainComponent::operation_status(TerrainOperationId id,
 }
 bool TerrainComponent::cancel_operation(TerrainOperationId id)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable() || !owner(*this, id))
     {
         return false;
@@ -267,6 +291,7 @@ bool TerrainComponent::cancel_operation(TerrainOperationId id)
 }
 bool TerrainComponent::release_operation(TerrainOperationId id)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable() || !owner(*this, id))
     {
         return false;
@@ -284,6 +309,7 @@ bool TerrainComponent::release_operation(TerrainOperationId id)
 bool TerrainComponent::query_regions(const TerrainRegionQuery& query,
                                      TerrainRegionSnapshot& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     TerrainRegionQuery local;
     if (!valid() || query.limit == 0 || query.limit > 4096 ||
@@ -392,6 +418,7 @@ bool TerrainComponent::query_regions(const TerrainRegionQuery& query,
 bool TerrainComponent::collect_support(const TerrainRegionQuery& query,
                                        std::vector<Collider>& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     TerrainRegionSnapshot status;
     TerrainRegionQuery local;

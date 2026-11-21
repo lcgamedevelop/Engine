@@ -1,5 +1,6 @@
 #include "runtime/render/passes/meshlet_cull_pass.hpp"
 
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/render/render_constants.hpp"
 #include "runtime/render/render_math.hpp"
@@ -37,18 +38,21 @@ constexpr std::uint32_t maximum_compaction_commands = 64;
 std::array<std::uint64_t, 5> index_source_key(const GpuGeometry& geometry, std::size_t lod,
                                               std::uint32_t first)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto id = geometry.resource.handle();
     return {id.owner, id.id, id.generation, lod, first};
 }
 
 bool cone_safe(const float* model, schema::CullMode cull)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (cull != schema::CullMode::back || linear_determinant(model) <= 0)
     {
         return false;
     }
     const auto dot = [model](std::size_t a, std::size_t b)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return static_cast<double>(model[a * 4]) * model[b * 4] +
                static_cast<double>(model[a * 4 + 1]) * model[b * 4 + 1] +
                static_cast<double>(model[a * 4 + 2]) * model[b * 4 + 2];
@@ -62,6 +66,7 @@ bool cone_safe(const float* model, schema::CullMode cull)
 
 bgfx::VertexLayout instance_layout()
 {
+    ENGINE_PROFILE_FUNCTION();
     bgfx::VertexLayout layout;
     layout.begin();
     for (auto attribute :
@@ -79,6 +84,7 @@ bgfx::VertexLayout instance_layout()
                                  std::uint32_t required, std::uint32_t maximum,
                                  const bgfx::VertexLayout& layout, std::uint16_t flags)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (required <= capacity)
     {
         return true;
@@ -98,6 +104,7 @@ bgfx::VertexLayout instance_layout()
 
 bool meshlet_supported() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* caps = bgfx::getCaps();
     constexpr auto required = BGFX_CAPS_COMPUTE | BGFX_CAPS_DRAW_INDIRECT;
     return caps && (caps->supported & required) == required && caps->limits.maxInstanceData >= 7 &&
@@ -106,6 +113,7 @@ bool meshlet_supported() noexcept
 
 bool meshlet_index_compaction_supported() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* caps = bgfx::getCaps();
     return meshlet_supported() && (caps->supported & BGFX_CAPS_DRAW_INDIRECT_COUNT) == 0 &&
            caps->limits.maxBlits >= 8;
@@ -113,11 +121,13 @@ bool meshlet_index_compaction_supported() noexcept
 
 MeshletCullPass::~MeshletCullPass() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     release_gpu();
 }
 
 bool MeshletCullPass::prepare(const RenderConfig& config)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto capacity = config.maximum_meshlet_candidates;
     if (!meshlet_supported() || capacity == 0 || capacity > UINT32_MAX / (8 * 4 * sizeof(float)) ||
         capacity > UINT32_MAX / 124)
@@ -170,6 +180,7 @@ bool MeshletCullPass::prepare(const RenderConfig& config)
 
 bool MeshletCullPass::prepare_index_compaction()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (std::exchange(index_compaction_attempted_, true))
     {
         return bgfx::isValid(index_compaction_);
@@ -208,6 +219,7 @@ std::optional<std::uint32_t> MeshletCullPass::cache_index_source(const GpuGeomet
                                                                  std::uint32_t count,
                                                                  std::uint32_t& remaining_copies)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto key = index_source_key(geometry, lod, first);
     const auto existing = index_sources_.find(key);
     if (existing != index_sources_.end())
@@ -252,6 +264,7 @@ bool MeshletCullPass::dispatch(const RenderFrameData& frame, const SceneDrawView
     }
     const auto fail = [&draws]
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         for (auto& batch : draws.batches)
         {
             batch.meshlets = {};
@@ -310,6 +323,7 @@ bool MeshletCullPass::dispatch(const RenderFrameData& frame, const SceneDrawView
     const auto pack_input =
         [&](const RenderFrameData::Mesh& instance, schema::CullMode cull, bool include_normal)
     {
+            ENGINE_PROFILE_FUNCTION_PROBE();
         const auto start = inputs.size();
         const auto vectors = include_normal ? 8U : 5U;
         inputs.resize(start + vectors);
@@ -392,7 +406,10 @@ bool MeshletCullPass::dispatch(const RenderFrameData& frame, const SceneDrawView
         {
             const auto found = std::find_if(
                 ranges.begin(), ranges.end(), [&](const auto& range)
-                { return range.first_index() == item.first && range.index_count() == item.count; });
+                {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
+                    return range.first_index() == item.first && range.index_count() == item.count;
+                });
             if (found == ranges.end())
             {
                 return fail();
@@ -523,6 +540,7 @@ bool MeshletCullPass::dispatch(const RenderFrameData& frame, const SceneDrawView
     }
     const auto same_binding = [&](const Work& left, const Work& right)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const auto& left_batch = draws.batches[left.draw_batch];
         const auto& right_batch = draws.batches[right.draw_batch];
         const auto& a = left_batch.key;
@@ -552,6 +570,7 @@ bool MeshletCullPass::dispatch(const RenderFrameData& frame, const SceneDrawView
     const auto add_index_job =
         [&](std::span<const Work> batches, std::uint32_t index_count, std::uint32_t commands)
     {
+            ENGINE_PROFILE_FUNCTION_PROBE();
         const auto size = (index_count + 1U) & ~1U;
         const bool merged = batches.size() > 1;
         if (!size || size > index_region_capacity_ - output_indices ||
@@ -670,6 +689,7 @@ bool MeshletCullPass::dispatch(const RenderFrameData& frame, const SceneDrawView
     std::stable_sort(candidates.begin(), candidates.end(),
                      [](const auto& a, const auto& b)
                      {
+                         ENGINE_PROFILE_FUNCTION_PROBE();
                          return std::uint64_t{a.commands - 1} * b.indices >
                                 std::uint64_t{b.commands - 1} * a.indices;
                      });
@@ -903,8 +923,11 @@ bool MeshletCullPass::dispatch(const RenderFrameData& frame, const SceneDrawView
         readback->generation = generation_;
         bgfx::BufferRegion region;
         region.init(counters_, 0, sizeof(readback->counters));
-        readback->ready_frame = bgfx::read(region, readback->counters.data());
-        readback->pending = true;
+        readback->pending = readback->completion.submit(region, readback->counters.data());
+        if (!readback->pending)
+        {
+            stats_.state = MeshletSampleState::failed;
+        }
         sampled_at_ = now;
     }
     result_planes_ = planes;
@@ -915,13 +938,20 @@ bool MeshletCullPass::dispatch(const RenderFrameData& frame, const SceneDrawView
 
 void MeshletCullPass::poll(std::uint32_t frame_number)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (auto& slot : readbacks_)
     {
-        if (!slot.pending || static_cast<std::int32_t>(frame_number - slot.ready_frame) < 0)
+        if (!slot.pending)
+        {
+            continue;
+        }
+        const auto result = slot.completion.status(frame_number);
+        if (result == GpuReadbackStatus::pending)
         {
             continue;
         }
         slot.pending = false;
+        slot.completion.reset();
         if (slot.generation != generation_)
         {
             continue;
@@ -929,6 +959,12 @@ void MeshletCullPass::poll(std::uint32_t frame_number)
         if (stats_.state == MeshletSampleState::ready &&
             static_cast<std::int32_t>(slot.stats.frame_number - stats_.frame_number) < 0)
         {
+            continue;
+        }
+        if (result == GpuReadbackStatus::failed)
+        {
+            slot.stats.state = MeshletSampleState::failed;
+            stats_ = slot.stats;
             continue;
         }
         slot.stats.state =
@@ -942,11 +978,13 @@ void MeshletCullPass::poll(std::uint32_t frame_number)
 
 MeshletGpuStats MeshletCullPass::statistics() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return stats_;
 }
 
 void MeshletCullPass::reset_scene() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     ++generation_;
     stats_ = {};
     resources_.clear();
@@ -958,6 +996,7 @@ void MeshletCullPass::reset_scene() noexcept
 
 void MeshletCullPass::release_gpu() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     result_valid_ = false;
     release_index_compaction();
     index_compaction_attempted_ = false;
@@ -1003,8 +1042,10 @@ void MeshletCullPass::release_gpu() noexcept
 
 void MeshletCullPass::release_index_compaction() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto destroy = [](auto& handle)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (bgfx::isValid(handle))
         {
             bgfx::destroy(handle);
@@ -1022,6 +1063,7 @@ void MeshletCullPass::release_index_compaction() noexcept
 
 std::uint32_t MeshletCullPass::resource_count() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return static_cast<std::uint32_t>(bgfx::isValid(program_)) + bgfx::isValid(clear_) +
            bgfx::isValid(parameters_) + bgfx::isValid(planes_) + bgfx::isValid(inputs_) +
            bgfx::isValid(instances_) + bgfx::isValid(commands_) + bgfx::isValid(counters_) +

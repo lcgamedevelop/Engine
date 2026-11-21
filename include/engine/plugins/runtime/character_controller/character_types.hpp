@@ -1,4 +1,6 @@
 #pragma once
+
+#include "runtime/performance/function_profile.hpp"
 #include "plugins/runtime/character_controller/character_input.hpp"
 #include "runtime/physics/character_motor_driver.hpp"
 #include <span>
@@ -16,11 +18,13 @@ enum class CharacterControlChannels : std::uint32_t
 };
 constexpr CharacterControlChannels operator|(CharacterControlChannels a, CharacterControlChannels b)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return static_cast<CharacterControlChannels>(static_cast<std::uint32_t>(a) |
                                                  static_cast<std::uint32_t>(b));
 }
 constexpr bool overlaps(CharacterControlChannels a, CharacterControlChannels b)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return (static_cast<std::uint32_t>(a) & static_cast<std::uint32_t>(b)) != 0;
 }
 enum class CharacterAbilitySelection
@@ -91,6 +95,7 @@ struct CharacterAbilityContext
     std::span<const CharacterActionState> actions;
     [[nodiscard]] bool action(std::string_view name, CharacterActionState& output) const
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         output = {};
         for (const auto& value : actions)
         {

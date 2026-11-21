@@ -1,4 +1,5 @@
 #include "plugins/runtime/script/bindings/animator_binding.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/script/bindings/binding_helpers.hpp"
 
 #include "plugins/runtime/script/bindings/binding_context.hpp"
@@ -195,12 +196,14 @@ Object.freeze(Animator);
 
 void add(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto node = BindingContext::node(arguments);
     arguments.set_return(arguments.count() == 2 && node && node.add_component<Animator>());
 }
 
 void animation(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<Animator>(arguments, 3);
     std::string path;
     if (value && BindingContext::text(arguments, 2, path))
@@ -211,6 +214,7 @@ void animation(const Arguments& arguments)
 
 void cross_fade(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<Animator>(arguments, 4);
     std::string path;
     double seconds = 0.0;
@@ -223,6 +227,7 @@ void cross_fade(const Arguments& arguments)
 
 void speed(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<Animator>(arguments, 3);
     float number = 0;
     if (value && BindingContext::scalar(arguments, 2, number))
@@ -240,6 +245,7 @@ void speed(const Arguments& arguments)
 
 void set_boolean(const Arguments& arguments, bool schema::AnimatorDataT::* field)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<Animator>(arguments, 3);
     if (value && arguments.is_boolean(2))
     {
@@ -256,34 +262,40 @@ void set_boolean(const Arguments& arguments, bool schema::AnimatorDataT::* field
 
 void loop(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     set_boolean(arguments, &schema::AnimatorDataT::loop);
 }
 
 void awake(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     set_boolean(arguments, &schema::AnimatorDataT::play_on_awake);
 }
 
 void play(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<Animator>(arguments, 2);
     arguments.set_return(value && value.play());
 }
 
 void pause(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<Animator>(arguments, 2);
     arguments.set_return(value && value.pause());
 }
 
 void stop(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<Animator>(arguments, 2);
     arguments.set_return(value && value.stop());
 }
 
 void seek(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<Animator>(arguments, 3);
     double seconds = 0;
     if (value && BindingContext::number(arguments, 2, seconds))
@@ -294,12 +306,14 @@ void seek(const Arguments& arguments)
 
 void playing(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto value = binding_detail::component<Animator>(arguments, 2);
     arguments.set_return(value && value.playback() == AnimationPlayback::playing);
 }
 
 void playback(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto value = binding_detail::component<Animator>(arguments, 2);
     arguments.set_return({});
     if (!value)
@@ -327,6 +341,7 @@ void playback(const Arguments& arguments)
 
 void time(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto value = binding_detail::component<Animator>(arguments, 2);
     arguments.set_return({});
     if (value)
@@ -336,6 +351,7 @@ void time(const Arguments& arguments)
 }
 const char* playback_name(AnimationPlayback value)
 {
+    ENGINE_PROFILE_FUNCTION();
     switch (value)
     {
     case AnimationPlayback::playing:
@@ -350,6 +366,7 @@ const char* playback_name(AnimationPlayback value)
 
 void snapshot(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto value = binding_detail::component<Animator>(arguments, 2);
     arguments.set_return({});
     AnimatorPlaybackInfo info;
@@ -376,6 +393,7 @@ void snapshot(const Arguments& arguments)
 
 void play_animation(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<Animator>(arguments, 8);
     AnimationPlayRequest request;
     if (value && BindingContext::text(arguments, 2, request.animation_path) &&
@@ -392,6 +410,7 @@ void play_animation(const Arguments& arguments)
 
 void ik_enabled(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<Animator>(arguments, 3);
     if (value && arguments.is_boolean(2))
     {
@@ -408,11 +427,13 @@ void ik_enabled(const Arguments& arguments)
 
 vm::NativeValue vector_value(const Vec3& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm::NativeValue::Object{{"x", value.x()}, {"y", value.y()}, {"z", value.z()}};
 }
 
 void ik_set(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<Animator>(arguments, 19);
     std::string name;
     AnimationIkTarget target;
@@ -452,6 +473,7 @@ void ik_set(const Arguments& arguments)
 
 void ik_target(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto value = binding_detail::component<Animator>(arguments, 3);
     arguments.set_return({});
     std::string name;
@@ -474,6 +496,7 @@ void ik_target(const Arguments& arguments)
 
 void pose(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto value = binding_detail::component<Animator>(arguments, 3);
     arguments.set_return({});
     std::string path;
@@ -500,6 +523,7 @@ void pose(const Arguments& arguments)
 
 void event_markers(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<Animator>(arguments, 3);
     std::string text;
     if (!value || !BindingContext::text(arguments, 2, text) || text.size() > 256 * 1024)
@@ -561,6 +585,7 @@ void event_markers(const Arguments& arguments)
 
 void clear_events(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<Animator>(arguments, 2);
     if (value)
     {
@@ -571,6 +596,7 @@ void clear_events(const Arguments& arguments)
 
 void take_event(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     auto* context = BindingContext::current(arguments);
     AnimationEvent event;
@@ -610,16 +636,19 @@ void take_event(const Arguments& arguments)
 
 std::string_view AnimatorBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "Animator";
 }
 
 std::string_view AnimatorBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 
 bool AnimatorBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.integer("AnimatorKind", static_cast<int>(Animator::component_type)) &&
            vm.function("AnimatorAdd", add) && vm.function("AnimatorAnimation", animation) &&
            vm.function("AnimatorCrossFade", cross_fade) && vm.function("AnimatorSpeed", speed) &&

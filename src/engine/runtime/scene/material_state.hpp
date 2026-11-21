@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/resource/resource_reference.hpp"
 #include "runtime/scene/material.hpp"
 
@@ -11,17 +13,20 @@ public:
     MaterialState() noexcept = default;
     explicit MaterialState(Node owner) noexcept : owner_(owner)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
     }
     std::uint64_t identity = 0;
 
     [[nodiscard]] std::string type_path() const noexcept;
     [[nodiscard]] ResourceHandle resource_handle() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return material_resource_.handle();
     }
     [[nodiscard]] std::string shader_path() const noexcept;
     [[nodiscard]] ResourceHandle shader_handle() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return shader_resource_.handle();
     }
     // 借用材质当前持有的 Shader 定义；切换 Shader 或销毁材质后失效。

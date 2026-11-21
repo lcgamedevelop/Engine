@@ -4,7 +4,6 @@
 
 #include <filesystem>
 #include <functional>
-#include <set>
 #include <string>
 
 namespace engine::plugins::mcp
@@ -28,7 +27,6 @@ private:
     std::string session_;
     std::string last_text_;
     std::string last_error_;
-    std::set<std::string> executed_;
     nlohmann::json pending_;
     nlohmann::json last_receipt_;
 };

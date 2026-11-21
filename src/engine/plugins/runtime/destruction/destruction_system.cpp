@@ -3,6 +3,7 @@
 #include "plugins/runtime/destruction/destruction_component_runtime.hpp"
 
 #include "plugins/runtime/destruction/destruction_component.hpp"
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/physics/physics_system.hpp"
 #include "runtime/scene/collider.hpp"
@@ -46,6 +47,7 @@ struct GeneratedGroup
 
 Node find_owned_node(WorldSystem& world, std::uint64_t id)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (auto published = world.find_node(id))
     {
         return published;
@@ -62,6 +64,7 @@ Node find_owned_node(WorldSystem& world, std::uint64_t id)
 bool set_group_collision(WorldSystem& world, PhysicsSystem& physics, Collider collider,
                          const Collider::Data& settings)
 {
+    ENGINE_PROFILE_FUNCTION();
     // 候选只写碰撞描述，由共同 Physics 准备阶段创建未激活的刚体。
     return world.find_node(collider.node().id()) == collider.node()
                ? physics.set_collider_data(collider, settings)
@@ -73,6 +76,7 @@ bool build_group_geometry(const schema::DestructionAssetDataT& asset,
                           const schema::DestructionDataT& settings, schema::MeshDataT& mesh,
                           schema::ColliderDataT& collision)
 {
+    ENGINE_PROFILE_FUNCTION();
     collision.shape = schema::ColliderShape::compound;
     collision.friction = settings.friction;
     collision.restitution = settings.restitution;
@@ -129,17 +133,20 @@ bool build_group_geometry(const schema::DestructionAssetDataT& asset,
 
 bool finite(const Vec3& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::isfinite(value.x()) && std::isfinite(value.y()) && std::isfinite(value.z());
 }
 
 bool active_component(DestructionComponent component)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto transform = component.node().get_component<Transform>();
     return component.active() && transform.valid() && transform.active();
 }
 
 bool valid_transform(const TransformSettings& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto& scale = value.scale;
     return finite(value.position) && finite(value.rotation) && finite(scale) && scale.x() > 0 &&
            scale.x() <= 100 && std::abs(scale.x() - scale.y()) <= 0.000001 * scale.x() &&
@@ -149,6 +156,7 @@ bool valid_transform(const TransformSettings& value)
 Vec3 center_of(const schema::DestructionAssetDataT& asset, const std::vector<std::uint32_t>& chunks,
                double& volume)
 {
+    ENGINE_PROFILE_FUNCTION();
     volume = 0;
     double x = 0;
     double y = 0;
@@ -166,6 +174,7 @@ Vec3 center_of(const schema::DestructionAssetDataT& asset, const std::vector<std
 
 Vec3 world_point(const double* matrix, const Vec3& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     return {matrix[0] * value.x() + matrix[4] * value.y() + matrix[8] * value.z() + matrix[12],
             matrix[1] * value.x() + matrix[5] * value.y() + matrix[9] * value.z() + matrix[13],
             matrix[2] * value.x() + matrix[6] * value.y() + matrix[10] * value.z() + matrix[14]};
@@ -173,6 +182,7 @@ Vec3 world_point(const double* matrix, const Vec3& value)
 
 Vec3 local_point(const double* matrix, const Vec3& value, double scale)
 {
+    ENGINE_PROFILE_FUNCTION();
     const double x = value.x() - matrix[12];
     const double y = value.y() - matrix[13];
     const double z = value.z() - matrix[14];
@@ -187,6 +197,7 @@ bool support_coverage(const schema::DestructionChunkDataT& chunk, const double* 
                       std::span<const Collider> supports, const PhysicsSystem& physics,
                       float max_gap, double& coverage, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     coverage = 0;
     const auto& mesh = *chunk.mesh;
     double bottom = mesh.vertices.front().y();
@@ -265,6 +276,7 @@ bool support_coverage(const schema::DestructionChunkDataT& chunk, const double* 
 bool release_groups(WorldSystem& world, PhysicsSystem& physics,
                     const std::vector<GeneratedGroup>& groups)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::vector<std::pair<Collider, bool>> disabled;
     // Keep every node alive until the whole batch has released its collision successfully.
     for (const auto& group : groups)
@@ -320,6 +332,7 @@ bool release_groups(WorldSystem& world, PhysicsSystem& physics,
 bool read_group(const Scene& scene, const GeneratedGroup& group,
                 schema::DestructionGroupStateT& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto node = scene.find_node(group.node);
     auto transform = node ? node.get_component<Transform>() : Transform{};
     auto body = node ? node.get_component<RigidBody>() : RigidBody{};
@@ -352,6 +365,7 @@ struct DestructionSystem::State
 
     ~State()
     {
+        ENGINE_PROFILE_FUNCTION();
         if (owners_query && query_world && query_world->native_world() &&
             query_world->epoch() == query_epoch)
         {
@@ -415,6 +429,7 @@ struct DestructionSystem::State
 
     void cancel(Owner& owner)
     {
+        ENGINE_PROFILE_FUNCTION();
         for (auto& request : owner.requests)
         {
             ready.push_back({std::move(request.completed), false, owner.node});
@@ -443,6 +458,7 @@ struct DestructionSystem::State
                 prepared.sources.begin(), prepared.sources.end(),
                 [&](const auto& item)
                 {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
                     return std::includes(item.group.chunks.begin(), item.group.chunks.end(),
                                          group.chunks.begin(), group.chunks.end());
                 });
@@ -500,18 +516,22 @@ DestructionSystem::DestructionSystem(WorldSystem& world, PhysicsSystem& physics,
     : world_(world), physics_(physics), tasks_(tasks), max_pending_requests_(max_pending_requests),
       max_commits_per_tick_(max_commits_per_tick)
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 DestructionSystem::~DestructionSystem() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
 }
 DestructionSystem* DestructionSystem::instance() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return active_system;
 }
 
 bool DestructionSystem::on_initialize(const EngineConfig&)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (active_system || (tasks_ != nullptr && !tasks_->is_initialized()) ||
         max_pending_requests_ == 0 || max_commits_per_tick_ == 0)
     {
@@ -592,6 +612,7 @@ bool DestructionSystem::publish(DestructionComponent component, DestructionGraph
         candidate.healths() != engine::ecs_detail::component_runtime(component)->graph_.healths();
     const auto fail = [&](std::string error)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (!release_groups(world_, physics_, created))
         {
             error += "; failed to clean candidate bodies";
@@ -787,6 +808,7 @@ bool DestructionSystem::prepare_groups(DestructionComponent component,
                 std::find_if(previous.groups.begin(), previous.groups.end(),
                              [&](const auto& old)
                              {
+                                 ENGINE_PROFILE_FUNCTION_PROBE();
                                  return std::includes(old->chunks.begin(), old->chunks.end(),
                                                       group.chunks.begin(), group.chunks.end());
                              });
@@ -805,7 +827,11 @@ bool DestructionSystem::prepare_groups(DestructionComponent component,
             const auto record = state_->generated.find(component.node().id());
             const auto generated =
                 std::find_if(record->second.begin(), record->second.end(),
-                             [&](const auto& item) { return item.chunks == (*found)->chunks; });
+                             [&](const auto& item)
+                             {
+                                 ENGINE_PROFILE_FUNCTION_PROBE();
+                                 return item.chunks == (*found)->chunks;
+                             });
             auto source_node = generated != record->second.end()
                                    ? component.node().scene()->find_node(generated->node)
                                    : Node{};
@@ -834,6 +860,7 @@ bool DestructionSystem::prepare_groups(DestructionComponent component,
 bool DestructionSystem::rebuild(DestructionComponent component, DestructionGraph candidate,
                                 bool preserve)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!component || component.node().world() != &world_ || !world_.can_modify())
     {
         return false;
@@ -879,7 +906,11 @@ bool DestructionSystem::damage(DestructionComponent component, const Vec3& cente
     {
         const auto generated =
             std::find_if(found->second.begin(), found->second.end(),
-                         [&](const auto& item) { return item.chunks == group.chunks; });
+                         [&](const auto& item)
+                         {
+                             ENGINE_PROFILE_FUNCTION_PROBE();
+                             return item.chunks == group.chunks;
+                         });
         auto node = generated != found->second.end()
                         ? component.node().scene()->find_node(generated->node)
                         : Node{};
@@ -918,6 +949,7 @@ bool DestructionSystem::damage(DestructionComponent component, const Vec3& cente
             std::find_if(found->second.begin(), found->second.end(),
                          [&](const auto& old)
                          {
+                             ENGINE_PROFILE_FUNCTION_PROBE();
                              return std::includes(old.chunks.begin(), old.chunks.end(),
                                                   group.chunks.begin(), group.chunks.end());
                          });
@@ -956,6 +988,7 @@ bool DestructionSystem::damage(DestructionComponent component, const Vec3& cente
 
 bool DestructionSystem::reset(DestructionComponent component)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!component || component.node().world() != &world_ || !world_.can_modify())
     {
         return false;
@@ -1011,7 +1044,11 @@ bool DestructionSystem::apply_stress(DestructionComponent component, const Vec3&
         }
         const auto generated =
             std::find_if(found->second.begin(), found->second.end(),
-                         [&](const auto& item) { return item.chunks == group.chunks; });
+                         [&](const auto& item)
+                         {
+                             ENGINE_PROFILE_FUNCTION_PROBE();
+                             return item.chunks == group.chunks;
+                         });
         auto node = generated != found->second.end()
                         ? component.node().scene()->find_node(generated->node)
                         : Node{};
@@ -1059,6 +1096,7 @@ bool DestructionSystem::request_damage(DestructionComponent component, const Vec
                                        float radius, float damage_value, float impulse,
                                        std::function<void(bool)> completed)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!component || component.node().world() != &world_ || !world_.can_modify())
     {
         return false;
@@ -1156,7 +1194,11 @@ void DestructionSystem::process_requests()
                     }
                     const auto found = std::find_if(
                         generated->second.begin(), generated->second.end(),
-                        [&](const auto& value) { return value.chunks == source.group.chunks; });
+                        [&](const auto& value)
+                        {
+                            ENGINE_PROFILE_FUNCTION_PROBE();
+                            return value.chunks == source.group.chunks;
+                        });
                     auto fragment =
                         found != generated->second.end() ? world_.find_node(found->node) : Node{};
                     auto transform = fragment ? fragment.get_component<Transform>() : Transform{};
@@ -1204,7 +1246,11 @@ void DestructionSystem::process_requests()
     }
     std::size_t running = static_cast<std::size_t>(
         std::count_if(state_->owners.begin(), state_->owners.end(),
-                      [](const auto& item) { return item.second.completion.valid(); }));
+                      [](const auto& item)
+                      {
+                          ENGINE_PROFILE_FUNCTION_PROBE();
+                          return item.second.completion.valid();
+                      }));
     item = state_->owners.upper_bound(state_->submitted_after);
     for (std::size_t remaining = state_->owners.size(); remaining != 0; --remaining)
     {
@@ -1241,7 +1287,11 @@ void DestructionSystem::process_requests()
                 }
                 const auto generated =
                     std::find_if(found->second.begin(), found->second.end(),
-                                 [&](const auto& value) { return value.chunks == group.chunks; });
+                                 [&](const auto& value)
+                                 {
+                                     ENGINE_PROFILE_FUNCTION_PROBE();
+                                     return value.chunks == group.chunks;
+                                 });
                 auto fragment =
                     generated != found->second.end() ? world_.find_node(generated->node) : Node{};
                 auto transform = fragment ? fragment.get_component<Transform>() : Transform{};
@@ -1278,7 +1328,10 @@ void DestructionSystem::process_requests()
             [prepared = owner.prepared, center = request.center, radius = request.radius,
              damage_value = request.damage, impulse = request.impulse,
              settings = std::move(component_settings)]
-            { return State::prepare(*prepared, center, radius, damage_value, impulse, settings); });
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return State::prepare(*prepared, center, radius, damage_value, impulse, settings);
+            });
         if (!owner.completion.valid())
         {
             break;
@@ -1308,6 +1361,7 @@ void DestructionSystem::process_requests()
 bool DestructionSystem::owns_fragment(DestructionComponent component,
                                       std::uint64_t node_id) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!component || component.node().world() != &world_)
     {
         return false;
@@ -1322,7 +1376,11 @@ bool DestructionSystem::owns_fragment(DestructionComponent component,
     auto node = world_.find_node(node_id);
     return found != state_->generated.end() && node && node.transient() &&
            std::any_of(found->second.begin(), found->second.end(),
-                       [node_id](const auto& group) { return group.node == node_id; });
+                       [node_id](const auto& group)
+                       {
+                           ENGINE_PROFILE_FUNCTION_PROBE();
+                           return group.node == node_id;
+                       });
 }
 
 bool DestructionSystem::retire_fragments(DestructionComponent component, std::uint32_t max_count,
@@ -1392,6 +1450,7 @@ bool DestructionSystem::retire_fragments(DestructionComponent component, std::ui
     std::sort(dynamic.begin(), dynamic.end(),
               [](const auto* a, const auto* b)
               {
+                  ENGINE_PROFILE_FUNCTION_PROBE();
                   return a->dynamic_age_seconds != b->dynamic_age_seconds
                              ? a->dynamic_age_seconds > b->dynamic_age_seconds
                              : a->chunks.front() < b->chunks.front();
@@ -1399,7 +1458,10 @@ bool DestructionSystem::retire_fragments(DestructionComponent component, std::ui
     const auto expired = max_age_seconds > 0
                              ? static_cast<std::size_t>(std::count_if(
                                    dynamic.begin(), dynamic.end(), [&](const auto* group)
-                                   { return group->dynamic_age_seconds >= max_age_seconds; }))
+                                   {
+                                       ENGINE_PROFILE_FUNCTION_PROBE();
+                                       return group->dynamic_age_seconds >= max_age_seconds;
+                                   }))
                              : 0;
     const auto excess = dynamic.size() > max_count ? dynamic.size() - max_count : 0;
     const auto count = std::max(expired, excess);
@@ -1494,7 +1556,10 @@ bool DestructionSystem::refresh_support(DestructionComponent component,
         }
         const auto group = std::find_if(
             found->second.begin(), found->second.end(), [chunk_id](const auto& value)
-            { return std::binary_search(value.chunks.begin(), value.chunks.end(), chunk_id); });
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return std::binary_search(value.chunks.begin(), value.chunks.end(), chunk_id);
+            });
         auto node = group != found->second.end() ? world_.find_node(group->node) : Node{};
         auto transform = node ? node.get_component<Transform>() : Transform{};
         double matrix[16];
@@ -1535,6 +1600,7 @@ bool DestructionSystem::refresh_support(DestructionComponent component,
 bool DestructionSystem::snapshot(DestructionComponent component,
                                  schema::DestructionStateDataT& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     if (!component || component.node().world() != &world_)
     {
@@ -1589,6 +1655,7 @@ bool DestructionSystem::snapshot(DestructionComponent component,
 bool DestructionSystem::restore(DestructionComponent component,
                                 const schema::DestructionStateDataT& state)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!component || component.node().world() != &world_ || !world_.can_modify())
     {
         return false;
@@ -1628,6 +1695,7 @@ bool DestructionSystem::restore(DestructionComponent component,
             std::count_if(group.chunks.begin(), group.chunks.end(),
                           [&](std::uint32_t chunk)
                           {
+                              ENGINE_PROFILE_FUNCTION_PROBE();
                               return std::binary_search(state.retired_chunks.begin(),
                                                         state.retired_chunks.end(), chunk);
                           });
@@ -1659,7 +1727,11 @@ bool DestructionSystem::restore(DestructionComponent component,
     {
         const auto found =
             std::find_if(state.groups.begin(), state.groups.end(),
-                         [&](const auto& saved) { return saved && saved->chunks == group.chunks; });
+                         [&](const auto& saved)
+                         {
+                             ENGINE_PROFILE_FUNCTION_PROBE();
+                             return saved && saved->chunks == group.chunks;
+                         });
         if (found == state.groups.end())
         {
             engine::ecs_detail::component_runtime(component)->last_error_ =
@@ -1673,6 +1745,7 @@ bool DestructionSystem::restore(DestructionComponent component,
 
 SceneWorkState DestructionSystem::prepare_scope(SceneScopeId scope, const SceneWorkBudget& budget)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!state_ || !is_initialized() || !world_.is_initialized())
     {
         return SceneWorkState::failed;
@@ -1721,6 +1794,7 @@ SceneWorkState DestructionSystem::prepare_scope(SceneScopeId scope, const SceneW
     {
         const auto prepare = [&](Scene&)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             const auto started = std::chrono::steady_clock::now();
             for (std::uint32_t count = 0;
                  progress.completed < work.owners.size() && count < budget.items; ++count)
@@ -1781,6 +1855,7 @@ SceneWorkState DestructionSystem::prepare_scope(SceneScopeId scope, const SceneW
 
 bool DestructionSystem::scope_status(SceneScopeId scope, ScenePreparationSnapshot& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     if (!state_)
     {
@@ -1797,6 +1872,7 @@ bool DestructionSystem::scope_status(SceneScopeId scope, ScenePreparationSnapsho
 
 void DestructionSystem::release_scope(SceneScopeId scope) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!state_)
     {
         return;
@@ -1819,6 +1895,7 @@ void DestructionSystem::release_scope(SceneScopeId scope) noexcept
 
 bool DestructionSystem::on_tick(double delta_time)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (world_.paused())
     {
         return synchronize();
@@ -1881,6 +1958,7 @@ bool DestructionSystem::synchronize()
             [&](flecs::entity entity,
                 const ecs_detail::ComponentStorage<DestructionComponent::Data>&)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 if (entity.has<ecs_detail::Simulating>())
                 {
                     owners.push_back(entity.id());
@@ -1903,6 +1981,7 @@ bool DestructionSystem::synchronize()
 
 bool DestructionSystem::synchronize(Node owner)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!owner || !state_ || !is_initialized() || world_.find_node(owner.id()) != owner)
     {
         return false;
@@ -1925,7 +2004,11 @@ bool DestructionSystem::synchronize(Node owner)
     if (const auto generated = state_->generated.find(node.id());
         generated != state_->generated.end() &&
         std::any_of(generated->second.begin(), generated->second.end(),
-                    [&](const auto& group) { return !world_.find_node(group.node).valid(); }))
+                    [&](const auto& group)
+                    {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
+                        return !world_.find_node(group.node).valid();
+                    }))
     {
         if (!release_groups(world_, physics_, generated->second))
         {
@@ -2031,6 +2114,7 @@ bool DestructionSystem::synchronize(Node owner)
 
 void DestructionSystem::on_shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (active_system == this)
     {
         active_system = nullptr;

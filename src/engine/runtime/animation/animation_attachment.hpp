@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/resource/resource_reference.hpp"
 #include "runtime/resource/types/skeleton_resource.hpp"
 #include "runtime/world/world_system.hpp"
@@ -19,6 +21,7 @@ namespace engine::animation_detail
 {
 inline bool attachment_drive_valid(Node owner, std::uint64_t instance) noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     const auto attachment = owner.get_component<BoneAttachment>();
     if (!attachment || attachment.instance_id() != instance)
     {
@@ -45,6 +48,7 @@ inline bool attachment_drive_valid(Node owner, std::uint64_t instance) noexcept
 
 inline bool attachment_can_drive(Node node)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     for (auto current = node; current; current = current.parent())
     {
         const auto transform = current.get_component<Transform>();
@@ -62,6 +66,7 @@ inline bool attachment_can_drive(Node node)
 }
 inline void clear_attachment_drive(BoneAttachment attachment)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     if (!attachment)
     {
         return;
@@ -81,6 +86,7 @@ inline bool resolve_attachment_source(BoneAttachment attachment, const BoneAttac
                                       Animator& source, std::uint32_t& socket_index,
                                       std::uint64_t& generation)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     source = {};
     socket_index = 0;
     generation = 0;

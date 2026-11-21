@@ -1,4 +1,6 @@
 #include "runtime/resource/builtin_resources.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/resource/builtin_font.hpp"
 #include "runtime/resource/builtin_resource_candidate.hpp"
 #include "runtime/resource/types/font_resource.hpp"
@@ -42,14 +44,17 @@ namespace engine
 
 const schema::AssetCatalogDataT& builtin_resource_catalog()
 {
+    ENGINE_PROFILE_FUNCTION();
     static const schema::AssetCatalogDataT catalog = []
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         schema::AssetCatalogDataT result;
         result.schema_version = 4;
         result.revision = "builtin-6";
         const auto add = [&result](const char* guid, const char* path, schema::AssetKind kind,
                                    const char* dependency)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             auto entry = std::make_unique<schema::AssetEntryT>();
             entry->guid = guid;
             entry->path = path;
@@ -115,6 +120,7 @@ const schema::AssetCatalogDataT& builtin_resource_catalog()
 
 const schema::AssetEntryT* builtin_resource_info(std::string_view guid)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (const auto& entry : builtin_resource_catalog().entries)
     {
         if (entry->guid == guid)
@@ -132,6 +138,7 @@ std::unique_ptr<schema::ShaderParameterT> scalar_parameter(const char* name, con
                                                            std::uint8_t offset, float value,
                                                            bool exposed)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto parameter = std::make_unique<schema::ShaderParameterT>();
     parameter->name = name;
     parameter->uniform_name = uniform;
@@ -148,6 +155,7 @@ std::unique_ptr<schema::ShaderParameterT> scalar_parameter(const char* name, con
 
 schema::ShaderDataT surface_shader(const char* shader_path, float lighting_mode)
 {
+    ENGINE_PROFILE_FUNCTION();
     const bool unlit = lighting_mode == 1.0F;
     schema::ShaderDataT shader;
     shader.path = shader_path;
@@ -232,6 +240,7 @@ schema::ShaderDataT surface_shader(const char* shader_path, float lighting_mode)
     const auto add_sampler =
         [&shader](const char* name, const char* uniform, std::uint8_t stage, const char* texture)
     {
+            ENGINE_PROFILE_FUNCTION_PROBE();
         auto sampler = std::make_unique<schema::ShaderSamplerT>();
         sampler->name = name;
         sampler->uniform_name = uniform;
@@ -249,6 +258,7 @@ schema::ShaderDataT surface_shader(const char* shader_path, float lighting_mode)
 
 schema::ShaderDataT terrain_shader()
 {
+    ENGINE_PROFILE_FUNCTION();
     auto shader = surface_shader("builtin://shaders/terrain-pbr", 0.0F);
     shader.meshlet_culling_compatible = false;
     shader.instanced_vertex_code.clear();
@@ -260,6 +270,7 @@ schema::ShaderDataT terrain_shader()
     std::erase_if(shader.parameters,
                   [](const auto& p)
                   {
+                      ENGINE_PROFILE_FUNCTION_PROBE();
                       return p->name != "lightingMode" && p->name != "specularWorkflow" &&
                              p->name != "specularHighlights" && p->name != "fogInfluence";
                   });
@@ -296,6 +307,7 @@ schema::ShaderDataT terrain_shader()
 
 schema::ShaderDataT water_shader()
 {
+    ENGINE_PROFILE_FUNCTION();
     auto shader = surface_shader("builtin://shaders/water", 0.0F);
     shader.meshlet_culling_compatible = false;
     shader.fragment_code.assign(std::begin(fs_water), std::end(fs_water));
@@ -352,6 +364,7 @@ schema::ShaderDataT water_shader()
     const auto add_frame_sampler = [&shader](const char* name, const char* uniform,
                                              std::uint8_t stage, schema::ShaderTextureSource source)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         auto sampler = std::make_unique<schema::ShaderSamplerT>();
         sampler->name = name;
         sampler->uniform_name = uniform;
@@ -377,8 +390,10 @@ struct BuiltinDefinitions
 
 const BuiltinDefinitions& builtin_definitions()
 {
+    ENGINE_PROFILE_FUNCTION();
     static const BuiltinDefinitions definitions = []
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         BuiltinDefinitions result;
 
         schema::ShaderDataT font;
@@ -389,6 +404,7 @@ const BuiltinDefinitions& builtin_definitions()
         const auto add_texture =
             [&result](const char* path, bool srgb, std::vector<std::uint8_t> pixels)
         {
+                ENGINE_PROFILE_FUNCTION_PROBE();
             schema::TextureDataT texture;
             texture.schema_version = 3;
             texture.path = path;
@@ -464,6 +480,7 @@ const BuiltinDefinitions& builtin_definitions()
 
 bool resource_detail::builtin_candidate(std::string_view guid, std::unique_ptr<Resource>& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* entry = builtin_resource_info(guid);
     if (!entry || output)
     {
@@ -476,10 +493,12 @@ bool resource_detail::builtin_candidate(std::string_view guid, std::unique_ptr<R
     }
     const auto create = [&]<typename T>(const auto& definitions)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         for (const auto& data : definitions)
         {
             const auto& path = [&]() -> const std::string&
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 if constexpr (std::is_same_v<T, MaterialResource>)
                 {
                     return data.type_path;
@@ -506,6 +525,7 @@ bool resource_detail::builtin_candidate(std::string_view guid, std::unique_ptr<R
 
 bool builtin_resource_payload(std::string_view guid, ByteBuffer& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     const auto* entry = builtin_resource_info(guid);
     if (entry == nullptr)
@@ -516,6 +536,7 @@ bool builtin_resource_payload(std::string_view guid, ByteBuffer& output)
     const auto serialize =
         [&]<typename Data>(const std::vector<Data>& definitions, const char* identifier)
     {
+            ENGINE_PROFILE_FUNCTION_PROBE();
         for (const auto& data : definitions)
         {
             const std::string* path = nullptr;

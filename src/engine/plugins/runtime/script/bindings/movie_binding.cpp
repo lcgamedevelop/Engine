@@ -1,4 +1,5 @@
 #include "plugins/runtime/script/bindings/movie_binding.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "plugins/runtime/script/bindings/binding_context.hpp"
 
@@ -25,6 +26,7 @@ Object.freeze(Movie);
 
 bool get_handle(const Arguments& arguments, BindingContext*& context, MoviePlaybackHandle& handle)
 {
+    ENGINE_PROFILE_FUNCTION();
     context = BindingContext::current(arguments);
     return context && context->movies() && arguments.count() >= 2 &&
            BindingContext::identifier(arguments, 0, handle.id) &&
@@ -33,6 +35,7 @@ bool get_handle(const Arguments& arguments, BindingContext*& context, MoviePlayb
 }
 void play(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* context = BindingContext::current(arguments);
     std::uint64_t token = 0;
     MoviePlaybackHandle handle;
@@ -54,6 +57,7 @@ void play(const Arguments& arguments)
 }
 void set_paused(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     BindingContext* context = nullptr;
     MoviePlaybackHandle handle;
     arguments.set_return(get_handle(arguments, context, handle) && arguments.count() == 3 &&
@@ -62,6 +66,7 @@ void set_paused(const Arguments& arguments)
 }
 void stop(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     BindingContext* context = nullptr;
     MoviePlaybackHandle handle;
     arguments.set_return(
@@ -71,6 +76,7 @@ void stop(const Arguments& arguments)
 }
 void status(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     BindingContext* context = nullptr;
     MoviePlaybackHandle handle;
     MoviePlaybackStatus state;
@@ -88,6 +94,7 @@ void status(const Arguments& arguments)
 }
 void release(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     BindingContext* context = nullptr;
     MoviePlaybackHandle handle;
     const bool success = get_handle(arguments, context, handle) && arguments.count() == 2 &&
@@ -100,6 +107,7 @@ void release(const Arguments& arguments)
 }
 void last_error(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* context = BindingContext::current(arguments);
     if (!context || !context->movies() || arguments.count() != 0)
     {
@@ -111,14 +119,17 @@ void last_error(const Arguments& arguments)
 } // namespace
 std::string_view MovieBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "Movie";
 }
 std::string_view MovieBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 bool MovieBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.function("MoviePlay", play) && vm.function("MovieSetPaused", set_paused) &&
            vm.function("MovieStop", stop) && vm.function("MovieStatus", status) &&
            vm.function("MovieRelease", release) && vm.function("MovieLastError", last_error);

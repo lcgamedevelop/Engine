@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/schema/animation_generated.h"
 #include "runtime/schema/mesh_generated.h"
 #include "runtime/schema/skeleton_generated.h"
@@ -17,6 +19,7 @@ namespace engine::animation_detail
 
 inline bool joint_paths(const schema::SkeletonDataT& skeleton, std::vector<std::string>& output)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     output.clear();
     if (skeleton.joints.empty() || skeleton.joints.size() > 1024)
     {
@@ -43,8 +46,10 @@ inline bool joint_paths(const schema::SkeletonDataT& skeleton, std::vector<std::
 
 inline bool compressible(const schema::Vec3& value, bool scale)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     const auto valid = [scale](double scalar)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return std::isfinite(scalar) && std::abs(scalar) <= 65504.0 &&
                (!scale || std::abs(scalar) >= 0x1p-24);
     };
@@ -56,6 +61,7 @@ inline bool valid_binding(const schema::MeshDataT& mesh, const schema::SkeletonD
                           const schema::SkeletonDataT& source,
                           const schema::AnimationDataT& animation)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     if (mesh.skin.empty() || mesh.skin.size() != mesh.vertices.size() ||
         !model_value_utils::affine(mesh.mesh_to_skeleton))
     {

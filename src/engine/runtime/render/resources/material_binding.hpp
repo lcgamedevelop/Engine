@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/resource/resource_handle.hpp"
 #include "runtime/schema/material_generated.h"
 #include "runtime/schema/shader_generated.h"
@@ -45,6 +47,7 @@ struct MaterialBinding
 
     bool operator==(const MaterialBinding& other) const
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return program == other.program && cull == other.cull && blend == other.blend &&
                values == other.values && samplers == other.samplers;
     }

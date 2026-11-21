@@ -1,4 +1,6 @@
 #include "plugins/editor/terrain/terrain_files.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "editor/asset_pipeline/asset_io.hpp"
 #include "editor/asset_pipeline/project_lock.hpp"
@@ -19,6 +21,7 @@ using Json = nlohmann::json;
 
 bool create_asset(const fs::path& project, const Json& arguments, Json& result, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!arguments.is_object() || arguments.size() != 2 || !arguments.contains("path") ||
         !arguments["path"].is_string() || !arguments.contains("source") ||
         !arguments["source"].is_string())
@@ -59,6 +62,7 @@ bool terrain_file_path(const std::filesystem::path& project, std::string_view di
                        std::string_view relative, std::string_view extension,
                        std::filesystem::path& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     return editor::asset_pipeline::project_file_path(project, directory, relative, extension,
                                                      output, error);
 }
@@ -66,10 +70,15 @@ bool terrain_file_path(const std::filesystem::path& project, std::string_view di
 bool register_terrain_asset_commands(editor::EditorCommands& commands,
                                      const std::filesystem::path& project)
 {
+    ENGINE_PROFILE_FUNCTION();
     return commands.register_command(
         "create_terrain_asset", false,
         [project](const Json& arguments, Json& result, std::unique_ptr<editor::EditorEdit>&,
-                  std::string& error) { return create_asset(project, arguments, result, error); });
+                  std::string& error)
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return create_asset(project, arguments, result, error);
+        });
 }
 
 } // namespace engine::plugins::terrain

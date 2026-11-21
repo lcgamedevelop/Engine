@@ -1,10 +1,13 @@
 #include "plugins/runtime/camera/modules/noise_camera_module.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/camera/camera_math.hpp"
 namespace engine::plugins::camera
 {
 bool NoiseCameraModule::validate(const Data& d, const schema::CameraControllerDataT& def,
                                  std::string& e)
 {
+    ENGINE_PROFILE_FUNCTION();
     return (detail::nonnegative(d.position_amplitude) &&
             detail::nonnegative(d.rotation_amplitude) && detail::bounded(d.frequency, 0, 1000) &&
             detail::bounded(d.decay, 0, 1000) && detail::valid_input(d.strength.get(), def) &&
@@ -14,6 +17,7 @@ bool NoiseCameraModule::validate(const Data& d, const schema::CameraControllerDa
 bool NoiseCameraModule::evaluate(const Data& d, const Runtime& current, Runtime& next,
                                  const CameraEvaluationContext& c, CameraPose& p)
 {
+    ENGINE_PROFILE_FUNCTION();
     float strength, impulse;
     if (!detail::input(d.strength.get(), c, strength) ||
         !detail::input(d.impulse.get(), c, impulse) || strength < 0 || impulse < 0)
@@ -25,6 +29,7 @@ bool NoiseCameraModule::evaluate(const Data& d, const Runtime& current, Runtime&
     const double amplitude = strength + next.impulse;
     const auto wave = [&](int axis)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return std::sin(next.time * d.frequency * 2 * std::numbers::pi * (1 + axis * 0.173) +
                         double(d.seed % 65521) * 0.071 + axis * 2.17) *
                amplitude;

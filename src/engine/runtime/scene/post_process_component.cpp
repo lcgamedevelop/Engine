@@ -1,4 +1,5 @@
 #include "runtime/scene/post_process_component.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/scene/ecs_storage.hpp"
 
@@ -9,11 +10,13 @@ namespace engine
 
 bool PostProcessComponent::register_type(ComponentRegistry& registry)
 {
+    ENGINE_PROFILE_FUNCTION();
     return register_component_storage<PostProcessComponent, Data>(registry);
 }
 
 bool PostProcessComponent::get_settings(Data& output) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* value = read_data<Data>();
     output = value ? *value : Data{};
     return value != nullptr;
@@ -21,6 +24,7 @@ bool PostProcessComponent::get_settings(Data& output) const noexcept
 
 bool PostProcessComponent::set_settings(const PostProcessSettings& settings) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -36,6 +40,7 @@ bool PostProcessComponent::set_settings(const PostProcessSettings& settings) noe
 
 bool PostProcessComponent::restore_data(const schema::ComponentDataT& data)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!data.flags)
     {
         return false;

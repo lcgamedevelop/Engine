@@ -1,10 +1,12 @@
 #include "plugins/runtime/camera/modules/fixed_camera_module.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/camera/camera_math.hpp"
 namespace engine::plugins::camera
 {
 bool FixedCameraModule::validate(const Data& d, const schema::CameraControllerDataT& def,
                                  std::string& e)
 {
+    ENGINE_PROFILE_FUNCTION();
     return (detail::finite(d.position) && detail::finite(d.rotation_degrees) &&
             detail::slot(def, d.anchor_slot, true)) ||
            detail::fail(e, "fixed: position, rotation or anchor_slot");
@@ -12,6 +14,7 @@ bool FixedCameraModule::validate(const Data& d, const schema::CameraControllerDa
 bool FixedCameraModule::evaluate(const Data& d, const Runtime&, Runtime& next,
                                  const CameraEvaluationContext& c, CameraPose& p)
 {
+    ENGINE_PROFILE_FUNCTION();
     p.position = d.position;
     p.rotation_xyzw = detail::rotation(d.rotation_degrees);
     if (!d.anchor_slot.empty())

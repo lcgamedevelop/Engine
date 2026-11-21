@@ -1,4 +1,5 @@
 #include "editor/asset_pipeline/editor_tools.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/asset_pipeline/editor_tool_directories.hpp"
 
 #include "runtime/utils/path_utils.hpp"
@@ -14,6 +15,7 @@ bool resolve_path(const std::filesystem::path& root, std::string_view relative,
                   const std::filesystem::path& fallback, std::filesystem::path& path,
                   std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     path.clear();
     auto candidate = root.empty() ? fallback : root / PathUtils::from_utf8(relative);
     std::error_code code;
@@ -29,6 +31,7 @@ bool resolve_path(const std::filesystem::path& root, std::string_view relative,
 
 bool shader_target(std::string_view target, std::string& platform, std::string& profile)
 {
+    ENGINE_PROFILE_FUNCTION();
     platform.clear();
     profile.clear();
     if (target == "web")
@@ -61,6 +64,7 @@ bool shader_target(std::string_view target, std::string& platform, std::string& 
 bool editor_tool_path(std::string_view name, const std::filesystem::path& fallback,
                       std::filesystem::path& path, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::filesystem::path executables;
     std::filesystem::path data;
     path.clear();
@@ -73,6 +77,7 @@ bool editor_tool_path(std::string_view name, const std::filesystem::path& fallba
 bool editor_tool_data_path(std::string_view relative, const std::filesystem::path& fallback,
                            std::filesystem::path& path, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::filesystem::path executables;
     std::filesystem::path data;
     path.clear();

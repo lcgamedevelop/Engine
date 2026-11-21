@@ -1,4 +1,5 @@
 #include "plugins/editor/destruction/destruction_importer.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/file_text.hpp"
 
 #include "editor/asset_pipeline/asset_io.hpp"
@@ -20,6 +21,7 @@ namespace
 bool source(const std::filesystem::path& path, schema::DestructionGeneratorDataT& settings,
             std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::error_code filesystem_error;
     const auto size = std::filesystem::file_size(path, filesystem_error);
     std::string text;
@@ -36,22 +38,26 @@ bool source(const std::filesystem::path& path, schema::DestructionGeneratorDataT
 
 std::string_view DestructionImporter::id() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "destruction";
 }
 
 schema::AssetKind DestructionImporter::kind() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::destruction;
 }
 
 bool DestructionImporter::matches(const std::filesystem::path& path) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return editor::asset_pipeline::source_extension(path) == ".destruction";
 }
 
 bool DestructionImporter::inspect_batch(const editor::asset_pipeline::ImportContext&,
                                         std::string& fingerprint, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!editor::asset_pipeline::schema_fingerprint(
             {"editor/destruction_authoring.fbs", "runtime/destruction.fbs", "runtime/mesh.fbs"},
             fingerprint, error))
@@ -66,6 +72,7 @@ bool DestructionImporter::scan_dependencies(editor::asset_pipeline::ImportAsset&
                                             const editor::asset_pipeline::ImportContext&,
                                             std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     asset.build_dependencies.clear();
     asset.runtime_dependencies.clear();
     schema::DestructionGeneratorDataT settings;
@@ -76,6 +83,7 @@ bool DestructionImporter::convert(const editor::asset_pipeline::ImportAsset& ass
                                   const editor::asset_pipeline::ImportContext& context,
                                   std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     schema::DestructionGeneratorDataT settings;
     schema::DestructionAssetDataT data;
     if (!source(asset.source, settings, error) ||

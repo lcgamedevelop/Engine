@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include <bgfx/bgfx.h>
 
 #include <array>
@@ -32,14 +34,17 @@ public:
     [[nodiscard]] bgfx::FrameBufferHandle scene_framebuffer() const noexcept;
     [[nodiscard]] bgfx::TextureHandle opaque_color() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return color_;
     }
     [[nodiscard]] bgfx::TextureHandle opaque_specular() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return specular_;
     }
     [[nodiscard]] bgfx::TextureHandle scene_color() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return reuse_opaque_color_ ? color_ : final_color_;
     }
     void begin_transparency(bgfx::TextureHandle frozen_scene, const float* view,

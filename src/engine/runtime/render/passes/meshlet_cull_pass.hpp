@@ -1,5 +1,6 @@
 #pragma once
 
+#include "runtime/render/gpu_readback.hpp"
 #include "runtime/render/render_features.hpp"
 
 #include <bgfx/bgfx.h>
@@ -50,8 +51,8 @@ private:
     struct Readback
     {
         std::array<std::uint32_t, 4> counters{};
+        GpuReadback completion;
         MeshletGpuStats stats;
-        std::uint32_t ready_frame = 0;
         std::uint64_t generation = 0;
         bool pending = false;
     };

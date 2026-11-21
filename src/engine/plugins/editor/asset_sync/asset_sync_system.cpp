@@ -1,4 +1,6 @@
 #include "plugins/editor/asset_sync/asset_sync_system.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/file_text.hpp"
 #include "runtime/utils/hash_utils.hpp"
 
@@ -31,6 +33,7 @@ namespace fs = std::filesystem;
 using Json = nlohmann::json;
 bool file_hash(const fs::path& path, std::string& hash, std::uint64_t& size)
 {
+    ENGINE_PROFILE_FUNCTION();
     hash.clear();
     std::uint64_t value = 0;
     if (!VirtualFileSystem::hash_file(path, value, size))
@@ -43,6 +46,7 @@ bool file_hash(const fs::path& path, std::string& hash, std::uint64_t& size)
 
 bool relative_asset_path(std::string_view path)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (path.empty() || path.front() == '/' || path.find('\\') != path.npos ||
         path.find(':') != path.npos || path.find('\0') != path.npos)
     {
@@ -68,6 +72,7 @@ bool relative_asset_path(std::string_view path)
 // 不跟随已有路径中的符号链接，避免写入项目或运行目录以外的位置。
 bool no_symlinks(const fs::path& path)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::error_code error;
     fs::path current;
     for (const auto& component : path)
@@ -89,12 +94,14 @@ bool no_symlinks(const fs::path& path)
 
 bool contains_path(const fs::path& parent, const fs::path& child)
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::mismatch(parent.begin(), parent.end(), child.begin(), child.end()).first ==
            parent.end();
 }
 
 bool read_json(const fs::path& path, Json& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string text;
     if (!engine::editor::file_detail::read_text(path, text))
     {
@@ -106,6 +113,7 @@ bool read_json(const fs::path& path, Json& output)
 
 bool write_json(const fs::path& path, const Json& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::ofstream stream(path, std::ios::binary | std::ios::trunc);
     if (!stream)
     {
@@ -122,33 +130,39 @@ AssetSyncSystem::AssetSyncSystem() noexcept = default;
 
 AssetSyncSystem::~AssetSyncSystem() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
 }
 
 bool AssetSyncSystem::on_initialize(const EngineConfig&)
 {
+    ENGINE_PROFILE_FUNCTION();
     return true;
 }
 
 void AssetSyncSystem::on_shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     revision_.clear();
     last_error_.clear();
 }
 
 const std::string& AssetSyncSystem::revision() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return revision_;
 }
 
 const std::string& AssetSyncSystem::last_error() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return last_error_;
 }
 
 bool AssetSyncSystem::sync(const fs::path& source_cache, const fs::path& runtime_dir,
                            std::string_view entry)
 {
+    ENGINE_PROFILE_FUNCTION();
     revision_.clear();
     last_error_.clear();
     std::error_code error;
@@ -157,6 +171,7 @@ bool AssetSyncSystem::sync(const fs::path& source_cache, const fs::path& runtime
     fs::path temporary_manifest;
     const auto cleanup = [&]()
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         std::error_code ignored;
         if (!temporary_manifest.empty())
         {
@@ -169,6 +184,7 @@ bool AssetSyncSystem::sync(const fs::path& source_cache, const fs::path& runtime
     };
     const auto fail = [&](std::string message)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         last_error_ = std::move(message);
         cleanup();
         return false;

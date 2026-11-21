@@ -1,9 +1,12 @@
 #pragma once
+
+#include "runtime/performance/function_profile.hpp"
 #include "plugins/runtime/camera/camera_math.hpp"
 namespace engine::plugins::camera::detail
 {
 inline bool comparison(schema::CameraComparison kind, double a, double b, double tolerance = 0)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     switch (kind)
     {
     case schema::CameraComparison::equal:
@@ -23,6 +26,7 @@ inline bool comparison(schema::CameraComparison kind, double a, double b, double
 }
 inline bool valid_comparison(schema::CameraComparison c)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return c >= schema::CameraComparison::MIN && c <= schema::CameraComparison::MAX;
 }
 } // namespace engine::plugins::camera::detail

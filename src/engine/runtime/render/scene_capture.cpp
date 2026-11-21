@@ -1,4 +1,6 @@
 #include "runtime/render/render_constants.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/render/render_math.hpp"
 #include "runtime/render/scene_gpu_resources.hpp"
 #include "runtime/resource/codecs/texture_resource_codec.hpp"
@@ -26,6 +28,7 @@ namespace engine
 {
 bool RenderSystem::request_hdr_capture()
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* scene = world_ ? world_->scene() : nullptr;
     if (!is_initialized() || !renderer_initialized_ || !scene ||
         hdr_capture_status_ == SceneCaptureStatus::pending ||
@@ -53,11 +56,13 @@ bool RenderSystem::request_hdr_capture()
 
 SceneCaptureStatus RenderSystem::hdr_capture_status() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return hdr_capture_status_;
 }
 
 void RenderSystem::cancel_hdr_capture() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (hdr_capture_status_ != SceneCaptureStatus::pending &&
         hdr_capture_status_ != SceneCaptureStatus::complete)
     {
@@ -80,6 +85,7 @@ void RenderSystem::cancel_hdr_capture() noexcept
 
 void RenderSystem::submit_hdr_capture()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (hdr_capture_status_ != SceneCaptureStatus::pending || !scene_resources_ ||
         scene_resources_->hdr_capture_pending)
     {
@@ -104,12 +110,20 @@ void RenderSystem::submit_hdr_capture()
     // display resolve samples but does not modify this linear scene texture.
     const bgfx::TextureRegion readback{.handle = resources.hdr_capture_readback};
     bgfx::blit(render_detail::hdr_capture_view, readback, bgfx::TextureRegion{.handle = source});
-    resources.hdr_capture_ready_frame = bgfx::read(readback, resources.hdr_capture_pixels.data());
-    resources.hdr_capture_pending = true;
+    resources.hdr_capture_pending =
+        resources.hdr_capture_completion.submit(readback, resources.hdr_capture_pixels.data());
+    if (!resources.hdr_capture_pending)
+    {
+        bgfx::destroy(resources.hdr_capture_readback);
+        resources.hdr_capture_readback = BGFX_INVALID_HANDLE;
+        resources.hdr_capture_pixels.clear();
+        hdr_capture_status_ = SceneCaptureStatus::failed;
+    }
 }
 
 void RenderSystem::poll_hdr_capture()
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* scene = world_ ? world_->scene() : nullptr;
     if ((hdr_capture_status_ == SceneCaptureStatus::pending ||
          hdr_capture_status_ == SceneCaptureStatus::complete) &&
@@ -117,27 +131,38 @@ void RenderSystem::poll_hdr_capture()
     {
         cancel_hdr_capture();
     }
-    if (!scene_resources_ || !scene_resources_->hdr_capture_pending ||
-        static_cast<std::int32_t>(frame_number_ - scene_resources_->hdr_capture_ready_frame) < 0)
+    if (!scene_resources_ || !scene_resources_->hdr_capture_pending)
     {
         return;
     }
     auto& resources = *scene_resources_;
+    const auto result = resources.hdr_capture_completion.status(frame_number_);
+    if (result == render_detail::GpuReadbackStatus::pending)
+    {
+        return;
+    }
     resources.hdr_capture_pending = false;
+    resources.hdr_capture_completion.reset();
     bgfx::destroy(resources.hdr_capture_readback);
     resources.hdr_capture_readback = BGFX_INVALID_HANDLE;
-    if (hdr_capture_status_ == SceneCaptureStatus::pending)
+    if (hdr_capture_status_ == SceneCaptureStatus::pending &&
+        result == render_detail::GpuReadbackStatus::complete)
     {
         hdr_capture_status_ = SceneCaptureStatus::complete;
     }
     else
     {
         resources.hdr_capture_pixels.clear();
+        if (hdr_capture_status_ == SceneCaptureStatus::pending)
+        {
+            hdr_capture_status_ = SceneCaptureStatus::failed;
+        }
     }
 }
 
 bool RenderSystem::take_hdr_capture(SceneCaptureImage& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     const auto* scene = world_ ? world_->scene() : nullptr;
     if (hdr_capture_status_ == SceneCaptureStatus::complete &&
@@ -174,12 +199,14 @@ namespace
 {
 void append_value(std::vector<std::uint8_t>& bytes, const auto& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* begin = reinterpret_cast<const std::uint8_t*>(&value);
     bytes.insert(bytes.end(), begin, begin + sizeof(value));
 }
 
 bool append_component(std::vector<std::uint8_t>& bytes, const Component& component)
 {
+    ENGINE_PROFILE_FUNCTION();
     flatbuffers::FlatBufferBuilder builder;
     schema::ComponentDataT data;
     if (!component.get_data(data))
@@ -196,6 +223,7 @@ bool append_component(std::vector<std::uint8_t>& bytes, const Component& compone
 bool capture_snapshot(const WorldSystem& world, const SceneCaptureRequest& request,
                       std::vector<std::uint8_t>& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     if (!world.scene())
     {
@@ -204,6 +232,7 @@ bool capture_snapshot(const WorldSystem& world, const SceneCaptureRequest& reque
     append_value(output, world.scene()->id());
     const auto append_node = [&](std::uint64_t id)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const auto node = world.find_node(id);
         const auto transform = node ? node.get_component<Transform>() : Transform{};
         std::array<double, 16> matrix{};
@@ -322,6 +351,7 @@ bool capture_snapshot(const WorldSystem& world, const SceneCaptureRequest& reque
     environments.each(
         [&](flecs::entity entity, const auto& stored, const ecs_detail::NodeRuntime& state)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             if (state.scene == world.scene() && state.active && state.visible_in_hierarchy &&
                 stored.state.flags.enabled && stored.state.flags.visible)
             {
@@ -354,6 +384,7 @@ bool capture_snapshot(const WorldSystem& world, const SceneCaptureRequest& reque
             [&](flecs::entity entity, const auto& stored, const auto& properties,
                 const ecs_detail::NodeRuntime& state)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 if (state.scene != world.scene() || properties.id != atmosphere_sun_id)
                 {
                     return;
@@ -379,12 +410,14 @@ bool capture_snapshot(const WorldSystem& world, const SceneCaptureRequest& reque
 
 bool RenderSystem::draw_diffuse_capture(const RenderSettings& rendering)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (capture_status_ != SceneCaptureStatus::pending)
     {
         return true;
     }
     const auto fail = [&](const char* message)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         SDL_LogError(SDL_LOG_CATEGORY_RENDER, "Diffuse capture failed: %s", message);
         capture_status_ = SceneCaptureStatus::failed;
         capture_request_ = {};
@@ -465,14 +498,19 @@ bool RenderSystem::draw_diffuse_capture(const RenderSettings& rendering)
         const bgfx::TextureRegion readback{.handle = resources.capture_readback};
         bgfx::blit(render_detail::capture_copy_view, readback,
                    bgfx::TextureRegion{.handle = resources.capture_color});
-        resources.capture_ready_frame = bgfx::read(readback, resources.capture_pixels.data());
-        resources.capture_pending = true;
+        resources.capture_pending =
+            resources.capture_completion.submit(readback, resources.capture_pixels.data());
+        if (!resources.capture_pending)
+        {
+            return fail("Cannot submit diffuse lighting readback");
+        }
     }
     return true;
 }
 
 bool RenderSystem::request_diffuse_capture(const SceneCaptureRequest& request)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!renderer_initialized_ || !world_ || !world_->scene() ||
         capture_status_ == SceneCaptureStatus::pending || request.width == 0 ||
         request.height == 0 || request.width > bgfx::getCaps()->limits.maxTextureSize ||
@@ -541,11 +579,13 @@ bool RenderSystem::request_diffuse_capture(const SceneCaptureRequest& request)
 
 SceneCaptureStatus RenderSystem::diffuse_capture_status() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return capture_status_;
 }
 
 bool RenderSystem::capture_unchanged() const
 {
+    ENGINE_PROFILE_FUNCTION();
     std::vector<std::uint8_t> current;
     return world_ && capture_snapshot(*world_, capture_request_, current) &&
            current == capture_snapshot_;
@@ -553,19 +593,33 @@ bool RenderSystem::capture_unchanged() const
 
 void RenderSystem::poll_diffuse_capture()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (capture_status_ != SceneCaptureStatus::pending || !scene_resources_ ||
-        !scene_resources_->capture_pending ||
-        static_cast<std::int32_t>(frame_number_ - scene_resources_->capture_ready_frame) < 0)
+        !scene_resources_->capture_pending)
     {
         return;
     }
     auto& resources = *scene_resources_;
+    const auto result = resources.capture_completion.status(frame_number_);
+    if (result == render_detail::GpuReadbackStatus::pending)
+    {
+        return;
+    }
     resources.capture_pending = false;
+    resources.capture_completion.reset();
     if (resources.capture_cancelled || !capture_unchanged())
     {
         capture_request_ = {};
         capture_snapshot_.clear();
         capture_status_ = SceneCaptureStatus::cancelled;
+        return;
+    }
+    if (result == render_detail::GpuReadbackStatus::failed)
+    {
+        resources.capture_pixels.clear();
+        capture_request_ = {};
+        capture_snapshot_.clear();
+        capture_status_ = SceneCaptureStatus::failed;
         return;
     }
     if (bgfx::getCaps()->originBottomLeft)
@@ -585,6 +639,7 @@ void RenderSystem::poll_diffuse_capture()
 
 bool RenderSystem::take_diffuse_capture(SceneCaptureImage& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     if (capture_status_ != SceneCaptureStatus::complete || !scene_resources_)
     {
@@ -606,6 +661,7 @@ bool RenderSystem::take_diffuse_capture(SceneCaptureImage& output)
 
 void RenderSystem::cancel_diffuse_capture() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (capture_status_ != SceneCaptureStatus::pending &&
         capture_status_ != SceneCaptureStatus::complete)
     {
@@ -629,6 +685,7 @@ void RenderSystem::cancel_diffuse_capture() noexcept
 
 bool RenderSystem::SceneGpuResources::prepare_capture(const SceneCaptureRequest& request)
 {
+    ENGINE_PROFILE_FUNCTION();
     capture_prepared = false;
     const bool dimensions_changed =
         capture_width != request.width || capture_height != request.height;
@@ -764,6 +821,7 @@ bool RenderSystem::SceneGpuResources::prepare_capture(const SceneCaptureRequest&
 bool RenderSystem::SceneGpuResources::draw_capture_sky(const SceneCaptureRequest& request,
                                                        const RenderSettings& settings)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (settings.atmosphere.atmosphere_enabled)
     {
         // An explicit capture must not publish a bake with silently missing sky.
@@ -866,15 +924,19 @@ bool RenderSystem::SceneGpuResources::draw_capture_sky(const SceneCaptureRequest
 
 void RenderSystem::SceneGpuResources::release_capture() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     capture_prepared = false;
-    // bgfx owns the readback pointer until its returned frame is reached.
-    while (capture_pending)
+    if constexpr (!render_detail::web_readbacks)
     {
-        if (static_cast<std::int32_t>(bgfx::frame() - capture_ready_frame) >= 0)
+        // The native backend keeps the destination until the submitted frame returns.
+        while (capture_pending)
         {
-            capture_pending = false;
+            capture_pending =
+                capture_completion.status(bgfx::frame()) == render_detail::GpuReadbackStatus::pending;
         }
     }
+    capture_completion.reset();
+    capture_pending = false;
     if (bgfx::isValid(capture_framebuffer))
     {
         bgfx::setViewFrameBuffer(render_detail::capture_view, BGFX_INVALID_HANDLE);

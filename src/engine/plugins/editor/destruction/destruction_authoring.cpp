@@ -1,4 +1,5 @@
 #include "plugins/editor/destruction/destruction_authoring.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "plugins/runtime/destruction/destruction_graph.hpp"
 
@@ -25,6 +26,7 @@ struct Release
 {
     template <typename T> void operator()(T* object) const noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         if (object)
         {
             object->release();
@@ -36,6 +38,7 @@ struct BlastFree
 {
     template <typename T> void operator()(T* object) const noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         NVBLAST_FREE(object);
     }
 };
@@ -45,14 +48,17 @@ class Random final : public Nv::Blast::RandomGeneratorBase
 public:
     explicit Random(std::uint32_t value) : generator_(value)
     {
+        ENGINE_PROFILE_FUNCTION();
     }
     float getRandomValue() override
     {
+        ENGINE_PROFILE_FUNCTION();
         // Explicit conversion gives the same sequence with libc++ and MSVC standard libraries.
         return static_cast<float>(generator_() >> 8) / 16777216.0F;
     }
     void seed(std::int32_t value) override
     {
+        ENGINE_PROFILE_FUNCTION();
         generator_.seed(static_cast<std::uint32_t>(value));
     }
 
@@ -62,6 +68,7 @@ private:
 
 bool validate_settings(const schema::DestructionGeneratorDataT& settings, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto& size = settings.size;
     if (!std::isfinite(size.x()) || !std::isfinite(size.y()) || !std::isfinite(size.z()) ||
         size.x() <= 0 || size.y() <= 0 || size.z() <= 0 || size.x() > 1000 || size.y() > 1000 ||
@@ -100,6 +107,7 @@ bool validate_settings(const schema::DestructionGeneratorDataT& settings, std::s
 
 std::unique_ptr<Nv::Blast::Mesh, Release> create_box(const schema::Vec3& size)
 {
+    ENGINE_PROFILE_FUNCTION();
     const float x = static_cast<float>(size.x() * 0.5);
     const float z = static_cast<float>(size.z() * 0.5);
     const float y = static_cast<float>(size.y());
@@ -137,6 +145,7 @@ std::unique_ptr<Nv::Blast::Mesh, Release> create_box(const schema::Vec3& size)
 bool DestructionAuthoring::generate(const schema::DestructionGeneratorDataT& settings,
                                     schema::DestructionAssetDataT& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     output = {};
     if (!validate_settings(settings, error))

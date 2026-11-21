@@ -1,4 +1,5 @@
 #include "runtime/storage/storage_file.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/utils/path_utils.hpp"
 
@@ -11,6 +12,7 @@ namespace engine::storage_detail
 
 std::FILE* open_exclusive_file(const std::filesystem::path& path, std::error_code& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     const auto encoded = PathUtils::to_utf8(path);
     auto* file = std::fopen(encoded.c_str(), "wbx");
@@ -24,6 +26,7 @@ std::FILE* open_exclusive_file(const std::filesystem::path& path, std::error_cod
 bool publish_storage_file(const std::filesystem::path& temporary,
                           const std::filesystem::path& target, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     if (!SDL_RenamePath(PathUtils::to_utf8(temporary).c_str(), PathUtils::to_utf8(target).c_str()))
     {

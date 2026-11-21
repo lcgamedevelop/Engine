@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <string_view>
@@ -29,6 +30,8 @@ public:
     [[nodiscard]] static const std::filesystem::path& cache_path() noexcept;
     static void set_game_language(std::string_view language);
     [[nodiscard]] static const std::string& game_language() noexcept;
+    [[nodiscard]] static bool supports_vibration() noexcept;
+    [[nodiscard]] static bool vibrate(std::uint32_t duration_ms) noexcept;
 
 private:
     App() = delete;

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/input/input_system.hpp"
 
 #include <SDL3/SDL.h>
@@ -17,11 +19,13 @@ using ContactKey = std::pair<std::uint64_t, std::uint64_t>;
 
 inline Key key(const schema::InputControlRef& source)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return {source.connection_id(), source.kind(), source.code()};
 }
 
 inline schema::InputControlRef source(const Key& value)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return {std::get<0>(value), std::get<1>(value), std::get<2>(value)};
 }
 

@@ -1,4 +1,6 @@
 #include "runtime/animation/animation_event_interval.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -9,6 +11,7 @@ bool collect_event_crossings(std::span<const double> marker_times, double durati
                              double current, bool loop, bool starting, std::size_t limit,
                              std::vector<EventCrossing>& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     if (!std::isfinite(duration) || duration <= 0.0 || !std::isfinite(previous) ||
         !std::isfinite(current) || previous < 0.0 || current < previous ||
@@ -32,6 +35,7 @@ bool collect_event_crossings(std::span<const double> marker_times, double durati
     // long double 与 double 精度相同。超过可精确表示的周期范围明确失败。
     const auto phase = [duration](double value, std::uint64_t& cycle, double& local)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         double whole = std::floor(value / duration);
         if (!std::isfinite(whole) || whole >= 0x1p53)
         {
@@ -66,6 +70,7 @@ bool collect_event_crossings(std::span<const double> marker_times, double durati
     }
     const auto range = [&](double time, std::uint64_t& first, std::uint64_t& last)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const bool end_marker = time == duration;
         const double marker_phase = end_marker ? 0.0 : time;
         first = previous_cycle + (marker_phase <= previous_phase ? 1U : 0U);
@@ -154,6 +159,7 @@ bool collect_event_crossings(std::span<const double> marker_times, double durati
     std::sort(output.begin(), output.end(),
               [&](const auto& first, const auto& second)
               {
+                  ENGINE_PROFILE_FUNCTION_PROBE();
                   const bool first_end = marker_times[first.second] == duration;
                   const bool second_end = marker_times[second.second] == duration;
                   const auto first_cycle = first.first + (first_end ? 1U : 0U);

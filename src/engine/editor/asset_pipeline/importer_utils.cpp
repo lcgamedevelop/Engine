@@ -1,4 +1,6 @@
 #include "editor/asset_pipeline/importer_utils.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/asset_pipeline/material_parameters.hpp"
 #include "editor/file_text.hpp"
 
@@ -21,6 +23,7 @@ namespace engine::editor::asset_pipeline
 bool read_generated_payload(const Guid& guid, const ImportContext& context,
                             std::vector<std::byte>& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     std::vector<std::byte> bytes;
     if (!read_bytes(context.output / guid, bytes, error))
@@ -55,6 +58,7 @@ bool read_generated_payload(const Guid& guid, const ImportContext& context,
 
 bool read_table(const std::filesystem::path& path, toml::table& table, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string text;
     if (!engine::editor::file_detail::read_text(path, text))
     {
@@ -75,6 +79,7 @@ bool read_table(const std::filesystem::path& path, toml::table& table, std::stri
 bool reference(const Guid& guid, schema::AssetKind kind, const ImportContext& context,
                std::vector<Guid>& dependencies, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string path;
     const auto entry = context.kinds.find(guid);
     if (!GuidMap::valid_guid(guid) || !context.identities.guid_to_path(guid, path) ||
@@ -93,6 +98,7 @@ bool reference(const Guid& guid, schema::AssetKind kind, const ImportContext& co
 bool parameter_values(const schema::MaterialValueUnion& value, std::array<double, 4>& values,
                       std::size_t& size)
 {
+    ENGINE_PROFILE_FUNCTION();
     values = {};
     size = 0;
     if (value.value == nullptr)
@@ -131,23 +137,31 @@ bool parameter_values(const schema::MaterialValueUnion& value, std::array<double
     }
     return std::all_of(
         values.begin(), values.begin() + static_cast<std::ptrdiff_t>(size), [](double number)
-        { return std::isfinite(number) && std::abs(number) <= std::numeric_limits<float>::max(); });
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return std::isfinite(number) && std::abs(number) <= std::numeric_limits<float>::max();
+        });
 }
 
 bool valid_parameter(const schema::ShaderParameterT& definition,
                      const schema::MaterialValueUnion& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::array<double, 4> values{};
     std::size_t size = 0;
     return value.type == definition.default_value.type && parameter_values(value, values, size) &&
            (!definition.bounded ||
             std::all_of(values.begin(), values.begin() + static_cast<std::ptrdiff_t>(size),
                         [&](double number)
-                        { return number >= definition.minimum && number <= definition.maximum; }));
+                        {
+                            ENGINE_PROFILE_FUNCTION_PROBE();
+                            return number >= definition.minimum && number <= definition.maximum;
+                        }));
 }
 
 bool file_hash(const std::filesystem::path& path, std::string& hash, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     hash.clear();
     std::uint64_t value = 0, size = 0;
     if (!VirtualFileSystem::hash_file(path, value, size))
@@ -163,6 +177,7 @@ bool file_hash(const std::filesystem::path& path, std::string& hash, std::string
 bool schema_fingerprint(std::initializer_list<std::string_view> names, std::string& fingerprint,
                         std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     fingerprint.clear();
     std::filesystem::path schemas;
     if (!editor_tool_data_path("include/schemas", ENGINE_SCHEMA_SOURCE_DIR, schemas, error))
@@ -183,14 +198,19 @@ bool schema_fingerprint(std::initializer_list<std::string_view> names, std::stri
 }
 std::string source_extension(const std::filesystem::path& path)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto extension = PathUtils::to_utf8(path.extension());
     std::transform(
         extension.begin(), extension.end(), extension.begin(), [](unsigned char value)
-        { return static_cast<char>(value >= 'A' && value <= 'Z' ? value + 32 : value); });
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return static_cast<char>(value >= 'A' && value <= 'Z' ? value + 32 : value);
+        });
     return extension;
 }
 std::string generic_path(const std::filesystem::path& path)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto value = path.generic_u8string();
     return {value.begin(), value.end()};
 }

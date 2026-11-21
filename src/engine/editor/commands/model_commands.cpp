@@ -1,4 +1,6 @@
 #include "editor/commands/components/component_edit.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/resource_access.hpp"
 #include "runtime/resource/types/model_resource.hpp"
 #include "runtime/resource/types/prefab_resource.hpp"
@@ -16,6 +18,7 @@ namespace
 {
 bool snapshot(const Node& node, schema::NodeDataT& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     if (node.transient())
     {
@@ -59,10 +62,12 @@ public:
         : world_(world), aliases_(aliases), scene_(scene), path_(std::move(path)),
           name_(std::move(name)), versions_(std::move(versions)), prefab_(prefab)
     {
+        ENGINE_PROFILE_FUNCTION();
     }
 
     bool apply(std::string& error) override
     {
+        ENGINE_PROFILE_FUNCTION();
         auto* scene = world_.scene();
         auto* loader = world_.resource_loader();
         if (!scene || scene->id() != scene_ || !loader)
@@ -83,7 +88,11 @@ public:
             return false;
         }
         if (std::any_of(nodes.begin(), nodes.end(),
-                        [this](const auto& node) { return node.name() == name_; }))
+                        [this](const auto& node)
+                        {
+                            ENGINE_PROFILE_FUNCTION_PROBE();
+                            return node.name() == name_;
+                        }))
         {
             error = "A node with this name already exists";
             return false;
@@ -153,6 +162,7 @@ public:
 
     bool revert(std::string& error) override
     {
+        ENGINE_PROFILE_FUNCTION();
         auto* scene = world_.scene();
         if (!scene || scene->id() != scene_ || identities_.empty())
         {
@@ -170,7 +180,10 @@ public:
             }
             const auto found =
                 std::find_if(instances.begin(), instances.end(), [this](const auto& value)
-                             { return prefab_snapshot_ && value == *prefab_snapshot_; });
+                             {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
+                    return prefab_snapshot_ && value == *prefab_snapshot_;
+                });
             if (found == instances.end())
             {
                 error = "Prefab association changed outside this edit";
@@ -240,6 +253,7 @@ bool prepare_hierarchy(WorldSystem& world, NodeAliases& aliases, const Json& arg
                        Json& result, std::unique_ptr<EditorEdit>& edit, std::string& error,
                        bool prefab)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* scene = world.scene();
     if (!scene || !arguments.is_object() || arguments.size() != 3 ||
         !arguments.contains("sceneId") || arguments["sceneId"] != std::to_string(scene->id()) ||
@@ -273,12 +287,14 @@ bool prepare_hierarchy(WorldSystem& world, NodeAliases& aliases, const Json& arg
 bool prepare_model(WorldSystem& world, NodeAliases& aliases, const Json& arguments, Json& result,
                    std::unique_ptr<EditorEdit>& edit, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     return prepare_hierarchy(world, aliases, arguments, result, edit, error, false);
 }
 
 bool prepare_prefab(WorldSystem& world, NodeAliases& aliases, const Json& arguments, Json& result,
                     std::unique_ptr<EditorEdit>& edit, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     return prepare_hierarchy(world, aliases, arguments, result, edit, error, true);
 }
 } // namespace engine::editor::components

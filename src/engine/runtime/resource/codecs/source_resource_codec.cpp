@@ -1,14 +1,17 @@
 #include "runtime/resource/codecs/source_resource_codec.hpp"
+#include "runtime/performance/profiling.hpp"
 
 namespace engine
 {
 schema::AssetKind SourceResourceCodec::kind() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::source;
 }
 bool SourceResourceCodec::decode(const schema::AssetEntryT& entry, ByteView payload,
                                  std::unique_ptr<Resource>& output, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     if (output || entry.kind != kind() || payload.size() > 64U * 1024U * 1024U)
     {
@@ -20,6 +23,7 @@ bool SourceResourceCodec::decode(const schema::AssetEntryT& entry, ByteView payl
 }
 bool SourceResourceCodec::validate_data(const Resource& resource, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     const auto* data = resource_detail::data<ResourceType>(&resource);
     if (!data || data->size() > 64U * 1024U * 1024U || !(resource.info().dependencies.empty()))
@@ -32,6 +36,7 @@ bool SourceResourceCodec::validate_data(const Resource& resource, std::string& e
 bool SourceResourceCodec::validate_dependencies(const Resource& resource, ResourceView dependencies,
                                                 std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     return resource.info().dependencies.empty() && dependencies.empty();
 }

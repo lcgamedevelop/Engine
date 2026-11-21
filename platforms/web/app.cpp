@@ -1,4 +1,7 @@
 #include "runtime/app/app.hpp"
+#include "runtime/performance/profiling.hpp"
+
+#include <emscripten.h>
 
 #include <system_error>
 #include <utility>
@@ -13,6 +16,7 @@ bool initialized = false;
 
 bool directory(const std::filesystem::path& path)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::error_code error;
     std::filesystem::create_directories(path, error);
     return !error && std::filesystem::is_directory(path, error) && !error;
@@ -20,6 +24,7 @@ bool directory(const std::filesystem::path& path)
 
 bool valid_application_name(std::string_view name)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (name.empty() || name == "." || name == "..")
     {
         return false;
@@ -39,6 +44,7 @@ bool valid_application_name(std::string_view name)
 
 bool App::initialize(const AppConfig& config)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (initialized || !valid_application_name(config.application_name))
     {
         return false;
@@ -90,32 +96,55 @@ bool App::initialize(const AppConfig& config)
 
 void App::shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     initialized = false;
     paths = {};
     language.clear();
 }
 bool App::is_initialized() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return initialized;
 }
 const std::filesystem::path& App::assets_path() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return paths.assets_path;
 }
 const std::filesystem::path& App::persistent_data_path() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return paths.persistent_data_path;
 }
 const std::filesystem::path& App::cache_path() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return paths.cache_path;
 }
 void App::set_game_language(std::string_view value)
 {
+    ENGINE_PROFILE_FUNCTION();
     language = value;
 }
 const std::string& App::game_language() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return language;
+}
+
+bool App::supports_vibration() noexcept
+{
+    ENGINE_PROFILE_FUNCTION();
+    return MAIN_THREAD_EM_ASM_INT({
+        return Number(typeof navigator.vibrate === 'function');
+    }) != 0;
+}
+
+bool App::vibrate(std::uint32_t duration_ms) noexcept
+{
+    ENGINE_PROFILE_FUNCTION();
+    return MAIN_THREAD_EM_ASM_INT({
+        return Number(typeof navigator.vibrate === 'function' && navigator.vibrate($0 >>> 0));
+    }, duration_ms) != 0;
 }
 } // namespace engine

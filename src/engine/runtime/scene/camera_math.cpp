@@ -1,4 +1,6 @@
 #include "runtime/scene/camera_math.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include <bx/math.h>
 
@@ -14,13 +16,19 @@ namespace
 
 bool finite_matrix(const float* matrix) noexcept
 {
-    return std::all_of(matrix, matrix + 16, [](float value) { return std::isfinite(value); });
+    ENGINE_PROFILE_FUNCTION();
+    return std::all_of(matrix, matrix + 16, [](float value)
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return std::isfinite(value);
+    });
 }
 
 } // namespace
 
 bool view_matrix(const float* world, float* view) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!finite_matrix(world))
     {
         return false;
@@ -71,6 +79,7 @@ bool view_matrix(const float* world, float* view) noexcept
 bool projection_matrix(const CameraSettings& settings, double aspect, bool homogeneous_depth,
                        float* projection) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!std::isfinite(aspect) || aspect <= 0.0 || aspect > std::numeric_limits<float>::max())
     {
         return false;

@@ -1,4 +1,6 @@
 #include "plugins/runtime/terrain/terrain_regions.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "plugins/runtime/terrain/terrain_samples.hpp"
 
@@ -16,6 +18,7 @@ using Keys = std::set<TerrainRegionKey, TerrainRegionLess>;
 
 double distance_to(Vec3 point, const Bounds3& box)
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::hypot(
         std::max({box.minimum().x() - point.x(), point.x() - box.maximum().x(), 0.0}),
         std::max({box.minimum().y() - point.y(), point.y() - box.maximum().y(), 0.0}),
@@ -24,6 +27,7 @@ double distance_to(Vec3 point, const Bounds3& box)
 
 bool adjacent(const Bounds3& a, const Bounds3& b)
 {
+    ENGINE_PROFILE_FUNCTION();
     const std::array<double, 3> amin{a.minimum().x(), a.minimum().y(), a.minimum().z()};
     const std::array<double, 3> amax{a.maximum().x(), a.maximum().y(), a.maximum().z()};
     const std::array<double, 3> bmin{b.minimum().x(), b.minimum().y(), b.minimum().z()};
@@ -49,6 +53,7 @@ public:
     bool plan(const TerrainPlanInput& input, TerrainRegionPlan& output,
               std::string& error) const override
     {
+        ENGINE_PROFILE_FUNCTION();
         output = {};
         error.clear();
         if (!input.source || input.views.size() > 16 || input.pins.size() > 64 ||
@@ -90,6 +95,7 @@ public:
         Keys desired;
         const auto children = [&](TerrainRegionKey key)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             std::array<TerrainRegionKey, 8> result;
             for (int child = 0; child < 8; ++child)
             {
@@ -101,6 +107,7 @@ public:
         };
         const auto visit = [&](TerrainRegionKey key, auto&& self) -> bool
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             const auto bounds = region_bounds(source, key);
             if (!intersects(source.bounds, bounds))
             {
@@ -108,7 +115,11 @@ public:
             }
             const bool retained =
                 std::any_of(input.resident.begin(), input.resident.end(),
-                            [&](const auto& region) { return region.key == key; });
+                            [&](const auto& region)
+                            {
+                                ENGINE_PROFILE_FUNCTION_PROBE();
+                                return region.key == key;
+                            });
             bool needed = false;
             bool split = entry(source, key) == nullptr;
             for (const auto& view : input.views)
@@ -268,6 +279,7 @@ public:
 } // namespace
 std::unique_ptr<TerrainRegionPlanner> create_terrain_region_planner(std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     return std::make_unique<DistanceRegionPlanner>();
 }

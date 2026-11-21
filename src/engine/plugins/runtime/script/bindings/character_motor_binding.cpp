@@ -1,4 +1,6 @@
 #include "plugins/runtime/script/bindings/character_motor_binding.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/script/bindings/binding_helpers.hpp"
 
 #include "plugins/runtime/script/bindings/binding_context.hpp"
@@ -74,6 +76,7 @@ Object.freeze(CharacterMotor);
 
 void capsule(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<CharacterMotor>(arguments, 4);
     float radius = 0;
     float half_height = 0;
@@ -94,6 +97,7 @@ void capsule(const Arguments& arguments)
 
 void set_number(const Arguments& arguments, float schema::CharacterMotorDataT::* field)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<CharacterMotor>(arguments, 3);
     float number = 0;
     if (value.valid() && BindingContext::scalar(arguments, 2, number))
@@ -111,31 +115,37 @@ void set_number(const Arguments& arguments, float schema::CharacterMotorDataT::*
 
 void slope(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     set_number(arguments, &schema::CharacterMotorDataT::max_slope_degrees);
 }
 
 void step(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     set_number(arguments, &schema::CharacterMotorDataT::step_height);
 }
 
 void snap(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     set_number(arguments, &schema::CharacterMotorDataT::ground_snap_distance);
 }
 
 void gravity(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     set_number(arguments, &schema::CharacterMotorDataT::gravity_factor);
 }
 
 void external_damping(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     set_number(arguments, &schema::CharacterMotorDataT::external_damping);
 }
 
 void velocity(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<CharacterMotor>(arguments, 4);
     double x = 0;
     double z = 0;
@@ -148,6 +158,7 @@ void velocity(const Arguments& arguments)
 
 void get_velocity(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto value = binding_detail::component<CharacterMotor>(arguments, 2);
     arguments.set_return({});
     if (!value)
@@ -161,6 +172,7 @@ void get_velocity(const Arguments& arguments)
 
 void clear_input(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<CharacterMotor>(arguments, 2);
     if (value.valid())
     {
@@ -170,6 +182,7 @@ void clear_input(const Arguments& arguments)
 
 void get_status(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto motor = binding_detail::component<CharacterMotor>(arguments, 2);
     CharacterMotorStatus s;
     arguments.set_return({});
@@ -179,7 +192,10 @@ void get_status(const Arguments& arguments)
     }
     using Object = vm::NativeValue::Object;
     const auto vector = [](const Vec3& v) -> vm::NativeValue
-    { return Object{{"x", v.x()}, {"y", v.y()}, {"z", v.z()}}; };
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return Object{{"x", v.x()}, {"y", v.y()}, {"z", v.z()}};
+    };
     static constexpr const char* ground[] = {"supported", "steep", "unsupported", "airborne"};
     static constexpr const char* shape[] = {"unchanged", "applied", "blocked"};
     arguments.set_return(
@@ -206,6 +222,7 @@ void get_status(const Arguments& arguments)
 
 void add_velocity(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<CharacterMotor>(arguments, 5);
     double x = 0;
     double y = 0;
@@ -219,6 +236,7 @@ void add_velocity(const Arguments& arguments)
 
 void jump(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<CharacterMotor>(arguments, 3);
     float speed = 0;
     if (value.valid() && BindingContext::scalar(arguments, 2, speed))
@@ -229,6 +247,7 @@ void jump(const Arguments& arguments)
 
 void grounded(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto value = binding_detail::component<CharacterMotor>(arguments, 2);
     arguments.set_return(value.valid() && value.grounded());
 }
@@ -237,16 +256,19 @@ void grounded(const Arguments& arguments)
 
 std::string_view CharacterMotorBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "CharacterMotor";
 }
 
 std::string_view CharacterMotorBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 
 bool CharacterMotorBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.integer("CharacterMotorKind", static_cast<int>(CharacterMotor::component_type)) &&
            vm.function("CharacterMotorAdd", binding_detail::add_component<CharacterMotor>) &&
            vm.function("CharacterMotorCapsule", capsule) &&

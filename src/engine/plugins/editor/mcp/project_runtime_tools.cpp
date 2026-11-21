@@ -1,4 +1,6 @@
 #include "editor/file_text.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/editor/mcp/project_mcp_tools.hpp"
 
 #include "plugins/editor/mcp/project_tool_utils.hpp"
@@ -27,6 +29,7 @@ using tools::read_project_status;
 
 bool atomic_control(const fs::path& runtime, bool enabled)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto target = runtime / "script-control.json";
     const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
     const auto temporary = runtime / (".script-control-" + std::to_string(nonce) + ".json");
@@ -54,6 +57,7 @@ bool atomic_control(const fs::path& runtime, bool enabled)
 
 bool read_status(const fs::path& runtime, Json& response)
 {
+    ENGINE_PROFILE_FUNCTION();
     Json status = {{"running", false},
                    {"runId", "0"},
                    {"state", "offline"},
@@ -158,6 +162,7 @@ bool read_status(const fs::path& runtime, Json& response)
 
 bool ProjectMcpTools::register_runtime_tools(McpSystem& mcp)
 {
+    ENGINE_PROFILE_FUNCTION();
     const bool control = mcp.register_tool(
         {"set_hot_reload",
          "Request the runtime to enable or disable engine-owned hot reload.",
@@ -167,6 +172,7 @@ bool ProjectMcpTools::register_runtime_tools(McpSystem& mcp)
           {"additionalProperties", false}},
          [this](const Json& arguments, Json& output)
          {
+             ENGINE_PROFILE_FUNCTION_PROBE();
              const bool enabled = arguments["enabled"].get<bool>();
              if (!target_.ios_udid.empty())
              {
@@ -198,6 +204,7 @@ bool ProjectMcpTools::register_runtime_tools(McpSystem& mcp)
          {{"type", "object"}, {"properties", Json::object()}, {"additionalProperties", false}},
          [this](const Json&, Json& output)
          {
+             ENGINE_PROFILE_FUNCTION_PROBE();
              if (!target_.ios_udid.empty())
              {
                  std::string receipt;

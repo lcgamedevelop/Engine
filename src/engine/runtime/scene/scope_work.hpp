@@ -1,4 +1,6 @@
 #pragma once
+
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/scene/ecs_scene.hpp"
 #include "runtime/scene/scene.hpp"
 #include "runtime/scene/scene_loading.hpp"
@@ -11,6 +13,7 @@ namespace engine::scene_detail
 {
 inline std::uint64_t work_time() noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
                                           std::chrono::steady_clock::now().time_since_epoch())
                                           .count());
@@ -21,11 +24,13 @@ struct ScopeWrite
     std::uint64_t scope = ecs_detail::preparing_scope;
     explicit ScopeWrite(SceneScopeId id)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         ecs_detail::preparing_epoch = id.world_epoch;
         ecs_detail::preparing_scope = id.value;
     }
     ~ScopeWrite()
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         ecs_detail::preparing_epoch = epoch;
         ecs_detail::preparing_scope = scope;
     }
@@ -41,6 +46,7 @@ struct ScopeWork
 inline bool begin_work(WorldSystem& world, SceneScopeId scope, std::string_view domain,
                        ScopeWork& work)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     auto* candidate = world.scope_candidate(scope);
     if (!candidate)
     {
@@ -54,6 +60,7 @@ inline bool begin_work(WorldSystem& world, SceneScopeId scope, std::string_view 
     query.each(
         [&](flecs::entity entity, const ecs_detail::NodeRuntime& runtime)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             if (runtime.scope_scene == candidate)
             {
                 work.nodes.push_back(candidate->find_node(entity.id()));
@@ -76,6 +83,7 @@ inline bool begin_work(WorldSystem& world, SceneScopeId scope, std::string_view 
 template <class Prepare>
 SceneWorkState step_work(ScopeWork& work, const SceneWorkBudget& budget, Prepare prepare)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     if (work.snapshot.state == SceneWorkState::ready ||
         work.snapshot.state == SceneWorkState::failed)
     {

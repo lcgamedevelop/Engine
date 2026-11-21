@@ -1,4 +1,5 @@
 #include "editor/asset_pipeline/components/planar_reflection_codec.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "editor/asset_pipeline/toml_helpers.hpp"
 #include "runtime/scene/scene_settings_validation.hpp"
@@ -7,17 +8,20 @@ namespace engine::editor::asset_pipeline
 {
 schema::ComponentPayload PlanarReflectionCodec::type() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::ComponentPayload::PlanarReflectionData;
 }
 
 std::string_view PlanarReflectionCodec::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "planar_reflection";
 }
 
 bool PlanarReflectionCodec::validate(const schema::ComponentDataT& component,
                                      std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* settings = component.payload.AsPlanarReflectionData();
     if (!settings || !scene_detail::valid_planar_reflection(*settings))
     {
@@ -30,6 +34,7 @@ bool PlanarReflectionCodec::validate(const schema::ComponentDataT& component,
 bool PlanarReflectionCodec::read(const toml::table& table, schema::ComponentDataT& component,
                                  std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     PlanarReflectionSettings settings;
     if ((table.contains("resolution_scale") &&
          !float_number(table.get("resolution_scale"), settings.resolution_scale)) ||
@@ -44,6 +49,7 @@ bool PlanarReflectionCodec::read(const toml::table& table, schema::ComponentData
 
 void PlanarReflectionCodec::write(const schema::ComponentDataT& component, toml::table& table) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto& settings = *component.payload.AsPlanarReflectionData();
     table.insert("type", "planar_reflection");
     table.insert("resolution_scale", settings.resolution_scale);

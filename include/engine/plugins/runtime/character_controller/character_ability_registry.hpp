@@ -1,4 +1,6 @@
 #pragma once
+
+#include "runtime/performance/function_profile.hpp"
 #include "plugins/runtime/character_controller/character_types.hpp"
 #include "runtime/scene/ecs_storage.hpp"
 #include <algorithm>
@@ -35,6 +37,7 @@ public:
     };
     template <class T> [[nodiscard]] bool add()
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (frozen_ || find(T::type()) || T::type().empty())
         {
             return false;
@@ -44,6 +47,7 @@ public:
         ops.channels = T::channels();
         ops.validate = [](const auto& d, std::string_view id, std::string& error)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             auto* data = T::find(d, id);
             if (!data)
             {
@@ -53,9 +57,13 @@ public:
             return T::validate(*data, d, error);
         };
         ops.bind = [](WorldSystem& world)
-        { flecs::world(world.native_world()).template set<detail::AbilityColumn<T>>({}); };
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            flecs::world(world.native_world()).template set<detail::AbilityColumn<T>>({});
+        };
         ops.reset = [](WorldSystem& world, Component owner)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             auto* column =
                 flecs::world(world.native_world()).template try_get_mut<detail::AbilityColumn<T>>();
             if (!column)
@@ -65,12 +73,14 @@ public:
             std::erase_if(column->records,
                           [&](const auto& pair)
                           {
+                              ENGINE_PROFILE_FUNCTION_PROBE();
                               return std::get<0>(pair.first) == owner.node().id() &&
                                      std::get<1>(pair.first) == owner.instance_id();
                           });
         };
         ops.prune = [](WorldSystem& world)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             auto* column =
                 flecs::world(world.native_world()).template try_get_mut<detail::AbilityColumn<T>>();
             if (!column)
@@ -81,6 +91,7 @@ public:
                 column->records,
                 [&](const auto& pair)
                 {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
                     auto c = world.find_node(std::get<0>(pair.first))
                                  .get_component(ComponentType::CharacterControllerData);
                     if (!c || c.instance_id() != std::get<1>(pair.first))
@@ -96,6 +107,7 @@ public:
                                                    stored->data.abilities.end(),
                                                    [&](const auto& ref)
                                                    {
+                                                       ENGINE_PROFILE_FUNCTION_PROBE();
                                                        return ref.type == T::type() &&
                                                               ref.id == std::get<2>(pair.first) &&
                                                               ref.enabled;
@@ -106,6 +118,7 @@ public:
                        std::string_view id, const auto& context, const auto& plan,
                        CharacterAbilityRequest& output)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             output = {};
             const auto* data = T::find(definition, id);
             auto* column =
@@ -126,6 +139,7 @@ public:
                         std::string_view id, const auto& context, const auto& decision,
                         const auto& result, bool& consume, CharacterAbilityStatus& status)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             consume = false;
             status = {};
             const auto* data = T::find(definition, id);
@@ -149,19 +163,23 @@ public:
     }
     [[nodiscard]] bool freeze() noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         frozen_ = true;
         return true;
     }
     [[nodiscard]] bool frozen() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return frozen_;
     }
     [[nodiscard]] std::span<const std::string> types() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return names_;
     }
     [[nodiscard]] const Operations* find(std::string_view type) const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         for (const auto& ops : operations_)
         {
             if (ops.type == type)
@@ -173,6 +191,7 @@ public:
     }
     [[nodiscard]] std::span<const Operations> operations() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return operations_;
     }
 

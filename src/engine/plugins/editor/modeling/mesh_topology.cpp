@@ -1,4 +1,6 @@
 #include "plugins/editor/modeling/mesh_topology.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "plugins/editor/modeling/modeling_math.hpp"
 
@@ -23,18 +25,21 @@ using EdgeKey = std::pair<Id, Id>;
 
 bool fail(std::string& error, std::string message)
 {
+    ENGINE_PROFILE_FUNCTION();
     error = std::move(message);
     return false;
 }
 
 EdgeKey edge_key(Id a, Id b)
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::minmax(a, b);
 }
 
 bool face_selection(const schema::EditableMeshDataT& data, std::span<const Id> faces,
                     std::set<Id>& result, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!mesh::validate(data, error))
     {
         return false;
@@ -55,6 +60,7 @@ bool face_selection(const schema::EditableMeshDataT& data, std::span<const Id> f
 
 void remove_orphans(schema::EditableMeshDataT& data)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::unordered_set<Id> used;
     for (const auto& face : data.faces)
     {
@@ -64,11 +70,16 @@ void remove_orphans(schema::EditableMeshDataT& data)
             used.insert(hole->vertices.begin(), hole->vertices.end());
         }
     }
-    std::erase_if(data.vertices, [&](const auto& vertex) { return !used.contains(vertex.id()); });
+    std::erase_if(data.vertices, [&](const auto& vertex)
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return !used.contains(vertex.id());
+    });
 }
 
 bool publish(schema::EditableMeshDataT& data, schema::EditableMeshDataT& result, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!mesh::validate(result, error))
     {
         return false;
@@ -80,8 +91,10 @@ bool publish(schema::EditableMeshDataT& data, schema::EditableMeshDataT& result,
 
 void map_face(schema::ModelingFaceT& face, const std::map<Id, Id>& mapping)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto apply = [&](auto& ids)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         for (auto& id : ids)
         {
             const auto found = mapping.find(id);
@@ -100,6 +113,7 @@ void map_face(schema::ModelingFaceT& face, const std::map<Id, Id>& mapping)
 
 std::vector<Id> face_vertices(const schema::ModelingFaceT& face)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto ids = face.vertices;
     for (const auto& hole : face.holes)
     {
@@ -111,6 +125,7 @@ std::vector<Id> face_vertices(const schema::ModelingFaceT& face)
 bool boundary_loop(const schema::EditableMeshDataT& data, std::span<const Id> loop,
                    std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (loop.size() < 3)
     {
         return fail(error, "Boundary loops require at least 3 vertices");
@@ -126,6 +141,7 @@ bool boundary_loop(const schema::EditableMeshDataT& data, std::span<const Id> lo
     std::map<EdgeKey, std::size_t> edges;
     const auto count = [&](const auto& ring)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         for (std::size_t i = 0; i < ring.size(); ++i)
         {
             ++edges[edge_key(ring[i], ring[(i + 1) % ring.size()])];
@@ -151,10 +167,12 @@ bool boundary_loop(const schema::EditableMeshDataT& data, std::span<const Id> lo
 
 int boundary_direction(const schema::EditableMeshDataT& data, Id first, Id second)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (const auto& face : data.faces)
     {
         const auto inspect = [&](const auto& ring, bool hole)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             bool reversed = false;
             if (hole)
             {
@@ -197,11 +215,13 @@ int boundary_direction(const schema::EditableMeshDataT& data, Id first, Id secon
 
 schema::Vec2 mix(const schema::Vec2& a, const schema::Vec2& b, double t)
 {
+    ENGINE_PROFILE_FUNCTION();
     return {a.x() * (1.0 - t) + b.x() * t, a.y() * (1.0 - t) + b.y() * t};
 }
 
 schema::Color mix(const schema::Color& a, const schema::Color& b, double t)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto s = static_cast<float>(t);
     return {a.r() * (1.0F - s) + b.r() * s, a.g() * (1.0F - s) + b.g() * s,
             a.b() * (1.0F - s) + b.b() * s, a.a() * (1.0F - s) + b.a() * s};
@@ -210,6 +230,7 @@ schema::Color mix(const schema::Color& a, const schema::Color& b, double t)
 void clean_ring(std::vector<Id>& ids, std::vector<schema::Vec2>& uv,
                 std::vector<schema::Color>& colors)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (std::size_t i = 0; ids.size() > 1 && i < ids.size();)
     {
         const auto next = (i + 1) % ids.size();
@@ -232,6 +253,7 @@ void clean_ring(std::vector<Id>& ids, std::vector<schema::Vec2>& uv,
 
 void remap_and_clean(schema::EditableMeshDataT& data, const std::map<Id, Id>& mapping)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (auto& face : data.faces)
     {
         map_face(*face, mapping);
@@ -240,9 +262,17 @@ void remap_and_clean(schema::EditableMeshDataT& data, const std::map<Id, Id>& ma
         {
             clean_ring(hole->vertices, hole->texcoords, hole->colors);
         }
-        std::erase_if(face->holes, [](const auto& hole) { return hole->vertices.size() < 3; });
+        std::erase_if(face->holes, [](const auto& hole)
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return hole->vertices.size() < 3;
+        });
     }
-    std::erase_if(data.faces, [](const auto& face) { return face->vertices.size() < 3; });
+    std::erase_if(data.faces, [](const auto& face)
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return face->vertices.size() < 3;
+    });
     remove_orphans(data);
 }
 
@@ -251,6 +281,7 @@ void remap_and_clean(schema::EditableMeshDataT& data, const std::map<Id, Id>& ma
 bool mesh::transform(schema::EditableMeshDataT& data, const MeshSelection& selection,
                      const std::array<double, 16>& matrix, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!mesh::validate(data, error))
     {
         return false;
@@ -292,7 +323,11 @@ bool mesh::transform(schema::EditableMeshDataT& data, const MeshSelection& selec
     {
         const auto vertices = face_vertices(*face);
         const auto selected_count = static_cast<std::size_t>(std::count_if(
-            vertices.begin(), vertices.end(), [&](auto id) { return ids.contains(id); }));
+            vertices.begin(), vertices.end(), [&](auto id)
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return ids.contains(id);
+            }));
         if (selected_count == 0 || selected_count == vertices.size() || vertices.size() == 3)
         {
             continue;
@@ -308,6 +343,7 @@ bool mesh::transform(schema::EditableMeshDataT& data, const MeshSelection& selec
             std::any_of(vertices.begin(), vertices.end(),
                         [&](auto id)
                         {
+                            ENGINE_PROFILE_FUNCTION_PROBE();
                             return std::abs(math::dot(math::sub(math::position(result, id), origin),
                                                       normal)) > 1.0e-7 * scale;
                         }))
@@ -334,7 +370,11 @@ bool mesh::transform(schema::EditableMeshDataT& data, const MeshSelection& selec
         {
             const auto face_ids = face_vertices(*face);
             if (std::all_of(face_ids.begin(), face_ids.end(),
-                            [&](auto id) { return ids.contains(id); }))
+                            [&](auto id)
+                            {
+                                ENGINE_PROFILE_FUNCTION_PROBE();
+                                return ids.contains(id);
+                            }))
             {
                 math::reverse_face(*face);
             }
@@ -346,6 +386,7 @@ bool mesh::transform(schema::EditableMeshDataT& data, const MeshSelection& selec
 bool mesh::extrude(schema::EditableMeshDataT& data, std::span<const Id> faces, double distance,
                    bool individual, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::set<Id> selected;
     if (!face_selection(data, faces, selected, error))
     {
@@ -382,6 +423,7 @@ bool mesh::extrude(schema::EditableMeshDataT& data, std::span<const Id> faces, d
         const auto add_ring = [&](const auto& ring, const Vector& normal,
                                   std::uint32_t material) -> bool
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             for (std::size_t i = 0; i < ring.size(); ++i)
             {
                 const auto a = ring[i];
@@ -469,6 +511,7 @@ bool mesh::extrude(schema::EditableMeshDataT& data, std::span<const Id> faces, d
 bool mesh::extrude_edges(schema::EditableMeshDataT& data, std::span<const MeshEdge> edges,
                          const schema::Vec3& delta, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!mesh::validate(data, error))
     {
         return false;
@@ -490,6 +533,7 @@ bool mesh::extrude_edges(schema::EditableMeshDataT& data, std::span<const MeshEd
     {
         const auto append_ring = [&](const auto& ring)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             for (std::size_t i = 0; i < ring.size(); ++i)
             {
                 auto& source = incident[edge_key(ring[i], ring[(i + 1) % ring.size()])];
@@ -543,6 +587,7 @@ namespace
 bool inset_region(schema::EditableMeshDataT& data, const std::set<Id>& selected, double distance,
                   std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     struct FaceSamples
     {
         const schema::ModelingFaceT* face = nullptr;
@@ -585,6 +630,7 @@ bool inset_region(schema::EditableMeshDataT& data, const std::set<Id>& selected,
         const auto append_ring =
             [&](const auto& ring, const auto& uv, const auto& colors, bool hole)
         {
+                ENGINE_PROFILE_FUNCTION_PROBE();
             auto directed = ring;
             if (hole)
             {
@@ -662,6 +708,7 @@ bool inset_region(schema::EditableMeshDataT& data, const std::set<Id>& selected,
     const auto interpolate = [&](const FaceSamples& sample, const Vector& point,
                                  bool require_inside, schema::Vec2& uv, schema::Color& color)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         double best_score = std::numeric_limits<double>::max();
         std::array<std::uint32_t, 3> best_triangle{};
         std::array<double, 3> best_weights{};
@@ -771,6 +818,7 @@ bool inset_region(schema::EditableMeshDataT& data, const std::set<Id>& selected,
         const auto& sample = samples[id];
         const auto update_ring = [&](auto& ring, auto& uv, auto& colors)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             for (std::size_t i = 0; i < ring.size(); ++i)
             {
                 const auto found = replacements.find(ring[i]);
@@ -849,6 +897,7 @@ bool inset_region(schema::EditableMeshDataT& data, const std::set<Id>& selected,
 bool mesh::inset(schema::EditableMeshDataT& data, std::span<const Id> faces, double distance,
                  std::string& error, bool group)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::set<Id> selected;
     if (!face_selection(data, faces, selected, error))
     {
@@ -1000,13 +1049,18 @@ bool mesh::inset(schema::EditableMeshDataT& data, std::span<const Id> faces, dou
 bool mesh::erase_faces(schema::EditableMeshDataT& data, std::span<const Id> faces,
                        std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::set<Id> selected;
     if (!face_selection(data, faces, selected, error))
     {
         return false;
     }
     schema::EditableMeshDataT result(data);
-    std::erase_if(result.faces, [&](const auto& face) { return selected.contains(face->id); });
+    std::erase_if(result.faces, [&](const auto& face)
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return selected.contains(face->id);
+    });
     remove_orphans(result);
     return publish(data, result, error);
 }
@@ -1014,6 +1068,7 @@ bool mesh::erase_faces(schema::EditableMeshDataT& data, std::span<const Id> face
 bool mesh::reverse_faces(schema::EditableMeshDataT& data, std::span<const Id> faces,
                          std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::set<Id> selected;
     if (!face_selection(data, faces, selected, error))
     {
@@ -1030,13 +1085,18 @@ bool mesh::reverse_faces(schema::EditableMeshDataT& data, std::span<const Id> fa
 bool mesh::triangulate(schema::EditableMeshDataT& data, std::span<const Id> faces,
                        std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::set<Id> selected;
     if (!face_selection(data, faces, selected, error))
     {
         return false;
     }
     schema::EditableMeshDataT result(data);
-    std::erase_if(result.faces, [&](const auto& face) { return selected.contains(face->id); });
+    std::erase_if(result.faces, [&](const auto& face)
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return selected.contains(face->id);
+    });
     for (auto id : selected)
     {
         const auto* source = mesh::find_face(data, id);
@@ -1050,6 +1110,7 @@ bool mesh::triangulate(schema::EditableMeshDataT& data, std::span<const Id> face
         std::vector<schema::Color> colors;
         const auto flatten = [&](const auto& ring, const auto& ring_uv, const auto& ring_colors)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             const auto axis = math::projection_axis(math::face_normal(data, *source));
             for (std::size_t i = 0; i < ring.size(); ++i)
             {
@@ -1085,6 +1146,7 @@ bool mesh::triangulate(schema::EditableMeshDataT& data, std::span<const Id> face
 bool mesh::subdivide(schema::EditableMeshDataT& data, std::span<const Id> faces,
                      std::uint32_t iterations, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::set<Id> selected;
     if (!face_selection(data, faces, selected, error))
     {
@@ -1100,7 +1162,11 @@ bool mesh::subdivide(schema::EditableMeshDataT& data, std::span<const Id> faces,
         schema::EditableMeshDataT before(result);
         std::map<EdgeKey, Id> midpoints;
         std::set<Id> next_selected;
-        std::erase_if(result.faces, [&](const auto& face) { return selected.contains(face->id); });
+        std::erase_if(result.faces, [&](const auto& face)
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return selected.contains(face->id);
+        });
         for (auto id : selected)
         {
             const auto* face = mesh::find_face(before, id);
@@ -1188,6 +1254,7 @@ bool mesh::subdivide(schema::EditableMeshDataT& data, std::span<const Id> faces,
             }
             const auto split_ring = [&](auto& ids, auto& uv, auto& colors)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 const auto old_ids = ids;
                 const auto old_uv = uv;
                 const auto old_colors = colors;
@@ -1239,6 +1306,7 @@ bool mesh::subdivide(schema::EditableMeshDataT& data, std::span<const Id> faces,
 bool mesh::weld(schema::EditableMeshDataT& data, std::span<const Id> vertices, double tolerance,
                 std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!mesh::validate(data, error))
     {
         return false;
@@ -1286,6 +1354,7 @@ bool mesh::weld(schema::EditableMeshDataT& data, std::span<const Id> vertices, d
 bool mesh::merge_vertices(schema::EditableMeshDataT& data, std::span<const Id> vertices,
                           const schema::Vec3& point, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!mesh::validate(data, error))
     {
         return false;
@@ -1314,6 +1383,7 @@ bool mesh::merge_vertices(schema::EditableMeshDataT& data, std::span<const Id> v
 bool mesh::split_vertices(schema::EditableMeshDataT& data, std::span<const Id> vertices,
                           std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!mesh::validate(data, error))
     {
         return false;
@@ -1336,6 +1406,7 @@ bool mesh::split_vertices(schema::EditableMeshDataT& data, std::span<const Id> v
     {
         const auto split_ring = [&](auto& ring)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             for (auto& id : ring)
             {
                 if (selected.contains(id) && !used.insert(id).second)
@@ -1356,6 +1427,7 @@ bool mesh::split_vertices(schema::EditableMeshDataT& data, std::span<const Id> v
 bool mesh::detach_faces(schema::EditableMeshDataT& data, std::span<const Id> faces,
                         std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::set<Id> selected;
     if (!face_selection(data, faces, selected, error))
     {
@@ -1384,6 +1456,7 @@ bool mesh::detach_faces(schema::EditableMeshDataT& data, std::span<const Id> fac
 bool mesh::duplicate_faces(schema::EditableMeshDataT& data, std::span<const Id> faces,
                            std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::set<Id> selected;
     if (!face_selection(data, faces, selected, error))
     {
@@ -1411,6 +1484,7 @@ bool mesh::duplicate_faces(schema::EditableMeshDataT& data, std::span<const Id> 
 bool mesh::bridge(schema::EditableMeshDataT& data, std::span<const Id> first_loop,
                   std::span<const Id> second_loop, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!mesh::validate(data, error) || !boundary_loop(data, first_loop, error) ||
         !boundary_loop(data, second_loop, error))
     {
@@ -1462,6 +1536,7 @@ bool mesh::bridge(schema::EditableMeshDataT& data, std::span<const Id> first_loo
 
 bool mesh::fill_hole(schema::EditableMeshDataT& data, std::span<const Id> loop, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!mesh::validate(data, error) || !boundary_loop(data, loop, error))
     {
         return false;
@@ -1478,6 +1553,7 @@ bool mesh::fill_hole(schema::EditableMeshDataT& data, std::span<const Id> loop, 
 
 bool mesh::dissolve_edge(schema::EditableMeshDataT& data, MeshEdge edge, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!mesh::validate(data, error))
     {
         return false;
@@ -1504,6 +1580,7 @@ bool mesh::dissolve_edge(schema::EditableMeshDataT& data, MeshEdge edge, std::st
     }
     const auto effective_uv = [&](const schema::ModelingFaceT& face, std::size_t index)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (!face.texcoords.empty())
         {
             return face.texcoords[index];
@@ -1585,7 +1662,10 @@ bool mesh::dissolve_edge(schema::EditableMeshDataT& data, MeshEdge edge, std::st
     }
     schema::EditableMeshDataT result(data);
     std::erase_if(result.faces, [&](const auto& face)
-                  { return face->id == adjacent[0]->id || face->id == adjacent[1]->id; });
+                  {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return face->id == adjacent[0]->id || face->id == adjacent[1]->id;
+    });
     result.faces.push_back(std::move(merged));
     return publish(data, result, error);
 }
@@ -1593,6 +1673,7 @@ bool mesh::dissolve_edge(schema::EditableMeshDataT& data, MeshEdge edge, std::st
 bool mesh::split_edge(schema::EditableMeshDataT& data, MeshEdge edge, double fraction,
                       std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!mesh::validate(data, error))
     {
         return false;
@@ -1612,6 +1693,7 @@ bool mesh::split_edge(schema::EditableMeshDataT& data, MeshEdge edge, double fra
     bool found = false;
     const auto split = [&](auto& ids, auto& uv, auto& colors)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         for (std::size_t i = 0; i < ids.size(); ++i)
         {
             const auto next = (i + 1) % ids.size();
@@ -1652,6 +1734,7 @@ bool mesh::split_edge(schema::EditableMeshDataT& data, MeshEdge edge, double fra
 bool mesh::connect_vertices(schema::EditableMeshDataT& data, Id face_id, Id first, Id second,
                             std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!mesh::validate(data, error))
     {
         return false;
@@ -1676,6 +1759,7 @@ bool mesh::connect_vertices(schema::EditableMeshDataT& data, Id face_id, Id firs
     schema::EditableMeshDataT result(data);
     const auto make_part = [&](std::size_t start, std::size_t end, Id id)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         auto part = std::make_unique<schema::ModelingFaceT>();
         part->id = id;
         part->material_slot = face->material_slot;
@@ -1708,7 +1792,11 @@ bool mesh::connect_vertices(schema::EditableMeshDataT& data, Id face_id, Id firs
     {
         return fail(error, "Connection leaves the polygon interior");
     }
-    std::erase_if(result.faces, [face_id](const auto& item) { return item->id == face_id; });
+    std::erase_if(result.faces, [face_id](const auto& item)
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return item->id == face_id;
+    });
     result.faces.push_back(std::move(part0));
     result.faces.push_back(std::move(part1));
     return publish(data, result, error);
@@ -1717,6 +1805,7 @@ bool mesh::connect_vertices(schema::EditableMeshDataT& data, Id face_id, Id firs
 bool mesh::append(schema::EditableMeshDataT& data, const schema::EditableMeshDataT& other,
                   std::string& error, std::uint32_t material_slot_offset)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!mesh::validate(data, error) || !mesh::validate(other, error))
     {
         return false;
@@ -1746,6 +1835,7 @@ bool mesh::append(schema::EditableMeshDataT& data, const schema::EditableMeshDat
 bool mesh::set_material(schema::EditableMeshDataT& data, std::span<const Id> faces,
                         std::uint32_t slot, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::set<Id> selected;
     if (!face_selection(data, faces, selected, error))
     {
@@ -1766,6 +1856,7 @@ bool mesh::set_material(schema::EditableMeshDataT& data, std::span<const Id> fac
 bool mesh::set_color(schema::EditableMeshDataT& data, std::span<const Id> faces,
                      const schema::Color& color, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::set<Id> selected;
     if (!face_selection(data, faces, selected, error))
     {
@@ -1794,6 +1885,7 @@ bool mesh::set_color(schema::EditableMeshDataT& data, std::span<const Id> faces,
 bool mesh::select_faces(const schema::EditableMeshDataT& data, std::span<const Id> faces,
                         MeshFaceSelection mode, std::vector<Id>& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     std::set<Id> selected;
     if (!face_selection(data, faces, selected, error))
@@ -1803,6 +1895,7 @@ bool mesh::select_faces(const schema::EditableMeshDataT& data, std::span<const I
     std::map<EdgeKey, std::vector<Id>> edge_faces;
     const auto add_ring = [&](const auto& ring, Id face)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         for (std::size_t i = 0; i < ring.size(); ++i)
         {
             edge_faces[edge_key(ring[i], ring[(i + 1) % ring.size()])].push_back(face);
@@ -1843,7 +1936,11 @@ bool mesh::select_faces(const schema::EditableMeshDataT& data, std::span<const I
         {
             if (boundary.contains(face) ||
                 std::any_of(neighbors[face].begin(), neighbors[face].end(),
-                            [&](auto adjacent) { return !selected.contains(adjacent); }))
+                            [&](auto adjacent)
+                            {
+                                ENGINE_PROFILE_FUNCTION_PROBE();
+                                return !selected.contains(adjacent);
+                            }))
             {
                 result.erase(face);
             }
@@ -1874,6 +1971,7 @@ bool mesh::select_faces(const schema::EditableMeshDataT& data, std::span<const I
 bool mesh::edge_ring(const schema::EditableMeshDataT& data, MeshEdge edge,
                      std::vector<MeshEdge>& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     if (!mesh::validate(data, error))
     {
@@ -1933,6 +2031,7 @@ bool mesh::edge_ring(const schema::EditableMeshDataT& data, MeshEdge edge,
 bool mesh::edge_loop(const schema::EditableMeshDataT& data, MeshEdge edge,
                      std::vector<MeshEdge>& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     if (!mesh::validate(data, error))
     {
@@ -1944,6 +2043,7 @@ bool mesh::edge_loop(const schema::EditableMeshDataT& data, MeshEdge edge,
     {
         const auto append_ring = [&](const auto& ring)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             for (std::size_t i = 0; i < ring.size(); ++i)
             {
                 const auto key = edge_key(ring[i], ring[(i + 1) % ring.size()]);
@@ -1983,7 +2083,11 @@ bool mesh::edge_loop(const schema::EditableMeshDataT& data, MeshEdge edge,
                 }
                 const bool same_face =
                     std::any_of(edge_faces[current].begin(), edge_faces[current].end(),
-                                [&](auto face) { return edge_faces[next].contains(face); });
+                                [&](auto face)
+                                {
+                                    ENGINE_PROFILE_FUNCTION_PROBE();
+                                    return edge_faces[next].contains(face);
+                                });
                 if (!same_face)
                 {
                     candidates.push_back(next);
@@ -2011,6 +2115,7 @@ bool mesh::edge_loop(const schema::EditableMeshDataT& data, MeshEdge edge,
 bool mesh::loop_cut(schema::EditableMeshDataT& data, MeshEdge edge, std::uint32_t cuts,
                     double pinch, double offset, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!mesh::validate(data, error))
     {
         return false;
@@ -2036,6 +2141,7 @@ bool mesh::loop_cut(schema::EditableMeshDataT& data, MeshEdge edge, std::uint32_
     {
         const auto append_ring = [&](const auto& ring)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             for (std::size_t i = 0; i < ring.size(); ++i)
             {
                 adjacent[edge_key(ring[i], ring[(i + 1) % ring.size()])].push_back(face.get());
@@ -2112,7 +2218,11 @@ bool mesh::loop_cut(schema::EditableMeshDataT& data, MeshEdge edge, std::uint32_
                                   math::mul(math::position(data, direction.second), t))));
         }
     }
-    std::erase_if(result.faces, [&](const auto& face) { return affected.contains(face->id); });
+    std::erase_if(result.faces, [&](const auto& face)
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return affected.contains(face->id);
+    });
     for (const auto& [id, side] : affected)
     {
         const auto* original = mesh::find_face(data, id);
@@ -2180,6 +2290,7 @@ bool mesh::loop_cut(schema::EditableMeshDataT& data, MeshEdge edge, std::uint32_
         }
         const auto insert_ring = [&](auto& ids, auto& uv, auto& colors)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             const auto old_ids = ids;
             const auto old_uv = uv;
             const auto old_colors = colors;

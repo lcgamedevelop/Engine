@@ -1,4 +1,6 @@
 #pragma once
+
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/animation/animation_attachment.hpp"
 
 #include "runtime/animation/animation_math.hpp"
@@ -16,11 +18,13 @@ struct Definition
 };
 inline std::size_t find_joint(std::span<const std::string> paths, std::string_view path)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return static_cast<std::size_t>(std::find(paths.begin(), paths.end(), path) - paths.begin());
 }
 inline bool definitions(const schema::SkeletonDataT& skeleton, std::span<const std::string> paths,
                         std::vector<Definition>& output)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     output.clear();
     for (std::size_t index = 0; index < skeleton.aim_ik.size(); ++index)
     {
@@ -51,6 +55,7 @@ inline bool definitions(const schema::SkeletonDataT& skeleton, std::span<const s
     std::stable_sort(output.begin(), output.end(),
                      [](const auto& a, const auto& b)
                      {
+                         ENGINE_PROFILE_FUNCTION_PROBE();
                          return std::tie(a.order, a.two_bone, a.index) <
                                 std::tie(b.order, b.two_bone, b.index);
                      });
@@ -58,6 +63,7 @@ inline bool definitions(const schema::SkeletonDataT& skeleton, std::span<const s
 }
 inline bool ancestor(const schema::SkeletonDataT& skeleton, std::size_t parent, std::size_t joint)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     for (auto current = static_cast<int>(joint); current >= 0;
          current = skeleton.joints[current]->parent)
     {
@@ -70,6 +76,7 @@ inline bool ancestor(const schema::SkeletonDataT& skeleton, std::size_t parent, 
 }
 inline bool target_values(const AnimationIkTarget& target)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     const bool zero_point = target.point.x() == 0 && target.point.y() == 0 && target.point.z() == 0;
     const bool zero_offset = target.local_offset.x() == 0 && target.local_offset.y() == 0 &&
                              target.local_offset.z() == 0;
@@ -90,6 +97,7 @@ inline bool resolve_target(Animator actor, const schema::SkeletonDataT& skeleton
                            const ozz::math::Float4x4& world_to_model, const Vec3& origin,
                            IkOperation& output)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     output.pole = target.space == AnimationIkSpace::world
                       ? ozz::math::TransformVector(world_to_model, simd_point(target.pole))
                       : simd_point(target.pole);

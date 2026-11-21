@@ -1,4 +1,6 @@
 #include "editor/render/render_feature_commands.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "editor/commands/components/component_edit.hpp"
 #include "editor/commands/scene_commands.hpp"
@@ -22,6 +24,7 @@ using Json = nlohmann::json;
 
 Json state_json(const RenderFeatureState& state)
 {
+    ENGINE_PROFILE_FUNCTION();
     return {{"requested", state.requested},
             {"supported", state.supported},
             {"effective", state.effective},
@@ -31,6 +34,7 @@ Json state_json(const RenderFeatureState& state)
 
 Json meshlet_sample_json(const MeshletGpuStats& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     constexpr std::array names{"disabled", "unsupported", "pending", "ready", "failed"};
     return {{"state", names[static_cast<std::size_t>(value.state)]},
             {"worldEpoch", std::to_string(value.world_epoch)},
@@ -45,6 +49,7 @@ Json meshlet_sample_json(const MeshletGpuStats& value)
 
 Json features_json(const RenderSystem& renderer)
 {
+    ENGINE_PROFILE_FUNCTION();
     Json result = Json::object();
     for (std::size_t index = 0; index < render_detail::feature_names.size(); ++index)
     {
@@ -56,6 +61,7 @@ Json features_json(const RenderSystem& renderer)
 
 Json mesh_settings(const MeshRenderer& mesh)
 {
+    ENGINE_PROFILE_FUNCTION();
     return {{"sceneId", std::to_string(mesh.node().scene()->id())},
             {"nodeId", std::to_string(mesh.node().id())},
             {"scope", "component"},
@@ -76,13 +82,16 @@ public:
                   std::uint8_t(mesh.static_lod_enabled()), std::uint8_t(mesh.rvt_role())},
           after_(after), changed_(changed)
     {
+        ENGINE_PROFILE_FUNCTION();
     }
     bool apply(std::string& error) override
     {
+        ENGINE_PROFILE_FUNCTION();
         return change(before_, after_, error);
     }
     bool revert(std::string& error) override
     {
+        ENGINE_PROFILE_FUNCTION();
         return change(after_, before_, error);
     }
 
@@ -90,6 +99,7 @@ private:
     bool change(const std::array<std::uint8_t, 3>& expected,
                 const std::array<std::uint8_t, 3>& replacement, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         auto* scene = world_.scene();
         const auto node =
             scene && scene->id() == scene_id_ && identity_ ? scene->find_node(*identity_) : Node{};
@@ -141,11 +151,13 @@ private:
 bool register_render_feature_commands(RenderSystem& renderer, WorldSystem& world,
                                       EditorCommands& commands, SceneCommands& scenes)
 {
+    ENGINE_PROFILE_FUNCTION();
     return commands.register_command(
                "get_vsm_status", false,
                [&renderer](const Json& args, Json& result, std::unique_ptr<EditorEdit>&,
                            std::string&)
                {
+                   ENGINE_PROFILE_FUNCTION_PROBE();
                    VsmStatus status;
                    if (!args.empty() || !renderer.vsm_status(status))
                    {
@@ -192,6 +204,7 @@ bool register_render_feature_commands(RenderSystem& renderer, WorldSystem& world
                [&renderer](const Json& args, Json& result, std::unique_ptr<EditorEdit>&,
                            std::string&)
                {
+                   ENGINE_PROFILE_FUNCTION_PROBE();
                    VsmDebugOptions options;
                    std::uint64_t revision = 0;
                    if (!args.empty() || !renderer.vsm_debug_options(options, revision))
@@ -221,6 +234,7 @@ bool register_render_feature_commands(RenderSystem& renderer, WorldSystem& world
                [&renderer](const Json& args, Json& result, std::unique_ptr<EditorEdit>&,
                            std::string&)
                {
+                   ENGINE_PROFILE_FUNCTION_PROBE();
                    if (!args.is_object() || args.size() != 2 || !args.contains("mode") ||
                        !args["mode"].is_string() || !args.contains("clipmapLevel") ||
                        !args["clipmapLevel"].is_number_integer() || args["clipmapLevel"] < -1 ||
@@ -252,6 +266,7 @@ bool register_render_feature_commands(RenderSystem& renderer, WorldSystem& world
                [&renderer](const Json& args, Json& result, std::unique_ptr<EditorEdit>&,
                            std::string&)
                {
+                   ENGINE_PROFILE_FUNCTION_PROBE();
                    RvtStatus status;
                    if (!args.empty() || !renderer.rvt_status(status))
                    {
@@ -274,6 +289,7 @@ bool register_render_feature_commands(RenderSystem& renderer, WorldSystem& world
                [&renderer](const Json& args, Json& result, std::unique_ptr<EditorEdit>&,
                            std::string&)
                {
+                   ENGINE_PROFILE_FUNCTION_PROBE();
                    RvtDebugOptions value;
                    std::uint64_t revision = 0;
                    if (!args.empty() || !renderer.rvt_debug_options(value, revision))
@@ -295,6 +311,7 @@ bool register_render_feature_commands(RenderSystem& renderer, WorldSystem& world
                [&renderer](const Json& args, Json& result, std::unique_ptr<EditorEdit>&,
                            std::string& error)
                {
+                   ENGINE_PROFILE_FUNCTION_PROBE();
                    RvtDebugOptions value;
                    std::uint64_t revision = 0;
                    if (!args.is_object() || args.empty() ||
@@ -351,6 +368,7 @@ bool register_render_feature_commands(RenderSystem& renderer, WorldSystem& world
                [&world](const Json& arguments, Json& result, std::unique_ptr<EditorEdit>&,
                         std::string& error)
                {
+                   ENGINE_PROFILE_FUNCTION_PROBE();
                    if (!arguments.is_object() || arguments.size() != 2)
                    {
                        return false;
@@ -370,6 +388,7 @@ bool register_render_feature_commands(RenderSystem& renderer, WorldSystem& world
                [&world, &scenes](const Json& arguments, Json& result,
                                  std::unique_ptr<EditorEdit>& edit, std::string& error)
                {
+                   ENGINE_PROFILE_FUNCTION_PROBE();
                    if (!components::fields(
                            arguments, {"staticInstancingEnabled", "staticLodEnabled", "rvtRole"},
                            error) ||
@@ -432,6 +451,7 @@ bool register_render_feature_commands(RenderSystem& renderer, WorldSystem& world
                [&renderer, &world](const Json& arguments, Json& result,
                                    std::unique_ptr<EditorEdit>&, std::string& error)
                {
+                   ENGINE_PROFILE_FUNCTION_PROBE();
                    if (!arguments.is_object())
                    {
                        return false;
@@ -581,6 +601,7 @@ bool register_render_feature_commands(RenderSystem& renderer, WorldSystem& world
                [&renderer](const Json& arguments, Json& result, std::unique_ptr<EditorEdit>&,
                            std::string& error)
                {
+                   ENGINE_PROFILE_FUNCTION_PROBE();
                    RenderFeature feature{};
                    if (!arguments.is_object() || arguments.size() != 2 ||
                        !arguments.contains("feature") || !arguments["feature"].is_string() ||
@@ -606,6 +627,7 @@ bool register_render_feature_commands(RenderSystem& renderer, WorldSystem& world
                [&renderer](const Json& arguments, Json& result, std::unique_ptr<EditorEdit>&,
                            std::string& error)
                {
+                   ENGINE_PROFILE_FUNCTION_PROBE();
                    if (!arguments.is_object() || !arguments.empty())
                    {
                        error = "Submission statistics has no arguments";
@@ -645,6 +667,7 @@ bool register_render_feature_commands(RenderSystem& renderer, WorldSystem& world
                [&renderer](const Json& arguments, Json& result, std::unique_ptr<EditorEdit>&,
                            std::string& error)
                {
+                   ENGINE_PROFILE_FUNCTION_PROBE();
                    if (!arguments.is_object() || !arguments.contains("lines") ||
                        !arguments["lines"].is_array() || arguments["lines"].empty() ||
                        arguments["lines"].size() > 4096)

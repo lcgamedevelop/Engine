@@ -1,4 +1,5 @@
 #include "plugins/editor/animation_tools/retarget_importer.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "editor/asset_pipeline/asset_io.hpp"
 #include "editor/asset_pipeline/importer_utils.hpp"
@@ -24,6 +25,7 @@ namespace io = editor::asset_pipeline;
 bool load_skeleton(const Guid& guid, const io::ImportContext& context,
                    std::unique_ptr<schema::SkeletonDataT>& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::vector<std::byte> payload;
     if (!io::read_generated_payload(guid, context, payload, error))
     {
@@ -48,6 +50,7 @@ bool load_skeleton(const Guid& guid, const io::ImportContext& context,
 template <std::size_t N>
 bool numbers(const toml::node_view<const toml::node>& node, std::array<double, N>& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* values = node.as_array();
     if (!values || values->size() != N)
     {
@@ -67,6 +70,7 @@ bool numbers(const toml::node_view<const toml::node>& node, std::array<double, N
 
 bool poses(const toml::table& table, const char* name, std::vector<schema::JointLocalPose>& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!table.contains(name))
     {
         return true;
@@ -96,6 +100,7 @@ bool poses(const toml::table& table, const char* name, std::vector<schema::Joint
 bool read(const io::ImportAsset& asset, schema::AnimationRetargetProfileDataT& output,
           std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     toml::table table;
     if (!io::read_table(asset.source, table, error))
@@ -177,17 +182,20 @@ bool read(const io::ImportAsset& asset, schema::AnimationRetargetProfileDataT& o
 
 schema::AssetKind RetargetImporter::kind() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::animation_retarget_profile;
 }
 
 bool RetargetImporter::matches(const std::filesystem::path& source) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return io::source_extension(source) == ".retarget";
 }
 
 bool RetargetImporter::inspect_batch(const io::ImportContext&, std::string& fingerprint,
                                      std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     return io::schema_fingerprint(
         {"runtime/animation_retarget.fbs", "runtime/animation_pose.fbs", "runtime/common.fbs"},
         fingerprint, error);
@@ -196,6 +204,7 @@ bool RetargetImporter::inspect_batch(const io::ImportContext&, std::string& fing
 bool RetargetImporter::scan_dependencies(io::ImportAsset& asset, const io::ImportContext& context,
                                          std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     schema::AnimationRetargetProfileDataT profile;
     std::vector<Guid> dependencies;
     if (!read(asset, profile, error) ||
@@ -216,6 +225,7 @@ bool RetargetImporter::scan_dependencies(io::ImportAsset& asset, const io::Impor
 bool RetargetImporter::convert(const io::ImportAsset& asset, const io::ImportContext& context,
                                std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     schema::AnimationRetargetProfileDataT profile;
     std::unique_ptr<schema::SkeletonDataT> source, target;
     if (!read(asset, profile, error) ||

@@ -1,4 +1,5 @@
 #include "editor/asset_pipeline/components/bone_attachment_codec.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "editor/asset_pipeline/toml_helpers.hpp"
 #include "runtime/scene/bone_attachment.hpp"
@@ -7,15 +8,18 @@ namespace engine::editor::asset_pipeline
 {
 schema::ComponentPayload BoneAttachmentCodec::type() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::ComponentPayload::BoneAttachmentData;
 }
 std::string_view BoneAttachmentCodec::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "bone_attachment";
 }
 bool BoneAttachmentCodec::validate(const schema::ComponentDataT& component,
                                    std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* value = component.payload.AsBoneAttachmentData();
     if (!value || !BoneAttachment::valid_settings(*value))
     {
@@ -27,6 +31,7 @@ bool BoneAttachmentCodec::validate(const schema::ComponentDataT& component,
 bool BoneAttachmentCodec::read(const toml::table& table, schema::ComponentDataT& component,
                                std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     schema::BoneAttachmentDataT value;
     std::array<double, 3> translation{0, 0, 0}, scale{1, 1, 1};
     std::array<double, 4> rotation{0, 0, 0, 1};
@@ -68,6 +73,7 @@ bool BoneAttachmentCodec::read(const toml::table& table, schema::ComponentDataT&
 }
 void BoneAttachmentCodec::write(const schema::ComponentDataT& component, toml::table& table) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* value = component.payload.AsBoneAttachmentData();
     table.insert("type", "bone_attachment");
     table.insert("source_node_id", std::to_string(value->source_node_id));

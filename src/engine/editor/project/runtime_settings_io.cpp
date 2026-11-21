@@ -1,4 +1,5 @@
 #include "editor/project/runtime_settings_io.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/file_text.hpp"
 
 #include "runtime/resource/resource_system.hpp"
@@ -18,6 +19,7 @@ using Json = nlohmann::json;
 
 bool convert(const toml::node& source, Json& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (const auto* table = source.as_table())
     {
         output = Json::object();
@@ -61,6 +63,7 @@ bool convert(const toml::node& source, Json& output)
 bool read_source(const std::filesystem::path& path, std::string_view platform, Json& output,
                  std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string text;
     if (!engine::editor::file_detail::read_text(path, text) || text.size() > 65536)
     {
@@ -114,6 +117,7 @@ bool load_project_runtime_settings(const std::filesystem::path& project_root,
                                    std::string_view platform, RuntimeSettings& output,
                                    std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     if (platform != "windows" && platform != "macos" && platform != "linux" &&
         platform != "android" && platform != "ios" && platform != "web")

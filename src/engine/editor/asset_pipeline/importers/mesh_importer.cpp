@@ -1,4 +1,6 @@
 #include "editor/asset_pipeline/importers/mesh_importer.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/asset_pipeline/importer_utils.hpp"
 
 #include "editor/asset_pipeline/asset_io.hpp"
@@ -36,14 +38,17 @@ namespace engine::editor::asset_pipeline
 {
 schema::AssetKind MeshImporter::kind() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::mesh;
 }
 bool MeshImporter::matches(const std::filesystem::path& source) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return source_extension(source) == ".mesh";
 }
 bool MeshImporter::inspect_batch(const ImportContext&, std::string& fingerprint, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!schema_fingerprint({"runtime/mesh.fbs"}, fingerprint, error))
     {
         return false;
@@ -55,6 +60,7 @@ bool MeshImporter::inspect_batch(const ImportContext&, std::string& fingerprint,
 bool MeshImporter::convert(const ImportAsset& asset, const ImportContext& context,
                            std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     toml::table table;
     if (!read_table(asset.source, table, error))
     {
@@ -80,7 +86,10 @@ bool MeshImporter::convert(const ImportAsset& asset, const ImportContext& contex
         std::array<double, 6> values{};
         if (!numbers(&item, values) ||
             std::any_of(values.begin(), values.end(), [](double value)
-                        { return std::abs(value) > std::numeric_limits<float>::max(); }))
+                        {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return std::abs(value) > std::numeric_limits<float>::max();
+            }))
         {
             error = "mesh vertex must contain six finite float values";
             return false;
@@ -127,7 +136,10 @@ bool MeshImporter::convert(const ImportAsset& asset, const ImportContext& contex
                 std::array<double, 2> value{};
                 if (!numbers(&item, value) ||
                     std::any_of(value.begin(), value.end(), [](double number)
-                                { return std::abs(number) > std::numeric_limits<float>::max(); }))
+                                {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
+                        return std::abs(number) > std::numeric_limits<float>::max();
+                    }))
                 {
                     error = "mesh texcoord requires two finite float values";
                     return false;
@@ -150,7 +162,10 @@ bool MeshImporter::convert(const ImportAsset& asset, const ImportContext& contex
             std::array<double, 4> value{};
             if (!numbers(&item, value) ||
                 std::any_of(value.begin(), value.end(), [](double number)
-                            { return std::abs(number) > std::numeric_limits<float>::max(); }))
+                            {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
+                    return std::abs(number) > std::numeric_limits<float>::max();
+                }))
             {
                 error = "mesh tangent/color requires four finite float values";
                 return false;
@@ -168,7 +183,11 @@ bool MeshImporter::convert(const ImportAsset& asset, const ImportContext& contex
             else
             {
                 if (std::any_of(value.begin(), value.end(),
-                                [](double number) { return number < 0 || number > 1; }))
+                                [](double number)
+                                {
+                                    ENGINE_PROFILE_FUNCTION_PROBE();
+                                    return number < 0 || number > 1;
+                                }))
                 {
                     error = "mesh color channels must be in [0, 1]";
                     return false;

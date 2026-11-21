@@ -1,4 +1,5 @@
 #include "runtime/render/movie_pass.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "fs_movie.bin.h"
 #include "runtime/render/render_constants.hpp"
 #include "vs_movie.bin.h"
@@ -21,6 +22,7 @@ struct Vertex
 bool valid_plane(const MoviePlane& plane, std::uint32_t width, std::uint32_t height,
                  std::uint32_t channels)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto row = static_cast<std::uint64_t>(width) * channels;
     const auto size = static_cast<std::uint64_t>(plane.stride_bytes) * (height - 1) + row;
     return plane.width == width && plane.height == height && plane.stride_bytes >= row &&
@@ -29,6 +31,7 @@ bool valid_plane(const MoviePlane& plane, std::uint32_t width, std::uint32_t hei
 
 bgfx::TextureHandle upload(const MoviePlane& plane, std::uint32_t channels)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto row = static_cast<std::size_t>(plane.width) * channels;
     const auto bytes = row * plane.height;
     if (bytes > std::numeric_limits<std::uint32_t>::max())
@@ -52,10 +55,12 @@ bgfx::TextureHandle upload(const MoviePlane& plane, std::uint32_t channels)
 } // namespace
 MoviePass::~MoviePass() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
 }
 bool MoviePass::initialize()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (bgfx::isValid(program_))
     {
         return true;
@@ -107,6 +112,7 @@ bool MoviePass::initialize()
 }
 bool MoviePass::draw(const MovieFrame& frame, std::uint16_t width, std::uint16_t height)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!frame.width || !frame.height || frame.width > 65535 || frame.height > 65535 || !width ||
         !height ||
         (frame.format != schema::MoviePixelFormat::nv12 &&
@@ -204,6 +210,7 @@ bool MoviePass::draw(const MovieFrame& frame, std::uint16_t width, std::uint16_t
 }
 void MoviePass::shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (bgfx::isValid(vertices_))
     {
         bgfx::destroy(vertices_);

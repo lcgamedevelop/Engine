@@ -1,4 +1,6 @@
 #include "runtime/render/passes/debug_draw_pass.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/utils/transform_math.hpp"
 
 #include "runtime/render/render_color.hpp"
@@ -38,8 +40,12 @@ constexpr auto feature_count = static_cast<std::size_t>(RenderFeature::count);
 
 std::uint32_t linear_abgr(std::uint32_t rgba)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto channel = [](std::uint32_t value)
-    { return static_cast<std::uint32_t>(255.0F * display_srgb_to_linear(value / 255.0F) + 0.5F); };
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return static_cast<std::uint32_t>(255.0F * display_srgb_to_linear(value / 255.0F) + 0.5F);
+    };
     return ((rgba & 255U) << 24U) | (channel((rgba >> 8U) & 255U) << 16U) |
            (channel((rgba >> 16U) & 255U) << 8U) | channel(rgba >> 24U);
 }
@@ -47,11 +53,13 @@ std::uint32_t linear_abgr(std::uint32_t rgba)
 
 DebugDrawPass::~DebugDrawPass() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     release();
 }
 
 bool DebugDrawPass::supports_wireframe() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* caps = bgfx::getCaps();
     return caps != nullptr && (caps->supported & BGFX_CAPS_COMPUTE) != 0 &&
            caps->limits.maxComputeBindings >= 2;
@@ -59,12 +67,14 @@ bool DebugDrawPass::supports_wireframe() noexcept
 
 bool DebugDrawPass::supports_meshlet_colors() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return supports_wireframe() && bgfx::getCaps()->limits.maxComputeBindings >= 4 &&
            bgfx::getCaps()->limits.maxInstanceData >= 4;
 }
 
 bool DebugDrawPass::prepare(bool wireframe, bool meshlet_colors)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!initialized_)
     {
         // Upstream 29-debugdraw owns its shared geometry and shader resources.
@@ -73,6 +83,7 @@ bool DebugDrawPass::prepare(bool wireframe, bool meshlet_colors)
     }
     const auto create_program = [](const std::uint8_t* code, std::uint32_t size)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const auto vertex = bgfx::createShader(bgfx::copy(code, size));
         const auto fragment =
             bgfx::createShader(bgfx::copy(fs_debug_wireframe, sizeof(fs_debug_wireframe)));
@@ -125,8 +136,12 @@ bool DebugDrawPass::draw(const WorldSystem& world, Camera camera, std::span<cons
                          std::span<const DebugLine> meshlet_lines, const RenderFrameData& frame,
                          const ViewDrawList& draws)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto enabled = [&](RenderFeature feature)
-    { return features[static_cast<std::size_t>(feature)]; };
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return features[static_cast<std::size_t>(feature)];
+    };
     const bool wireframe = enabled(RenderFeature::wireframe) && supports_wireframe();
     const bool meshlet_colors = enabled(RenderFeature::meshlet_colors) && supports_meshlet_colors();
     if (!meshlet_colors && bgfx::isValid(meshlet_instances_))
@@ -149,7 +164,11 @@ bool DebugDrawPass::draw(const WorldSystem& world, Camera camera, std::span<cons
     if (meshlet_colors)
     {
         if (std::any_of(draws.opaque.begin(), draws.opaque.end(),
-                        [](const auto& item) { return item.instanced_transform; }))
+                        [](const auto& item)
+                        {
+                            ENGINE_PROFILE_FUNCTION_PROBE();
+                            return item.instanced_transform;
+                        }))
         {
             constexpr auto stride = sizeof(std::array<float, 16>);
             if (frame.meshes.size() > UINT32_MAX / stride)
@@ -218,6 +237,7 @@ bool DebugDrawPass::draw(const WorldSystem& world, Camera camera, std::span<cons
                 const auto found = std::find_if(ranges.begin(), ranges.end(),
                                                 [&](const auto& range)
                                                 {
+                                                    ENGINE_PROFILE_FUNCTION_PROBE();
                                                     return range.first_index() == item.first &&
                                                            range.index_count() == item.count;
                                                 });
@@ -350,6 +370,7 @@ bool DebugDrawPass::draw(const WorldSystem& world, Camera camera, std::span<cons
         query.each(
             [&](flecs::entity entity, const auto&)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 const auto node = world.find_node(entity.id());
                 const auto target = node.get_component<Camera>();
                 const auto transform = node.get_component<Transform>();
@@ -408,17 +429,20 @@ bool DebugDrawPass::draw(const WorldSystem& world, Camera camera, std::span<cons
 
 void DebugDrawPass::reset_frame() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     submitted_.fill(false);
 }
 
 bool DebugDrawPass::submitted(RenderFeature feature) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto index = static_cast<std::size_t>(feature);
     return index < submitted_.size() && submitted_[index];
 }
 
 std::uint32_t DebugDrawPass::resource_count() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     // Fixed upstream ddInit creates seven programs, two uniforms, one atlas and two buffers.
     // This integration never creates upstream sprites or custom geometry handles.
     return (initialized_ ? 12U : 0U) + static_cast<std::uint32_t>(bgfx::isValid(wireframe_)) +
@@ -432,6 +456,7 @@ std::uint32_t DebugDrawPass::resource_count() const noexcept
 
 void DebugDrawPass::release() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (bgfx::isValid(wireframe_))
     {
         bgfx::destroy(wireframe_);

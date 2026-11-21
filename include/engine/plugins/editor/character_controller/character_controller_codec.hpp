@@ -1,4 +1,6 @@
 #pragma once
+
+#include "runtime/performance/function_profile.hpp"
 #include "editor/asset_pipeline/components/scene_component_codec.hpp"
 #include "plugins/runtime/character_controller/character_ability_registry.hpp"
 namespace engine::plugins::character_controller
@@ -8,6 +10,7 @@ class CharacterControllerCodec final : public editor::asset_pipeline::SceneCompo
 public:
     explicit CharacterControllerCodec(const CharacterAbilityRegistry& types) : types_(types)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
     }
     [[nodiscard]] schema::ComponentPayload type() const noexcept override;
     [[nodiscard]] std::string_view name() const noexcept override;

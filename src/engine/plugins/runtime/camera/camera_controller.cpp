@@ -1,4 +1,6 @@
 #include "plugins/runtime/camera/camera_controller.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/camera/camera_math.hpp"
 #include "plugins/runtime/camera/camera_runtime.hpp"
 #include "runtime/scene/scene.hpp"
@@ -7,20 +9,24 @@ namespace engine::plugins::camera
 {
 bool CameraController::register_type(ComponentRegistry& registry)
 {
+    ENGINE_PROFILE_FUNCTION();
     return register_component_storage<CameraController, Data, Runtime>(registry);
 }
 CameraController::Runtime* CameraController::runtime() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return runtime_state<Runtime>();
 }
 bool CameraController::get_settings(Data& out) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* p = read_data<Data>();
     out = p ? *p : Data{};
     return p != nullptr;
 }
 bool CameraController::set_settings(const Data& d, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     if (!writable())
     {
@@ -52,6 +58,7 @@ bool CameraController::set_settings(const Data& d, std::string& error)
 }
 bool CameraController::reset()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -94,6 +101,7 @@ bool CameraController::reset()
             std::stable_sort(edges.begin(), edges.end(),
                              [&](auto a, auto b)
                              {
+                                 ENGINE_PROFILE_FUNCTION_PROBE();
                                  return d.machine->transitions[a].priority >
                                         d.machine->transitions[b].priority;
                              });
@@ -109,6 +117,7 @@ bool CameraController::reset()
 bool CameraController::get_parameter(std::string_view name,
                                      schema::CameraParameterValueT& out) const
 {
+    ENGINE_PROFILE_FUNCTION();
     out = {};
     if (!valid())
     {
@@ -126,6 +135,7 @@ bool CameraController::get_parameter(std::string_view name,
 }
 bool CameraController::set_parameters(std::span<const schema::CameraParameterValueT> values)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -156,6 +166,7 @@ bool CameraController::set_parameters(std::span<const schema::CameraParameterVal
 }
 bool CameraController::trigger(std::string_view name)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -172,6 +183,7 @@ bool CameraController::trigger(std::string_view name)
 }
 bool CameraController::reset_trigger(std::string_view name)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -188,6 +200,7 @@ bool CameraController::reset_trigger(std::string_view name)
 }
 bool valid_camera_target(Node camera, Node target)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::set<std::uint64_t> visited;
     std::vector<Node> pending{target};
     while (!pending.empty())
@@ -234,6 +247,7 @@ bool valid_camera_target(Node camera, Node target)
 }
 bool CameraController::set_target(std::string_view slot, Node target)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable() || !detail::slot(*read_data<Data>(), slot))
     {
         return false;
@@ -252,6 +266,7 @@ bool CameraController::set_target(std::string_view slot, Node target)
 }
 bool CameraController::clear_target_override(std::string_view slot)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable() || !detail::slot(*read_data<Data>(), slot))
     {
         return false;
@@ -262,6 +277,7 @@ bool CameraController::clear_target_override(std::string_view slot)
 }
 bool CameraController::get_target(std::string_view slot, Node& out) const
 {
+    ENGINE_PROFILE_FUNCTION();
     out = {};
     if (!valid())
     {
@@ -309,6 +325,7 @@ bool CameraController::get_target(std::string_view slot, Node& out) const
 }
 bool CameraController::get_status(CameraStatus& out) const
 {
+    ENGINE_PROFILE_FUNCTION();
     out = {};
     if (!valid())
     {
@@ -319,6 +336,7 @@ bool CameraController::get_status(CameraStatus& out) const
 }
 bool CameraController::restore_data(const schema::ComponentDataT& d)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* value = d.payload.AsCameraControllerData();
     std::string error;
     return d.flags && value && set_settings(*value, error) && restore_flags(d);
@@ -326,6 +344,7 @@ bool CameraController::restore_data(const schema::ComponentDataT& d)
 bool CameraController::remap_node_references(schema::ComponentDataT& d,
                                              std::span<const schema::NodeIdMappingT> mappings) const
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* value = d.payload.AsCameraControllerData();
     if (!value)
     {

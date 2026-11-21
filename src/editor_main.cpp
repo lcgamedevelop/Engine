@@ -17,6 +17,7 @@
 #if ENGINE_HAS_ANIMATION_RETARGET_PLUGIN
 #include "plugins/runtime/animation_retarget/animation_retarget.hpp"
 #endif
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #if ENGINE_HAS_TERRAIN_EDITOR
 #include "plugins/editor/terrain/terrain_codec.hpp"
@@ -149,6 +150,7 @@ using engine::PathUtils;
 
 void print_usage()
 {
+    ENGINE_PROFILE_FUNCTION();
     std::fputs("Usage: editor_app --project <project-directory> "
                "[--runtime-dir <persistent-directory>] [--frames <positive-count>] [--width "
                "<pixels>] [--height <pixels>] [--workers <0..64>]\n",
@@ -219,6 +221,7 @@ int run_editor(const fs::path& project_root, engine::editor::EditorEnvironment& 
            engine::RenderSystem& renderer, engine::TaskSystem& tasks,
            std::vector<engine::ScenePreparation*>& preparations)
     {
+            ENGINE_PROFILE_FUNCTION_PROBE();
         const bool assembled = assemble_runtime_plugins(stage, world, window, physics, navigation,
                                                         renderer, tasks, preparations,
 #if ENGINE_HAS_CAMERA
@@ -248,6 +251,7 @@ int run_editor(const fs::path& project_root, engine::editor::EditorEnvironment& 
                         engine::WindowSystem& window, engine::AnimationSystem& animation,
                         engine::MoviePlayer* movies) -> std::unique_ptr<engine::ScriptRuntime>
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return std::make_unique<engine::plugins::script::ScriptSystem>(
             world.resource_loader(), &world, &renderer, &ui, &physics, &navigation, &input, &window,
             &animation, movies);
@@ -278,6 +282,7 @@ int run_editor(const fs::path& project_root, engine::editor::EditorEnvironment& 
     std::uint64_t frames = 0;
     const int result = [&]()
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (!threads.initialize(config))
         {
             LogSystem::write(LogLevel::error,
@@ -416,6 +421,7 @@ int run_editor(const fs::path& project_root, engine::editor::EditorEnvironment& 
 #if ENGINE_HAS_RESOURCE_GRAPH_PLUGIN
         const auto domain = [&](engine::TaskConfig value)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             if (!value.max_concurrency)
             {
                 value.max_concurrency = threads.worker_count();
@@ -462,6 +468,7 @@ int run_editor(const fs::path& project_root, engine::editor::EditorEnvironment& 
 #if ENGINE_HAS_ASSET_PIPELINE
         import = [&pipeline, &project_root](std::string& error)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             if (!pipeline.build_assets(project_root))
             {
                 error = pipeline.last_error();
@@ -508,7 +515,10 @@ int run_editor(const fs::path& project_root, engine::editor::EditorEnvironment& 
         }
         runtime.set_event_observer(
             [](void* context, const SDL_Event& event)
-            { static_cast<engine::plugins::ui::UiEditorCommands*>(context)->observe_event(event); },
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                static_cast<engine::plugins::ui::UiEditorCommands*>(context)->observe_event(event);
+            },
             ui_editor.get());
 #endif
 #if ENGINE_HAS_CAMERA_EDITOR
@@ -612,14 +622,20 @@ int run_editor(const fs::path& project_root, engine::editor::EditorEnvironment& 
             {
                 mesh_writer = [&modeling](const engine::Node& node, const fs::path& destination,
                                           std::string& error)
-                { return modeling->export_mesh(node, destination, error); };
+                {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
+                    return modeling->export_mesh(node, destination, error);
+                };
             }
 #endif
             persistence = std::make_unique<engine::editor::ScenePersistence>(
                 *runtime.world(), project_root, std::move(mesh_writer),
                 [&preview](std::string_view path,
                            std::span<const engine::editor::SceneSavedResource> changed)
-                { preview->mark_saved(path, changed); });
+                {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
+                    preview->mark_saved(path, changed);
+                });
             if (!persistence->register_commands(*editor->commands()))
             {
                 LogSystem::write(LogLevel::error, "Cannot register scene persistence commands");
@@ -633,6 +649,7 @@ int run_editor(const fs::path& project_root, engine::editor::EditorEnvironment& 
             [&editor, &preview, &runtime](std::string_view path, std::uint64_t& scene_id,
                                           std::string& error)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 scene_id = 0;
                 nlohmann::json status;
                 if (!preview->active() || runtime.world()->scene() == nullptr ||
@@ -653,6 +670,7 @@ int run_editor(const fs::path& project_root, engine::editor::EditorEnvironment& 
             },
             [&editor](std::string& error)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 nlohmann::json result;
                 return editor->commands()->execute("refresh_scene_preview",
                                                    {{"discardChanges", false}}, result, error);
@@ -746,6 +764,7 @@ int run_editor(const fs::path& project_root, engine::editor::EditorEnvironment& 
 #endif
             const auto render_preview = [&](engine::Camera camera = {})
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 switch (runtime.renderer()->render(camera))
                 {
                 case engine::RenderSubmitStatus::submitted:
@@ -772,6 +791,7 @@ int run_editor(const fs::path& project_root, engine::editor::EditorEnvironment& 
                 else if (
                     [&]()
                     {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
                         for (auto* preparation : preview_preparations)
                         {
                             if (preparation->prepare_scope({}, {}) ==
@@ -831,6 +851,7 @@ int run_editor(const fs::path& project_root, engine::editor::EditorEnvironment& 
                 else if (
                     [&]
                     {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
                         engine::ScenePreparationSnapshot progress;
                         const auto prepared = runtime.renderer()->scope_status({}, progress)
                                                   ? progress.state
@@ -965,6 +986,7 @@ int run_editor(const fs::path& project_root, engine::editor::EditorEnvironment& 
 
 int main(int argc, char* argv[])
 {
+    ENGINE_PROFILE_FUNCTION();
     engine::RuntimeSettings settings;
     auto& config = settings.engine;
     auto& parallel = settings.parallel;

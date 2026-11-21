@@ -1,3 +1,6 @@
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
+
 #if defined(ENGINE_HAS_DESTRUCTION_PLUGIN) && ENGINE_HAS_DESTRUCTION_PLUGIN
 
 #include "plugins/runtime/script/bindings/destruction_binding.hpp"
@@ -67,6 +70,7 @@ Object.freeze(DestructionComponent);
 
 void damage(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<destruction::DestructionComponent>(arguments, 8);
     double x = 0;
     double y = 0;
@@ -85,6 +89,7 @@ void damage(const Arguments& arguments)
 }
 void damage_async(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<destruction::DestructionComponent>(arguments, 8);
     auto* context = BindingContext::current(arguments);
     auto* system = destruction::DestructionSystem::instance();
@@ -103,6 +108,7 @@ void damage_async(const Arguments& arguments)
         arguments.set_return(context->submit_async(
             [=](std::function<void(bool)> completed) mutable
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 return system->request_damage(value, {x, y, z}, radius, amount, impulse,
                                               std::move(completed));
             }));
@@ -110,6 +116,7 @@ void damage_async(const Arguments& arguments)
 }
 void support(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<destruction::DestructionComponent>(arguments, 5);
     auto* context = BindingContext::current(arguments);
     control_detail::Json ids;
@@ -146,6 +153,7 @@ void support(const Arguments& arguments)
 }
 void owns_fragment(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto value = binding_detail::component<destruction::DestructionComponent>(arguments, 3);
     std::uint64_t node_id = 0;
     arguments.set_return(value && BindingContext::identifier(arguments, 2, node_id) &&
@@ -153,12 +161,14 @@ void owns_fragment(const Arguments& arguments)
 }
 void reset(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<destruction::DestructionComponent>(arguments, 2);
     arguments.set_return(value && value.reset());
 }
 
 void retire_fragments(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<destruction::DestructionComponent>(arguments, 4);
     arguments.set_return({});
     double max_age = 0;
@@ -175,6 +185,7 @@ void retire_fragments(const Arguments& arguments)
 
 void stress(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<destruction::DestructionComponent>(arguments, 8);
     arguments.set_return({});
     double x = 0;
@@ -197,6 +208,7 @@ void stress(const Arguments& arguments)
 }
 void statistic(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto value = binding_detail::component<destruction::DestructionComponent>(arguments, 2);
     arguments.set_return({});
     if (!value)
@@ -229,14 +241,17 @@ void statistic(const Arguments& arguments)
 
 std::string_view DestructionBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "DestructionComponent";
 }
 std::string_view DestructionBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 bool DestructionBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.integer("DestructionKind",
                       static_cast<int>(destruction::DestructionComponent::component_type)) &&
            vm.function("DestructionAdd",

@@ -1,4 +1,5 @@
 #include "runtime_entry.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include <SDL3/SDL_main.h>
 #include <chrono>
@@ -6,6 +7,7 @@
 
 int main(int argc, char* argv[])
 {
+    ENGINE_PROFILE_FUNCTION();
     engine::host_detail::RuntimeAppState state;
     engine::AppConfig config;
 #if defined(ENGINE_PROJECT_APPLICATION_NAME)

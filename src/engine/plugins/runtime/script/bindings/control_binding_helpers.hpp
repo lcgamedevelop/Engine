@@ -1,4 +1,6 @@
 #pragma once
+
+#include "runtime/performance/function_profile.hpp"
 #include "plugins/runtime/script/bindings/binding_helpers.hpp"
 #include "runtime/schema/control_json_generated.hpp"
 namespace engine::plugins::script::bindings::control_detail
@@ -6,6 +8,7 @@ namespace engine::plugins::script::bindings::control_detail
 using Json = nlohmann::json;
 inline vm::NativeValue native(const Json& value)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     if (value.is_boolean())
     {
         return value.get<bool>();
@@ -44,6 +47,7 @@ inline vm::NativeValue native(const Json& value)
 }
 inline bool argument(const Arguments& a, int index, Json& out)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     std::string text;
     if (!BindingContext::text(a, index, text) || text.size() > 4 * 1024 * 1024)
     {
@@ -54,6 +58,7 @@ inline bool argument(const Arguments& a, int index, Json& out)
 }
 template <class T> void get_settings(const Arguments& a)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     auto c = binding_detail::component<T>(a, 2);
     a.set_return({});
     typename T::Data data;
@@ -64,6 +69,7 @@ template <class T> void get_settings(const Arguments& a)
 }
 template <class T> void set_settings(const Arguments& a)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     auto c = binding_detail::component<T>(a, 3);
     Json j;
     typename T::Data data;

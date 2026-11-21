@@ -1,5 +1,7 @@
 #include "runtime/resource/resource_catalog.hpp"
 
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/resource/builtin_resources.hpp"
 
 #include <algorithm>
@@ -23,6 +25,7 @@ namespace
 
 bool valid_relative_path(std::string_view value)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (value.empty())
     {
         return false;
@@ -52,6 +55,7 @@ bool valid_relative_path(std::string_view value)
 
 bool valid_entry(const schema::AssetEntryT& entry)
 {
+    ENGINE_PROFILE_FUNCTION();
     constexpr std::uint64_t maximum_size = 64U * 1024U * 1024U;
     constexpr auto maximum_offset =
         static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
@@ -60,7 +64,10 @@ bool valid_entry(const schema::AssetEntryT& entry)
            entry.format_version == 2 && entry.content_hash.size() == 16 &&
            std::all_of(
                entry.content_hash.begin(), entry.content_hash.end(), [](char value)
-               { return (value >= '0' && value <= '9') || (value >= 'a' && value <= 'f'); }) &&
+               {
+                   ENGINE_PROFILE_FUNCTION_PROBE();
+                   return (value >= '0' && value <= '9') || (value >= 'a' && value <= 'f');
+               }) &&
            entry.header_size >= 16 && entry.header_size <= 65536 &&
            entry.header_size <= entry.content_size && entry.content_size <= maximum_size &&
            entry.location && valid_relative_path(entry.location->mount) &&
@@ -75,6 +82,7 @@ bool valid_entry(const schema::AssetEntryT& entry)
 
 bool ResourceCatalog::assign(const schema::AssetCatalogDataT& data)
 {
+    ENGINE_PROFILE_ZONE("ResourceCatalog.assign");
     if (data.schema_version != 4 || data.revision.empty() || data.entries.size() > 65536 ||
         (data.target_platform != "macos" && data.target_platform != "ios" &&
          data.target_platform != "windows" && data.target_platform != "android" &&
@@ -186,6 +194,7 @@ bool ResourceCatalog::assign(const schema::AssetCatalogDataT& data)
 
 const schema::AssetEntryT* ResourceCatalog::find(std::string_view guid) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (snapshot_)
     {
         const auto found = snapshot_->entries.find(guid);
@@ -199,18 +208,21 @@ const schema::AssetEntryT* ResourceCatalog::find(std::string_view guid) const no
 
 const GuidMap& ResourceCatalog::identities() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     static const GuidMap empty;
     return snapshot_ ? snapshot_->identities : empty;
 }
 
 const schema::AssetCatalogDataT& ResourceCatalog::data() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     static const schema::AssetCatalogDataT empty;
     return snapshot_ ? snapshot_->data : empty;
 }
 
 std::string_view ResourceCatalog::revision() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return data().revision;
 }
 

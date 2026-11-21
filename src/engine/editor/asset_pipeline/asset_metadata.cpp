@@ -1,4 +1,5 @@
 #include "editor/asset_pipeline/asset_metadata.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/file_text.hpp"
 
 #include "editor/asset_pipeline/asset_database.hpp"
@@ -26,6 +27,7 @@ namespace fs = std::filesystem;
 
 bool read_meta(const fs::path& path, std::string& text, std::string& guid, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!engine::editor::file_detail::read_text(path, text))
     {
         error = "Cannot read asset metadata: " + PathUtils::to_utf8(path);
@@ -53,6 +55,7 @@ bool read_or_create_asset_meta(const fs::path& source, const fs::path& staging,
                                bool allow_create, std::string& text, std::string& guid,
                                std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     text.clear();
     guid.clear();
     auto meta = source;
@@ -128,6 +131,7 @@ bool update_subresource_meta(const ImportAsset& source, const fs::path& staging,
                              const std::set<std::string>& remembered, std::string& text,
                              std::vector<ImportAsset>& identities, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     identities.clear();
     auto parsed = toml::parse(text);
     if (!parsed)
@@ -279,6 +283,7 @@ bool update_subresource_meta(const ImportAsset& source, const fs::path& staging,
 bool ensure_asset_guid(const fs::path& project_root, const fs::path& source,
                        std::string_view importer, std::string& guid, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     guid.clear();
     error.clear();
     std::error_code code;

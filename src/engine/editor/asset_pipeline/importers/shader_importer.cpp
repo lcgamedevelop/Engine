@@ -1,4 +1,6 @@
 #include "editor/asset_pipeline/importers/shader_importer.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/asset_pipeline/importer_utils.hpp"
 #include "editor/asset_pipeline/material_parameters.hpp"
 
@@ -38,6 +40,7 @@ namespace
 bool builtin_texture(std::string_view path, const ImportContext& context,
                      std::vector<Guid>& dependencies, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     Guid guid;
     if (!path.starts_with("builtin://") || !context.identities.path_to_guid(path, guid))
     {
@@ -49,6 +52,7 @@ bool builtin_texture(std::string_view path, const ImportContext& context,
 
 bool read_sampler(const toml::table& table, schema::ShaderSamplerT& sampler, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     sampler.name = table["name"].value_or(std::string{});
     sampler.uniform_name = table["uniform"].value_or(std::string{});
     sampler.default_texture = table["default_texture"].value_or(std::string{});
@@ -98,15 +102,23 @@ bool read_sampler(const toml::table& table, schema::ShaderSamplerT& sampler, std
 
 bool uniform_name(std::string_view name)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto letter = [](char value)
-    { return (value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z') || value == '_'; };
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return (value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z') || value == '_';
+    };
     return !name.empty() && letter(name.front()) &&
            std::all_of(name.begin(), name.end(), [letter](char value)
-                       { return letter(value) || (value >= '0' && value <= '9'); });
+                       {
+               ENGINE_PROFILE_FUNCTION_PROBE();
+               return letter(value) || (value >= '0' && value <= '9');
+           });
 }
 
 bool reserved_uniform(std::string_view name)
 {
+    ENGINE_PROFILE_FUNCTION();
     constexpr std::array reserved = {"u_normal_transform",
                                      "u_ambient",
                                      "u_ambient_sky",
@@ -180,15 +192,18 @@ bool reserved_uniform(std::string_view name)
 
 schema::AssetKind ShaderImporter::kind() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::shader;
 }
 bool ShaderImporter::matches(const std::filesystem::path& source) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return source_extension(source) == ".shader";
 }
 bool ShaderImporter::convert(const ImportAsset& asset, const ImportContext& context,
                              std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     toml::table table;
     if (!read_table(asset.source, table, error))
     {
@@ -227,6 +242,7 @@ bool ShaderImporter::convert(const ImportAsset& asset, const ImportContext& cont
             const auto offset = (*parameter_table)["offset"].value_or(std::int64_t{0});
             const auto uniform_letter = [](char character)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 return (character >= 'a' && character <= 'z') ||
                        (character >= 'A' && character <= 'Z') || character == '_';
             };
@@ -235,6 +251,7 @@ bool ShaderImporter::convert(const ImportAsset& asset, const ImportContext& cont
                 !std::all_of(parameter->uniform_name.begin(), parameter->uniform_name.end(),
                              [&](char character)
                              {
+                                 ENGINE_PROFILE_FUNCTION_PROBE();
                                  return uniform_letter(character) ||
                                         (character >= '0' && character <= '9');
                              }) ||
@@ -403,7 +420,11 @@ bool ShaderImporter::convert(const ImportAsset& asset, const ImportContext& cont
                                                           : shader.surface_fragment_code;
         destination.resize(bytes.size());
         std::transform(bytes.begin(), bytes.end(), destination.begin(),
-                       [](std::byte value) { return std::to_integer<std::uint8_t>(value); });
+                       [](std::byte value)
+                       {
+                           ENGINE_PROFILE_FUNCTION_PROBE();
+                           return std::to_integer<std::uint8_t>(value);
+                       });
         std::error_code cleanup_error;
         std::filesystem::remove(compiled, cleanup_error);
     }
@@ -417,6 +438,7 @@ bool ShaderImporter::convert(const ImportAsset& asset, const ImportContext& cont
 bool ShaderImporter::inspect_batch(const ImportContext& context, std::string& fingerprint,
                                    std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string platform;
     std::string profile;
     std::string version;
@@ -448,6 +470,7 @@ bool ShaderImporter::inspect_batch(const ImportContext& context, std::string& fi
 bool ShaderImporter::scan_dependencies(ImportAsset& asset, const ImportContext& context,
                                        std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     asset.build_dependencies.clear();
     asset.runtime_dependencies.clear();
     toml::table table;

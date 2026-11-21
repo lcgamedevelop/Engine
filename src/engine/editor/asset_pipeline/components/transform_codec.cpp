@@ -1,4 +1,6 @@
 #include "editor/asset_pipeline/components/transform_codec.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/core/guid_map.hpp"
 
@@ -13,20 +15,26 @@ namespace engine::editor::asset_pipeline
 
 schema::ComponentPayload TransformCodec::type() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::ComponentPayload::TransformData;
 }
 
 std::string_view TransformCodec::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "transform";
 }
 
 bool TransformCodec::validate(const schema::ComponentDataT& component, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
 
     const auto* value = component.payload.AsTransformData();
     const auto finite = [](const schema::Vec3& vector)
-    { return std::isfinite(vector.x()) && std::isfinite(vector.y()) && std::isfinite(vector.z()); };
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return std::isfinite(vector.x()) && std::isfinite(vector.y()) && std::isfinite(vector.z());
+    };
     if (value == nullptr || !finite(value->position) || !finite(value->rotation) ||
         !finite(value->scale) || value->scale.x() == 0 || value->scale.y() == 0 ||
         value->scale.z() == 0)
@@ -41,6 +49,7 @@ bool TransformCodec::validate(const schema::ComponentDataT& component, std::stri
 bool TransformCodec::read(const toml::table& table, schema::ComponentDataT& component,
                           std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
 
     std::array<double, 3> position{0, 0, 0};
     std::array<double, 3> rotation{0, 0, 0};
@@ -63,6 +72,7 @@ bool TransformCodec::read(const toml::table& table, schema::ComponentDataT& comp
 
 void TransformCodec::write(const schema::ComponentDataT& component, toml::table& value) const
 {
+    ENGINE_PROFILE_FUNCTION();
 
     const auto* transform = component.payload.AsTransformData();
     value.insert("type", "transform");

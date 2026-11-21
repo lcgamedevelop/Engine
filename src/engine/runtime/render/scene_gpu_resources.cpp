@@ -1,4 +1,6 @@
 #include "runtime/render/scene_gpu_resources.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/render/scene_render_query.hpp"
 #include "runtime/scene/ecs_scene.hpp"
 #include "runtime/scene/ecs_storage.hpp"
@@ -17,11 +19,13 @@ namespace engine
 
 RenderSystem::SceneGpuResources::~SceneGpuResources() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     release();
 }
 
 bool RenderSystem::SceneGpuResources::initialize()
 {
+    ENGINE_PROFILE_FUNCTION();
     release();
     frame_time_uniform =
         bgfx::createUniform("u_frame_time", bgfx::UniformFreq::Frame, bgfx::UniformType::Vec4);
@@ -139,6 +143,7 @@ bool RenderSystem::SceneGpuResources::initialize()
 
 void RenderSystem::SceneGpuResources::release() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     frame_data = {};
     draw_lists = {};
     view_stats.clear();
@@ -156,6 +161,8 @@ void RenderSystem::SceneGpuResources::release() noexcept
     textures.clear();
 
     release_capture();
+    hdr_capture_completion.reset();
+    hdr_capture_pending = false;
     if (bgfx::isValid(hdr_capture_readback))
     {
         bgfx::destroy(hdr_capture_readback);
@@ -260,6 +267,7 @@ void RenderSystem::SceneGpuResources::release() noexcept
 
 std::uint32_t RenderSystem::SceneGpuResources::resource_count() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     std::uint32_t count = atmosphere.resource_count() + debug_draw.resource_count() +
                           static_cast<std::uint32_t>(bgfx::isValid(frame_time_uniform)) +
                           static_cast<std::uint32_t>(bgfx::isValid(normal_transform)) +
@@ -391,6 +399,7 @@ std::uint32_t RenderSystem::SceneGpuResources::resource_count() const noexcept
 bool RenderSystem::SceneGpuResources::collect_ibl(const Scene* scene,
                                                   RenderPreparation& preparation)
 {
+    ENGINE_PROFILE_FUNCTION();
     EnvironmentSettings snapshot;
     const EnvironmentSettings* environment = nullptr;
     std::array<ResourceHandle, 3> sources{};
@@ -409,6 +418,7 @@ bool RenderSystem::SceneGpuResources::collect_ibl(const Scene* scene,
             [&](flecs::entity entity, const auto& stored, const EnvironmentRuntime& runtime,
                 const ecs_detail::NodeRuntime& state)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 if (render_detail::scope_node(*scene, entity.id()) && state.active &&
                     state.visible_in_hierarchy && stored.state.flags.enabled &&
                     stored.state.flags.visible)
@@ -444,15 +454,11 @@ bool RenderSystem::SceneGpuResources::collect_ibl(const Scene* scene,
         {
             if (previous)
             {
-                if (--preparation.texture_users[previous] == 0)
-                {
-                    preparation.unused_textures.insert(previous);
-                }
+                preparation.release_texture(*this, previous);
             }
             if (source)
             {
-                ++preparation.texture_users[source];
-                preparation.unused_textures.erase(source);
+                preparation.retain_texture(*this, source);
             }
             previous = source;
         }
@@ -461,4 +467,32 @@ bool RenderSystem::SceneGpuResources::collect_ibl(const Scene* scene,
     return true;
 }
 
+void RenderSystem::RenderPreparation::retain_texture(SceneGpuResources& resources,
+                                                      const Resource* source)
+{
+    ENGINE_PROFILE_FUNCTION();
+    if (++texture_users[source] == 1)
+    {
+        unused_textures.erase(source);
+        if (const auto found = resources.textures.find(source); found != resources.textures.end())
+        {
+            found->second.memory.retain();
+        }
+    }
+}
+
+void RenderSystem::RenderPreparation::release_texture(SceneGpuResources& resources,
+                                                       const Resource* source)
+{
+    ENGINE_PROFILE_FUNCTION();
+    const auto users = texture_users.find(source);
+    if (users != texture_users.end() && users->second != 0 && --users->second == 0)
+    {
+        unused_textures.insert(source);
+        if (const auto found = resources.textures.find(source); found != resources.textures.end())
+        {
+            found->second.memory.release_requested();
+        }
+    }
+}
 } // namespace engine

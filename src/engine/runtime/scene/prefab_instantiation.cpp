@@ -1,6 +1,8 @@
 #include "runtime/scene/scene.hpp"
 
 #include "runtime/core/guid_map.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/resource/types/prefab_resource.hpp"
 #include "runtime/scene/ecs_storage.hpp"
 #include "runtime/scene/resource_binding.hpp"
@@ -17,6 +19,7 @@ namespace
 
 bool descendant_of(const Node& node, const Node& root)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (auto ancestor = node; ancestor; ancestor = ancestor.parent())
     {
         if (ancestor == root)
@@ -29,6 +32,7 @@ bool descendant_of(const Node& node, const Node& root)
 
 bool valid_fields(const std::vector<std::string>& fields)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::unordered_set<std::string_view> names;
     for (const auto& field : fields)
     {
@@ -45,6 +49,7 @@ bool valid_fields(const std::vector<std::string>& fields)
 Node Scene::instantiate_prefab(std::string_view path, std::string_view name,
                                std::vector<Node>* created)
 {
+    ENGINE_PROFILE_ZONE("Scene.instantiatePrefab");
     if (created)
     {
         created->clear();
@@ -113,6 +118,7 @@ Node Scene::instantiate_prefab(std::string_view path, std::string_view name,
     node_sequence_ = sequence;
     const auto rollback = [this, candidate_start]() -> Node
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         rollback_created(candidate_start);
         return {};
     };
@@ -170,6 +176,7 @@ Node Scene::instantiate_prefab(std::string_view path, std::string_view name,
 
 bool Scene::collect_prefab_instances(std::vector<schema::PrefabInstanceDataT>& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     std::vector<Node> nodes;
     if (!collect_nodes(nodes))
@@ -180,6 +187,7 @@ bool Scene::collect_prefab_instances(std::vector<schema::PrefabInstanceDataT>& o
     std::sort(nodes.begin(), nodes.end(),
               [&](Node left, Node right)
               {
+                  ENGINE_PROFILE_FUNCTION_PROBE();
                   return current.entity(left.id()).get<ecs_detail::NodeRuntime>().prefab_order <
                          current.entity(right.id()).get<ecs_detail::NodeRuntime>().prefab_order;
               });
@@ -195,6 +203,7 @@ bool Scene::collect_prefab_instances(std::vector<schema::PrefabInstanceDataT>& o
 
 bool Scene::valid_prefab_instance(const schema::PrefabInstanceDataT& instance) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto root = find_local_node(instance.root_id);
     if (!root || !GuidMap::valid_guid(instance.prefab_guid) || instance.node_mappings.empty())
     {
@@ -296,6 +305,7 @@ bool Scene::valid_prefab_instance(const schema::PrefabInstanceDataT& instance) c
 
 bool Scene::set_prefab_instance(const schema::PrefabInstanceDataT& instance)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid_prefab_instance(instance))
     {
         return false;
@@ -325,6 +335,7 @@ bool Scene::set_prefab_instance(const schema::PrefabInstanceDataT& instance)
 
 bool Scene::remove_prefab_instance(std::uint64_t root_local_id) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     auto root = find_local_node(root_local_id);
     if (!root || !world_.can_modify())
     {

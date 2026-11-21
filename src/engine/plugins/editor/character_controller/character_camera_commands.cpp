@@ -1,4 +1,6 @@
 #include "plugins/editor/character_controller/character_camera_commands.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/commands/component_commands.hpp"
 #include "plugins/runtime/character_controller/character_camera.hpp"
 #include "runtime/schema/control_json_generated.hpp"
@@ -7,11 +9,13 @@ namespace engine::plugins::character_controller
 bool register_character_camera_commands(WorldSystem& world, editor::SceneCommands& scenes,
                                         editor::EditorCommands& commands)
 {
+    ENGINE_PROFILE_FUNCTION();
     using Json = nlohmann::json;
     if (!editor::components::register_component<CharacterCamera, schema::CharacterCameraDataT>(
             world, scenes, commands, "character_camera",
             [](Node, const Json& args, auto& data, auto&, std::string& error)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 if (!editor::components::fields(args, {"enabled", "settings"}, error) ||
                     !args.contains("settings"))
                 {
@@ -21,7 +25,10 @@ bool register_character_camera_commands(WorldSystem& world, editor::SceneCommand
                 return schema::control_json::read(args["settings"], data, error);
             },
             [](auto, const auto& data)
-            { return Json{{"settings", schema::control_json::write(data)}}; }))
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return Json{{"settings", schema::control_json::write(data)}};
+            }))
     {
         return false;
     }

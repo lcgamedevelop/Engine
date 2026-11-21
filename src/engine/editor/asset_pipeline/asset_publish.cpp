@@ -1,4 +1,5 @@
 #include "editor/asset_pipeline/asset_publish.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/file_text.hpp"
 
 #include "editor/asset_pipeline/asset_io.hpp"
@@ -16,6 +17,7 @@ namespace
 
 bool restore(const std::filesystem::path& cache, const toml::table& journal, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto workspace = cache / ".asset-publish";
     std::error_code filesystem_error;
     for (const auto& name : {std::string("gen"), std::string("catalog.bin")})
@@ -55,6 +57,7 @@ bool restore(const std::filesystem::path& cache, const toml::table& journal, std
 bool recover_publish(const std::filesystem::path& cache, AssetDatabase& database,
                      std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto workspace = cache / ".asset-publish";
     std::error_code filesystem_error;
     if (!std::filesystem::exists(workspace, filesystem_error))
@@ -117,6 +120,7 @@ bool publish_assets(const std::filesystem::path& cache, AssetDatabase& database,
                     const std::vector<AssetRecord>& records, const std::string& revision,
                     std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto workspace = cache / ".asset-publish";
     std::error_code filesystem_error;
     const bool had_gen = std::filesystem::exists(cache / "gen", filesystem_error);

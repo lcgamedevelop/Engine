@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/navigation/navigation_agent.hpp"
 #include "runtime/scene/component.hpp"
 
@@ -17,6 +19,7 @@ public:
     NavigationAgent() noexcept = default;
     explicit NavigationAgent(Component component) noexcept : Component(component, component_type)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
     }
     [[nodiscard]] static bool register_type(ComponentRegistry& registry);
     using Runtime = NavigationAgentRuntime;

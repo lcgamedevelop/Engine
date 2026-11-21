@@ -1,4 +1,5 @@
 #include "plugins/runtime/camera/modules/bounds_camera_module.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/camera/camera_math.hpp"
 namespace engine::plugins::camera
 {
@@ -7,6 +8,7 @@ namespace
 bool frame(const schema::CameraBoundsDataT& d, const CameraEvaluationContext& c, Vec3& origin,
            detail::Q& q)
 {
+    ENGINE_PROFILE_FUNCTION();
     origin = {};
     q = {0, 0, 0, 1};
     if (d.anchor_slot.empty())
@@ -26,6 +28,7 @@ bool frame(const schema::CameraBoundsDataT& d, const CameraEvaluationContext& c,
 bool BoundsCameraModule::validate(const Data& d, const schema::CameraControllerDataT& def,
                                   std::string& e)
 {
+    ENGINE_PROFILE_FUNCTION();
     return (detail::slot(def, d.anchor_slot, true) && detail::finite(d.minimum) &&
             detail::finite(d.maximum) && detail::bounded(d.margin, 0, 1e6) &&
             d.maximum.x() - d.minimum.x() >= 2 * d.margin &&
@@ -36,6 +39,7 @@ bool BoundsCameraModule::validate(const Data& d, const schema::CameraControllerD
 bool BoundsCameraModule::evaluate(const Data& d, const Runtime&, Runtime& next,
                                   const CameraEvaluationContext& c, CameraPose& p)
 {
+    ENGINE_PROFILE_FUNCTION();
     Vec3 origin;
     detail::Q q;
     if (!frame(d, c, origin, q))
@@ -54,6 +58,7 @@ bool BoundsCameraModule::evaluate(const Data& d, const Runtime&, Runtime& next,
 bool BoundsCameraModule::check(const Data& d, const CameraEvaluationContext& c, const CameraPose& p,
                                bool& accepted)
 {
+    ENGINE_PROFILE_FUNCTION();
     CameraPose test = p;
     Runtime current, next;
     accepted = false;

@@ -1,4 +1,5 @@
 #include "plugins/runtime/effects/effect_model_loader.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/resource/types/source_resource.hpp"
 
 #include "plugins/runtime/effects/effect_resources.hpp"
@@ -13,10 +14,12 @@ EffectModelLoader::EffectModelLoader(Effekseer::ModelLoaderRef loader,
                                      EffectResources& resources) noexcept
     : loader_(std::move(loader)), resources_(resources)
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 Effekseer::ModelRef EffectModelLoader::Load(const char16_t* path)
 {
+    ENGINE_PROFILE_FUNCTION();
     ResourceReference resource;
     const auto logical = effect_utf8(path);
     if (!loader_ || !resources_.resolve(logical, schema::AssetKind::source, resource) ||
@@ -41,6 +44,7 @@ Effekseer::ModelRef EffectModelLoader::Load(const char16_t* path)
 
 void EffectModelLoader::Unload(Effekseer::ModelRef model)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (loader_ && model)
     {
         loader_->Unload(std::move(model));

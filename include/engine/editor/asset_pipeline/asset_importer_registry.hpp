@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "editor/asset_pipeline/asset_importer.hpp"
 
 #include <memory>
@@ -13,6 +15,7 @@ public:
     [[nodiscard]] bool initialize();
     template <typename T> [[nodiscard]] bool add(bool fallback = false)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         std::unique_ptr<AssetImporter> importer = std::make_unique<T>();
         return add(importer, fallback);
     }

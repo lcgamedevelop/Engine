@@ -1,4 +1,6 @@
 #include "plugins/editor/character_controller/character_controller_codec.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/asset_pipeline/control_toml.hpp"
 #include "plugins/editor/character_controller/character_camera_codec.hpp"
 #include "plugins/editor/character_controller/character_visual_codec.hpp"
@@ -7,14 +9,17 @@ namespace engine::plugins::character_controller
 {
 schema::ComponentPayload CharacterControllerCodec::type() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::ComponentPayload::CharacterControllerData;
 }
 std::string_view CharacterControllerCodec::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "character_controller";
 }
 bool CharacterControllerCodec::validate(const schema::ComponentDataT& c, std::string& e) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* d = c.payload.AsCharacterControllerData();
     if (!d)
     {
@@ -26,6 +31,7 @@ bool CharacterControllerCodec::validate(const schema::ComponentDataT& c, std::st
 bool CharacterControllerCodec::read(const toml::table& t, schema::ComponentDataT& c,
                                     std::string& e) const
 {
+    ENGINE_PROFILE_FUNCTION();
     nlohmann::json j;
     schema::CharacterControllerDataT d;
     if (!editor::asset_pipeline::control_toml::read_component(t, j, e) ||
@@ -44,6 +50,7 @@ bool CharacterControllerCodec::read(const toml::table& t, schema::ComponentDataT
 }
 void CharacterControllerCodec::write(const schema::ComponentDataT& c, toml::table& t) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* d = c.payload.AsCharacterControllerData();
     if (!d)
     {
@@ -56,6 +63,7 @@ bool CharacterControllerCodec::remap_node_references(
     schema::ComponentDataT& c, std::span<const schema::NodeIdMappingT> mappings,
     std::string& e) const
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* d = c.payload.AsCharacterControllerData();
     if (!d)
     {
@@ -63,6 +71,7 @@ bool CharacterControllerCodec::remap_node_references(
     }
     const auto remap = [&](std::uint64_t& id)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (!id)
         {
             return true;
@@ -86,6 +95,7 @@ bool CharacterControllerCodec::remap_node_references(
 }
 bool register_controller_codec(const CharacterAbilityRegistry& types)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!types.frozen())
     {
         return false;

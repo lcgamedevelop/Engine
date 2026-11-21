@@ -1,4 +1,5 @@
 #include "runtime/animation/animation_ik.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/scene/animator_runtime.hpp"
 
@@ -23,6 +24,7 @@ namespace
 void correct_joint(std::vector<ozz::math::SoaTransform>& locals, std::size_t dfs,
                    const ozz::math::SimdQuaternion& correction)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto pose = local_pose(locals[dfs / 4], dfs % 4);
     ozz::math::SimdQuaternion current{ozz::math::simd_float4::Load(
         static_cast<float>(pose.rotation().x()), static_cast<float>(pose.rotation().y()),
@@ -38,6 +40,7 @@ void correct_joint(std::vector<ozz::math::SoaTransform>& locals, std::size_t dfs
 bool fk(const CompiledSkeleton& skeleton, std::vector<ozz::math::SoaTransform>& locals,
         std::vector<ozz::math::Float4x4>& models)
 {
+    ENGINE_PROFILE_FUNCTION();
     ozz::animation::LocalToModelJob job;
     job.skeleton = skeleton.skeleton.get();
     job.input = ozz::make_span(locals);
@@ -49,6 +52,7 @@ bool collect_ik_operations(Animator actor, const CompiledSkeleton& skeleton,
                            const ozz::math::Float4x4& model_to_world, const Vec3& origin,
                            std::vector<IkOperation>& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     Animator::Data settings;
     if (!actor.get_settings(settings))
@@ -127,6 +131,7 @@ bool apply_ik(const CompiledSkeleton& skeleton, std::span<const IkOperation> ope
               std::vector<ozz::math::SoaTransform>& locals,
               std::vector<ozz::math::Float4x4>& models)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (const auto& operation : operations)
     {
         const auto target = operation.attachment_target

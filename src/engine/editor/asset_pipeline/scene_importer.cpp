@@ -1,4 +1,6 @@
 #include "editor/asset_pipeline/scene_importer.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/file_text.hpp"
 
 #include "editor/asset_pipeline/asset_io.hpp"
@@ -29,6 +31,7 @@ namespace
 
 bool validate_scene(const schema::SceneDataT& scene, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (scene.schema_version != 6 || scene.info == nullptr || scene.info->name.empty())
     {
         error = "scene requires schema version 5 and a name";
@@ -141,6 +144,7 @@ bool validate_scene(const schema::SceneDataT& scene, std::string& error)
             std::none_of(camera->second->components.begin(), camera->second->components.end(),
                          [](const auto& component)
                          {
+                             ENGINE_PROFILE_FUNCTION_PROBE();
                              return component->flags->enabled &&
                                     component->payload.type == schema::ComponentPayload::CameraData;
                          }))
@@ -155,6 +159,7 @@ bool validate_scene(const schema::SceneDataT& scene, std::string& error)
 bool parse_component(const toml::table& table, schema::ComponentDataT& component,
                      std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     using namespace asset_pipeline;
     component.flags = std::make_unique<schema::ComponentFlagsT>();
     component.flags->enabled = table["enabled"].value_or(true);
@@ -179,18 +184,21 @@ bool parse_component(const toml::table& table, schema::ComponentDataT& component
 
 bool SceneImporter::validate(const schema::SceneDataT& data, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     return validate_scene(data, error);
 }
 
 bool SceneImporter::read_component(const toml::table& table, schema::ComponentDataT& output,
                                    std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     return parse_component(table, output, error);
 }
 
 bool SceneImporter::write_component(const schema::ComponentDataT& component, toml::table& output,
                                     std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* codec = asset_pipeline::find_scene_component_codec(component.payload.type);
     if (!component.flags || !codec || !codec->validate(component, error))
     {
@@ -210,6 +218,7 @@ bool SceneImporter::read_nodes(const toml::array& nodes,
                                std::vector<std::unique_ptr<schema::NodeDataT>>& output,
                                std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     std::vector<std::unique_ptr<schema::NodeDataT>> candidate;
     for (const auto& item : nodes)
@@ -265,6 +274,7 @@ bool SceneImporter::read_nodes(const toml::array& nodes,
 bool SceneImporter::write_nodes(const std::vector<std::unique_ptr<schema::NodeDataT>>& input,
                                 toml::array& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     for (const auto& node : input)
     {
@@ -298,6 +308,7 @@ bool SceneImporter::write_nodes(const std::vector<std::unique_ptr<schema::NodeDa
 bool SceneImporter::read(const std::filesystem::path& source, schema::SceneDataT& output,
                          std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     error.clear();
     std::string text;
@@ -345,6 +356,7 @@ bool SceneImporter::read(const std::filesystem::path& source, schema::SceneDataT
 bool SceneImporter::write(const std::filesystem::path& destination, const schema::SceneDataT& data,
                           std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     if (!validate(data, error))
     {

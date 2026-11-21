@@ -79,6 +79,7 @@ def export(args):
         for name in files:
             shutil.copy2(safe_file(runtime, name), stage / name)
         shutil.copy2(Path(__file__).with_name("bootstrap.mjs"), stage / "bootstrap.mjs")
+        shutil.copy2(Path(__file__).with_name("profiling.mjs"), stage / "profiling.mjs")
         shutil.copy2(Path(__file__).parent / "templates/index.html", stage / "index.html")
         (stage / "storage").mkdir()
         shutil.copy2(Path(__file__).parent / "storage/storage.mjs", stage / "storage/storage.mjs")

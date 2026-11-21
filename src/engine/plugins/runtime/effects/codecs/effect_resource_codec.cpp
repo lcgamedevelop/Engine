@@ -1,4 +1,6 @@
 #include "plugins/runtime/effects/codecs/effect_resource_codec.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/effects/effect_validation.hpp"
 #include "runtime/core/guid_map.hpp"
 #include "runtime/utils/path_utils.hpp"
@@ -11,11 +13,13 @@ namespace engine::plugins::effects
 {
 schema::AssetKind EffectResourceCodec::kind() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::effect;
 }
 bool EffectResourceCodec::decode(const schema::AssetEntryT& entry, ByteView payload,
                                  std::unique_ptr<Resource>& output, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     if (output || entry.kind != kind() || payload.empty() || payload.size() > 64U * 1024U * 1024U)
     {
@@ -35,6 +39,7 @@ bool EffectResourceCodec::decode(const schema::AssetEntryT& entry, ByteView payl
 }
 bool EffectResourceCodec::validate_data(const Resource& resource, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     const auto* data = resource_detail::data<ResourceType>(&resource);
     if (!data || data->data.size() > 64U * 1024U * 1024U ||
@@ -60,7 +65,10 @@ bool EffectResourceCodec::validate_data(const Resource& resource, std::string& e
             relative.filename().empty() || relative == "." || relative.filename() == ".." ||
             path != PathUtils::to_utf8(relative.lexically_normal()) ||
             std::any_of(path.begin(), path.end(), [](unsigned char value)
-                        { return value < 32 || value == 127 || value == ':' || value == '\\'; }) ||
+                        {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return value < 32 || value == 127 || value == ':' || value == '\\';
+            }) ||
             !GuidMap::valid_guid(binding->guid) || !declares(resource, binding->guid) ||
             (binding->kind != schema::AssetKind::texture &&
              binding->kind != schema::AssetKind::source) ||
@@ -76,6 +84,7 @@ bool EffectResourceCodec::validate_data(const Resource& resource, std::string& e
 bool EffectResourceCodec::validate_dependencies(const Resource& resource, ResourceView dependencies,
                                                 std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     const auto* data = resource_detail::data<ResourceType>(&resource);
     if (!data)

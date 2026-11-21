@@ -1,4 +1,6 @@
 #include "plugins/runtime/script/bindings/script_binding_registry.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #if ENGINE_HAS_CAMERA_PLUGIN
 #include "plugins/runtime/script/bindings/camera_controller_binding.hpp"
 #endif
@@ -68,6 +70,7 @@ namespace engine::plugins::script::bindings
 
 bool ScriptBindingRegistry::initialize()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!bindings_.empty())
     {
         return false;
@@ -138,9 +141,13 @@ bool ScriptBindingRegistry::initialize()
 
 bool ScriptBindingRegistry::add_binding(std::unique_ptr<ScriptBinding>& binding)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (binding == nullptr || binding->name().empty() ||
         std::any_of(bindings_.begin(), bindings_.end(), [&binding](const auto& existing)
-                    { return existing->name() == binding->name(); }))
+                    {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return existing->name() == binding->name();
+        }))
     {
         return false;
     }
@@ -150,6 +157,7 @@ bool ScriptBindingRegistry::add_binding(std::unique_ptr<ScriptBinding>& binding)
 
 bool ScriptBindingRegistry::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     if (bindings_.empty())
     {
         return false;
@@ -166,6 +174,7 @@ bool ScriptBindingRegistry::register_functions(vm::ScriptVm& vm) const
 
 std::string ScriptBindingRegistry::source() const
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string result = R"js(
 const native = globalThis.__engineNative;
 const key = {};

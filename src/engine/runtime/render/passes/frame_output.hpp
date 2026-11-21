@@ -1,5 +1,11 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
+#include "runtime/performance/memory_profiling.hpp"
+#include "runtime/render/gpu_memory_tracker.hpp"
+#include "runtime/render/gpu_readback.hpp"
+
 #include <bgfx/bgfx.h>
 #include <cstddef>
 #include <cstdint>
@@ -11,41 +17,56 @@ namespace engine::render_detail
 class FrameOutput final
 {
 public:
-    FrameOutput() = default;
+    explicit FrameOutput(GpuMemoryTracker* memory) noexcept : memory_(memory)
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+    }
     ~FrameOutput() noexcept;
     FrameOutput(const FrameOutput&) = delete;
     FrameOutput& operator=(const FrameOutput&) = delete;
     [[nodiscard]] bool prepare(std::uint16_t width, std::uint16_t height);
     void present(std::uint32_t clear_color, bool movie);
-    [[nodiscard]] bool capture();
-    [[nodiscard]] bool collect(std::uint32_t frame);
+    [[nodiscard]] bool capture(SceneScopeId scope, std::uint64_t scene);
+    void retire_capture() noexcept;
+    [[nodiscard]] GpuReadbackStatus collect(std::uint32_t frame);
     [[nodiscard]] const std::vector<std::byte>& pixels() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return pixels_;
     }
     [[nodiscard]] std::uint32_t capture_width() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return capture_width_;
     }
     [[nodiscard]] std::uint32_t capture_height() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return capture_height_;
     }
     [[nodiscard]] bgfx::FrameBufferHandle target() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return target_;
     }
     [[nodiscard]] std::uint16_t width() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return width_;
     }
     [[nodiscard]] std::uint16_t height() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return height_;
     }
     void release() noexcept;
 
 private:
+    void release_target() noexcept;
+    void release_readback() noexcept;
+    GpuMemoryTracker* memory_;
+    [[no_unique_address]] GpuMemoryAllocation color_memory_;
+    [[no_unique_address]] GpuMemoryAllocation readback_memory_;
     bgfx::FrameBufferHandle target_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle color_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle readback_ = BGFX_INVALID_HANDLE;
@@ -54,8 +75,9 @@ private:
     bgfx::VertexBufferHandle vertices_ = BGFX_INVALID_HANDLE;
     std::uint16_t width_ = 0, height_ = 0;
     std::uint16_t capture_width_ = 0, capture_height_ = 0;
-    std::uint32_t ready_frame_ = 0;
     bool pending_ = false;
     std::vector<std::byte> pixels_;
+    [[no_unique_address]] memory_profile::Allocation pixels_allocation_;
+    GpuReadback readback_completion_;
 };
 } // namespace engine::render_detail

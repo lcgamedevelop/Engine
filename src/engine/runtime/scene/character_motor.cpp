@@ -1,4 +1,5 @@
 #include "runtime/scene/character_motor.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/scene/character_motor_runtime.hpp"
 
@@ -15,11 +16,13 @@ namespace
 
 bool bounded(float value, float minimum, float maximum) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::isfinite(value) && value >= minimum && value <= maximum;
 }
 
 bool valid_velocity(const Vec3& value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::isfinite(value.x()) && std::isfinite(value.y()) && std::isfinite(value.z()) &&
            std::abs(value.x()) <= 10000.0 && std::abs(value.y()) <= 10000.0 &&
            std::abs(value.z()) <= 10000.0;
@@ -27,6 +30,7 @@ bool valid_velocity(const Vec3& value) noexcept
 
 bool externally_writable(CharacterMotor motor) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!motor.valid())
     {
         return false;
@@ -48,16 +52,19 @@ bool externally_writable(CharacterMotor motor) noexcept
 
 bool CharacterMotor::register_type(ComponentRegistry& registry)
 {
+    ENGINE_PROFILE_FUNCTION();
     return register_component_storage<CharacterMotor, Data, Runtime>(registry);
 }
 
 CharacterMotor::Runtime* CharacterMotor::runtime() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return runtime_state<Runtime>();
 }
 
 bool CharacterMotor::valid_settings(const schema::CharacterMotorDataT& value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return bounded(value.radius, 0.01F, 1000.0F) && bounded(value.half_height, 0.01F, 1000.0F) &&
            bounded(value.max_slope_degrees, 0.0F, 89.0F) &&
            bounded(value.step_height, 0.0F, 1000.0F) &&
@@ -68,6 +75,7 @@ bool CharacterMotor::valid_settings(const schema::CharacterMotorDataT& value) no
 
 bool CharacterMotor::get_settings(Data& output) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* value = read_data<Data>();
     output = value ? *value : Data{};
     return value != nullptr;
@@ -75,6 +83,7 @@ bool CharacterMotor::get_settings(Data& output) const noexcept
 
 bool CharacterMotor::set_settings(const schema::CharacterMotorDataT& value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -90,6 +99,7 @@ bool CharacterMotor::set_settings(const schema::CharacterMotorDataT& value) noex
 
 bool CharacterMotor::restore_data(const schema::ComponentDataT& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!value.flags)
     {
         return false;
@@ -118,6 +128,7 @@ bool CharacterMotor::restore_data(const schema::ComponentDataT& value)
 
 bool CharacterMotor::set_velocity(const Vec3& value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -132,6 +143,7 @@ bool CharacterMotor::set_velocity(const Vec3& value) noexcept
 
 bool CharacterMotor::clear_input() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable() || !externally_writable(*this))
     {
         return false;
@@ -143,6 +155,7 @@ bool CharacterMotor::clear_input() noexcept
 
 bool CharacterMotor::add_velocity(const Vec3& delta) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -170,6 +183,7 @@ bool CharacterMotor::add_velocity(const Vec3& delta) noexcept
 
 Vec3 CharacterMotor::velocity() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return {};
@@ -179,6 +193,7 @@ Vec3 CharacterMotor::velocity() const noexcept
 
 bool CharacterMotor::jump(float speed) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -194,6 +209,7 @@ bool CharacterMotor::jump(float speed) noexcept
 
 bool CharacterMotor::grounded() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return false;
@@ -203,6 +219,7 @@ bool CharacterMotor::grounded() const noexcept
 
 bool CharacterMotor::get_status(CharacterMotorStatus& output) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     output = valid() ? runtime()->status : CharacterMotorStatus{};
     return valid();
 }

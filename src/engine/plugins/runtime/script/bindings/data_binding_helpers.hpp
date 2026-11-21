@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "plugins/runtime/script/vm/script_vm.hpp"
 #include "plugins/runtime/script/vm/text_encoding.hpp"
 
@@ -7,6 +9,7 @@ namespace engine::plugins::script::bindings::binding_detail
 {
 [[nodiscard]] inline bool decode_text(ByteView bytes, std::string& output)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     output.clear();
     if (bytes.size() > vm::maximum_text_size)
     {

@@ -1,4 +1,5 @@
 #include "editor/editor_environment.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/utils/hash_utils.hpp"
 
 #include "editor/asset_pipeline/project_lock.hpp"
@@ -27,6 +28,7 @@ namespace fs = std::filesystem;
 
 std::string application_name(const std::string& project_identity)
 {
+    ENGINE_PROFILE_FUNCTION();
     return "engine-editor-" + hash::hex(hash::fnv1a(project_identity));
 }
 } // namespace
@@ -34,15 +36,18 @@ std::string application_name(const std::string& project_identity)
 EditorEnvironment::EditorEnvironment(ProjectSystem& project, fs::path persistent_directory)
     : project_(project), persistent_directory_(std::move(persistent_directory))
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 EditorEnvironment::~EditorEnvironment() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
 }
 
 bool EditorEnvironment::initialize()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (initialized_ || !project_.is_initialized() || App::is_initialized())
     {
         return false;
@@ -155,6 +160,7 @@ bool EditorEnvironment::initialize()
 
 void EditorEnvironment::shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!session_marker_.empty())
     {
         std::error_code error;
@@ -182,12 +188,14 @@ void EditorEnvironment::shutdown() noexcept
 
 bool EditorEnvironment::is_initialized() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return initialized_ && project_.is_initialized() && App::is_initialized() &&
            App::assets_path() == builtin_path_;
 }
 
 bool EditorEnvironment::refresh_resources(GameplaySession& gameplay)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!is_initialized())
     {
         return false;
@@ -204,6 +212,7 @@ bool EditorEnvironment::refresh_resources(GameplaySession& gameplay)
 bool EditorEnvironment::apply_resources(const schema::AssetCatalogDataT& data,
                                         GameplaySession& gameplay)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!is_initialized() || session_marker_.empty() || !session_lease_ ||
         data.target_platform != ENGINE_TARGET_PLATFORM ||
         !gameplay.set_resources(data, {{"content", builtin_path_}}))

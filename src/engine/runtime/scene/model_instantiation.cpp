@@ -1,5 +1,7 @@
 #include "runtime/scene/scene.hpp"
 
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/resource/types/model_resource.hpp"
 #include "runtime/scene/mesh_renderer.hpp"
 #include "runtime/scene/resource_binding.hpp"
@@ -13,6 +15,7 @@ namespace engine
 Node Scene::instantiate_model(std::string_view path, std::string_view name,
                               std::vector<Node>* created)
 {
+    ENGINE_PROFILE_ZONE("Scene.instantiateModel");
     if (created)
     {
         created->clear();
@@ -36,6 +39,7 @@ Node Scene::instantiate_model(std::string_view path, std::string_view name,
     }
     const auto rollback = [this, first_order]() -> Node
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         rollback_created(first_order);
         return {};
     };

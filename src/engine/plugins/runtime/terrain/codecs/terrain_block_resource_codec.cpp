@@ -1,4 +1,6 @@
 #include "plugins/runtime/terrain/codecs/terrain_block_resource_codec.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "plugins/runtime/terrain/terrain_samples.hpp"
 
@@ -11,12 +13,14 @@ namespace engine::plugins::terrain
 {
 schema::AssetKind TerrainBlockResourceCodec::kind() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::terrain_block;
 }
 
 bool TerrainBlockResourceCodec::decode(const schema::AssetEntryT& entry, ByteView payload,
                                        std::unique_ptr<Resource>& output, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     if (output || entry.kind != kind() || payload.empty() || payload.size() > 4U * 1024U * 1024U)
     {
@@ -37,6 +41,7 @@ bool TerrainBlockResourceCodec::decode(const schema::AssetEntryT& entry, ByteVie
 
 bool TerrainBlockResourceCodec::validate_data(const Resource& resource, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     const auto* data = resource_detail::data<ResourceType>(&resource);
     if (!data || data->schema_version != 2 || data->key.lod() > 15 ||
@@ -46,9 +51,17 @@ bool TerrainBlockResourceCodec::validate_data(const Resource& resource, std::str
                              data->density.size() != 32768) ||
         data->layers.size() != data->density.size() ||
         !std::all_of(data->density.begin(), data->density.end(),
-                     [](float v) { return std::isfinite(v); }) ||
+                     [](float v)
+                     {
+                         ENGINE_PROFILE_FUNCTION_PROBE();
+                         return std::isfinite(v);
+                     }) ||
         !std::all_of(data->layers.begin(), data->layers.end(),
-                     [](const auto& layer) { return terrain_detail::layer_valid(layer, 256); }))
+                     [](const auto& layer)
+                     {
+                         ENGINE_PROFILE_FUNCTION_PROBE();
+                         return terrain_detail::layer_valid(layer, 256);
+                     }))
     {
         error = "Invalid terrain block dimensions, samples, layers or dependencies";
         return false;
@@ -60,6 +73,7 @@ bool TerrainBlockResourceCodec::validate_dependencies(const Resource& resource,
                                                       ResourceView dependencies,
                                                       std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     if (!resource.info().dependencies.empty() || !dependencies.empty())
     {

@@ -1,3 +1,5 @@
+#include "runtime/performance/profiling.hpp"
+
 #if defined(ENGINE_HAS_NAVIGATION_CROWD_PLUGIN) && ENGINE_HAS_NAVIGATION_CROWD_PLUGIN
 
 #include "plugins/runtime/script/bindings/navigation_agent_binding.hpp"
@@ -53,6 +55,7 @@ Object.freeze(NavigationAgent);
 
 navigation_crowd::NavigationAgent component(const Arguments& arguments, int count)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto node = BindingContext::node(arguments);
     auto agent = node.valid() ? node.get_component<navigation_crowd::NavigationAgent>()
                               : navigation_crowd::NavigationAgent{};
@@ -66,6 +69,7 @@ navigation_crowd::NavigationAgent component(const Arguments& arguments, int coun
 
 void configure(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto agent = component(arguments, 10);
     schema::NavigationAgentDataT settings;
@@ -85,6 +89,7 @@ void configure(const Arguments& arguments)
 
 void move_to(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto agent = component(arguments, 6);
     double x = 0.0;
@@ -99,6 +104,7 @@ void move_to(const Arguments& arguments)
 
 void stop(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto agent = component(arguments, 3);
     if (agent.valid())
@@ -110,6 +116,7 @@ void stop(const Arguments& arguments)
 
 void state(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     const auto agent = component(arguments, 3);
     if (!agent)
@@ -141,6 +148,7 @@ void state(const Arguments& arguments)
 
 void velocity(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     const auto agent = component(arguments, 3);
     if (agent.valid())
@@ -154,16 +162,19 @@ void velocity(const Arguments& arguments)
 
 std::string_view NavigationAgentBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "NavigationAgent";
 }
 
 std::string_view NavigationAgentBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 
 bool NavigationAgentBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.integer("NavigationAgentKind",
                       static_cast<int>(navigation_crowd::NavigationAgent::component_type)) &&
            vm.function("NavigationAgentAdd",

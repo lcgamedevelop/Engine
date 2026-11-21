@@ -1,3 +1,5 @@
+#include "runtime/performance/profiling.hpp"
+
 #if ENGINE_HAS_CHARACTER_CONTROLLER_PLUGIN
 #include "plugins/runtime/script/bindings/character_camera_binding.hpp"
 #include "plugins/runtime/character_controller/character_camera.hpp"
@@ -22,6 +24,7 @@ Object.freeze(CharacterCamera.prototype);Object.freeze(CharacterCamera);
 )js";
 void angles(const Arguments& a)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto c = binding_detail::component<Adapter>(a, 2);
     a.set_return({});
     double yaw = 0, pitch = 0;
@@ -32,6 +35,7 @@ void angles(const Arguments& a)
 }
 void set_angles(const Arguments& a)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto c = binding_detail::component<Adapter>(a, 4);
     double yaw = 0, pitch = 0;
     if (c && BindingContext::number(a, 2, yaw) && BindingContext::number(a, 3, pitch))
@@ -41,6 +45,7 @@ void set_angles(const Arguments& a)
 }
 void look(const Arguments& a)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto c = binding_detail::component<Adapter>(a, 7);
     double v[5]{};
     if (!c)
@@ -58,20 +63,24 @@ void look(const Arguments& a)
 }
 void toggle(const Arguments& a)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto c = binding_detail::component<Adapter>(a, 2);
     a.set_return(c && c.toggle_view());
 }
 } // namespace
 std::string_view CharacterCameraBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "CharacterCamera";
 }
 std::string_view CharacterCameraBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 bool CharacterCameraBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.integer("CharacterCameraKind", static_cast<int>(Adapter::component_type)) &&
            vm.function("CharacterCameraAdd", binding_detail::add_component<Adapter>) &&
            vm.function("CharacterCameraSettings", control_detail::get_settings<Adapter>) &&

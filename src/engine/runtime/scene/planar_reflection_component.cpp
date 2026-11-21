@@ -1,4 +1,5 @@
 #include "runtime/scene/planar_reflection_component.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/scene/ecs_storage.hpp"
 
@@ -9,11 +10,13 @@ namespace engine
 
 bool PlanarReflectionComponent::register_type(ComponentRegistry& registry)
 {
+    ENGINE_PROFILE_FUNCTION();
     return register_component_storage<PlanarReflectionComponent, Data>(registry);
 }
 
 bool PlanarReflectionComponent::get_settings(Data& output) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* value = read_data<Data>();
     output = value ? *value : Data{};
     return value != nullptr;
@@ -21,6 +24,7 @@ bool PlanarReflectionComponent::get_settings(Data& output) const noexcept
 
 bool PlanarReflectionComponent::set_settings(const PlanarReflectionSettings& settings) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -36,6 +40,7 @@ bool PlanarReflectionComponent::set_settings(const PlanarReflectionSettings& set
 
 bool PlanarReflectionComponent::restore_data(const schema::ComponentDataT& data)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!data.flags)
     {
         return false;

@@ -18,3 +18,9 @@
 #define ENGINE_PROFILE_PLOT(name, value) static_cast<void>(0)
 #define ENGINE_PROFILE_MESSAGE(text, size) static_cast<void>(0)
 #endif
+
+#if defined(ENGINE_ENABLE_TRACY) && defined(ENGINE_ENABLE_TRACY_FUNCTIONS)
+#define ENGINE_PROFILE_FUNCTION() ZoneScoped
+#else
+#define ENGINE_PROFILE_FUNCTION() static_cast<void>(0)
+#endif

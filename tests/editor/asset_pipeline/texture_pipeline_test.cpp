@@ -243,14 +243,15 @@ bool shader_dependencies(engine::editor::AssetPipelineSystem& pipeline, const Fi
     constexpr const char* shader_guid = "b0000000-0000-4000-8000-000000000010";
     constexpr std::array sources = {"vs_cube.sc",          "fs_cube.sc",
                                     "varying.def.sc",      "pbr_helpers.sh",
-                                    "shadow_helpers.sh",   "material_helpers.sh",
+                                    "vsm/vsm_fragment.sh", "material_helpers.sh",
                                     "csm_helpers.sh",      "pbr_surface.sh",
                                     "pbr_lighting.sh",     "local_shadow_helpers.sh",
                                     "cluster/lighting.sh", "fs_surface.sc",
                                     "dfg_approx.sh",       "hex_tiling.sh",
                                     "cube_fragment.sh",    "surface_fragment.sh",
                                     "terrain_surface.sh",  "pbr_surface_types.sh",
-                                    "rvt_surface.sh",      "rvt_cache.sh"};
+                                    "rvt_surface.sh",      "rvt_cache.sh",
+                                    "vsm/vsm_address.sh"};
     constexpr std::array identities = {
         "b0000000-0000-4000-8000-000000000011", "b0000000-0000-4000-8000-000000000012",
         "b0000000-0000-4000-8000-000000000013", "b0000000-0000-4000-8000-000000000014",
@@ -261,7 +262,8 @@ bool shader_dependencies(engine::editor::AssetPipelineSystem& pipeline, const Fi
         "b0000000-0000-4000-8000-00000000001d", "b0000000-0000-4000-8000-00000000001e",
         "b0000000-0000-4000-8000-00000000001f", "b0000000-0000-4000-8000-000000000020",
         "b0000000-0000-4000-8000-000000000021", "b0000000-0000-4000-8000-000000000022",
-        "b0000000-0000-4000-8000-000000000023", "b0000000-0000-4000-8000-000000000024"};
+        "b0000000-0000-4000-8000-000000000023", "b0000000-0000-4000-8000-000000000024",
+        "b0000000-0000-4000-8000-000000000025"};
     const auto upstream = std::filesystem::path(ENGINE_TEST_SOURCE_DIR).parent_path() /
                           "src/engine/runtime/render/shaders";
     for (std::size_t index = 0; index < sources.size(); ++index)
@@ -383,9 +385,12 @@ bool tests()
     engine::TaskSystem tasks(threads, {"Editor", 4, engine::TaskPriority::low});
     engine::editor::AssetPipelineSystem pipeline(tasks);
     EngineConfig config;
-    if (!fixture.initialize() ||
-        !(test_support::register_resource_codecs(resources) && resources.initialize(config)) ||
-        !threads.initialize(config) || !tasks.initialize(config) || !pipeline.initialize(config))
+    if (!expect(fixture.initialize(), "initialize the color texture fixture") ||
+        !expect(test_support::register_resource_codecs(resources) && resources.initialize(config),
+                "initialize color texture resources") ||
+        !expect(threads.initialize(config) && tasks.initialize(config),
+                "initialize color texture worker domain") ||
+        !expect(pipeline.initialize(config), "initialize the color texture import pipeline"))
     {
         return false;
     }
@@ -425,7 +430,7 @@ bool tests()
     }
     auto native_meta = original_meta;
     const auto storage = native_meta.find("storage = \"basis\"");
-    if (storage == std::string::npos)
+    if (!expect(storage != std::string::npos, "locate the default texture storage setting"))
     {
         return false;
     }
@@ -623,8 +628,10 @@ bool additional_source_tests()
     editor::AssetPipelineSystem pipeline(tasks);
     test_support::ResourceServices services(&threads);
     auto& resources = services.core;
-    if (!fixture.initialize() || !threads.initialize({}) || !tasks.initialize({}) ||
-        !pipeline.initialize({}) || !services.initialize({}))
+    if (!expect(fixture.initialize(), "initialize the HDR texture fixture") ||
+        !expect(threads.initialize({}) && tasks.initialize({}), "initialize HDR texture workers") ||
+        !expect(pipeline.initialize({}), "initialize the HDR texture import pipeline") ||
+        !expect(services.initialize({}), "initialize HDR texture resource loading"))
     {
         return false;
     }
@@ -698,7 +705,7 @@ bool additional_source_tests()
         caps.limits.maxTextureSize = 8192;
         caps.formats[bgfx::TextureFormat::RGBA16F] = BGFX_CAPS_FORMAT_TEXTURE_2D;
         engine::ResourceReference source;
-        if (!services.load(asset->guid, source))
+        if (!expect(services.load(asset->guid, source), "load resolved HDR texture"))
         {
             return false;
         }
@@ -715,7 +722,16 @@ bool additional_source_tests()
                 return false;
             }
             std::array<basist::half_float, 4> pixel{};
-            std::memcpy(pixel.data(), prepared.pixels.data(), sizeof(pixel));
+            std::memcpy(pixel.data(), prepared.view.data(), sizeof(pixel));
+            const auto memory = memory_profile::snapshot();
+            const auto& staging =
+                memory.pools[static_cast<std::size_t>(memory_profile::Pool::texture_prepare)];
+            if (memory.mode != memory_profile::Mode::off &&
+                !expect(staging.current_bytes >= prepared.bytes && staging.live_allocations == 1,
+                        "Prepared HDR pixels hold one traced staging allocation"))
+            {
+                return false;
+            }
             if (!expect(std::abs(basist::half_to_float(pixel[0]) - 4.0F) < 0.15F &&
                             std::abs(basist::half_to_float(pixel[1]) - 2.0F) < 0.15F &&
                             std::abs(basist::half_to_float(pixel[2]) - 1.0F) < 0.15F &&
@@ -724,6 +740,15 @@ bool additional_source_tests()
             {
                 return false;
             }
+        }
+        prepared = {};
+        const auto memory = memory_profile::snapshot();
+        const auto& staging =
+            memory.pools[static_cast<std::size_t>(memory_profile::Pool::texture_prepare)];
+        if (!expect(staging.current_bytes == 0 && staging.live_allocations == 0,
+                    "Discarding a prepared mip releases its traced staging allocation"))
+        {
+            return false;
         }
         prepared.mip = 0;
         if (!expect(!prepared.describe(&services.loader, source.handle(), caps, 127),
@@ -998,5 +1023,8 @@ bool ktx_tests()
 
 int main()
 {
-    return tests() && additional_source_tests() && ktx_tests() ? 0 : 1;
+    return expect(tests(), "validate color texture import") &&
+                   expect(additional_source_tests(), "validate HDR and other texture sources") &&
+                   expect(ktx_tests(), "validate KTX import")
+               ? 0 : 1;
 }

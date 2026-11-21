@@ -1,4 +1,6 @@
 #include "runtime/resource/virtual_file_system.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/utils/path_utils.hpp"
 
@@ -19,6 +21,7 @@ namespace fs = std::filesystem;
 
 bool file_fail(std::string& error, std::string_view message, const std::error_code& code = {})
 {
+    ENGINE_PROFILE_FUNCTION();
     error.assign(message);
     if (code)
     {
@@ -29,6 +32,7 @@ bool file_fail(std::string& error, std::string_view message, const std::error_co
 
 bool valid_path(const fs::path& path, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto text = PathUtils::to_utf8(path);
     return (path.is_absolute() && !text.empty() && text.find('\0') == std::string::npos) ||
            file_fail(error, "Expected an absolute native file path");
@@ -36,6 +40,7 @@ bool valid_path(const fs::path& path, std::string& error)
 
 bool path_status(const fs::path& path, fs::file_status& status, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid_path(path, error))
     {
         return false;
@@ -51,6 +56,7 @@ bool path_status(const fs::path& path, fs::file_status& status, std::string& err
 
 bool destination_missing(const fs::path& path, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     fs::file_status status;
     return path_status(path, status, error) &&
            (!fs::exists(status) || file_fail(error, "Destination already exists"));
@@ -58,6 +64,7 @@ bool destination_missing(const fs::path& path, std::string& error)
 
 bool read_entry(const fs::path& path, FileEntry& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     fs::file_status status;
     if (!path_status(path, status, error) || !fs::exists(status))
     {
@@ -89,6 +96,7 @@ bool read_entry(const fs::path& path, FileEntry& output, std::string& error)
 
 fs::path temporary_path(const fs::path& path)
 {
+    ENGINE_PROFILE_FUNCTION();
     static std::atomic<std::uint64_t> sequence{0};
     const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
     auto temporary = path;
@@ -105,6 +113,7 @@ struct DirectoryEntries
 SDL_EnumerationResult SDLCALL enumerate_entry(void* userdata, const char* directory,
                                               const char* name)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto& result = *static_cast<DirectoryEntries*>(userdata);
     FileEntry entry;
     if (!read_entry(PathUtils::from_utf8(directory) / PathUtils::from_utf8(name), entry,
@@ -119,6 +128,7 @@ SDL_EnumerationResult SDLCALL enumerate_entry(void* userdata, const char* direct
 
 bool VirtualFileSystem::stat(const fs::path& path, FileEntry& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     error.clear();
     return read_entry(path, output, error);
@@ -127,6 +137,7 @@ bool VirtualFileSystem::stat(const fs::path& path, FileEntry& output, std::strin
 bool VirtualFileSystem::list_directory(const fs::path& path, std::vector<FileEntry>& output,
                                        std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     error.clear();
     fs::file_status status;
@@ -148,6 +159,7 @@ bool VirtualFileSystem::list_directory(const fs::path& path, std::vector<FileEnt
     std::sort(result.entries.begin(), result.entries.end(),
               [](const FileEntry& left, const FileEntry& right)
               {
+                  ENGINE_PROFILE_FUNCTION_PROBE();
                   return left.path.filename().generic_u8string() <
                          right.path.filename().generic_u8string();
               });
@@ -157,6 +169,7 @@ bool VirtualFileSystem::list_directory(const fs::path& path, std::vector<FileEnt
 
 bool VirtualFileSystem::write_file(const fs::path& path, ByteView bytes, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     fs::file_status status;
     if (!path_status(path, status, error))
@@ -198,6 +211,7 @@ bool VirtualFileSystem::write_file(const fs::path& path, ByteView bytes, std::st
 
 bool VirtualFileSystem::create_directory(const fs::path& path, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     fs::file_status status;
     if (!path_status(path, status, error))
@@ -225,6 +239,7 @@ bool VirtualFileSystem::create_directory(const fs::path& path, std::string& erro
 bool VirtualFileSystem::copy_file(const fs::path& source, const fs::path& destination,
                                   std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     fs::file_status status;
     if (!path_status(source, status, error) || !destination_missing(destination, error))
@@ -260,6 +275,7 @@ bool VirtualFileSystem::copy_file(const fs::path& source, const fs::path& destin
 bool VirtualFileSystem::move(const fs::path& source, const fs::path& destination,
                              std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     fs::file_status status;
     if (!path_status(source, status, error) || !destination_missing(destination, error))
@@ -277,6 +293,7 @@ bool VirtualFileSystem::move(const fs::path& source, const fs::path& destination
 
 bool VirtualFileSystem::remove(const fs::path& path, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     fs::file_status status;
     if (!path_status(path, status, error))

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "plugins/runtime/script/bindings/binding_context.hpp"
 #include "runtime/scene/node.hpp"
 
@@ -7,6 +9,7 @@ namespace engine::plugins::script::bindings::binding_detail
 {
 template <class T> [[nodiscard]] T component(const Arguments& arguments, int expected_count)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     arguments.set_return(false);
     if (arguments.count() != expected_count)
     {
@@ -18,6 +21,7 @@ template <class T> [[nodiscard]] T component(const Arguments& arguments, int exp
 
 template <class T> void add_component(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     arguments.set_return(false);
     if (arguments.count() != 2)
     {

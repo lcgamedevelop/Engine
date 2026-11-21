@@ -6,6 +6,7 @@
 
 #include "plugins/runtime/navigation_crowd/navigation_agent.hpp"
 #include "runtime/navigation/navigation_system.hpp"
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/scene/character_motor.hpp"
 #include "runtime/scene/collider.hpp"
@@ -25,11 +26,13 @@ namespace
 
 bool same_position(const Vec3& left, const Vec3& right) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return left.x() == right.x() && left.y() == right.y() && left.z() == right.z();
 }
 
 bool can_drive(const Node& node, Transform transform) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     TransformSettings pose;
     if (node.parent().valid() || !transform.get_settings(pose) || !transform.active())
     {
@@ -53,6 +56,7 @@ bool can_drive(const Node& node, Transform transform) noexcept
 
 NavigationAgentSettings agent_settings(const schema::NavigationAgentDataT& value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     NavigationAgentSettings result;
     result.radius = value.radius;
     result.height = value.height;
@@ -88,15 +92,18 @@ NavigationCrowdSystem::NavigationCrowdSystem(WorldSystem& world, NavigationSyste
                                              std::uint32_t capacity) noexcept
     : world_(world), navigation_(navigation), capacity_(capacity)
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 NavigationCrowdSystem::~NavigationCrowdSystem() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
 }
 
 bool NavigationCrowdSystem::on_initialize(const EngineConfig&)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (capacity_ == 0 || capacity_ > 4096)
     {
         return false;
@@ -112,6 +119,7 @@ bool NavigationCrowdSystem::on_initialize(const EngineConfig&)
 
 void NavigationCrowdSystem::release_agents() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (state_ == nullptr)
     {
         return;
@@ -149,6 +157,7 @@ bool NavigationCrowdSystem::on_tick(double delta_time)
             [&](Node node,
                 const ecs_detail::ComponentStorage<NavigationAgent::Data>& stored) -> bool
         {
+                ENGINE_PROFILE_FUNCTION_PROBE();
             const auto* scene = node.scene();
             (void)scene;
             (void)stored;
@@ -186,6 +195,7 @@ bool NavigationCrowdSystem::on_tick(double delta_time)
             [&](flecs::entity entity,
                 const ecs_detail::ComponentStorage<NavigationAgent::Data>& stored)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 if (query_success)
                 {
                     query_success = process(world_.find_node(entity.id()), stored);
@@ -346,6 +356,7 @@ bool NavigationCrowdSystem::on_tick(double delta_time)
 
 void NavigationCrowdSystem::on_shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     release_agents();
     state_.reset();
 }

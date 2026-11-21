@@ -1,10 +1,12 @@
 #include "plugins/runtime/character_controller/abilities/sprint_ability.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/character_controller/abilities/ability_validation.hpp"
 namespace engine::plugins::character_controller
 {
 const SprintAbility::Data* SprintAbility::find(const schema::CharacterControllerDataT& d,
                                                std::string_view id)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (d.ability_data)
     {
         for (const auto& v : d.ability_data->sprint)
@@ -20,12 +22,14 @@ const SprintAbility::Data* SprintAbility::find(const schema::CharacterController
 bool SprintAbility::validate(const Data& d, const schema::CharacterControllerDataT& definition,
                              std::string& e)
 {
+    ENGINE_PROFILE_FUNCTION();
     return (detail::action_exists(definition, d.action) && detail::bounded(d.speed, 0, 1000)) ||
            detail::invalid(e, "invalid sprint action or speed");
 }
 bool SprintAbility::query(const Data& d, const Runtime&, const CharacterAbilityContext& c,
                           const CharacterMotionPlan& p, CharacterAbilityRequest& out)
 {
+    ENGINE_PROFILE_FUNCTION();
     out = {};
     CharacterActionState a;
     if (!c.motor || !c.motor->settings || !c.action(d.action, a))
@@ -46,11 +50,13 @@ void SprintAbility::finish(const Data&, const Runtime&, const CharacterAbilityCo
                            const CharacterAbilityDecision& d, const CharacterMotorStepResult& r,
                            Runtime& next, bool& consume)
 {
+    ENGINE_PROFILE_FUNCTION();
     consume = false;
     next.active = d.result == CharacterAbilitySelection::selected && !r.status.control_error;
 }
 void SprintAbility::status(const Data& d, const Runtime& r, CharacterAbilityStatus& out)
 {
+    ENGINE_PROFILE_FUNCTION();
     out = {};
     out.id = d.id;
     out.active = r.active;

@@ -6,6 +6,8 @@
 
 **2026-11-07 已实现增量：** 下图 retain_dependency / ResourceReference.dependency 的路径语义已实现，其余生命周期契约保持。具体边界见加载接口说明和[大场景准备](large-scene-preparation.md)。
 
+内存观察在加载器的协调线程读取已发布的资源记录与当前引用关系，输出独立值。`begin_load` 可以携带场景请求身份，`set_memory_owner` 为已有获取登记场景或候选作用域。观察接口不增加资源引用，也不推进加载，未支持的实现返回不可用。
+
 ## 加载接口
 
 ```mermaid
@@ -14,7 +16,7 @@ classDiagram
         <<abstract>>
         +~ResourceLoader()
         +load(string_view path_or_guid, ResourceHandle& output) bool*
-        +begin_load(string_view path_or_guid, unique_ptr~ResourceLoad~& output) bool*
+        +begin_load(string_view path_or_guid, unique_ptr~ResourceLoad~& output, ResourceMemoryOwner owner) bool*
         +load_memory(unique_ptr~Resource~& candidate, span~const ResourceHandle~ dependencies, ResourceHandle& output) bool*
         +begin_load_memory(unique_ptr~Resource~& candidate, span~const ResourceHandle~ dependencies, unique_ptr~ResourceLoad~& output) bool*
         +acquire_loaded(string_view path_or_guid, ResourceHandle& output) bool*
@@ -25,6 +27,8 @@ classDiagram
         +get~TResource~(const ResourceHandle& handle, const TResource*& output) ResourceError
         +error() ResourceError*
         +last_error() string_view*
+        +set_memory_owner(handle, owner) void
+        +memory_snapshot(query, output) bool
         #ResourceLoader()
         #owner_id() uint64_t
     }
@@ -33,11 +37,22 @@ classDiagram
     class ResourceLoad
     class Resource
     class ResourceError
+    class ResourceMemoryQuery
+    class ResourceMemoryOwner
+    class ResourceMemorySnapshot
+    class ResourceMemoryEntry
+    class ResourceMemoryHolder
     ResourceLoader <|-- ResourceGraphSystem
     ResourceLoader ..> ResourceHandle : 获取与释放
     ResourceLoader ..> ResourceLoad : 转交独占操作
     ResourceLoader ..> Resource : 读取借用或接纳独占候选
     ResourceLoader ..> ResourceError : 明确错误原因
+    ResourceLoader ..> ResourceMemoryOwner : 接收已有引用所属身份
+    ResourceLoader ..> ResourceMemoryQuery : 只读筛选
+    ResourceLoader ..> ResourceMemorySnapshot : 输出独立值
+    ResourceMemorySnapshot *-- ResourceMemoryEntry
+    ResourceMemoryEntry *-- ResourceMemoryHolder
+    ResourceMemoryHolder *-- ResourceMemoryOwner
 ```
 
 - 基类构造与公共虚析构 noexcept，禁止复制/移动。状态与查询标注 nodiscard；get、error、last_error 为 const，get 模板只校验规范类型后转交借用，不使用 RTTI。实例只在宿主协调线程操作，不承诺任意线程并发调用。

@@ -1,4 +1,6 @@
 #include "runtime/scene/mesh_renderer.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/resource/types/mesh_resource.hpp"
 #include "runtime/resource/types/texture_resource.hpp"
@@ -28,6 +30,7 @@ namespace
 
 std::size_t required_materials(const schema::MeshDataT& data) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     std::size_t count = 1;
     for (const auto& submesh : data.submeshes)
     {
@@ -38,6 +41,7 @@ std::size_t required_materials(const schema::MeshDataT& data) noexcept
 
 bool skin_joint_count(const schema::MeshDataT& data, std::uint32_t& count) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     count = 0;
     if (!data.skin.empty() && data.skin.size() != data.vertices.size())
     {
@@ -48,7 +52,10 @@ bool skin_joint_count(const schema::MeshDataT& data, std::uint32_t& count) noexc
         const std::array<float, 4> weights = {skin.w0(), skin.w1(), skin.w2(), skin.w3()};
         const float sum = skin.w0() + skin.w1() + skin.w2() + skin.w3();
         if (!std::all_of(weights.begin(), weights.end(), [](float weight)
-                         { return std::isfinite(weight) && weight >= 0.0F && weight <= 1.0F; }) ||
+                         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return std::isfinite(weight) && weight >= 0.0F && weight <= 1.0F;
+        }) ||
             !std::isfinite(sum) || std::abs(sum - 1.0F) > 0.0001F)
         {
             return false;
@@ -62,16 +69,19 @@ bool skin_joint_count(const schema::MeshDataT& data, std::uint32_t& count) noexc
 
 bool MeshRenderer::register_type(ComponentRegistry& registry)
 {
+    ENGINE_PROFILE_FUNCTION();
     return register_component_storage<MeshRenderer, Data, Runtime>(registry);
 }
 
 MeshRenderer::Runtime* MeshRenderer::runtime() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return runtime_state<Runtime>();
 }
 
 bool MeshRenderer::cast_shadows() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return false;
@@ -81,6 +91,7 @@ bool MeshRenderer::cast_shadows() const noexcept
 
 void MeshRenderer::set_cast_shadows(bool enabled) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return;
@@ -91,12 +102,14 @@ void MeshRenderer::set_cast_shadows(bool enabled) noexcept
 
 bool MeshRenderer::static_instancing_enabled() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* data = read_data<Data>();
     return data && data->static_instancing_enabled;
 }
 
 bool MeshRenderer::set_static_instancing_enabled(bool enabled) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -111,12 +124,14 @@ bool MeshRenderer::set_static_instancing_enabled(bool enabled) noexcept
 
 bool MeshRenderer::static_lod_enabled() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* data = read_data<Data>();
     return data && data->static_lod_enabled;
 }
 
 bool MeshRenderer::set_static_lod_enabled(bool enabled) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -131,6 +146,7 @@ bool MeshRenderer::set_static_lod_enabled(bool enabled) noexcept
 
 bool MeshRenderer::bake_static() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return false;
@@ -140,6 +156,7 @@ bool MeshRenderer::bake_static() const noexcept
 
 bool MeshRenderer::set_bake_static(bool enabled) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -156,11 +173,13 @@ bool MeshRenderer::set_bake_static(bool enabled) noexcept
 
 schema::RvtRole MeshRenderer::rvt_role() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return valid() ? read_data<Data>()->rvt_role : schema::RvtRole::none;
 }
 
 bool MeshRenderer::set_rvt_role(schema::RvtRole role) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable() || role < schema::RvtRole::MIN || role > schema::RvtRole::MAX)
     {
         return false;
@@ -172,6 +191,7 @@ bool MeshRenderer::set_rvt_role(schema::RvtRole role) noexcept
 
 ResourceHandle MeshRenderer::lightmap_resource() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return {};
@@ -201,6 +221,7 @@ ResourceHandle MeshRenderer::lightmap_resource() const noexcept
 
 std::string_view MeshRenderer::lightmap_path() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return {};
@@ -212,6 +233,7 @@ std::string_view MeshRenderer::lightmap_path() const noexcept
 
 bool MeshRenderer::set_lightmap(std::string_view path)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -253,6 +275,7 @@ bool MeshRenderer::set_lightmap(std::string_view path)
 
 bool MeshRenderer::initialize()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -268,6 +291,7 @@ bool MeshRenderer::initialize()
 
 std::string_view MeshRenderer::mesh_path() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid() || read_data<Data>()->mesh_guid.empty())
     {
         return {};
@@ -279,6 +303,7 @@ std::string_view MeshRenderer::mesh_path() const noexcept
 
 bool MeshRenderer::set_mesh(std::string_view path)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -311,6 +336,7 @@ bool MeshRenderer::set_mesh(std::string_view path)
 
 bool MeshRenderer::set_mesh_data(const schema::MeshDataT& data)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -391,6 +417,7 @@ bool MeshRenderer::set_mesh_data(const schema::MeshDataT& data)
 
 const schema::MeshDataT* MeshRenderer::mesh_data() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return {};
@@ -400,6 +427,7 @@ const schema::MeshDataT* MeshRenderer::mesh_data() const noexcept
 
 ResourceHandle MeshRenderer::mesh_resource() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return {};
@@ -409,6 +437,7 @@ ResourceHandle MeshRenderer::mesh_resource() const noexcept
 
 std::uint64_t MeshRenderer::mesh_revision() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return {};
@@ -419,6 +448,7 @@ std::uint64_t MeshRenderer::mesh_revision() const noexcept
 bool MeshRenderer::set_deformation(std::span<const schema::MeshVertex> vertices,
                                    std::span<const Vec4> tangents)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -435,7 +465,10 @@ bool MeshRenderer::set_deformation(std::span<const schema::MeshVertex> vertices,
         const auto& vertex = vertices[index];
         const auto& tangent = tangents[index];
         const auto valid = [](double value)
-        { return std::isfinite(value) && std::abs(value) <= std::numeric_limits<float>::max(); };
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return std::isfinite(value) && std::abs(value) <= std::numeric_limits<float>::max();
+        };
         if (!valid(vertex.x()) || !valid(vertex.y()) || !valid(vertex.z()) || !valid(vertex.nx()) ||
             !valid(vertex.ny()) || !valid(vertex.nz()) || !valid(tangent.x()) ||
             !valid(tangent.y()) || !valid(tangent.z()) ||
@@ -467,6 +500,7 @@ bool MeshRenderer::set_deformation(std::span<const schema::MeshVertex> vertices,
 
 void MeshRenderer::clear_deformation() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return;
@@ -488,6 +522,7 @@ void MeshRenderer::clear_deformation() noexcept
 bool MeshRenderer::set_skinning_palette(std::span<const std::array<float, 16>> transforms,
                                         std::span<const std::array<float, 16>> normal_transforms)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -502,7 +537,11 @@ bool MeshRenderer::set_skinning_palette(std::span<const std::array<float, 16>> t
     {
         const auto& matrix = transforms[index];
         const auto& normal = normal_transforms[index];
-        const auto finite = [](float value) { return std::isfinite(value); };
+        const auto finite = [](float value)
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return std::isfinite(value);
+        };
         if (!std::all_of(matrix.begin(), matrix.end(), finite) ||
             !std::all_of(normal.begin(), normal.end(), finite) || std::abs(matrix[3]) > 1.0e-5F ||
             std::abs(matrix[7]) > 1.0e-5F || std::abs(matrix[11]) > 1.0e-5F ||
@@ -523,6 +562,7 @@ bool MeshRenderer::set_skinning_palette(std::span<const std::array<float, 16>> t
 
 std::span<const std::array<float, 16>> MeshRenderer::skinning_palette() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return {};
@@ -532,6 +572,7 @@ std::span<const std::array<float, 16>> MeshRenderer::skinning_palette() const no
 
 std::span<const std::array<float, 16>> MeshRenderer::skinning_normal_palette() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return {};
@@ -541,6 +582,7 @@ std::span<const std::array<float, 16>> MeshRenderer::skinning_normal_palette() c
 
 std::span<const schema::MeshVertex> MeshRenderer::deformed_vertices() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return {};
@@ -550,6 +592,7 @@ std::span<const schema::MeshVertex> MeshRenderer::deformed_vertices() const noex
 
 std::span<const Vec4> MeshRenderer::deformed_tangents() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return {};
@@ -559,6 +602,7 @@ std::span<const Vec4> MeshRenderer::deformed_tangents() const noexcept
 
 std::uint64_t MeshRenderer::deformation_revision() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return {};
@@ -568,12 +612,14 @@ std::uint64_t MeshRenderer::deformation_revision() const noexcept
 
 std::size_t MeshRenderer::material_count() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* state = runtime();
     return state ? state->materials_.size() : 0;
 }
 
 Material MeshRenderer::material(std::size_t slot) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* state = runtime();
     if (!state || slot >= state->materials_.size())
     {
@@ -584,6 +630,7 @@ Material MeshRenderer::material(std::size_t slot) const noexcept
 
 bool MeshRenderer::set_material_count(std::size_t count)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* state = runtime();
     if (!writable() || !state || count == 0 || count > 16 ||
         (mesh_data() && count < required_materials(*mesh_data())))
@@ -619,6 +666,7 @@ bool MeshRenderer::set_material_count(std::size_t count)
 
 bool MeshRenderer::build_data(schema::ComponentDataT& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     schema::ComponentDataT snapshot;
     if (!get_data(snapshot))
@@ -655,6 +703,7 @@ bool MeshRenderer::build_data(schema::ComponentDataT& output) const
 
 bool MeshRenderer::restore_data(const schema::ComponentDataT& data)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* settings = data.payload.AsMeshRendererData();
     auto* current = runtime();
     auto* resources = node().world()->resource_loader();
@@ -705,7 +754,11 @@ bool MeshRenderer::restore_data(const schema::ComponentDataT& data)
             mesh->lightmap_texcoords.size() != mesh->vertices.size() ||
             settings->lightmap_mesh_hash.empty() || settings->lightmap_transform.size() != 16 ||
             !std::all_of(settings->lightmap_transform.begin(), settings->lightmap_transform.end(),
-                         [](float value) { return std::isfinite(value); }))
+                         [](float value)
+                         {
+                             ENGINE_PROFILE_FUNCTION_PROBE();
+                             return std::isfinite(value);
+                         }))
         {
             return false;
         }

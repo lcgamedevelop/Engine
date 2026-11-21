@@ -1,4 +1,5 @@
 #include "plugins/runtime/terrain/terrain_fragment_runtime.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/terrain/terrain_islands.hpp"
 #include "plugins/runtime/terrain/terrain_samples.hpp"
 #include "runtime/scene/ecs_storage.hpp"
@@ -20,6 +21,7 @@ bool restore_fragments(const TerrainReadSnapshot& source,
                        const TerrainMesher& mesher, std::vector<TerrainFragment>& output,
                        std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     for (const auto& saved : checkpoint.debris)
     {
@@ -92,6 +94,7 @@ bool create_fragments(Scene& scene, TerrainComponent owner, const TransformSetti
                       std::span<const TerrainFragment> fragments, std::vector<Node>& output,
                       std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     for (const auto& fragment : fragments)
     {
@@ -150,6 +153,7 @@ bool capture_fragments(std::span<const TerrainComponentRuntime::Fragment> fragme
                        schema::TerrainCheckpointDataT& output,
                        std::vector<schema::TerrainBlockDataT>& blocks, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.debris.clear();
     for (const auto& fragment : fragments)
     {

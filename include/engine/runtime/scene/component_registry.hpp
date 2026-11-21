@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/scene/component.hpp"
 
 #include <map>
@@ -36,6 +38,7 @@ public:
 
     template <class T> [[nodiscard]] bool add()
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return T::register_type(*this);
     }
     [[nodiscard]] bool contains(ComponentType type) const noexcept;

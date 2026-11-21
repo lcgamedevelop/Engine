@@ -1,4 +1,5 @@
 #include "runtime/ui/rml_input.hpp"
+#include "runtime/performance/profiling.hpp"
 #include <RmlUi/Core/Context.h>
 #include <RmlUi/Core/Element.h>
 #include <RmlUi/Core/Input.h>
@@ -9,6 +10,7 @@ namespace
 {
 Rml::Input::KeyIdentifier key(SDL_Keycode code)
 {
+    ENGINE_PROFILE_FUNCTION();
     using namespace Rml::Input;
     if (code >= SDLK_A && code <= SDLK_Z)
     {
@@ -98,6 +100,7 @@ Rml::Input::KeyIdentifier key(SDL_Keycode code)
 }
 int modifiers(SDL_Keymod mask)
 {
+    ENGINE_PROFILE_FUNCTION();
     int result = 0;
     if ((mask & SDL_KMOD_SHIFT) != 0)
     {
@@ -123,6 +126,7 @@ int modifiers(SDL_Keymod mask)
 }
 int button(std::uint8_t value)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (value == SDL_BUTTON_LEFT)
     {
         return 0;
@@ -141,6 +145,7 @@ int button(std::uint8_t value)
 bool process_input(Rml::Context& context, SDL_Window* window, const SDL_Event& event,
                    std::uint16_t modifier_state)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (SDL_GetWindowFromEvent(&event) != window)
     {
         return false;
@@ -209,6 +214,7 @@ bool process_input(Rml::Context& context, SDL_Window* window, const SDL_Event& e
 }
 void cancel_pointer(Rml::Context& context, std::uint32_t buttons)
 {
+    ENGINE_PROFILE_FUNCTION();
     static_cast<void>(context.ProcessMouseLeave());
     for (const auto value : {SDL_BUTTON_LEFT, SDL_BUTTON_RIGHT, SDL_BUTTON_MIDDLE})
     {

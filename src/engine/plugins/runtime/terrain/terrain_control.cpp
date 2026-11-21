@@ -1,4 +1,5 @@
 #include "plugins/runtime/terrain/terrain_control.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/terrain/terrain_component_runtime.hpp"
 #include "runtime/scene/collider.hpp"
 #include "runtime/scene/ecs_storage.hpp"
@@ -15,14 +16,17 @@ namespace
 using Json = nlohmann::json;
 template <class T> bool field(const Json& j, const char* name, T& value, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     return !j.contains(name) || schema::control_json::read(j[name], value, error, false, name);
 }
 bool vector(const Json& j, Vec3& value, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::control_json::read(j, value, error, false, "vector");
 }
 bool bounds(const Json& j, Bounds3& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     Vec3 low, high;
     if (!j.is_object() || j.size() != 2 || !j.contains("minimum") || !j.contains("maximum") ||
         !vector(j["minimum"], low, error) || !vector(j["maximum"], high, error))
@@ -35,6 +39,7 @@ bool bounds(const Json& j, Bounds3& output, std::string& error)
 }
 bool key(const Json& j, TerrainRegionKey& value, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::int32_t x = 0, y = 0, z = 0;
     std::uint8_t lod = 0;
     if (!j.is_object() || !j.contains("x") || !j.contains("y") || !j.contains("z") ||
@@ -49,15 +54,18 @@ bool key(const Json& j, TerrainRegionKey& value, std::string& error)
 }
 Json key_json(TerrainRegionKey value)
 {
+    ENGINE_PROFILE_FUNCTION();
     return Json{{"x", value.x()}, {"y", value.y()}, {"z", value.z()}, {"lod", value.lod()}};
 }
 Json bounds_json(const Bounds3& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     return Json{{"minimum", schema::control_json::write(value.minimum(), false)},
                 {"maximum", schema::control_json::write(value.maximum(), false)}};
 }
 template <class Id> bool identity(const Json& j, Id& id, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     return j.is_object() && j.size() == 4 && j.contains("world_epoch") && j.contains("node_id") &&
            j.contains("component_instance") && j.contains("sequence") &&
            field(j, "world_epoch", id.world_epoch, error) &&
@@ -67,6 +75,7 @@ template <class Id> bool identity(const Json& j, Id& id, std::string& error)
 }
 template <class Id> Json id_json(Id id)
 {
+    ENGINE_PROFILE_FUNCTION();
     return Json{{"world_epoch", std::to_string(id.world_epoch)},
                 {"node_id", std::to_string(id.node_id)},
                 {"component_instance", std::to_string(id.component_instance)},
@@ -74,12 +83,14 @@ template <class Id> Json id_json(Id id)
 }
 bool query(const Json& j, TerrainRegionQuery& value, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     return j.contains("bounds") && bounds(j["bounds"], value.bounds, error) &&
            field(j, "lod", value.lod, error) && field(j, "limit", value.limit, error) &&
            field(j, "cursor", value.cursor, error);
 }
 bool brush(const Json& j, schema::TerrainBrushDataT& value, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!j.is_object() || !j.contains("center") || !j.contains("extent") ||
         !vector(j["center"], value.center, error) || !vector(j["extent"], value.extent, error) ||
         !field(j, "strength", value.strength, error))
@@ -125,6 +136,7 @@ constexpr const char* work_states[]{"queued",       "working", "ready",
 } // namespace
 void abandon_operation(TerrainComponent component, const Json& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     TerrainOperationId id;
     TerrainOperationSnapshot snapshot;
     std::string error;
@@ -150,6 +162,7 @@ void abandon_operation(TerrainComponent component, const Json& value)
 bool call(TerrainComponent component, std::string_view method, const Json& args, Json& output,
           std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = nullptr;
     error.clear();
     if (!component || !args.is_object())

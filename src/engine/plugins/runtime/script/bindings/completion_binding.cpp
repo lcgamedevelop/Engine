@@ -1,4 +1,5 @@
 #include "plugins/runtime/script/bindings/completion_binding.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "plugins/runtime/script/bindings/binding_context.hpp"
 
@@ -30,6 +31,7 @@ bindingCleanupHooks.push(() => asyncCompletions.clear());
 
 void poll(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* context = BindingContext::current(arguments);
     std::uint64_t request = 0;
     arguments.set_return(context != nullptr && arguments.count() == 1 &&
@@ -41,16 +43,19 @@ void poll(const Arguments& arguments)
 
 std::string_view CompletionBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "Completion";
 }
 
 std::string_view CompletionBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 
 bool CompletionBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.function("AsyncCompletion", poll);
 }
 } // namespace engine::plugins::script::bindings

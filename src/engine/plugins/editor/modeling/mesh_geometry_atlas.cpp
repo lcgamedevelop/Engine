@@ -1,4 +1,6 @@
 #include "plugins/editor/modeling/mesh_geometry.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "plugins/editor/modeling/mesh_geometry_internal.hpp"
 
@@ -39,6 +41,7 @@ struct AtlasTriangle
 
 bool same_uv(const schema::Vec2& a, const schema::Vec2& b)
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::abs(a.x() - b.x()) <= 0.000001 && std::abs(a.y() - b.y()) <= 0.000001;
 }
 
@@ -48,6 +51,7 @@ bool repair_unused_corners(const schema::EditableMeshDataT& data,
                            std::vector<bool>& assigned, std::vector<schema::Vec2>& texcoords,
                            std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (const auto& loop : loops)
     {
         for (std::size_t i = 0; i < loop.size(); ++i)
@@ -99,6 +103,7 @@ bool repair_unused_corners(const schema::EditableMeshDataT& data,
 bool mesh::unwrap_uv(schema::EditableMeshDataT& data, std::span<const std::uint64_t> face_ids,
                      const MeshUvUnwrapOptions& options, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     if (!std::isfinite(options.padding) || options.padding < 0.0 || options.padding >= 0.25 ||
         options.resolution < 64 || options.resolution > 8192 || options.iterations == 0 ||
@@ -127,6 +132,7 @@ bool mesh::unwrap_uv(schema::EditableMeshDataT& data, std::span<const std::uint6
         const auto base = static_cast<std::uint32_t>(corners.size());
         const auto append_loop = [&](const auto& vertices, auto& texcoords, const auto& colors)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             const auto first = static_cast<std::uint32_t>(corners.size());
             texcoords.resize(vertices.size());
             std::vector<std::uint32_t> loop;
@@ -360,7 +366,11 @@ bool mesh::unwrap_uv(schema::EditableMeshDataT& data, std::span<const std::uint6
         }
         replacements.push_back(std::move(face));
     }
-    std::erase_if(candidate.faces, [&](const auto& face) { return replaced.contains(face->id); });
+    std::erase_if(candidate.faces, [&](const auto& face)
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return replaced.contains(face->id);
+    });
     for (auto& face : replacements)
     {
         candidate.faces.push_back(std::move(face));

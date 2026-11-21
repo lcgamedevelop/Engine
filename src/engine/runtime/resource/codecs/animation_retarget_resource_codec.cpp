@@ -1,4 +1,6 @@
 #include "runtime/resource/codecs/animation_retarget_resource_codec.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/resource/codecs/resource_decode.hpp"
 
 #include "runtime/core/guid_map.hpp"
@@ -17,18 +19,25 @@ namespace
 {
 bool joint_path(std::string_view value)
 {
+    ENGINE_PROFILE_FUNCTION();
     return !value.empty() && value.size() <= 4096 && value.front() != '/' && value.back() != '/' &&
            value.find("//") == std::string_view::npos &&
            std::none_of(value.begin(), value.end(),
-                        [](unsigned char ch) { return ch < 32 || ch == 127; });
+                        [](unsigned char ch)
+                        {
+                            ENGINE_PROFILE_FUNCTION_PROBE();
+                            return ch < 32 || ch == 127;
+                        });
 }
 
 bool reference_pose(const std::vector<schema::JointLocalPose>& poses)
 {
+    ENGINE_PROFILE_FUNCTION();
     return poses.size() <= 1024 &&
            std::all_of(poses.begin(), poses.end(),
                        [](const auto& pose)
                        {
+                           ENGINE_PROFILE_FUNCTION_PROBE();
                            const auto& scale = pose.scale();
                            return model_value_utils::vector(pose.translation()) &&
                                   model_value_utils::quaternion(pose.rotation()) &&
@@ -41,6 +50,7 @@ bool reference_pose(const std::vector<schema::JointLocalPose>& poses)
 
 bool AnimationRetargetResourceCodec::validate(const schema::AnimationRetargetProfileDataT& data)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (data.schema_version != 1 || !valid_path(data.path) ||
         !GuidMap::valid_guid(data.source_skeleton_guid) ||
         !GuidMap::valid_guid(data.target_skeleton_guid) || data.joint_mappings.empty() ||
@@ -75,6 +85,7 @@ bool AnimationRetargetResourceCodec::validate(const schema::AnimationRetargetPro
 
 schema::AssetKind AnimationRetargetResourceCodec::kind() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::animation_retarget_profile;
 }
 
@@ -82,20 +93,26 @@ bool AnimationRetargetResourceCodec::decode(const schema::AssetEntryT& entry, By
                                             std::unique_ptr<Resource>& output,
                                             std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto validate = [](ByteView payload, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return resource_decode_detail::verify_flatbuffer(
             payload, schema::VerifyAnimationRetargetProfileDataBuffer,
             "Invalid AnimationRetarget FlatBuffer", error);
     };
     return resource_decode_detail::decode_flatbuffer<ResourceType>(
         entry, payload, 4U * 1024U * 1024U, validate, [](const std::uint8_t* bytes)
-        { return schema::UnPackAnimationRetargetProfileData(bytes); }, output, error);
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return schema::UnPackAnimationRetargetProfileData(bytes);
+        }, output, error);
 }
 
 bool AnimationRetargetResourceCodec::validate_data(const Resource& resource,
                                                    std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* data = resource_detail::data<ResourceType>(&resource);
     if (!data || !(data->path == resource.info().path && validate(*data) &&
                    resource.info().dependencies.size() ==
@@ -114,6 +131,7 @@ bool AnimationRetargetResourceCodec::validate_dependencies(const Resource& resou
                                                            ResourceView dependencies,
                                                            std::string&) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* data = resource_detail::data<AnimationRetargetResource>(&resource);
     const auto* source = data ? dependency(dependencies, data->source_skeleton_guid) : nullptr;
     const auto* target = data ? dependency(dependencies, data->target_skeleton_guid) : nullptr;

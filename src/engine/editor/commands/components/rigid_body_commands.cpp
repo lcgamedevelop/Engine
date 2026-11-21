@@ -1,4 +1,6 @@
 #include "editor/commands/components/component_edit.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/resource/resource_system.hpp"
 #include "runtime/scene/rigid_body.hpp"
 namespace engine::editor::components
@@ -8,6 +10,7 @@ namespace
 bool read(const Json& arguments, schema::RigidBodyDataT& value, std::vector<ResourceReference>&,
           std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!fields(arguments,
                 {"enabled", "motion", "mass", "gravityFactor", "linearDamping", "angularDamping",
                  "linearVelocity", "angularVelocity"},
@@ -74,6 +77,7 @@ bool read(const Json& arguments, schema::RigidBodyDataT& value, std::vector<Reso
 }
 Json write(const schema::RigidBodyDataT& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     Json result = Json::object();
     result["motion"] = schema::EnumNameBodyMotion(value.motion);
     result["mass"] = value.mass;
@@ -90,11 +94,19 @@ Json write(const schema::RigidBodyDataT& value)
 bool register_rigid_body(WorldSystem& world, EditorCommands& commands,
                          SceneCommands& scene_commands)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!register_component<engine::RigidBody, schema::RigidBodyDataT>(
             world, scene_commands, commands, "rigid_body",
             [](Node, const auto& args, auto& data, auto& prepared, auto& error)
-            { return read(args, data, prepared, error); },
-            [](auto, const auto& data) { return write(data); }))
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return read(args, data, prepared, error);
+            },
+            [](auto, const auto& data)
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return write(data);
+            }))
     {
         return false;
     }
@@ -103,6 +115,7 @@ bool register_rigid_body(WorldSystem& world, EditorCommands& commands,
         [&world](const Json& arguments, Json& result, std::unique_ptr<EditorEdit>&,
                  std::string& error)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             if (!fields(arguments, {"impulse"}, error))
             {
                 return false;

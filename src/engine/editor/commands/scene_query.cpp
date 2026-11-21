@@ -1,4 +1,6 @@
 #include "editor/commands/scene_query.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/resource_access.hpp"
 
 #include "editor/commands/components/component_edit.hpp"
@@ -23,6 +25,7 @@ using components::json_vector;
 
 bool query_scene(WorldSystem& world, const Json& arguments, Json& result, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!fields(arguments, {"offset", "limit"}))
     {
         error = "get_scene accepts only offset and limit";
@@ -30,6 +33,7 @@ bool query_scene(WorldSystem& world, const Json& arguments, Json& result, std::s
     }
     const auto read_count = [&arguments](const char* name, std::size_t& output)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const auto found = arguments.find(name);
         if (found == arguments.end())
         {

@@ -1,5 +1,6 @@
 #include "runtime/render/passes/ambient_occlusion_pass.hpp"
 
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/render/render_constants.hpp"
 #include "runtime/render/render_settings.hpp"
@@ -45,11 +46,16 @@ bool make_uniforms(const CameraSettings& camera, const RenderSettings& settings,
                    std::uint16_t viewport_width, std::uint16_t viewport_height,
                    AoUniforms& uniforms)
 {
+    ENGINE_PROFILE_FUNCTION();
     uniforms = {};
     if (width == 0 || height == 0 || viewport_width == 0 || viewport_height == 0 ||
         projection == nullptr ||
         !std::all_of(projection, projection + 16,
-                     [](float value) { return std::isfinite(value); }) ||
+                     [](float value)
+                     {
+                         ENGINE_PROFILE_FUNCTION_PROBE();
+                         return std::isfinite(value);
+                     }) ||
         !(projection[0] > 0.0F) || !(projection[5] > 0.0F) || !std::isfinite(camera.near_clip) ||
         !std::isfinite(camera.far_clip) || camera.near_clip <= 0.0F ||
         camera.far_clip <= camera.near_clip ||
@@ -104,13 +110,19 @@ bool make_uniforms(const CameraSettings& camera, const RenderSettings& settings,
     return std::all_of(uniforms.begin(), uniforms.end(),
                        [](const auto& vector)
                        {
+                           ENGINE_PROFILE_FUNCTION_PROBE();
                            return std::all_of(vector.begin(), vector.end(),
-                                              [](float value) { return std::isfinite(value); });
+                                              [](float value)
+                                              {
+                                                  ENGINE_PROFILE_FUNCTION_PROBE();
+                                                  return std::isfinite(value);
+                                              });
                        });
 }
 
 void set_phase(AoUniforms& uniforms, std::uint16_t pass, bool origin_bottom_left)
 {
+    ENGINE_PROFILE_FUNCTION();
     const float x = static_cast<float>(pass % 2);
     const float y =
         origin_bottom_left ? 1.0F - static_cast<float>(pass / 2) : static_cast<float>(pass / 2);
@@ -132,6 +144,7 @@ void set_phase(AoUniforms& uniforms, std::uint16_t pass, bool origin_bottom_left
 
 bool supports_ao(const bgfx::Caps& caps)
 {
+    ENGINE_PROFILE_FUNCTION();
     constexpr auto required = BGFX_CAPS_COMPUTE;
     if ((caps.supported & required) != required || caps.limits.maxComputeBindings < 8 ||
         caps.limits.maxTextureLayers < 4)
@@ -189,13 +202,19 @@ bool supports_ao(const bgfx::Caps& caps)
 
 AmbientOcclusionPass::~AmbientOcclusionPass() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     release();
 }
 
 bool AmbientOcclusionPass::initialize_programs()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (std::all_of(programs_.begin(), programs_.end(),
-                    [](auto handle) { return bgfx::isValid(handle); }))
+                    [](auto handle)
+                    {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
+                        return bgfx::isValid(handle);
+                    }))
     {
         return true;
     }
@@ -296,7 +315,11 @@ bool AmbientOcclusionPass::prepare(std::uint16_t width, std::uint16_t height)
                                 bgfx::TextureFormat::R8, BGFX_TEXTURE_COMPUTE_WRITE | point_clamp);
     if (!bgfx::isValid(normals_) || !bgfx::isValid(final_results_) || !bgfx::isValid(ao_) ||
         !std::all_of(half_depths_.begin(), half_depths_.end(),
-                     [](auto handle) { return bgfx::isValid(handle); }) ||
+                     [](auto handle)
+                     {
+                         ENGINE_PROFILE_FUNCTION_PROBE();
+                         return bgfx::isValid(handle);
+                     }) ||
         !bgfx::isValid(blur_results_))
     {
         SDL_LogError(SDL_LOG_CATEGORY_RENDER, "Cannot allocate ASSAO frame textures");
@@ -323,6 +346,7 @@ bool AmbientOcclusionPass::compute(const CameraSettings& camera, const RenderSet
                        std::equal(uniforms.begin(), uniforms.end(), cached_uniforms_.begin(),
                                   [](const auto& current, const auto& cached)
                                   {
+                                      ENGINE_PROFILE_FUNCTION_PROBE();
                                       return std::memcmp(current.data(), cached.data(),
                                                          sizeof(float) * current.size()) == 0;
                                   });
@@ -413,11 +437,13 @@ bool AmbientOcclusionPass::compute(const CameraSettings& camera, const RenderSet
 
 bgfx::TextureHandle AmbientOcclusionPass::texture() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return ao_;
 }
 
 std::uint32_t AmbientOcclusionPass::resource_count() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     std::uint32_t count = static_cast<std::uint32_t>(bgfx::isValid(parameters_)) +
                           static_cast<std::uint32_t>(bgfx::isValid(rectangle_)) +
                           static_cast<std::uint32_t>(bgfx::isValid(normals_)) +
@@ -441,6 +467,7 @@ std::uint32_t AmbientOcclusionPass::resource_count() const noexcept
 
 void AmbientOcclusionPass::release_textures() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     cached_depth_revision_ = 0;
     for (auto* handle : {&normals_, &blur_results_, &final_results_, &ao_})
     {
@@ -466,6 +493,7 @@ void AmbientOcclusionPass::release_textures() noexcept
 
 void AmbientOcclusionPass::release() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     release_textures();
     for (auto& handle : programs_)
     {

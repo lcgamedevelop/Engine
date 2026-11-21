@@ -76,6 +76,9 @@ declare module "engine" {
         static readonly gameLanguage: string;
         /** Requests normal host shutdown at a frame boundary. Active callbacks only. */
         static RequestQuit(): boolean;
+        static SupportsVibration(): boolean;
+        /** Requests device vibration in milliseconds. Zero cancels. Active callbacks only. */
+        static Vibrate(durationMs: number): boolean;
     }
 
     export type WindowMode = "windowed" | "borderless" | "fullscreen";

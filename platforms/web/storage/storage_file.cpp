@@ -1,5 +1,6 @@
 #include "runtime/storage/storage_file.hpp"
 
+#include "runtime/performance/profiling.hpp"
 #include "runtime/utils/path_utils.hpp"
 
 #include <emscripten.h>
@@ -55,6 +56,7 @@ namespace engine::storage_detail
 {
 std::FILE* open_exclusive_file(const std::filesystem::path& path, std::error_code& error)
 {
+    ENGINE_PROFILE_ZONE("WebStorage.openTemporary");
     error.clear();
     auto* file = std::fopen(PathUtils::to_utf8(path).c_str(), "wbx");
     if (file == nullptr)
@@ -67,6 +69,7 @@ std::FILE* open_exclusive_file(const std::filesystem::path& path, std::error_cod
 bool publish_storage_file(const std::filesystem::path& temporary,
                           const std::filesystem::path& target, std::string& error)
 {
+    ENGINE_PROFILE_ZONE("WebStorage.publish");
     error.clear();
     if (queue == nullptr || emscripten_is_main_browser_thread())
     {

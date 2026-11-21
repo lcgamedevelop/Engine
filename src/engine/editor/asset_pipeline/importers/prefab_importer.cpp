@@ -1,4 +1,5 @@
 #include "editor/asset_pipeline/importers/prefab_importer.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "editor/asset_pipeline/asset_io.hpp"
 #include "editor/asset_pipeline/importer_utils.hpp"
@@ -13,17 +14,20 @@ namespace engine::editor::asset_pipeline
 {
 schema::AssetKind PrefabAssetImporter::kind() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::prefab;
 }
 
 bool PrefabAssetImporter::matches(const std::filesystem::path& source) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return source_extension(source) == ".prefab";
 }
 
 bool PrefabAssetImporter::inspect_batch(const ImportContext&, std::string& fingerprint,
                                         std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema_fingerprint({"runtime/scene.fbs", "runtime/prefab.fbs", "runtime/model.fbs",
                                "runtime/camera.fbs", "runtime/character_controller.fbs"},
                               fingerprint, error);
@@ -32,6 +36,7 @@ bool PrefabAssetImporter::inspect_batch(const ImportContext&, std::string& finge
 bool PrefabAssetImporter::scan_dependencies(ImportAsset& asset, const ImportContext& context,
                                             std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     asset.build_dependencies.clear();
     asset.runtime_dependencies.clear();
     schema::PrefabDataT prefab;
@@ -68,6 +73,7 @@ bool PrefabAssetImporter::scan_dependencies(ImportAsset& asset, const ImportCont
 bool PrefabAssetImporter::convert(const ImportAsset& asset, const ImportContext& context,
                                   std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     schema::PrefabDataT prefab;
     if (!PrefabImporter::read(asset.source, prefab, error))
     {
@@ -109,6 +115,7 @@ bool PrefabAssetImporter::convert(const ImportAsset& asset, const ImportContext&
 bool PrefabAssetImporter::finalize_dependencies(ImportAsset& asset, const ImportContext& context,
                                                 std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     std::vector<std::byte> payload;
     if (!read_generated_payload(asset.guid, context, payload, error))
     {

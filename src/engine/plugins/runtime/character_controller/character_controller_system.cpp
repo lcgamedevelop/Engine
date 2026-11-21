@@ -1,4 +1,6 @@
 #include "plugins/runtime/character_controller/character_controller_system.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/camera/camera_controller.hpp"
 #include "plugins/runtime/character_controller/character_camera.hpp"
 #include "plugins/runtime/character_controller/character_controller_runtime.hpp"
@@ -13,6 +15,7 @@ namespace
 {
 const CharacterController::Data* definition(CharacterController c)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!c)
     {
         return nullptr;
@@ -24,6 +27,7 @@ const CharacterController::Data* definition(CharacterController c)
 }
 Vec3 approach(Vec3 from, Vec3 to, double delta)
 {
+    ENGINE_PROFILE_FUNCTION();
     const double x = to.x() - from.x(), z = to.z() - from.z(), n = std::hypot(x, z);
     if (n <= delta || n == 0)
     {
@@ -34,6 +38,7 @@ Vec3 approach(Vec3 from, Vec3 to, double delta)
 bool look_binding(CharacterController c, CharacterControllerRuntime& r,
                   const CharacterController::Data& d, CharacterCamera& camera)
 {
+    ENGINE_PROFILE_FUNCTION();
     camera = {};
     if (!d.camera_node_id)
     {
@@ -54,17 +59,21 @@ bool look_binding(CharacterController c, CharacterControllerRuntime& r,
 } // namespace
 CharacterControllerSystem::CharacterControllerSystem(WorldSystem& w) noexcept : world_(w)
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 CharacterControllerSystem::~CharacterControllerSystem() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
 }
 bool CharacterControllerSystem::on_initialize(const EngineConfig&)
 {
+    ENGINE_PROFILE_FUNCTION();
     return world_.native_world() != nullptr;
 }
 Component CharacterControllerSystem::control_owner(CharacterMotor motor) const
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!motor.active() || motor.node().world() != &world_)
     {
         return {};
@@ -74,6 +83,7 @@ Component CharacterControllerSystem::control_owner(CharacterMotor motor) const
 }
 void CharacterControllerSystem::reset(Component owner, CharacterMotor) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     auto c = CharacterController(owner);
     if (!c || c.node().world() != &world_)
     {
@@ -97,6 +107,7 @@ void CharacterControllerSystem::reset(Component owner, CharacterMotor) noexcept
 }
 bool CharacterControllerSystem::on_tick(double dt)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!std::isfinite(dt) || dt < 0 || !world_.refresh_scene_state())
     {
         return false;
@@ -119,6 +130,7 @@ bool CharacterControllerSystem::on_tick(double dt)
     query.each(
         [&](flecs::entity e, const auto& stored, CharacterControllerRuntime& r)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             auto c = world_.find_node(e.id()).get_component<CharacterController>();
             if (!c.active() || world_.paused())
             {
@@ -178,6 +190,7 @@ bool CharacterControllerSystem::prepare_step(Component owner, CharacterMotor mot
                                              const CharacterMotorStepContext& context,
                                              CharacterMotorCommand& out)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto c = CharacterController(owner);
     const auto* d = definition(c);
     const auto* types = character_abilities(world_);
@@ -348,6 +361,7 @@ bool CharacterControllerSystem::prepare_step(Component owner, CharacterMotor mot
 void CharacterControllerSystem::finish_step(Component owner, CharacterMotor motor,
                                             const CharacterMotorStepResult& result) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     auto c = CharacterController(owner);
     const auto* d = definition(c);
     const auto* types = character_abilities(world_);
@@ -435,6 +449,7 @@ void CharacterControllerSystem::finish_step(Component owner, CharacterMotor moto
 }
 void CharacterControllerSystem::on_shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!world_.native_world())
     {
         return;
@@ -442,6 +457,9 @@ void CharacterControllerSystem::on_shutdown() noexcept
     auto query =
         flecs::world(world_.native_world()).query_builder<CharacterControllerRuntime>().build();
     query.each([&](flecs::entity e, auto&)
-               { reset(world_.find_node(e.id()).get_component<CharacterController>(), {}); });
+               {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        reset(world_.find_node(e.id()).get_component<CharacterController>(), {});
+    });
 }
 } // namespace engine::plugins::character_controller

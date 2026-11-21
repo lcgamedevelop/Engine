@@ -1,4 +1,6 @@
 #include "runtime/resource/codecs/scene_resource_codec.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/resource/codecs/resource_decode.hpp"
 
 #include "runtime/core/guid_map.hpp"
@@ -23,24 +25,32 @@ namespace engine
 
 schema::AssetKind SceneResourceCodec::kind() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::scene;
 }
 
 bool SceneResourceCodec::decode(const schema::AssetEntryT& entry, ByteView payload,
                                 std::unique_ptr<Resource>& output, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto validate = [](ByteView payload, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return resource_decode_detail::verify_flatbuffer(payload, schema::VerifySceneDataBuffer,
                                                          "Invalid Scene FlatBuffer", error);
     };
     return resource_decode_detail::decode_flatbuffer<ResourceType>(
         entry, payload, 64U * 1024U * 1024U, validate,
-        [](const std::uint8_t* bytes) { return schema::UnPackSceneData(bytes); }, output, error);
+        [](const std::uint8_t* bytes)
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return schema::UnPackSceneData(bytes);
+        }, output, error);
 }
 
 bool SceneResourceCodec::validate_data(const Resource& resource, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* data = resource_detail::data<ResourceType>(&resource);
     if (!data || !(!resource.info().path.starts_with("builtin://") && data->schema_version == 6 &&
                    data->info && validate_nodes(resource, data->nodes)))
@@ -55,6 +65,7 @@ bool SceneResourceCodec::validate_data(const Resource& resource, std::string& er
 bool SceneResourceCodec::validate_nodes(
     const Resource& resource, const std::vector<std::unique_ptr<schema::NodeDataT>>& nodes)
 {
+    ENGINE_PROFILE_FUNCTION();
     bool has_environment = false;
     bool has_shadow_light = false;
     for (const auto& node : nodes)
@@ -196,7 +207,11 @@ bool SceneResourceCodec::validate_nodes(
                            renderer->lightmap_transform.size() != 16 ||
                            !std::all_of(renderer->lightmap_transform.begin(),
                                         renderer->lightmap_transform.end(),
-                                        [](float value) { return std::isfinite(value); })))
+                                        [](float value)
+                                        {
+                                            ENGINE_PROFILE_FUNCTION_PROBE();
+                                            return std::isfinite(value);
+                                        })))
                 {
                     return false;
                 }
@@ -228,6 +243,7 @@ bool SceneResourceCodec::validate_nodes(
 bool SceneResourceCodec::validate_dependencies(const Resource& resource, ResourceView dependencies,
                                                std::string&) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* scene = resource_detail::data<SceneResource>(&resource);
     if (!scene)
     {
@@ -239,6 +255,7 @@ bool SceneResourceCodec::validate_dependencies(const Resource& resource, Resourc
 bool SceneResourceCodec::validate_node_dependencies(
     const std::vector<std::unique_ptr<schema::NodeDataT>>& nodes, ResourceView dependencies)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (const auto& node : nodes)
     {
         for (const auto& component : node->components)

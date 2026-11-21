@@ -1,4 +1,6 @@
 #pragma once
+
+#include "runtime/performance/function_profile.hpp"
 #include "plugins/runtime/camera/camera_types.hpp"
 namespace engine::plugins::camera
 {
@@ -13,6 +15,7 @@ public:
     CameraController() noexcept = default;
     explicit CameraController(Component c) noexcept : Component(c, component_type)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
     }
     [[nodiscard]] static bool register_type(ComponentRegistry& registry);
     [[nodiscard]] static bool valid_settings(const Data&, const CameraTypeRegistry&,

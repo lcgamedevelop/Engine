@@ -1,4 +1,5 @@
 #include "runtime/app/runtime_settings.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/resource/virtual_file_system.hpp"
 
@@ -19,8 +20,10 @@ namespace
 using Json = nlohmann::json;
 constexpr std::uint64_t maximum_bytes = 4ULL * 1024 * 1024 * 1024;
 
-bool keys(const Json& value, std::initializer_list<std::string_view> allowed, std::string& error)
+bool keys(const Json& value, std::initializer_list<std::string_view> required, std::string& error,
+          std::initializer_list<std::string_view> optional = {})
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!value.is_object())
     {
         error = "Runtime configuration sections must be objects";
@@ -28,13 +31,14 @@ bool keys(const Json& value, std::initializer_list<std::string_view> allowed, st
     }
     for (const auto& [name, item] : value.items())
     {
-        if (std::find(allowed.begin(), allowed.end(), name) == allowed.end())
+        if (std::find(required.begin(), required.end(), name) == required.end() &&
+            std::find(optional.begin(), optional.end(), name) == optional.end())
         {
             error = "Unknown runtime configuration field: " + std::string(name);
             return false;
         }
     }
-    for (const auto name : allowed)
+    for (const auto name : required)
     {
         if (!value.contains(name))
         {
@@ -49,6 +53,7 @@ template <typename T>
 bool integer(const Json& value, const char* key, T& output, std::uint64_t minimum,
              std::uint64_t maximum, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto& number = value[key];
     if (!number.is_number_unsigned() || number.get<std::uint64_t>() < minimum ||
         number.get<std::uint64_t>() > maximum)
@@ -62,6 +67,7 @@ bool integer(const Json& value, const char* key, T& output, std::uint64_t minimu
 
 bool seconds(const Json& value, const char* key, double& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto& field = value[key];
     if (!field.is_number())
     {
@@ -81,6 +87,7 @@ bool seconds(const Json& value, const char* key, double& output, std::string& er
 template <typename T>
 bool priority(const Json& value, const char* key, T& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto& field = value[key];
     if (field.is_string())
     {
@@ -107,6 +114,7 @@ bool priority(const Json& value, const char* key, T& output, std::string& error)
 
 bool domain(const Json& value, TaskConfig& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     return keys(value, {"max_concurrency", "priority", "max_pending"}, error) &&
            integer(value, "max_concurrency", output.max_concurrency, 0, 64, error) &&
            priority(value, "priority", output.priority, error) &&
@@ -115,12 +123,13 @@ bool domain(const Json& value, TaskConfig& output, std::string& error)
 
 bool apply_parallel(const Json& value, RuntimeParallelConfig& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!keys(value,
               {"threads", "runtime", "background", "file", "resource_read", "resource_graph",
                "movie", "physics", "animation", "navigation", "resources", "animation_sampling",
                "scene_restore", "render", "rendering", "navigation_tile_threshold",
                "completions_per_frame", "completion_budget_seconds"},
-              error))
+              error, {"physics_limits"}))
     {
         return false;
     }
@@ -147,6 +156,23 @@ bool apply_parallel(const Json& value, RuntimeParallelConfig& output, std::strin
     for (const auto& [name, config] : domains)
     {
         if (!domain(value[name], *config, error))
+        {
+            return false;
+        }
+    }
+    output.physics_limits = {};
+    if (const auto limits = value.find("physics_limits"); limits != value.end())
+    {
+        auto& config = output.physics_limits;
+        if (!keys(*limits, {"maximum_bodies", "maximum_body_pairs", "maximum_contact_constraints",
+                            "temporary_allocator_bytes"}, error) ||
+            !integer(*limits, "maximum_bodies", config.maximum_bodies, 1, UINT32_MAX, error) ||
+            !integer(*limits, "maximum_body_pairs", config.maximum_body_pairs, 1, UINT32_MAX,
+                     error) ||
+            !integer(*limits, "maximum_contact_constraints", config.maximum_contact_constraints, 1,
+                     UINT32_MAX, error) ||
+            !integer(*limits, "temporary_allocator_bytes", config.temporary_allocator_bytes, 1,
+                     UINT32_MAX, error))
         {
             return false;
         }
@@ -193,6 +219,8 @@ bool apply_parallel(const Json& value, RuntimeParallelConfig& output, std::strin
     {
         const auto& render = value["rendering"];
         auto& config = output.rendering;
+        config.transient_vertex_bytes = 0;
+        config.transient_index_bytes = 0;
         if (!keys(render,
                   {"texture_batch_size", "texture_staging_bytes", "prepare_items_per_step",
                    "prepare_seconds_per_step", "upload_bytes_per_step", "cluster_tile_size",
@@ -200,7 +228,7 @@ bool apply_parallel(const Json& value, RuntimeParallelConfig& output, std::strin
                    "maximum_meshlet_candidates", "shadow_atlas_size", "local_shadow_tile_size",
                    "maximum_local_shadow_faces", "maximum_planar_reflections", "vsm_physical_pages",
                    "vsm_pages_per_frame"},
-                  error) ||
+                  error, {"transient_vertex_bytes", "transient_index_bytes"}) ||
             !integer(render, "texture_batch_size", config.texture_batch_size, 1, 64, error) ||
             !integer(render, "texture_staging_bytes", config.texture_staging_bytes, 1,
                      maximum_bytes, error) ||
@@ -224,7 +252,13 @@ bool apply_parallel(const Json& value, RuntimeParallelConfig& output, std::strin
             !integer(render, "vsm_physical_pages", config.vsm_physical_pages, 1, 4096, error) ||
             !integer(render, "vsm_pages_per_frame", config.vsm_pages_per_frame, 1, 16, error) ||
             !integer(render, "maximum_planar_reflections", config.maximum_planar_reflections, 0, 2,
-                     error))
+                     error) ||
+            (render.contains("transient_vertex_bytes") &&
+             !integer(render, "transient_vertex_bytes", config.transient_vertex_bytes, 0,
+                      UINT32_MAX, error)) ||
+            (render.contains("transient_index_bytes") &&
+             !integer(render, "transient_index_bytes", config.transient_index_bytes, 0,
+                      UINT32_MAX, error)))
         {
             return false;
         }
@@ -244,6 +278,7 @@ bool apply_parallel(const Json& value, RuntimeParallelConfig& output, std::strin
 
 bool apply_engine(const Json& value, EngineConfig& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!keys(value, {"window_title", "width", "height", "target_frame_rate"}, error) ||
         !integer(value, "width", output.width, 1, std::numeric_limits<int>::max(), error) ||
         !integer(value, "height", output.height, 1, std::numeric_limits<int>::max(), error))
@@ -284,6 +319,7 @@ bool apply_engine(const Json& value, EngineConfig& output, std::string& error)
 
 bool apply(const Json& value, RuntimeSettings& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!keys(value, {"game", "engine", "parallel"}, error))
     {
         return false;
@@ -324,6 +360,7 @@ bool apply(const Json& value, RuntimeSettings& output, std::string& error)
 
 bool decode_runtime_settings(std::string_view text, RuntimeSettings& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     if (text.size() > 65536)
     {
@@ -343,6 +380,7 @@ bool decode_runtime_settings(std::string_view text, RuntimeSettings& output, std
 bool load_runtime_settings(const std::filesystem::path& path, RuntimeSettings& output,
                            std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     ByteBuffer bytes;
     if (!VirtualFileSystem::read_file(path, bytes) || bytes.size() > 65536)
     {

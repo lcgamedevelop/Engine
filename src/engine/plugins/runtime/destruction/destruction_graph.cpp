@@ -1,5 +1,6 @@
 #include "plugins/runtime/destruction/destruction_graph.hpp"
 
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/utils/mesh_utils.hpp"
 
@@ -27,6 +28,7 @@ struct AlignedDelete
 {
     void operator()(std::byte* memory) const noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         ::operator delete(memory, std::align_val_t{16});
     }
 };
@@ -34,12 +36,14 @@ using Memory = std::unique_ptr<std::byte, AlignedDelete>;
 
 Memory allocate(std::size_t size)
 {
+    ENGINE_PROFILE_FUNCTION();
     return Memory(
         static_cast<std::byte*>(::operator new(size, std::align_val_t{16}, std::nothrow)));
 }
 
 bool finite(const schema::Vec3& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::isfinite(value.x()) && std::isfinite(value.y()) && std::isfinite(value.z()) &&
            std::abs(value.x()) <= std::numeric_limits<float>::max() &&
            std::abs(value.y()) <= std::numeric_limits<float>::max() &&
@@ -69,6 +73,7 @@ struct DestructionGraph::Impl
 
     bool refresh(std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         std::vector<NvBlastActor*> actors(NvBlastFamilyGetActorCount(family, nullptr));
         if (!actors.empty() &&
             NvBlastFamilyGetActors(actors.data(), static_cast<std::uint32_t>(actors.size()), family,
@@ -96,18 +101,24 @@ struct DestructionGraph::Impl
             groups.push_back(std::move(group));
         }
         std::sort(groups.begin(), groups.end(),
-                  [](const auto& a, const auto& b) { return a.id < b.id; });
+                  [](const auto& a, const auto& b)
+                  {
+                      ENGINE_PROFILE_FUNCTION_PROBE();
+                      return a.id < b.id;
+                  });
         return true;
     }
 
     bool remove_retired(std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         std::vector<NvBlastActor*> actors;
         for (const auto& group : groups)
         {
             const auto count = std::count_if(group.chunks.begin(), group.chunks.end(),
                                               [&](std::uint32_t chunk)
                                               {
+                                                  ENGINE_PROFILE_FUNCTION_PROBE();
                                                   return std::binary_search(
                                                       retired_chunks.begin(), retired_chunks.end(),
                                                       chunk);
@@ -142,6 +153,7 @@ struct DestructionGraph::Impl
 
     bool split(NvBlastActor* actor, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         const auto size = NvBlastActorGetRequiredScratchForSplit(actor, nullptr);
         auto scratch = allocate(size);
         if (!scratch)
@@ -158,6 +170,7 @@ struct DestructionGraph::Impl
 
     bool reset(std::span<const float> health, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         empty_health.assign(health.begin(), health.end());
         memory = allocate(NvBlastAssetGetFamilyMemorySize(asset->asset, nullptr));
         if (!memory)
@@ -218,6 +231,7 @@ DestructionGraph& DestructionGraph::operator=(DestructionGraph&&) noexcept = def
 
 bool DestructionGraph::validate(const schema::DestructionAssetDataT& data, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     if (data.schema_version != 1 || data.chunks.empty() || data.chunks.size() > max_chunks ||
         data.bonds.size() > max_bonds)
@@ -261,6 +275,7 @@ bool DestructionGraph::validate(const schema::DestructionAssetDataT& data, std::
 
 bool DestructionGraph::initialize(const schema::DestructionAssetDataT& data, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!validate(data, error))
     {
         return false;
@@ -398,7 +413,11 @@ bool DestructionGraph::damage_sphere(std::uint32_t group_id, const schema::Vec3&
         return false;
     }
     const auto group = std::find_if(impl_->groups.begin(), impl_->groups.end(),
-                                    [group_id](const auto& value) { return value.id == group_id; });
+                                    [group_id](const auto& value)
+                                    {
+                                        ENGINE_PROFILE_FUNCTION_PROBE();
+                                        return value.id == group_id;
+                                    });
     if (group == impl_->groups.end())
     {
         error = "Destruction group no longer exists";
@@ -427,6 +446,7 @@ bool DestructionGraph::damage_sphere(std::uint32_t group_id, const schema::Vec3&
 
 bool DestructionGraph::release_anchors(std::span<const std::uint32_t> chunk_ids, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     if (!impl_)
     {
@@ -502,7 +522,11 @@ bool DestructionGraph::retire_groups(std::span<const std::uint32_t> group_ids, s
     for (const auto id : selected)
     {
         const auto group = std::find_if(impl_->groups.begin(), impl_->groups.end(),
-                                        [id](const auto& value) { return value.id == id; });
+                                        [id](const auto& value)
+                                        {
+                                            ENGINE_PROFILE_FUNCTION_PROBE();
+                                            return value.id == id;
+                                        });
         if (group == impl_->groups.end() || group->anchored)
         {
             error = "Only current detached destruction groups can be retired";
@@ -547,7 +571,11 @@ bool DestructionGraph::apply_stress(std::uint32_t group_id, const schema::Vec3& 
         return false;
     }
     const auto group = std::find_if(impl_->groups.begin(), impl_->groups.end(),
-                                    [group_id](const auto& value) { return value.id == group_id; });
+                                    [group_id](const auto& value)
+                                    {
+                                        ENGINE_PROFILE_FUNCTION_PROBE();
+                                        return value.id == group_id;
+                                    });
     if (group == impl_->groups.end())
     {
         error = "Destruction stress group no longer exists";
@@ -587,7 +615,11 @@ bool DestructionGraph::apply_stress(std::uint32_t group_id, const schema::Vec3& 
     settings.compressionElasticLimit = elastic_limit;
     settings.compressionFatalLimit = fatal_limit;
     // Negative tension/shear limits inherit compression, as specified by the SDK.
-    const auto release = [](Nv::Blast::ExtStressSolver* value) { value->release(); };
+    const auto release = [](Nv::Blast::ExtStressSolver* value)
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        value->release();
+    };
     std::unique_ptr<Nv::Blast::ExtStressSolver, decltype(release)> solver(
         Nv::Blast::ExtStressSolver::create(*working.family, settings), release);
     if (!solver)
@@ -672,6 +704,7 @@ bool DestructionGraph::apply_stress(std::uint32_t group_id, const schema::Vec3& 
 
 bool DestructionGraph::restore_health(std::span<const float> health, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     if (!impl_ || health.size() != impl_->asset->initial_health.size())
     {
@@ -700,6 +733,7 @@ bool DestructionGraph::restore_health(std::span<const float> health, std::string
 
 std::vector<float> DestructionGraph::healths() const
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!impl_)
     {
         return {};
@@ -722,12 +756,14 @@ std::vector<float> DestructionGraph::healths() const
 
 const schema::DestructionAssetDataT& DestructionGraph::data() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     static const schema::DestructionAssetDataT empty;
     return impl_ ? impl_->asset->data : empty;
 }
 
 const std::vector<DestructionGroup>& DestructionGraph::groups() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     static const std::vector<DestructionGroup> empty;
     return impl_ ? impl_->groups : empty;
 }

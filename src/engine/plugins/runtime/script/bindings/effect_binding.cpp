@@ -1,3 +1,5 @@
+#include "runtime/performance/profiling.hpp"
+
 #if defined(ENGINE_HAS_EFFECTS_PLUGIN) && ENGINE_HAS_EFFECTS_PLUGIN
 
 #include "plugins/runtime/script/bindings/effect_binding.hpp"
@@ -30,6 +32,7 @@ Object.freeze(EffectComponent);
 
 void resource(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<effects::EffectComponent>(arguments, 3);
     std::string path;
     if (value && BindingContext::text(arguments, 2, path))
@@ -39,6 +42,7 @@ void resource(const Arguments& arguments)
 }
 void boolean_setting(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<effects::EffectComponent>(arguments, 3);
     if (value && arguments.is_boolean(2))
     {
@@ -61,6 +65,7 @@ void boolean_setting(const Arguments& arguments)
 }
 void speed(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<effects::EffectComponent>(arguments, 3);
     float speed = 0;
     if (value && BindingContext::scalar(arguments, 2, speed))
@@ -77,6 +82,7 @@ void speed(const Arguments& arguments)
 }
 void playback(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<effects::EffectComponent>(arguments, 2);
     if (!value)
     {
@@ -102,14 +108,17 @@ void playback(const Arguments& arguments)
 
 std::string_view EffectBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "EffectComponent";
 }
 std::string_view EffectBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 bool EffectBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.integer("EffectKind", static_cast<int>(effects::EffectComponent::component_type)) &&
            vm.function("EffectAdd", binding_detail::add_component<effects::EffectComponent>) &&
            vm.function("EffectResource", resource) &&

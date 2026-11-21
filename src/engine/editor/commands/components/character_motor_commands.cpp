@@ -1,4 +1,6 @@
 #include "editor/commands/components/component_edit.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/scene/character_motor.hpp"
 
@@ -10,6 +12,7 @@ namespace
 bool read(const Json& arguments, schema::CharacterMotorDataT& value,
           std::vector<ResourceReference>&, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!fields(arguments,
                 {"enabled", "radius", "halfHeight", "maxSlopeDegrees", "stepHeight",
                  "groundSnapDistance", "gravityFactor", "externalDamping"},
@@ -19,6 +22,7 @@ bool read(const Json& arguments, schema::CharacterMotorDataT& value,
     }
     const auto read_number = [&](std::string_view name, float& output)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (arguments.contains(name) && !number(arguments[name], output))
         {
             error = "Invalid character motor field: " + std::string(name);
@@ -36,6 +40,7 @@ bool read(const Json& arguments, schema::CharacterMotorDataT& value,
 
 Json write(const schema::CharacterMotorDataT& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     return {{"radius", value.radius},
             {"halfHeight", value.half_height},
             {"maxSlopeDegrees", value.max_slope_degrees},
@@ -50,11 +55,19 @@ Json write(const schema::CharacterMotorDataT& value)
 bool register_character_motor(WorldSystem& world, EditorCommands& commands,
                               SceneCommands& scene_commands)
 {
+    ENGINE_PROFILE_FUNCTION();
     return register_component<CharacterMotor, schema::CharacterMotorDataT>(
         world, scene_commands, commands, "character_motor",
         [](Node, const auto& args, auto& data, auto& prepared, auto& error)
-        { return read(args, data, prepared, error); },
-        [](auto, const auto& data) { return write(data); });
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return read(args, data, prepared, error);
+        },
+        [](auto, const auto& data)
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return write(data);
+        });
 }
 
 } // namespace engine::editor::components

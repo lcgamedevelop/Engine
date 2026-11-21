@@ -1,4 +1,5 @@
 #include "editor/asset_pipeline/import_tool.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "editor/asset_pipeline/editor_tool_directories.hpp"
 #include "editor/asset_pipeline/editor_tools.hpp"
@@ -14,6 +15,7 @@ namespace engine::editor::asset_pipeline
 {
 bool find_import_tool(std::string_view name, std::filesystem::path& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     error.clear();
     if (name.empty() ||
@@ -65,6 +67,7 @@ ImportToolStatus run_import_tool(const std::vector<std::string>& arguments, std:
                                  std::string& error, const CancellationCheck& cancel_requested,
                                  std::size_t max_output_bytes)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     error.clear();
     if (arguments.empty() || arguments.front().empty() || max_output_bytes == 0)

@@ -1,4 +1,5 @@
 #include "runtime/scene/ui_component.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/resource/types/ui_resource.hpp"
 #include "runtime/scene/ui_component_runtime.hpp"
@@ -15,16 +16,19 @@ namespace engine
 {
 bool UiComponent::register_type(ComponentRegistry& registry)
 {
+    ENGINE_PROFILE_FUNCTION();
     return register_component_storage<UiComponent, Data, Runtime>(registry);
 }
 
 UiComponent::Runtime* UiComponent::runtime() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return runtime_state<Runtime>();
 }
 
 std::uint64_t UiComponent::document_revision() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return {};
@@ -33,22 +37,26 @@ std::uint64_t UiComponent::document_revision() const noexcept
 }
 bool UiComponent::valid_settings(const schema::UiDataT& settings) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return settings.document_guid.empty() || GuidMap::valid_guid(settings.document_guid);
 }
 
 bool UiComponent::get_settings(Data& output) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* value = read_data<Data>();
     output = value ? *value : Data{};
     return value != nullptr;
 }
 bool UiComponent::set_settings(const schema::UiDataT& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     return apply_settings(value, {});
 }
 
 bool UiComponent::apply_settings(const Data& value, ResourceReference prepared)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -93,6 +101,7 @@ bool UiComponent::apply_settings(const Data& value, ResourceReference prepared)
 }
 bool UiComponent::set_document(std::string_view path)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -111,6 +120,7 @@ bool UiComponent::set_document(std::string_view path)
 }
 ResourceHandle UiComponent::document() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return {};
@@ -119,6 +129,7 @@ ResourceHandle UiComponent::document() const noexcept
 }
 bool UiComponent::restore_data(const schema::ComponentDataT& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!value.flags)
     {
         return false;

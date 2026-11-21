@@ -1,4 +1,5 @@
 #include "runtime/resource/codecs/script_resource_codec.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/core/guid_map.hpp"
 #include "runtime/resource/codecs/resource_bytes.hpp"
 
@@ -6,11 +7,13 @@ namespace engine
 {
 schema::AssetKind ScriptResourceCodec::kind() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::script;
 }
 bool ScriptResourceCodec::decode(const schema::AssetEntryT& entry, ByteView payload,
                                  std::unique_ptr<Resource>& output, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     if (output || entry.kind != kind() || payload.size() > 64U * 1024U * 1024U)
     {
@@ -22,6 +25,7 @@ bool ScriptResourceCodec::decode(const schema::AssetEntryT& entry, ByteView payl
 }
 bool ScriptResourceCodec::validate_data(const Resource& resource, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     const auto* data = resource_detail::data<ResourceType>(&resource);
     if (!data || data->size() > 64U * 1024U * 1024U ||
@@ -39,6 +43,7 @@ bool ScriptResourceCodec::validate_data(const Resource& resource, std::string& e
 bool ScriptResourceCodec::validate_dependencies(const Resource& resource, ResourceView dependencies,
                                                 std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     for (const auto* item : dependencies)
     {

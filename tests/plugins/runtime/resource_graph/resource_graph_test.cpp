@@ -211,6 +211,36 @@ bool sync_lifetime()
     {
         return false;
     }
+    f.graph.set_memory_owner(a, {ResourceMemoryOwnerKind::scene, 11, 2});
+    f.graph.set_memory_owner(b, {ResourceMemoryOwnerKind::scene_scope, 11, 3});
+    ResourceMemorySnapshot root_sample, leaf_sample, top, released;
+    if (!f.graph.memory_snapshot({.guid = guid(4)}, root_sample) ||
+        !f.graph.memory_snapshot({.guid = guid(1)}, leaf_sample) ||
+        !f.graph.memory_snapshot({.limit = 1}, top) ||
+        !expect(root_sample.entries.size() == 1 && root_sample.measured_payloads == 4 &&
+                    root_sample.measured_cpu_payload_bytes == 4 &&
+                    top.matching_entries == 4 && top.entries.size() == 1,
+                "memory snapshot counts shared records once and bounds the listed entries") ||
+        !expect(leaf_sample.entries.size() == 1 && leaf_sample.entries[0].acquisitions == 1 &&
+                    leaf_sample.entries[0].dependency_references == 2 &&
+                    leaf_sample.entries[0].holders.size() == 3 &&
+                    leaf_sample.entries[0].holders[1].guid == guid(2) &&
+                    leaf_sample.entries[0].holders[2].guid == guid(3),
+                "memory snapshot returns each parent of a shared dependency"))
+    {
+        return false;
+    }
+    const auto& root_item = root_sample.entries[0];
+    if (!expect(root_item.cpu_payload_bytes == 1 && root_item.phase == ResourceMemoryPhase::ready &&
+                    root_item.holders.size() == 2 && root_item.holders[0].id == a.id &&
+                    root_item.holders[0].owner.kind == ResourceMemoryOwnerKind::scene &&
+                    root_item.holders[0].owner.domain == 11 && root_item.holders[0].owner.id == 2 &&
+                    root_item.holders[1].id == b.id &&
+                    root_item.holders[1].owner.kind == ResourceMemoryOwnerKind::scene_scope,
+                "each resource acquisition preserves its current owner identity"))
+    {
+        return false;
+    }
     const SourceResource* source = nullptr;
     const ScriptResource* wrong = nullptr;
     const auto copied = a;
@@ -219,6 +249,11 @@ bool sync_lifetime()
                     f.graph.get(a, wrong) == ResourceError::type_mismatch && !wrong,
                 "typed access validates the canonical payload") ||
         !f.graph.release(a) || !f.graph.release(a) ||
+        !f.graph.memory_snapshot({.guid = guid(4)}, released) ||
+        !expect(released.entries.size() == 1 && released.entries[0].acquisitions == 1 &&
+                    released.entries[0].holders.size() == 1 && released.entries[0].holders[0].id == b.id &&
+                    released.measured_cpu_payload_bytes == root_sample.measured_cpu_payload_bytes,
+                "releasing a consumer preserves the shared payload") ||
         !expect(f.graph.get(copied, value) == ResourceError::invalid_handle && !value &&
                     f.graph.get(b, value) == ResourceError::none,
                 "copied handle is not an independent acquisition") ||
@@ -228,7 +263,12 @@ bool sync_lifetime()
                 f.graph.error() == ResourceError::not_loaded &&
                 f.graph.get(child, value) == ResourceError::none,
             "last root release unloads the root but preserves independent dependency ownership") ||
-        !f.graph.release(child))
+        !f.graph.release(child) || !f.graph.memory_snapshot({}, released) ||
+        !expect(released.entries.empty() && released.measured_cpu_payload_bytes == 0 &&
+                    released.loader_id == root_sample.loader_id &&
+                    released.session_started_ns == root_sample.session_started_ns &&
+                    released.sequence > root_sample.sequence && root_item.acquisitions == 2,
+                "the final release removes the closure while earlier snapshots remain readable"))
     {
         return false;
     }
@@ -258,7 +298,8 @@ bool asynchronous_lifetime()
     std::unique_ptr<ResourceLoad> first, second, other;
     ResourceLoadProgress progress;
     ResourceHandle rejected, handle, retained;
-    if (!f.graph.begin_load(guid(2), first) || !f.graph.begin_load(guid(2), second) ||
+    if (!f.graph.begin_load(guid(2), first, {ResourceMemoryOwnerKind::scene_load, 12, 3}) ||
+        !f.graph.begin_load(guid(2), second, {ResourceMemoryOwnerKind::scene_load, 12, 4}) ||
         !f.graph.begin_load(guid(3), other) ||
         !expect(
             first->status(progress) == ResourceLoadStatus::loading && !first->take(rejected) &&
@@ -268,7 +309,20 @@ bool asynchronous_lifetime()
         !expect(!f.graph.acquire_loaded(guid(2), rejected) &&
                     f.graph.error() == ResourceError::not_ready,
                 "in-flight is distinct from unloaded") ||
-        !first->cancel() || !first->cancel() || !f.pump(*second) || !f.pump(*other) ||
+        !first->cancel() || !first->cancel())
+    {
+        return false;
+    }
+    ResourceMemorySnapshot waiting;
+    if (!f.graph.memory_snapshot({.guid = guid(2)}, waiting) ||
+        !expect(waiting.entries.size() == 1 && waiting.entries[0].request_references == 2 &&
+                    waiting.entries[0].holders.size() == 2 &&
+                    waiting.entries[0].holders[0].owner.id == 3 &&
+                    waiting.entries[0].holders[0].pending_release &&
+                    waiting.entries[0].holders[1].owner.id == 4 &&
+                    !waiting.entries[0].holders[1].pending_release,
+                "cancelled pins stay visible until the graph reclaims them") ||
+        !f.pump(*second) || !f.pump(*other) ||
         !expect(
             CountingCodec::decodes == 3 && second->status(progress) == ResourceLoadStatus::ready &&
                 progress.completed == 2 && progress.total == 2,
@@ -340,6 +394,16 @@ bool generations_and_memory()
     if (!expect(f.graph.get(current, new_data) == ResourceError::none && new_data != old_data &&
                     new_data->generation() != old_generation,
                 "old closures never resolve against new-generation records"))
+    {
+        return false;
+    }
+    ResourceMemorySnapshot generations;
+    if (!f.graph.memory_snapshot({.guid = guid(1)}, generations) ||
+        !expect(generations.entries.size() == 2 &&
+                    generations.entries[0].record_id != generations.entries[1].record_id &&
+                    generations.entries[0].catalog_generation !=
+                        generations.entries[1].catalog_generation,
+                "memory query reports separate live payloads for old and new catalog generations"))
     {
         return false;
     }

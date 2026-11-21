@@ -1,4 +1,6 @@
 #include "editor/mesh/meshlets.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/utils/mesh_utils.hpp"
 
@@ -25,9 +27,11 @@ bool build(const std::vector<schema::MeshVertex>& vertices,
            const std::vector<schema::MeshSubmesh>& submeshes,
            std::unique_ptr<schema::MeshletDataT>& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto result = std::make_unique<schema::MeshletDataT>();
     const auto append = [&](std::span<const std::uint32_t> part)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const auto bound =
             meshopt_buildMeshletsBound(part.size(), maximum_vertices, maximum_triangles);
         if (bound > std::numeric_limits<std::uint32_t>::max() / (maximum_triangles * 3))
@@ -53,7 +57,11 @@ bool build(const std::vector<schema::MeshVertex>& vertices,
                 cluster.triangle_count, positions, vertices.size(), sizeof(schema::MeshVertex));
             if (bounds.cone_cutoff == 0 &&
                 std::all_of(std::begin(bounds.cone_axis), std::end(bounds.cone_axis),
-                            [](float value) { return value == 0; }))
+                            [](float value)
+                            {
+                                ENGINE_PROFILE_FUNCTION_PROBE();
+                                return value == 0;
+                            }))
             {
                 // meshoptimizer returns zero bounds when every triangle is degenerate.
                 // Preserve those source indices and bound their points without a normal cone.
@@ -120,6 +128,7 @@ bool build(const std::vector<schema::MeshVertex>& vertices,
 
 bool generate_meshlets(schema::MeshDataT& mesh, const toml::table& meta, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     bool enabled = false;
     if (meta.contains("meshlets"))
@@ -183,6 +192,7 @@ bool generate_meshlets(schema::MeshDataT& mesh, const toml::table& meta, std::st
 bool generate_meshlets(schema::MeshDataT& mesh, const std::filesystem::path& source,
                        std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto path = source;
     path += ".meta";
     std::ifstream stream(path, std::ios::binary);
@@ -202,6 +212,7 @@ bool generate_meshlets(schema::MeshDataT& mesh, const std::filesystem::path& sou
 
 std::string meshlet_fingerprint()
 {
+    ENGINE_PROFILE_FUNCTION();
     return ":meshoptimizer-" + std::to_string(MESHOPTIMIZER_VERSION) + ":meshlets-scan-64-124-4";
 }
 

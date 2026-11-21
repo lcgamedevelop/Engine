@@ -1,4 +1,6 @@
 #include "plugins/editor/asset_import/fbx_document.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/editor/asset_import/fbx_authoring.hpp"
 #include "runtime/resource/virtual_file_system.hpp"
 
@@ -27,11 +29,13 @@ constexpr std::uint64_t maximum_fbx_source_bytes = 2ULL * 1024ULL * 1024ULL * 10
 
 bool finite_float(double value)
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::isfinite(value) && std::abs(value) <= std::numeric_limits<float>::max();
 }
 
 bool read_motion_settings(const toml::table& settings, FbxDocument& document, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     document.animation_motion.clear();
     if (!settings.contains("animation_motion"))
     {
@@ -71,6 +75,7 @@ bool read_motion_settings(const toml::table& settings, FbxDocument& document, st
         motion.joint = *joint;
         const auto read_axes = [&](const char* field, std::array<bool, 3>& axes)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             if (!table->contains(field))
             {
                 return true;
@@ -112,6 +117,7 @@ bool read_motion_settings(const toml::table& settings, FbxDocument& document, st
 bool read_document_settings(const std::filesystem::path& path, FbxDocument& document,
                             std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto meta = path;
     meta += ".meta";
     toml::table settings;
@@ -179,6 +185,7 @@ bool read_document_settings(const std::filesystem::path& path, FbxDocument& docu
 
 std::string safe_name(ufbx_string name)
 {
+    ENGINE_PROFILE_FUNCTION();
     constexpr char hex[] = "0123456789abcdef";
     std::string output;
     for (std::size_t index = 0; index < name.length; ++index)
@@ -210,6 +217,7 @@ std::string safe_name(ufbx_string name)
 bool collect_nodes(FbxDocument& document, const ufbx_node& node, const std::string& parent,
                    std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto path = parent.empty() ? "root" : parent + "/" + safe_name(node.name);
     if (!document.nodes.emplace(path, &node).second)
     {
@@ -247,6 +255,7 @@ bool collect_nodes(FbxDocument& document, const ufbx_node& node, const std::stri
 void collect_joints(FbxDocument& document, const ufbx_node& node,
                     const std::set<const ufbx_node*>& included)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (included.contains(&node))
     {
         document.joint_indices.emplace(&node, static_cast<std::uint32_t>(document.joints.size()));
@@ -260,6 +269,7 @@ void collect_joints(FbxDocument& document, const ufbx_node& node,
 
 bool matrix_close(const ufbx_matrix& left, const ufbx_matrix& right)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (std::size_t index = 0; index < 12; ++index)
     {
         if (!std::isfinite(left.v[index]) || !std::isfinite(right.v[index]))
@@ -292,17 +302,20 @@ bool matrix_close(const ufbx_matrix& left, const ufbx_matrix& right)
 
 schema::Vec3 vector(ufbx_vec3 value)
 {
+    ENGINE_PROFILE_FUNCTION();
     return {value.x, value.y, value.z};
 }
 
 schema::Vec4 rotation(ufbx_quat value)
 {
+    ENGINE_PROFILE_FUNCTION();
     return {value.x, value.y, value.z, value.w};
 }
 
 bool skin_influence(const FbxDocument& document, const ufbx_skin_deformer& skin,
                     std::uint32_t vertex, schema::SkinInfluence& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (vertex >= skin.vertices.count)
     {
         error = "FBX skin has no weights for a mesh control point";
@@ -351,11 +364,13 @@ bool skin_influence(const FbxDocument& document, const ufbx_skin_deformer& skin,
 
 void SceneDeleter::operator()(ufbx_scene* scene) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     ufbx_free_scene(scene);
 }
 
 std::vector<float> matrix_values(const ufbx_matrix& matrix)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::vector<float> result(16, 0.0F);
     for (std::size_t column = 0; column < 4; ++column)
     {
@@ -371,6 +386,7 @@ std::vector<float> matrix_values(const ufbx_matrix& matrix)
 bool document_settings_match(const std::filesystem::path& path, const FbxDocument& document,
                              std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     FbxDocument current;
     if (!read_document_settings(path, current, error))
     {
@@ -392,6 +408,7 @@ bool document_settings_match(const std::filesystem::path& path, const FbxDocumen
 
 bool load_document(const std::filesystem::path& path, FbxDocument& document, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     document = {};
     if (!read_document_settings(path, document, error))
     {
@@ -444,6 +461,7 @@ bool load_document(const std::filesystem::path& path, FbxDocument& document, std
     std::set<const ufbx_node*> included;
     const auto include = [&](const ufbx_node* node)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         while (node != nullptr)
         {
             included.insert(node);
@@ -500,6 +518,7 @@ bool load_document(const std::filesystem::path& path, FbxDocument& document, std
 bool convert_skeleton(const FbxDocument& document, schema::SkeletonDataT& output,
                       std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.schema_version = 2;
     std::map<const ufbx_node*, ufbx_matrix> bindings;
     for (const auto& [key, node] : document.meshes)
@@ -553,6 +572,7 @@ bool convert_skeleton(const FbxDocument& document, schema::SkeletonDataT& output
 bool convert_mesh(const FbxDocument& document, const ufbx_node& node, schema::MeshDataT& result,
                   std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (node.mesh == nullptr)
     {
         error = "FBX node has no mesh";
@@ -745,6 +765,7 @@ bool convert_mesh(const FbxDocument& document, const ufbx_node& node, schema::Me
     std::size_t stream_count = 0;
     const auto add_stream = [&](auto& values)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (!values.empty())
         {
             streams[stream_count++] = {values.data(), values.size(), sizeof(values.front())};
@@ -772,6 +793,7 @@ bool convert_mesh(const FbxDocument& document, const ufbx_node& node, schema::Me
     }
     const auto compact = [unique_count](auto& values)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (!values.empty())
         {
             values.resize(unique_count);
@@ -792,6 +814,7 @@ bool convert_animation(const FbxDocument& source, const FbxDocument& skeleton,
                        const ufbx_anim_stack& stack, schema::AnimationDataT& output,
                        std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.schema_version = 2;
     if (source.scale_factor != skeleton.scale_factor ||
         source.rotation_offset != skeleton.rotation_offset)

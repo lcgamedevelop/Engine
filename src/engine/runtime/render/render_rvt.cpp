@@ -15,6 +15,7 @@ namespace engine
 {
 bool RenderSystem::rvt_status(RvtStatus& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = rvt_status_;
     if (!renderer_initialized_)
     {
@@ -26,6 +27,7 @@ bool RenderSystem::rvt_status(RvtStatus& output) const
 }
 bool RenderSystem::set_rvt_debug_options(const RvtDebugOptions& options)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (options.mode > RvtDebugMode::page_table || options.channel > RvtDebugChannel::ao ||
         options.mip < -1 || options.mip > 8 ||
         (rvt_cache_ && options.mip > rvt_cache_->maximum_mip()))
@@ -41,12 +43,14 @@ bool RenderSystem::set_rvt_debug_options(const RvtDebugOptions& options)
 }
 bool RenderSystem::rvt_debug_options(RvtDebugOptions& output, std::uint64_t& revision) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = rvt_options_;
     revision = rvt_debug_revision_;
     return true;
 }
 void RenderSystem::release_rvt() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     rvt_cache_.reset();
     rvt_pass_.reset();
     rvt_scene_id_ = 0;
@@ -141,6 +145,7 @@ void RenderSystem::prepare_rvt(const RenderSettings& settings,
 }
 void RenderSystem::draw_rvt_viewer()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!debug_requests_[std::size_t(RenderFeature::rvt_viewer)])
     {
         rvt_viewer_.reset();

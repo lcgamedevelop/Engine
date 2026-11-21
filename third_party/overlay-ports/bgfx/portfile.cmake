@@ -21,7 +21,7 @@ vcpkg_extract_source_archive(
     wgsl-tools.patch
     webgpu-external-device.patch
     webgpu-emscripten.patch
-    webgpu-readback-yield.patch
+    webgpu-readback-async.patch
     profiler-option.patch
     metal-profiler-scopes.patch
     metal-counter-validity.patch

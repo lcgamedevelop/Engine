@@ -8,6 +8,7 @@
 #include "runtime/scene/scope_work.hpp"
 
 #include "runtime/font/font_system.hpp"
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/resource/resource_reference.hpp"
 #include "runtime/scene/node.hpp"
@@ -36,11 +37,13 @@ namespace
 {
 bool valid_string(std::string_view value)
 {
+    ENGINE_PROFILE_FUNCTION();
     return value.find('\0') == std::string_view::npos;
 }
 
 Rml::ElementFormControl* form_control(Rml::Element& element)
 {
+    ENGINE_PROFILE_FUNCTION();
     // These built-in tags have fixed instancers; no native RTTI or custom element registration.
     const auto& tag = element.GetTagName();
     return tag == "input" || tag == "textarea" || tag == "select"
@@ -50,6 +53,7 @@ Rml::ElementFormControl* form_control(Rml::Element& element)
 
 std::string element_value(Rml::Element& element)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (auto* control = form_control(element))
     {
         return control->GetValue();
@@ -59,6 +63,7 @@ std::string element_value(Rml::Element& element)
 
 bool element_enabled(Rml::Element& element)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (auto* current = &element; current != nullptr; current = current->GetParentNode())
     {
         if (current->HasAttribute("disabled"))
@@ -71,12 +76,14 @@ bool element_enabled(Rml::Element& element)
 
 bool valid_pointer(float x, float y)
 {
+    ENGINE_PROFILE_FUNCTION();
     constexpr float limit = 1000000.0F;
     return std::isfinite(x) && std::isfinite(y) && std::abs(x) <= limit && std::abs(y) <= limit;
 }
 
 bool interactive_element(Rml::Element& element)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto& tag = element.GetTagName();
     if (tag == "button" || tag == "input" || tag == "textarea" || tag == "select" || tag == "a" ||
         tag == "label" || element.HasAttribute("data-input-capture"))
@@ -85,7 +92,10 @@ bool interactive_element(Rml::Element& element)
     }
     const auto& style = element.GetComputedValues();
     const auto scrollable = [](Rml::Style::Overflow value)
-    { return value == Rml::Style::Overflow::Auto || value == Rml::Style::Overflow::Scroll; };
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return value == Rml::Style::Overflow::Auto || value == Rml::Style::Overflow::Scroll;
+    };
     return (scrollable(style.overflow_x()) &&
             element.GetScrollWidth() > element.GetClientWidth()) ||
            (scrollable(style.overflow_y()) &&
@@ -94,6 +104,7 @@ bool interactive_element(Rml::Element& element)
 
 void append_text(Rml::Element& element, std::string& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (element.GetTagName() == "#text")
     {
         output += static_cast<Rml::ElementText&>(element).GetText();
@@ -107,6 +118,7 @@ void append_text(Rml::Element& element, std::string& output)
 
 std::uint64_t next_document_id()
 {
+    ENGINE_PROFILE_FUNCTION();
     static std::atomic<std::uint64_t> sequence{0};
     auto previous = sequence.load(std::memory_order_relaxed);
     while (previous != std::numeric_limits<std::uint64_t>::max())
@@ -124,10 +136,12 @@ class RmlPlatform final : public Rml::SystemInterface
 public:
     double GetElapsedTime() override
     {
+        ENGINE_PROFILE_FUNCTION();
         return static_cast<double>(SDL_GetTicksNS()) / 1.0e9;
     }
     bool LogMessage(Rml::Log::Type type, const Rml::String& message) override
     {
+        ENGINE_PROFILE_FUNCTION();
         SDL_LogMessage(SDL_LOG_CATEGORY_APPLICATION,
                        type <= Rml::Log::LT_WARNING ? SDL_LOG_PRIORITY_WARN : SDL_LOG_PRIORITY_INFO,
                        "RmlUi: %s", message.c_str());
@@ -135,16 +149,19 @@ public:
     }
     void SetClipboardText(const Rml::String& text) override
     {
+        ENGINE_PROFILE_FUNCTION();
         static_cast<void>(SDL_SetClipboardText(text.c_str()));
     }
     void GetClipboardText(Rml::String& text) override
     {
+        ENGINE_PROFILE_FUNCTION();
         char* value = SDL_GetClipboardText();
         text = value ? value : "";
         SDL_free(value);
     }
     void JoinPath(Rml::String& result, const Rml::String& base, const Rml::String& path) override
     {
+        ENGINE_PROFILE_FUNCTION();
         // Keep project paths unchanged; RmlUi's cache sees a private document generation prefix.
         constexpr std::string_view prefix = "engine-ui/";
         const auto end = base.find('/', prefix.size());
@@ -159,21 +176,26 @@ class RmlFiles final : public Rml::FileInterface
 public:
     Rml::FileHandle Open(const Rml::String&) override
     {
+        ENGINE_PROFILE_FUNCTION();
         return 0;
     }
     void Close(Rml::FileHandle) override
     {
+        ENGINE_PROFILE_FUNCTION();
     }
     size_t Read(void*, size_t, Rml::FileHandle) override
     {
+        ENGINE_PROFILE_FUNCTION();
         return 0;
     }
     bool Seek(Rml::FileHandle, long, int) override
     {
+        ENGINE_PROFILE_FUNCTION();
         return false;
     }
     size_t Tell(Rml::FileHandle) override
     {
+        ENGINE_PROFILE_FUNCTION();
         return 0;
     }
 };
@@ -206,6 +228,7 @@ struct UiSystem::State final : Rml::EventListener
     };
     explicit State(FontSystem& fonts) : font_engine(fonts), renderer(fonts, font_engine)
     {
+        ENGINE_PROFILE_FUNCTION();
     }
     RmlPlatform platform;
     RmlFiles files;
@@ -228,14 +251,20 @@ struct UiSystem::State final : Rml::EventListener
     bool input_event = false;
     Document* find_document(std::uint64_t node)
     {
+        ENGINE_PROFILE_FUNCTION();
         const auto found =
             std::find_if(documents.begin(), documents.end(),
-                         [node](const auto& document) { return document.node == node; });
+                         [node](const auto& document)
+                         {
+                             ENGINE_PROFILE_FUNCTION_PROBE();
+                             return document.node == node;
+                         });
         return found == documents.end() ? nullptr : &*found;
     }
     bool prepare_document(WorldSystem& world, Node node, const ecs_detail::NodeRuntime& state,
                           bool& changed)
     {
+        ENGINE_PROFILE_FUNCTION();
         const auto* scene = node.scene();
         (void)scene;
 
@@ -296,11 +325,13 @@ struct UiSystem::State final : Rml::EventListener
     }
     bool activate(Document& document)
     {
+        ENGINE_PROFILE_FUNCTION();
         return font_engine.activate(document.key, document.resource) &&
                renderer.activate(document.key, document.resource);
     }
     void cancel_pointer()
     {
+        ENGINE_PROFILE_FUNCTION();
         canceling_input = true;
         for (auto& document : documents)
         {
@@ -319,6 +350,7 @@ struct UiSystem::State final : Rml::EventListener
     }
     Rml::Element* hit_target(Document& document, float x, float y)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (!document.visible || !valid_pointer(x, y))
         {
             return nullptr;
@@ -342,6 +374,7 @@ struct UiSystem::State final : Rml::EventListener
     }
     void prune()
     {
+        ENGINE_PROFILE_FUNCTION();
         if (documents.empty())
         {
             // No remaining contexts can hold font faces or cached texture handles.
@@ -361,7 +394,12 @@ struct UiSystem::State final : Rml::EventListener
     }
     UiElementHandle handle(Document& document, Rml::Element& element)
     {
-        std::erase_if(document.elements, [](const auto& pair) { return !pair.second.reference; });
+        ENGINE_PROFILE_FUNCTION();
+        std::erase_if(document.elements, [](const auto& pair)
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return !pair.second.reference;
+        });
         for (const auto& [id, tracked] : document.elements)
         {
             if (tracked.reference.get() == &element)
@@ -381,6 +419,7 @@ struct UiSystem::State final : Rml::EventListener
     }
     Element* resolve(UiElementHandle handle, Document** owner = nullptr)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (owner)
         {
             *owner = nullptr;
@@ -411,11 +450,16 @@ struct UiSystem::State final : Rml::EventListener
     }
     void clear_events(std::uint64_t document_id)
     {
+        ENGINE_PROFILE_FUNCTION();
         std::erase_if(events, [document_id](const auto& event)
-                      { return event.target.document_id == document_id; });
+                      {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return event.target.document_id == document_id;
+        });
     }
     void close(Document& document)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (keyboard_context == document.context)
         {
             keyboard_context = nullptr;
@@ -432,6 +476,7 @@ struct UiSystem::State final : Rml::EventListener
     }
     void ProcessEvent(Rml::Event& event) override
     {
+        ENGINE_PROFILE_FUNCTION();
         if (canceling_input)
         {
             return;
@@ -502,13 +547,16 @@ struct UiSystem::State final : Rml::EventListener
 UiSystem::UiSystem(WindowSystem& window, WorldSystem& world, FontSystem& fonts)
     : state_(std::make_unique<State>(fonts)), window_(window), world_(world)
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 UiSystem::~UiSystem() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
 }
 bool UiSystem::on_initialize(const EngineConfig&)
 {
+    ENGINE_PROFILE_FUNCTION();
     Rml::SetSystemInterface(&state_->platform);
     Rml::SetFileInterface(&state_->files);
     Rml::SetRenderInterface(&state_->renderer);
@@ -518,6 +566,7 @@ bool UiSystem::on_initialize(const EngineConfig&)
 }
 SceneWorkState UiSystem::prepare_scope(SceneScopeId scope, const SceneWorkBudget& budget)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!state_->initialized || !world_.refresh_scene_state())
     {
         return SceneWorkState::failed;
@@ -535,7 +584,11 @@ SceneWorkState UiSystem::prepare_scope(SceneScopeId scope, const SceneWorkBudget
     state_->logical_width = width;
     state_->logical_height = height;
     std::erase_if(state_->preparing,
-                  [&](const auto& entry) { return !world_.scope_candidate(entry.first); });
+                  [&](const auto& entry)
+                  {
+                      ENGINE_PROFILE_FUNCTION_PROBE();
+                      return !world_.scope_candidate(entry.first);
+                  });
     auto found = state_->preparing.find(scope);
     if (found == state_->preparing.end())
     {
@@ -550,6 +603,7 @@ SceneWorkState UiSystem::prepare_scope(SceneScopeId scope, const SceneWorkBudget
         found->second, budget,
         [&](Node node)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             const auto ui = node.get_component<UiComponent>();
             if (!ui || !ui.active() || ui.document().id == 0)
             {
@@ -584,6 +638,7 @@ SceneWorkState UiSystem::prepare_scope(SceneScopeId scope, const SceneWorkBudget
 }
 bool UiSystem::scope_status(SceneScopeId scope, ScenePreparationSnapshot& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     if (!state_)
     {
@@ -599,6 +654,7 @@ bool UiSystem::scope_status(SceneScopeId scope, ScenePreparationSnapshot& output
 }
 void UiSystem::release_scope(SceneScopeId scope) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!state_)
     {
         return;
@@ -613,6 +669,7 @@ void UiSystem::release_scope(SceneScopeId scope) noexcept
         std::erase_if(state_->documents,
                       [&](auto& document)
                       {
+                          ENGINE_PROFILE_FUNCTION_PROBE();
                           if (document.node != node.id())
                           {
                               return false;
@@ -659,6 +716,7 @@ bool UiSystem::synchronize()
     state_->logical_height = logical_height;
     const auto wanted = [&](const State::Document& document)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         auto node = world_.find_node(document.node);
         if (!node)
         {
@@ -687,6 +745,7 @@ bool UiSystem::synchronize()
     std::erase_if(state_->documents,
                   [&](auto& document)
                   {
+                      ENGINE_PROFILE_FUNCTION_PROBE();
                       if (wanted(document))
                       {
                           return false;
@@ -706,6 +765,7 @@ bool UiSystem::synchronize()
             [&](flecs::entity entity, const ecs_detail::ComponentStorage<UiComponent::Data>& stored,
                 const ecs_detail::NodeRuntime& state)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 if (query_success)
                 {
                     (void)stored;
@@ -725,6 +785,7 @@ bool UiSystem::synchronize()
     std::stable_sort(state_->documents.begin(), state_->documents.end(),
                      [](const auto& left, const auto& right)
                      {
+                         ENGINE_PROFILE_FUNCTION_PROBE();
                          return left.persistent != right.persistent ? !left.persistent
                                 : left.scene != right.scene         ? left.scene < right.scene
                                                                     : left.order < right.order;
@@ -819,6 +880,7 @@ bool UiSystem::render(std::uint32_t width, std::uint32_t height)
 }
 bool UiSystem::find_element(std::uint64_t node, std::string_view id, UiElementHandle& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     if (id.empty() || !valid_string(id) || !synchronize())
     {
@@ -836,6 +898,7 @@ bool UiSystem::find_element(std::uint64_t node, std::string_view id, UiElementHa
 
 bool UiSystem::document_root(std::uint64_t node, UiElementHandle& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     if (!synchronize())
     {
@@ -852,6 +915,7 @@ bool UiSystem::document_root(std::uint64_t node, UiElementHandle& output)
 
 bool UiSystem::inspect_element(UiElementHandle handle, UiElementInfo& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     State::Document* document = nullptr;
     auto* tracked = synchronize() ? state_->resolve(handle, &document) : nullptr;
@@ -891,6 +955,7 @@ bool UiSystem::inspect_element(UiElementHandle handle, UiElementInfo& output)
 
 bool UiSystem::child_element(UiElementHandle parent, std::uint32_t index, UiElementHandle& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     State::Document* document = nullptr;
     auto* tracked = synchronize() ? state_->resolve(parent, &document) : nullptr;
@@ -909,6 +974,7 @@ bool UiSystem::child_element(UiElementHandle parent, std::uint32_t index, UiElem
 
 bool UiSystem::element_style(UiElementHandle handle, std::string_view name, std::string& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     if (name.empty() || !valid_string(name))
     {
@@ -926,6 +992,7 @@ bool UiSystem::element_style(UiElementHandle handle, std::string_view name, std:
 
 bool UiSystem::hit_test(float x, float y, UiElementHandle& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     if (!valid_pointer(x, y) || !synchronize())
     {
@@ -955,12 +1022,14 @@ bool UiSystem::hit_test(float x, float y, UiElementHandle& output)
 
 bool UiSystem::pointer_active() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return state_->initialized && (state_->pointer_context != nullptr || state_->touch_pointer ||
                                    !state_->blocked_touches.empty());
 }
 
 bool UiSystem::focus_element(UiElementHandle handle)
 {
+    ENGINE_PROFILE_FUNCTION();
     State::Document* document = nullptr;
     auto* tracked = synchronize() ? state_->resolve(handle, &document) : nullptr;
     if (!tracked || !document->visible || !tracked->reference->IsVisible(true) ||
@@ -1003,10 +1072,12 @@ bool UiSystem::focus_element(UiElementHandle handle)
 }
 bool UiSystem::is_valid(UiElementHandle handle)
 {
+    ENGINE_PROFILE_FUNCTION();
     return synchronize() && state_->resolve(handle) != nullptr;
 }
 std::uint64_t UiSystem::document_id(std::uint64_t node)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!synchronize())
     {
         return 0;
@@ -1016,6 +1087,7 @@ std::uint64_t UiSystem::document_id(std::uint64_t node)
 }
 bool UiSystem::document_visible(std::uint64_t node)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!synchronize())
     {
         return false;
@@ -1025,6 +1097,7 @@ bool UiSystem::document_visible(std::uint64_t node)
 }
 bool UiSystem::set_document_visible(std::uint64_t node_id, bool visible)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto node = world_.find_node(node_id);
     auto ui = node ? node.get_component<UiComponent>() : UiComponent{};
     if (!ui)
@@ -1035,6 +1108,7 @@ bool UiSystem::set_document_visible(std::uint64_t node_id, bool visible)
 }
 bool UiSystem::element_id(UiElementHandle handle, std::string& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     auto* element = synchronize() ? state_->resolve(handle) : nullptr;
     if (!element)
@@ -1046,6 +1120,7 @@ bool UiSystem::element_id(UiElementHandle handle, std::string& output)
 }
 bool UiSystem::text(UiElementHandle handle, std::string& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     auto* element = synchronize() ? state_->resolve(handle) : nullptr;
     if (!element)
@@ -1057,6 +1132,7 @@ bool UiSystem::text(UiElementHandle handle, std::string& output)
 }
 bool UiSystem::value(UiElementHandle handle, std::string& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     auto* element = synchronize() ? state_->resolve(handle) : nullptr;
     if (!element)
@@ -1068,6 +1144,7 @@ bool UiSystem::value(UiElementHandle handle, std::string& output)
 }
 bool UiSystem::set_text(UiElementHandle handle, std::string_view value)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid_string(value) || !synchronize())
     {
         return false;
@@ -1097,6 +1174,7 @@ bool UiSystem::set_text(UiElementHandle handle, std::string_view value)
 }
 bool UiSystem::set_value(UiElementHandle handle, std::string_view value)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid_string(value) || !synchronize())
     {
         return false;
@@ -1120,11 +1198,13 @@ bool UiSystem::set_value(UiElementHandle handle, std::string_view value)
 }
 bool UiSystem::set_visible(UiElementHandle handle, bool value)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* tracked = synchronize() ? state_->resolve(handle) : nullptr;
     return tracked && tracked->reference->SetProperty("visibility", value ? "visible" : "hidden");
 }
 bool UiSystem::set_enabled(UiElementHandle handle, bool value)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* tracked = synchronize() ? state_->resolve(handle) : nullptr;
     if (!tracked)
     {
@@ -1195,8 +1275,13 @@ bool UiSystem::set_enabled(UiElementHandle handle, bool value)
 }
 bool UiSystem::set_class(UiElementHandle handle, std::string_view name, bool active)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (name.empty() || !valid_string(name) ||
-        std::any_of(name.begin(), name.end(), [](unsigned char value) { return value <= 32; }) ||
+        std::any_of(name.begin(), name.end(), [](unsigned char value)
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return value <= 32;
+        }) ||
         !synchronize())
     {
         return false;
@@ -1211,6 +1296,7 @@ bool UiSystem::set_class(UiElementHandle handle, std::string_view name, bool act
 }
 bool UiSystem::set_style(UiElementHandle handle, std::string_view name, std::string_view value)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (name.empty() || !valid_string(name) || !valid_string(value) || !synchronize())
     {
         return false;
@@ -1220,6 +1306,7 @@ bool UiSystem::set_style(UiElementHandle handle, std::string_view name, std::str
 }
 bool UiSystem::set_image(UiElementHandle handle, std::string_view path)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (path.empty() || !valid_string(path) || !synchronize())
     {
         return false;
@@ -1240,6 +1327,7 @@ bool UiSystem::set_image(UiElementHandle handle, std::string_view path)
 }
 void UiSystem::release_gpu() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!state_ || !state_->initialized)
     {
         return;
@@ -1252,6 +1340,7 @@ void UiSystem::release_gpu() noexcept
 
 void UiSystem::release_scene() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!state_ || !state_->initialized)
     {
         return;
@@ -1279,6 +1368,7 @@ void UiSystem::release_scene() noexcept
 }
 bool UiSystem::process_event(const SDL_Event& event)
 {
+    ENGINE_PROFILE_FUNCTION();
     return process_event(event, event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP
                                     ? event.key.mod
                                     : SDL_GetModState());
@@ -1286,6 +1376,7 @@ bool UiSystem::process_event(const SDL_Event& event)
 
 bool UiSystem::process_event(const SDL_Event& event, std::uint16_t modifiers)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!state_->initialized)
     {
         return false;
@@ -1322,6 +1413,7 @@ bool UiSystem::process_event(const SDL_Event& event, std::uint16_t modifiers)
     }
     const auto process = [&](State::Document& document, const SDL_Event& input)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (!document.visible || !state_->activate(document))
         {
             return false;
@@ -1338,6 +1430,7 @@ bool UiSystem::process_event(const SDL_Event& event, std::uint16_t modifiers)
     };
     const auto select_focus = [&](Rml::Context* selected)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         for (auto& document : state_->documents)
         {
             if (document.context != selected)
@@ -1458,7 +1551,11 @@ bool UiSystem::process_event(const SDL_Event& event, std::uint16_t modifiers)
         {
             const auto visible =
                 std::find_if(state_->documents.rbegin(), state_->documents.rend(),
-                             [](const auto& document) { return document.visible; });
+                             [](const auto& document)
+                             {
+                                 ENGINE_PROFILE_FUNCTION_PROBE();
+                                 return document.visible;
+                             });
             if (visible == state_->documents.rend())
             {
                 return false;
@@ -1496,6 +1593,7 @@ bool UiSystem::process_event(const SDL_Event& event, std::uint16_t modifiers)
     }
     const auto button_mask = [&]() -> std::uint32_t
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return event.button.button > 0 && event.button.button <= 32
                    ? (std::uint32_t{1} << (event.button.button - 1))
                    : 0;
@@ -1574,6 +1672,7 @@ bool UiSystem::process_event(const SDL_Event& event, std::uint16_t modifiers)
 }
 bool UiSystem::keyboard_claimed() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!state_->initialized)
     {
         return false;
@@ -1599,12 +1698,17 @@ bool UiSystem::keyboard_claimed() const noexcept
 }
 bool UiSystem::pointer_claimed() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return state_->initialized &&
            std::any_of(state_->documents.begin(), state_->documents.end(), [](const auto& document)
-                       { return document.visible && document.markup->IsModal(); });
+                       {
+               ENGINE_PROFILE_FUNCTION_PROBE();
+               return document.visible && document.markup->IsModal();
+           });
 }
 bool UiSystem::owns_pointer(const SDL_Event& event) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!state_->initialized || SDL_GetWindowFromEvent(&event) != window_.native_window())
     {
         return false;
@@ -1621,6 +1725,7 @@ bool UiSystem::owns_pointer(const SDL_Event& event) const noexcept
 }
 void UiSystem::cancel_input() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!state_ || !state_->initialized)
     {
         return;
@@ -1653,10 +1758,12 @@ void UiSystem::cancel_input() noexcept
 }
 std::size_t UiSystem::document_count() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return state_->documents.size();
 }
 bool UiSystem::poll_event(UiEvent& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     if (!synchronize())
     {
@@ -1681,6 +1788,7 @@ bool UiSystem::poll_event(UiEvent& output)
 }
 void UiSystem::on_shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (state_->initialized)
     {
         release_scene();

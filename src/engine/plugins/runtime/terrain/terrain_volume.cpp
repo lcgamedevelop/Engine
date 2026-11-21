@@ -2,6 +2,7 @@
 
 #include "plugins/runtime/terrain/terrain_samples.hpp"
 #include "runtime/core/guid_map.hpp"
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 
 #include <algorithm>
@@ -22,6 +23,7 @@ constexpr std::size_t maximum_brushes = 64;
 
 bool block_valid(const schema::TerrainAssetDataT& source, const schema::TerrainBlockDataT& block)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto count =
         static_cast<std::size_t>(source.block_cells) * source.block_cells * source.block_cells;
     const auto* region = entry(source, block.key);
@@ -30,13 +32,21 @@ bool block_valid(const schema::TerrainAssetDataT& source, const schema::TerrainB
            region->uniform != schema::TerrainUniformState::unknown &&
            block.density.size() == samples && block.layers.size() == samples &&
            std::all_of(block.density.begin(), block.density.end(),
-                       [](float v) { return std::isfinite(v); }) &&
+                       [](float v)
+                       {
+                           ENGINE_PROFILE_FUNCTION_PROBE();
+                           return std::isfinite(v);
+                       }) &&
            std::all_of(block.layers.begin(), block.layers.end(), [&](const auto& layer)
-                       { return layer_valid(layer, source.material_layers.size()); });
+                       {
+               ENGINE_PROFILE_FUNCTION_PROBE();
+               return layer_valid(layer, source.material_layers.size());
+           });
 }
 
 Bounds3 brush_bounds(const schema::TerrainBrushDataT& brush)
 {
+    ENGINE_PROFILE_FUNCTION();
     return {{brush.center.x() - brush.extent.x(), brush.center.y() - brush.extent.y(),
              brush.center.z() - brush.extent.z()},
             {brush.center.x() + brush.extent.x(), brush.center.y() + brush.extent.y(),
@@ -45,6 +55,7 @@ Bounds3 brush_bounds(const schema::TerrainBrushDataT& brush)
 
 bool brush_valid(const schema::TerrainBrushDataT& brush, const schema::TerrainAssetDataT& source)
 {
+    ENGINE_PROFILE_FUNCTION();
     return finite(brush.center) && finite(brush.extent) && brush.extent.x() > 0 &&
            brush.extent.y() > 0 && brush.extent.z() > 0 && std::isfinite(brush.strength) &&
            brush.strength > 0 && brush.strength <= 1 &&
@@ -59,6 +70,7 @@ bool brush_valid(const schema::TerrainBrushDataT& brush, const schema::TerrainAs
 
 float signed_distance(const schema::TerrainBrushDataT& brush, Vec3 point)
 {
+    ENGINE_PROFILE_FUNCTION();
     const double x = std::abs(point.x() - brush.center.x());
     const double y = std::abs(point.y() - brush.center.y());
     const double z = std::abs(point.z() - brush.center.z());
@@ -74,22 +86,27 @@ float signed_distance(const schema::TerrainBrushDataT& brush, Vec3 point)
 using BrushFunction = float (*)(float value, float distance, double height, float smooth);
 float dig(float value, float distance, double, float)
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::max(value, -distance);
 }
 float fill(float value, float distance, double, float)
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::min(value, distance);
 }
 float flatten(float value, float distance, double height, float)
 {
+    ENGINE_PROFILE_FUNCTION();
     return distance <= 0 ? static_cast<float>(height) : value;
 }
 float smooth(float value, float distance, double, float average)
 {
+    ENGINE_PROFILE_FUNCTION();
     return distance <= 0 ? average : value;
 }
 float paint(float value, float, double, float)
 {
+    ENGINE_PROFILE_FUNCTION();
     return value;
 }
 constexpr std::array<BrushFunction, 5> brush_functions{dig, fill, flatten, smooth, paint};
@@ -98,6 +115,7 @@ constexpr std::array<BrushFunction, 5> brush_functions{dig, fill, flatten, smoot
 
 bool TerrainVolume::validate(const schema::TerrainAssetDataT& source, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     if (source.schema_version != 2 || !finite(source.origin) || !valid_bounds(source.bounds) ||
         !std::isfinite(source.voxel_size) || source.voxel_size < 0.01 || source.voxel_size > 1024 ||
@@ -125,7 +143,10 @@ bool TerrainVolume::validate(const schema::TerrainAssetDataT& source, std::strin
         {
             if (!GuidMap::valid_guid(region->payload) || region->content_hash.size() != 16 ||
                 !std::all_of(region->content_hash.begin(), region->content_hash.end(), [](char c)
-                             { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }))
+                             {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
+                    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+                }))
             {
                 error = "Mixed terrain regions require a payload GUID and catalog content hash";
                 return false;
@@ -151,6 +172,7 @@ bool TerrainVolume::validate(const schema::TerrainAssetDataT& source, std::strin
 
 bool TerrainVolume::initialize(const schema::TerrainAssetDataT& source, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!validate(source, error))
     {
         return false;
@@ -166,6 +188,7 @@ bool TerrainVolume::stage_regions(std::span<const schema::TerrainBlockDataT> blo
                                   std::span<const TerrainRegionKey> retire, TerrainDelta& output,
                                   std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     error.clear();
     if (!source_ || blocks.size() + retire.size() > maximum_edit_regions || revision_ == UINT64_MAX)
@@ -203,6 +226,7 @@ bool TerrainVolume::stage_regions(std::span<const schema::TerrainBlockDataT> blo
 
 bool TerrainVolume::read(const TerrainRegionQuery& query, TerrainReadSnapshot& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     TerrainReadSnapshot candidate;
     if (!source_ || !query.cursor.empty() || query.limit > 4096 ||
@@ -378,12 +402,14 @@ bool TerrainVolume::stage_edit(const TerrainReadSnapshot& input, const TerrainEd
 
 bool TerrainVolume::validate_delta(const TerrainDelta& delta) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return source_ && delta.source == source_ && delta.base_revision == revision_ &&
            revision_ != UINT64_MAX;
 }
 
 void TerrainVolume::publish(TerrainDelta&& delta) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     assert(validate_delta(delta));
     blocks_.swap(delta.blocks);
     ++revision_;

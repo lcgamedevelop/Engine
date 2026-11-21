@@ -9,6 +9,7 @@
 #include "runtime/app/app.hpp"
 #include "runtime/core/guid_map.hpp"
 #include "runtime/log/log_system.hpp"
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/resource/resource_reference.hpp"
 #include "runtime/resource/types/script_resource.hpp"
@@ -35,6 +36,7 @@ std::atomic<std::uint64_t> last_run_id{0};
 
 [[nodiscard]] std::uint64_t allocate_run_id()
 {
+    ENGINE_PROFILE_FUNCTION();
     auto previous = last_run_id.load(std::memory_order_relaxed);
     while (previous != std::numeric_limits<std::uint64_t>::max())
     {
@@ -49,6 +51,7 @@ std::atomic<std::uint64_t> last_run_id{0};
 #if defined(ENGINE_ENABLE_TEST_SUPPORT)
 [[nodiscard]] bool relative_path(std::string_view input, std::string& normalized)
 {
+    ENGINE_PROFILE_FUNCTION();
     normalized.clear();
     if (input.empty() || input.find_first_of("\\:") != std::string_view::npos ||
         input.find('\0') != std::string_view::npos)
@@ -75,6 +78,7 @@ std::atomic<std::uint64_t> last_run_id{0};
 
 [[nodiscard]] bool script_path(std::string_view path)
 {
+    ENGINE_PROFILE_FUNCTION();
     return path.ends_with(".js") || path.ends_with(".mjs");
 }
 
@@ -88,6 +92,7 @@ struct Snapshot
 
 [[nodiscard]] bool loaded_snapshot(ResourceLoader* loader, ResourceHandle entry, Snapshot& snapshot)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!snapshot.root.retain(loader, entry))
     {
         return false;
@@ -145,11 +150,13 @@ struct ScriptSystem::State
                        state.navigation, state.input, state.window, state.movies),
               machine(vm::create_script_vm())
         {
+            ENGINE_PROFILE_FUNCTION();
             bindings.set_gameplay_session(state.gameplay);
         }
 
         ~Run()
         {
+            ENGINE_PROFILE_FUNCTION();
             // VM 与队列先释放，再撤销场景；不存在仍能调用旧 BindingContext 的函数。
             bindings.cancel_movies();
             machine.reset();
@@ -158,6 +165,7 @@ struct ScriptSystem::State
 
         [[nodiscard]] bool read_source(std::string_view path, std::string& source)
         {
+            ENGINE_PROFILE_FUNCTION();
             source.clear();
             if (path == "engine")
             {
@@ -209,16 +217,19 @@ struct ScriptSystem::State
           ui(scene_ui), physics(scene_physics), navigation(scene_navigation), input(scene_input),
           window(scene_window), movies(movie_player)
     {
+        ENGINE_PROFILE_FUNCTION();
     }
 
     ~State()
     {
+        ENGINE_PROFILE_FUNCTION();
         prepared.reset();
         stop();
     }
 
     bool fail(std::string message)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (status.last_error != message)
         {
             LogSystem::write(LogLevel::error, message);
@@ -229,13 +240,17 @@ struct ScriptSystem::State
 
     [[nodiscard]] std::unique_ptr<Run> precheck(Snapshot snapshot)
     {
+        ENGINE_PROFILE_FUNCTION();
         auto candidate = std::make_unique<Run>(*this, std::move(snapshot));
         auto& machine = candidate->machine;
         if (!machine || !machine->initialize(&candidate->bindings) ||
             !binding_registry.register_functions(*machine) ||
             !machine->prepare(candidate->snapshot.entry,
                               [&run = *candidate](std::string_view path, std::string& source)
-                              { return run.read_source(path, source); }))
+                              {
+                                  ENGINE_PROFILE_FUNCTION_PROBE();
+                                  return run.read_source(path, source);
+                              }))
         {
             (void)fail(machine ? machine->last_error() : "Cannot create script virtual machine");
             return {};
@@ -268,6 +283,7 @@ struct ScriptSystem::State
 
     void stop()
     {
+        ENGINE_PROFILE_FUNCTION();
         status.run_id = 0;
         status.running = false;
         if (active)
@@ -288,6 +304,7 @@ struct ScriptSystem::State
 
     [[nodiscard]] bool activate(std::unique_ptr<Run> candidate)
     {
+        ENGINE_PROFILE_FUNCTION();
         stop();
         status.last_error.clear();
         const auto run_id = allocate_run_id();
@@ -326,15 +343,18 @@ ScriptSystem::ScriptSystem(ResourceLoader* resources, WorldSystem* world, Render
       navigation_(navigation), input_(input), window_(window), animation_(animation),
       movies_(movies)
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 ScriptSystem::~ScriptSystem() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
 }
 
 bool ScriptSystem::on_initialize(const EngineConfig&)
 {
+    ENGINE_PROFILE_FUNCTION();
     status_.last_error.clear();
     state_ = std::make_unique<State>(status_, resources_, world_, renderer_, ui_, physics_,
                                      navigation_, input_, window_, movies_);
@@ -354,6 +374,7 @@ bool ScriptSystem::on_initialize(const EngineConfig&)
         animation_->set_event_sink(
             [this](std::span<const AnimationEvent> events)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 if (!state_ || !status_.running || !state_->active)
                 {
                     return true;
@@ -382,6 +403,7 @@ bool ScriptSystem::on_initialize(const EngineConfig&)
 
 bool ScriptSystem::bind_gameplay_session(GameplaySession* session)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (state_ && (state_->active || state_->prepared || state_->calling))
     {
         return false;
@@ -396,6 +418,7 @@ bool ScriptSystem::bind_gameplay_session(GameplaySession* session)
 
 bool ScriptSystem::prepare_gameplay(const ResourceHandle& entry, std::string_view revision)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!is_initialized() || !state_)
     {
         status_.last_error = "Gameplay requires an initialized script system";
@@ -414,6 +437,7 @@ bool ScriptSystem::prepare_gameplay(const ResourceHandle& entry, std::string_vie
 
 bool ScriptSystem::start_prepared_gameplay()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!is_initialized() || !state_ || !state_->prepared)
     {
         status_.last_error = "No prepared gameplay is available";
@@ -424,6 +448,7 @@ bool ScriptSystem::start_prepared_gameplay()
 
 void ScriptSystem::stop_gameplay() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (state_)
     {
         state_->stop();
@@ -435,6 +460,7 @@ bool ScriptSystem::execute_project_script(const ResourceHandle& script_handle,
                                           const ProjectScriptRequest& request,
                                           std::string& result_json, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     result_json.clear();
     error.clear();
     if (!is_initialized() || !state_ || state_->owner_thread != std::this_thread::get_id())
@@ -490,6 +516,7 @@ bool ScriptSystem::execute_project_script(const ResourceHandle& script_handle,
 
 const ScriptStatus& ScriptSystem::status() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return status_;
 }
 
@@ -518,6 +545,7 @@ bool ScriptSystem::on_tick(double delta_time)
 
 void ScriptSystem::on_shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (animation_ != nullptr)
     {
         animation_->set_event_sink({});

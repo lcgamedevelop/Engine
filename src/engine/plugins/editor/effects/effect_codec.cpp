@@ -1,4 +1,5 @@
 #include "plugins/editor/effects/effect_codec.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "editor/asset_pipeline/importer_utils.hpp"
 #include "editor/asset_pipeline/toml_helpers.hpp"
@@ -14,16 +15,19 @@ namespace engine::plugins::effects
 
 schema::ComponentPayload EffectCodec::type() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::ComponentPayload::EffectData;
 }
 
 std::string_view EffectCodec::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "effect";
 }
 
 bool EffectCodec::validate(const schema::ComponentDataT& component, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* value = component.payload.AsEffectData();
     if (value == nullptr || !EffectComponent::valid_settings(*value))
     {
@@ -36,6 +40,7 @@ bool EffectCodec::validate(const schema::ComponentDataT& component, std::string&
 bool EffectCodec::read(const toml::table& table, schema::ComponentDataT& component,
                        std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     constexpr std::array<std::string_view, 7> fields = {
         "type", "enabled", "visible", "effect", "speed", "loop", "play_on_awake"};
     for (const auto& [name, field] : table)
@@ -91,6 +96,7 @@ bool EffectCodec::scan_dependencies(const schema::ComponentDataT& component,
                                     const editor::asset_pipeline::ImportContext& context,
                                     std::vector<Guid>& dependencies, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!validate(component, error))
     {
         return false;
@@ -102,12 +108,14 @@ bool EffectCodec::scan_dependencies(const schema::ComponentDataT& component,
 
 std::span<const std::string_view> EffectCodec::resource_fields() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     static constexpr std::string_view fields[]{"effect"};
     return fields;
 }
 
 void EffectCodec::write(const schema::ComponentDataT& component, toml::table& table) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto& value = *component.payload.AsEffectData();
     table.insert("type", "effect");
     table.insert("effect", value.effect_guid);
@@ -118,6 +126,7 @@ void EffectCodec::write(const schema::ComponentDataT& component, toml::table& ta
 
 bool register_effect_codec()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (editor::asset_pipeline::find_scene_component_codec(schema::ComponentPayload::EffectData))
     {
         return true;

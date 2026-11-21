@@ -1,4 +1,6 @@
 #include "editor/asset_pipeline/asset_io.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/resource/virtual_file_system.hpp"
 #include "runtime/utils/hash_utils.hpp"
 
@@ -26,6 +28,7 @@ namespace fs = std::filesystem;
 
 bool unused_file(const fs::path& path, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::error_code status_error;
     const auto status = fs::symlink_status(path, status_error);
     if ((status_error && status_error != std::errc::no_such_file_or_directory) ||
@@ -41,17 +44,20 @@ bool unused_file(const fs::path& path, std::string& error)
 
 std::string hash_bytes(std::span<const std::byte> bytes)
 {
+    ENGINE_PROFILE_FUNCTION();
     return hash::hex(hash::fnv1a(bytes));
 }
 
 std::string hash_text(const std::string& text)
 {
+    ENGINE_PROFILE_FUNCTION();
     return hash_bytes(std::as_bytes(std::span(text.data(), text.size())));
 }
 
 bool read_bytes(const std::filesystem::path& path, std::vector<std::byte>& bytes,
                 std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!VirtualFileSystem::read_file(path, bytes))
     {
         error = "cannot read file: " + PathUtils::to_utf8(path);
@@ -63,6 +69,7 @@ bool read_bytes(const std::filesystem::path& path, std::vector<std::byte>& bytes
 bool write_bytes(const std::filesystem::path& path, std::span<const std::byte> bytes,
                  std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     SDL_IOStream* stream = SDL_IOFromFile(PathUtils::to_utf8(path).c_str(), "wb");
     if (stream == nullptr)
     {
@@ -83,6 +90,7 @@ bool write_bytes(const std::filesystem::path& path, std::span<const std::byte> b
 
 bool write_text(const std::filesystem::path& path, const std::string& text, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     return write_bytes(path, std::as_bytes(std::span(text.data(), text.size())), error);
 }
 
@@ -90,10 +98,14 @@ bool project_file_path(const fs::path& project, std::string_view directory,
                        std::string_view relative, std::string_view extension, fs::path& output,
                        std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     if (relative.empty() || relative.size() > 1024 ||
         std::any_of(relative.begin(), relative.end(), [](unsigned char value)
-                    { return value < 0x20 || value == 0x7f || value == ':' || value == '\\'; }))
+                    {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return value < 0x20 || value == 0x7f || value == ':' || value == '\\';
+        }))
     {
         error = "Project file path requires a bounded relative path without control characters";
         return false;
@@ -102,7 +114,11 @@ bool project_file_path(const fs::path& project, std::string_view directory,
     if (path.is_absolute() || path.has_root_name() || path.filename().empty() ||
         PathUtils::to_utf8(path.extension()) != extension ||
         std::any_of(path.begin(), path.end(),
-                    [](const auto& part) { return part == ".." || part == "." || part.empty(); }))
+                    [](const auto& part)
+                    {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
+                        return part == ".." || part == "." || part.empty();
+                    }))
     {
         error = "File path must stay in its project directory and use " + std::string(extension);
         return false;
@@ -140,6 +156,7 @@ bool project_file_path(const fs::path& project, std::string_view directory,
 bool create_source_with_meta(const fs::path& destination, const std::string& source,
                              std::string_view importer, std::string& guid, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     guid.clear();
     auto meta = destination;
     meta += ".meta";
@@ -172,6 +189,7 @@ bool create_source_with_meta(const fs::path& destination, const std::string& sou
                           std::string(importer) + "\"\nmeta_version = 1\n";
     const auto cleanup = [&]()
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         std::error_code ignored;
         fs::remove(source_temporary, ignored);
         fs::remove(meta_temporary, ignored);
@@ -207,6 +225,7 @@ bool create_source_with_meta(const fs::path& destination, const std::string& sou
 
 std::string new_guid()
 {
+    ENGINE_PROFILE_FUNCTION();
     // GUID 是身份，不是凭据；SDL 自带的跨平台随机源，生成后还由映射和 SQL 双重查重。
     std::array<unsigned char, 16> bytes{};
     std::uint64_t state = SDL_GetPerformanceCounter() ^ SDL_GetTicksNS();

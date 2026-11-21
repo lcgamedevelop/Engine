@@ -1,4 +1,5 @@
 #include "plugins/runtime/script/bindings/animation_state_machine_binding.hpp"
+#include "runtime/performance/profiling.hpp"
 
 namespace engine::plugins::script::bindings
 {
@@ -395,16 +396,19 @@ Object.freeze(AnimationStateContext);
 
 std::string_view AnimationStateMachineBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "AnimationStateMachine";
 }
 
 std::string_view AnimationStateMachineBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 
 bool AnimationStateMachineBinding::register_functions(vm::ScriptVm&) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return true;
 }
 } // namespace engine::plugins::script::bindings

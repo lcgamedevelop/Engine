@@ -1,4 +1,5 @@
 #include "runtime/app/app.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/utils/path_utils.hpp"
 
@@ -24,12 +25,14 @@ struct AppState
 
 AppState& state()
 {
+    ENGINE_PROFILE_FUNCTION();
     static AppState value;
     return value;
 }
 
 bool valid_application_name(std::string_view name)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (name.empty() || name == "." || name == "..")
     {
         return false;
@@ -48,6 +51,7 @@ bool valid_application_name(std::string_view name)
 
 bool valid_apk_root(std::string_view path)
 {
+    ENGINE_PROFILE_FUNCTION();
     constexpr std::string_view root = "apk:/assets";
     if (path == root)
     {
@@ -81,6 +85,7 @@ bool valid_apk_root(std::string_view path)
 
 bool normalize_disk_path(const std::filesystem::path& input, std::filesystem::path& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     // 虚拟 APK 根只能作为内置资源来源，不能作为可写目录。
     const auto text = PathUtils::to_utf8(input);
     if (text.empty() || text.starts_with("apk:") || text.find('\0') != std::string::npos)
@@ -99,6 +104,7 @@ bool normalize_disk_path(const std::filesystem::path& input, std::filesystem::pa
 
 bool prepare_directory(const std::filesystem::path& path)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::error_code error;
     std::filesystem::create_directories(path, error);
     return !error && std::filesystem::is_directory(path, error) && !error;
@@ -108,6 +114,7 @@ bool prepare_directory(const std::filesystem::path& path)
 
 bool App::initialize(const AppConfig& config)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (state().initialized || !valid_application_name(config.application_name))
     {
         return false;
@@ -178,6 +185,7 @@ bool App::initialize(const AppConfig& config)
 
 void App::shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     auto& value = state();
     value.initialized = false;
     value.assets_path.clear();
@@ -188,32 +196,51 @@ void App::shutdown() noexcept
 
 bool App::is_initialized() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return state().initialized;
 }
 
 const std::filesystem::path& App::assets_path() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return state().assets_path;
 }
 
 const std::filesystem::path& App::persistent_data_path() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return state().persistent_data_path;
 }
 
 const std::filesystem::path& App::cache_path() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return state().cache_path;
 }
 
 void App::set_game_language(std::string_view language)
 {
+    ENGINE_PROFILE_FUNCTION();
     state().game_language = language;
 }
 
 const std::string& App::game_language() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return state().game_language;
+}
+
+
+bool App::supports_vibration() noexcept
+{
+    ENGINE_PROFILE_FUNCTION();
+    return false;
+}
+
+bool App::vibrate(std::uint32_t) noexcept
+{
+    ENGINE_PROFILE_FUNCTION();
+    return false;
 }
 
 } // namespace engine

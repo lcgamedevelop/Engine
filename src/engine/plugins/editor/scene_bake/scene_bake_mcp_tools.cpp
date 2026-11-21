@@ -1,4 +1,6 @@
 #include "plugins/editor/scene_bake/scene_bake_mcp_tools.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/editor/mcp/editor_tool_registration.hpp"
 
 #include "plugins/editor/mcp/editor_mcp_tools.hpp"
@@ -13,9 +15,11 @@ namespace engine::plugins::scene_bake
 {
 bool register_scene_bake_tools(mcp::McpSystem& system, mcp::EditorMcpTools& editor)
 {
+    ENGINE_PROFILE_FUNCTION();
     using Json = nlohmann::json;
     const auto add = [&](std::string name, std::string description, Json schema)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const auto command = name;
         return mcp::register_editor_command_tool(
             system, editor, std::move(name), std::move(description), std::move(schema), command);
@@ -24,6 +28,7 @@ bool register_scene_bake_tools(mcp::McpSystem& system, mcp::EditorMcpTools& edit
     const Json job = {{"type", "string"}, {"minLength", 1}, {"maxLength", 64}};
     const auto vector = [](Json item)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return Json{
             {"type", "array"}, {"items", std::move(item)}, {"minItems", 3}, {"maxItems", 3}};
     };

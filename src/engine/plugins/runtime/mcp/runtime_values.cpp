@@ -1,13 +1,21 @@
 #include "plugins/runtime/mcp/runtime_values.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/app/runtime_host.hpp"
+#include "runtime/core/guid_map.hpp"
 #include "runtime/gameplay/gameplay_session.hpp"
+#include "runtime/performance/memory_snapshot.hpp"
+#include "runtime/render/gpu_memory_value.hpp"
 #include "runtime/render/render_system.hpp"
+#include "runtime/resource/resource_loader.hpp"
 #include "runtime/task/task_system.hpp"
 #include "runtime/utils/path_utils.hpp"
+#include "runtime/world/world_system.hpp"
 #include <SDL3/SDL.h>
 #include <charconv>
 #include <chrono>
 #include <fstream>
+#include <span>
 #include <system_error>
 
 namespace engine::plugins::mcp
@@ -15,6 +23,7 @@ namespace engine::plugins::mcp
 using Json = nlohmann::json;
 Json scene_load_value(const SceneLoadSnapshot& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     constexpr const char* states[] = {"loading",    "staged", "preparing", "ready",
                                       "activating", "active", "failed",    "cancelled"};
     constexpr const char* work_states[] = {"queued",       "working", "ready",
@@ -53,6 +62,7 @@ Json scene_load_value(const SceneLoadSnapshot& value)
 }
 Json frame_value(const RenderFrameSnapshot& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     constexpr const char* kinds[] = {"scene", "movie", "clear"};
     return {{"deviceGeneration", std::to_string(value.device_generation)},
             {"submissionId", std::to_string(value.submission_id)},
@@ -78,6 +88,7 @@ Json frame_value(const RenderFrameSnapshot& value)
 }
 Json screenshot_value(const ScreenshotSnapshot& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     constexpr const char* states[] = {"waiting_frame", "reading_back", "writing",
                                       "complete",      "failed",       "cancelled"};
     return {
@@ -93,6 +104,7 @@ namespace
 {
 bool decimal(const Json& object, const char* field, std::uint64_t& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = 0;
     if (!object.is_object() || !object.contains(field) || !object[field].is_string())
     {
@@ -102,10 +114,212 @@ bool decimal(const Json& object, const char* field, std::uint64_t& output)
     const auto parsed = std::from_chars(text.data(), text.data() + text.size(), output);
     return !text.empty() && parsed.ec == std::errc{} && parsed.ptr == text.data() + text.size();
 }
+
+namespace
+{
+Json pool_memory_value(const memory_profile::PoolUsage& pool)
+{
+    ENGINE_PROFILE_FUNCTION();
+    return {{"currentBytes", std::to_string(pool.current_bytes)},
+            {"peakBytes", std::to_string(pool.peak_bytes)},
+            {"liveAllocations", std::to_string(pool.live_allocations)}};
+}
+
+Json heap_records_value(std::span<const memory_profile::HeapRecord> records)
+{
+    ENGINE_PROFILE_FUNCTION();
+    auto values = Json::array();
+    for (const auto& record : records)
+    {
+        if (record.id)
+        {
+            values.push_back({{"id", std::to_string(record.id)},
+                              {"requestedBytes", std::to_string(record.requested_bytes)},
+                              {"releaseSequence", std::to_string(record.release_sequence)}});
+        }
+    }
+    return values;
+}
+
+Json general_heap_value(const memory_profile::HeapSnapshot& heap)
+{
+    ENGINE_PROFILE_FUNCTION();
+    const auto capacity = heap.recent_releases.size();
+    const auto overwritten = heap.tracked_releases > capacity ? heap.tracked_releases - capacity : 0;
+    return {{"available", heap.available},
+            {"coverage", "allocatorEntryPoints"},
+            {"sequence", std::to_string(heap.sequence)},
+            {"unattributed", pool_memory_value(heap.unattributed)},
+            {"attributed", pool_memory_value(heap.attributed)},
+            {"trackedAllocations", std::to_string(heap.tracked_allocations)},
+            {"trackedReleases", std::to_string(heap.tracked_releases)},
+            {"overwrittenReleases", std::to_string(overwritten)},
+            {"droppedAllocations", std::to_string(heap.dropped_allocations)},
+            {"unmatchedReleases", std::to_string(heap.unmatched_releases)},
+            {"unmatchedAttributions", std::to_string(heap.unmatched_attributions)},
+            {"ownershipConflicts", std::to_string(heap.ownership_conflicts)},
+            {"captureGaps", std::to_string(heap.capture_gaps)},
+            {"recordCapacity", heap.record_capacity},
+            {"metadataBytes", heap.metadata_bytes},
+            {"largest", heap_records_value(heap.largest)},
+            {"recentReleases", heap_records_value(heap.recent_releases)}};
+}
+} // namespace
+
+Json cpu_memory_value()
+{
+    ENGINE_PROFILE_FUNCTION();
+    const auto sample = memory_profile::snapshot();
+    constexpr const char* modes[] = {"off", "totals", "detailed"};
+    Json pools = Json::object();
+    for (std::size_t index = 0; index < sample.pools.size(); ++index)
+    {
+        const auto& pool = sample.pools[index];
+        auto value = pool_memory_value(pool);
+        value["hasSamples"] = pool.peak_bytes != 0;
+        pools[memory_profile::pool_keys[index]] = std::move(value);
+    }
+    Json data{{"mode", modes[static_cast<unsigned>(sample.mode)]},
+              {"sequence", std::to_string(sample.sequence)},
+              {"sampledAtNs", std::to_string(sample.timestamp_ns)},
+              {"tracyConnectionId", std::to_string(sample.connection_id)},
+              {"tracyConnected", sample.connected},
+              {"captureGaps", std::to_string(sample.capture_gaps)},
+              {"callstacksAvailable", sample.callstacks_available},
+              {"pools", std::move(pools)}};
+    if (sample.general_heap.available)
+    {
+        data["generalHeap"] = general_heap_value(sample.general_heap);
+    }
+    return data;
+}
+
+Json resource_memory_entry_value(const ResourceMemoryEntry& entry)
+{
+    ENGINE_PROFILE_FUNCTION();
+    constexpr const char* phases[] = {"queued", "reading", "decoded",
+                                      "ready",  "failed",  "retiring"};
+    constexpr const char* holders[] = {"acquisition", "dependency", "load_request"};
+    constexpr const char* owners[] = {"unspecified", "scene", "scene_scope", "scene_load"};
+    Json references = Json::array();
+    for (const auto& item : entry.holders)
+    {
+        references.push_back({{"kind", holders[static_cast<unsigned>(item.kind)]},
+                              {"id", std::to_string(item.id)},
+                              {"owner",
+                               {{"kind", owners[static_cast<unsigned>(item.owner.kind)]},
+                                {"domain", std::to_string(item.owner.domain)},
+                                {"id", std::to_string(item.owner.id)}}},
+                              {"guid", item.guid},
+                              {"pendingRelease", item.pending_release}});
+    }
+    return {{"recordId", std::to_string(entry.record_id)},
+            {"catalogGeneration", std::to_string(entry.catalog_generation)},
+            {"guid", entry.guid},
+            {"path", entry.path},
+            {"kind", schema::EnumNameAssetKind(entry.kind)},
+            {"phase", phases[static_cast<unsigned>(entry.phase)]},
+            {"storedPayloadBytes", std::to_string(entry.stored_payload_bytes)},
+            {"cpuPayloadBytes", entry.cpu_payload_bytes
+                                    ? Json(std::to_string(*entry.cpu_payload_bytes))
+                                    : Json(nullptr)},
+            {"hasPayload", entry.has_payload},
+            {"acquisitions", std::to_string(entry.acquisitions)},
+            {"dependencyReferences", std::to_string(entry.dependency_references)},
+            {"requestReferences", std::to_string(entry.request_references)},
+            {"holdersTruncated", entry.holders_truncated},
+            {"holders", std::move(references)}};
+}
+
+std::string counter_delta(std::uint64_t before, std::uint64_t after)
+{
+    ENGINE_PROFILE_FUNCTION();
+    return after >= before ? std::to_string(after - before) : "-" + std::to_string(before - after);
+}
+
+bool resource_memory_observation(RuntimeHost& host, const Json& args, Json& result,
+                                 std::string& error)
+{
+    ENGINE_PROFILE_FUNCTION();
+    ResourceMemoryQuery query;
+    for (auto it = args.begin(); it != args.end(); ++it)
+    {
+        if (it.key() == "guid" && it->is_string() &&
+            GuidMap::valid_guid(it->get_ref<const std::string&>()))
+        {
+            query.guid = it->get_ref<const std::string&>();
+        }
+        else if (it.key() == "limit" && it->is_number_integer() && *it >= 1 &&
+                 *it <= ResourceMemoryQuery::maximum_items)
+        {
+            query.limit = it->get<std::uint32_t>();
+        }
+        else if (it.key() != "baseline" || !it->is_object())
+        {
+            error = "Resource memory requires a GUID, a limit within 1.." +
+                    std::to_string(ResourceMemoryQuery::maximum_items) +
+                    " or a baseline totals object";
+            return false;
+        }
+    }
+
+    ResourceMemorySnapshot sample;
+    const auto* world = host.world();
+    const auto* loader = world ? world->resource_loader() : nullptr;
+    if (!loader || !loader->memory_snapshot(query, sample))
+    {
+        error = "Resource memory observation is unavailable";
+        return false;
+    }
+    const auto session =
+        std::to_string(sample.loader_id) + "/" + std::to_string(sample.session_started_ns);
+    Json delta = nullptr;
+    if (const auto baseline = args.find("baseline"); baseline != args.end())
+    {
+        std::uint64_t sequence = 0, bytes = 0, measured = 0, unmeasured = 0;
+        if (baseline->size() != 5 || !baseline->contains("sessionId") ||
+            (*baseline)["sessionId"] != session || !decimal(*baseline, "sequence", sequence) ||
+            sequence == 0 || sequence >= sample.sequence ||
+            !decimal(*baseline, "measuredCpuPayloadBytes", bytes) ||
+            !decimal(*baseline, "measuredPayloads", measured) ||
+            !decimal(*baseline, "unmeasuredPayloads", unmeasured))
+        {
+            error = "Baseline must be the totals of an earlier snapshot from this loader session";
+            return false;
+        }
+        delta = {
+            {"fromSequence", std::to_string(sequence)},
+            {"measuredCpuPayloadBytes", counter_delta(bytes, sample.measured_cpu_payload_bytes)},
+            {"measuredPayloads", counter_delta(measured, sample.measured_payloads)},
+            {"unmeasuredPayloads", counter_delta(unmeasured, sample.unmeasured_payloads)}};
+    }
+
+    Json entries = Json::array();
+    for (const auto& entry : sample.entries)
+    {
+        entries.push_back(resource_memory_entry_value(entry));
+    }
+    result = {{"totals",
+               {{"sessionId", session},
+                {"sequence", std::to_string(sample.sequence)},
+                {"measuredCpuPayloadBytes", std::to_string(sample.measured_cpu_payload_bytes)},
+                {"measuredPayloads", std::to_string(sample.measured_payloads)},
+                {"unmeasuredPayloads", std::to_string(sample.unmeasured_payloads)}}},
+              {"sampledAtNs", std::to_string(sample.timestamp_ns)},
+              {"catalogGeneration", std::to_string(sample.catalog_generation)},
+              {"matchingEntries", std::to_string(sample.matching_entries)},
+              {"truncated", sample.entries.size() < sample.matching_entries},
+              {"entries", std::move(entries)},
+              {"delta", std::move(delta)},
+              {"cpuProfiler", cpu_memory_value()},
+              {"gpuMemory", render_detail::gpu_memory_value(host.renderer(), query.guid, query.limit)}};
+    return true;
+}
 } // namespace
 bool publish_observation(TaskSystem* tasks, std::future<bool>& pending,
                          const std::filesystem::path& target, const Json& status, bool finish)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (pending.valid())
     {
         if (!finish && pending.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
@@ -121,6 +335,7 @@ bool publish_observation(TaskSystem* tasks, std::future<bool>& pending,
     temporary += ".mcp-tmp";
     auto write = [target, temporary, text = status.dump() + "\n"]()
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
         output.write(text.data(), static_cast<std::streamsize>(text.size()));
         output.close();
@@ -144,11 +359,16 @@ bool observation_command(RuntimeHost& host, const std::filesystem::path& cache,
                          std::string_view command, const Json& args, Json& result,
                          std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     result = Json::object();
     if (!args.is_object())
     {
         error = "Observation arguments must be an object";
         return false;
+    }
+    if (command == "get_resource_memory")
+    {
+        return resource_memory_observation(host, args, result, error);
     }
     if (command == "get_gameplay_prepare" || command == "release_gameplay_prepare")
     {

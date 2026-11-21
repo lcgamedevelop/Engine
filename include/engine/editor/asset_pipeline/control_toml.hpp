@@ -1,4 +1,6 @@
 #pragma once
+
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/schema/control_json_generated.hpp"
 #include <sstream>
 #include <toml++/toml.hpp>
@@ -7,6 +9,7 @@ namespace engine::editor::asset_pipeline::control_toml
 using Json = nlohmann::json;
 inline bool read_table(const toml::table& table, Json& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     std::ostringstream stream;
     stream << toml::json_formatter(table);
     output = Json::parse(stream.str(), nullptr, false);
@@ -20,6 +23,7 @@ inline bool read_table(const toml::table& table, Json& output, std::string& erro
 // Component flags belong to the outer record, never to nested settings.
 inline bool read_component(const toml::table& table, Json& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     if (!read_table(table, output, error))
     {
         return false;
@@ -32,6 +36,7 @@ inline bool read_component(const toml::table& table, Json& output, std::string& 
 inline void write_table(const Json& value, toml::table& output);
 inline void write_array(const Json& value, toml::array& output)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     for (const auto& v : value)
     {
         if (v.is_object())
@@ -66,6 +71,7 @@ inline void write_array(const Json& value, toml::array& output)
 }
 inline void write_table(const Json& value, toml::table& output)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     for (auto i = value.begin(); i != value.end(); ++i)
     {
         const auto& v = i.value();

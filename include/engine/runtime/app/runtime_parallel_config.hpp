@@ -1,6 +1,7 @@
 #pragma once
 
 #include "runtime/animation/animation_system.hpp"
+#include "runtime/physics/physics_system.hpp"
 #include "runtime/render/render_system.hpp"
 #include "runtime/resource/resource_system.hpp"
 #include "runtime/task/task_system.hpp"
@@ -29,6 +30,7 @@ struct RuntimeParallelConfig
     ResourceReadConfig resources;
     SceneRestoreConfig scene_restore;
     RenderConfig rendering;
+    PhysicsConfig physics_limits;
     AnimationConfig animation_sampling;
     std::size_t navigation_tile_threshold{};
     std::size_t completions_per_frame{};

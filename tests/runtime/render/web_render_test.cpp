@@ -11,6 +11,7 @@
 #include <emscripten.h>
 
 #include <cstdint>
+#include <filesystem>
 #include <string>
 
 namespace engine::test_support
@@ -51,8 +52,10 @@ protected:
         if (id_ == ScreenshotId{})
         {
             progress(-1);
-            path_ = PathUtils::to_utf8(
-                App::cache_path() / (resized_ ? "web-readback-resized.png" : "web-readback.png"));
+            const auto filename = !cancelled_ ? "web-readback-cancelled.png"
+                                  : resized_  ? "web-readback-resized.png"
+                                              : "web-readback.png";
+            path_ = PathUtils::to_utf8(App::cache_path() / filename);
             ScreenshotRequest request;
             request.path = path_;
             return render_.request_screenshot(request, id_);
@@ -66,6 +69,23 @@ protected:
         {
             last_state_ = static_cast<int>(snapshot.state);
             progress(last_state_);
+        }
+        if (!cancelled_)
+        {
+            if (snapshot.state == ScreenshotState::waiting_frame)
+            {
+                return true;
+            }
+            if (snapshot.state != ScreenshotState::reading_back ||
+                !render_.cancel_screenshot(id_) || !render_.screenshot_status(id_, snapshot) ||
+                snapshot.state != ScreenshotState::cancelled || !render_.release_screenshot(id_))
+            {
+                SDL_LogError(SDL_LOG_CATEGORY_TEST, "Cannot cancel the pending Web screenshot");
+                return false;
+            }
+            id_ = {};
+            cancelled_ = true;
+            return true;
         }
         if (snapshot.state == ScreenshotState::failed ||
             snapshot.state == ScreenshotState::cancelled)
@@ -107,12 +127,16 @@ protected:
             resized_ = true;
             return window_.set_size(640, 360);
         }
-        if (first_width_ == width && first_height_ == height)
+        std::error_code error;
+        if ((first_width_ == width && first_height_ == height) ||
+            std::filesystem::exists(App::cache_path() / "web-readback-cancelled.png", error) ||
+            error)
         {
             return false;
         }
         complete_ = true;
-        const auto receipt = "{\"state\":\"passed\",\"width\":" + std::to_string(width) +
+        const auto receipt = "{\"state\":\"passed\",\"cancelled\":true,\"width\":" +
+                             std::to_string(width) +
                              ",\"height\":" + std::to_string(height) +
                              ",\"firstWidth\":" + std::to_string(first_width_) +
                              ",\"firstHeight\":" + std::to_string(first_height_) +
@@ -146,6 +170,7 @@ private:
     std::string path_;
     std::uint32_t first_width_ = 0;
     std::uint32_t first_height_ = 0;
+    bool cancelled_ = false;
     bool resized_ = false;
     bool complete_ = false;
     int last_state_ = -2;

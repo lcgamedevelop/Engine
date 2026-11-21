@@ -1,10 +1,13 @@
 #pragma once
+
+#include "runtime/performance/function_profile.hpp"
 #include "plugins/runtime/character_controller/character_input.hpp"
 #include "runtime/schema/control_json_generated.hpp"
 namespace engine::plugins::character_controller::detail
 {
 inline bool read_input(const nlohmann::json& j, CharacterInput& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     if (!j.is_object() || j.size() != 5 || !j.contains("move") || !j.contains("lookDelta") ||
         !j.contains("lookRate") || !j.contains("toggleView") || !j.contains("actions"))
     {
@@ -12,6 +15,7 @@ inline bool read_input(const nlohmann::json& j, CharacterInput& output, std::str
     }
     const auto tuple = [&](const char* name, Vec2& out)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const auto& value = j[name];
         double x = 0, y = 0;
         if (!value.is_array() || value.size() != 2 ||
@@ -46,6 +50,7 @@ inline bool read_input(const nlohmann::json& j, CharacterInput& output, std::str
 }
 inline nlohmann::json input_schema()
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     using Json = nlohmann::json;
     const Json pair = {
         {"type", "array"}, {"minItems", 2}, {"maxItems", 2}, {"items", {{"type", "number"}}}};

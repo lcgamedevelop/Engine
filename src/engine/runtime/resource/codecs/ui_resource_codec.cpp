@@ -1,4 +1,6 @@
 #include "runtime/resource/codecs/ui_resource_codec.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/core/guid_map.hpp"
 #include "runtime/resource/codecs/resource_decode.hpp"
 #include <SDL3/SDL_log.h>
@@ -12,11 +14,13 @@ namespace engine
 {
 bool UiResourceCodec::valid_family(std::string_view family) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return !family.empty() && family.size() <= 128 && family.front() != ' ' &&
            family.back() != ' ' &&
            std::all_of(family.begin(), family.end(),
                        [](unsigned char value)
                        {
+                           ENGINE_PROFILE_FUNCTION_PROBE();
                            return value >= 32 && value != 127 && !(value >= 'A' && value <= 'Z') &&
                                   value != ',' && value != '\'' && value != '"' && value != ';' &&
                                   value != '{' && value != '}' && value != '<' && value != '>';
@@ -25,24 +29,31 @@ bool UiResourceCodec::valid_family(std::string_view family) noexcept
 
 schema::AssetKind UiResourceCodec::kind() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::ui;
 }
 
 bool UiResourceCodec::decode(const schema::AssetEntryT& entry, ByteView payload,
                              std::unique_ptr<Resource>& output, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto validate = [](ByteView payload, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return resource_decode_detail::verify_flatbuffer(
             payload, schema::VerifyUiDocumentDataBuffer, "Invalid Ui FlatBuffer", error);
     };
     return resource_decode_detail::decode_flatbuffer<ResourceType>(
         entry, payload, 4U * 1024U * 1024U, validate, [](const std::uint8_t* bytes)
-        { return schema::UnPackUiDocumentData(bytes); }, output, error);
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return schema::UnPackUiDocumentData(bytes);
+        }, output, error);
 }
 
 bool UiResourceCodec::validate_data(const Resource& resource, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     const auto* data = resource_detail::data<ResourceType>(&resource);
     if (!data || data->schema_version != 1 || data->markup.empty() ||
@@ -78,6 +89,7 @@ bool UiResourceCodec::validate_data(const Resource& resource, std::string& error
 bool UiResourceCodec::validate_dependencies(const Resource& resource, ResourceView dependencies,
                                             std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     const auto* data = resource_detail::data<ResourceType>(&resource);
     if (!data)
