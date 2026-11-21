@@ -243,4 +243,17 @@ const std::string& App::game_language() noexcept
     return state().game_language;
 }
 
+
+bool App::supports_vibration() noexcept
+{
+    ENGINE_PROFILE_FUNCTION();
+    return false;
+}
+
+bool App::vibrate(std::uint32_t) noexcept
+{
+    ENGINE_PROFILE_FUNCTION();
+    return false;
+}
+
 } // namespace engine

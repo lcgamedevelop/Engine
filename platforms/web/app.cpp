@@ -1,6 +1,8 @@
 #include "runtime/app/app.hpp"
 #include "runtime/performance/profiling.hpp"
 
+#include <emscripten.h>
+
 #include <system_error>
 #include <utility>
 
@@ -128,5 +130,21 @@ const std::string& App::game_language() noexcept
 {
     ENGINE_PROFILE_FUNCTION();
     return language;
+}
+
+bool App::supports_vibration() noexcept
+{
+    ENGINE_PROFILE_FUNCTION();
+    return MAIN_THREAD_EM_ASM_INT({
+        return Number(typeof navigator.vibrate === 'function');
+    }) != 0;
+}
+
+bool App::vibrate(std::uint32_t duration_ms) noexcept
+{
+    ENGINE_PROFILE_FUNCTION();
+    return MAIN_THREAD_EM_ASM_INT({
+        return Number(typeof navigator.vibrate === 'function' && navigator.vibrate($0 >>> 0));
+    }, duration_ms) != 0;
 }
 } // namespace engine
