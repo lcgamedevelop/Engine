@@ -1,4 +1,5 @@
 #include "plugins/runtime/script/bindings/gameplay_binding.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "plugins/runtime/script/bindings/binding_context.hpp"
 
@@ -18,16 +19,19 @@ export class Gameplay {
 
 std::string_view GameplayBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "Gameplay";
 }
 
 std::string_view GameplayBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 
 bool GameplayBinding::register_functions(vm::ScriptVm&) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return true;
 }
 

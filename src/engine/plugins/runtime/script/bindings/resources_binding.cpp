@@ -1,4 +1,5 @@
 #include "plugins/runtime/script/bindings/resources_binding.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "plugins/runtime/script/bindings/binding_context.hpp"
 #include "plugins/runtime/script/bindings/data_binding_helpers.hpp"
@@ -64,6 +65,7 @@ Object.freeze(Resources);
 
 void load(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     auto* context = BindingContext::current(arguments);
     std::string path;
@@ -81,6 +83,7 @@ void load(const Arguments& arguments)
 
 void read_data(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     auto* context = BindingContext::current(arguments);
     if (!context)
@@ -120,6 +123,7 @@ void read_data(const Arguments& arguments)
 
 void operation(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     auto* context = BindingContext::current(arguments);
     std::uint64_t token = 0;
@@ -160,6 +164,7 @@ void operation(const Arguments& arguments)
 
 void status(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     auto* context = BindingContext::current(arguments);
     std::uint64_t token = 0;
@@ -188,6 +193,7 @@ void status(const Arguments& arguments)
 
 void last_error(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* context = BindingContext::current(arguments);
     arguments.set_return(context ? Value(context->resource_error()) : Value{});
 }
@@ -195,14 +201,17 @@ void last_error(const Arguments& arguments)
 
 std::string_view ResourcesBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "Resources";
 }
 std::string_view ResourcesBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 bool ResourcesBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.function("ResourceLoad", load, 0) && vm.function("ResourceBeginLoad", load, 1) &&
            vm.function("ResourceReadText", read_data, 0) &&
            vm.function("ResourceReadBytes", read_data, 1) &&

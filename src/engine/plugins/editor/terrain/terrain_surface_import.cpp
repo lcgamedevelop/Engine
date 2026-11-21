@@ -1,4 +1,6 @@
 #include "plugins/editor/terrain/terrain_surface_import.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/asset_pipeline/asset_io.hpp"
 #include "editor/asset_pipeline/importer_utils.hpp"
 #include "runtime/resource/builtin_resources.hpp"
@@ -24,6 +26,7 @@ using Pixel = std::array<float, 4>;
 
 bool load(const Guid& guid, const io::ImportContext& context, ByteBuffer& bytes, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (builtin_resource_info(guid))
     {
         return builtin_resource_payload(guid, bytes);
@@ -33,6 +36,7 @@ bool load(const Guid& guid, const io::ImportContext& context, ByteBuffer& bytes,
 bool layers(const schema::TerrainGenerationSpecT& recipe, const io::ImportContext& context,
             std::vector<schema::MaterialDataT>& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (const auto& guid : recipe.material_layers)
     {
         ByteBuffer bytes;
@@ -78,6 +82,7 @@ bool layers(const schema::TerrainGenerationSpecT& recipe, const io::ImportContex
 }
 float scalar(const schema::MaterialDataT& material, std::string_view name, float fallback)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (const auto& p : material.parameters)
     {
         if (p->name == name && p->value.AsFloatValue())
@@ -89,6 +94,7 @@ float scalar(const schema::MaterialDataT& material, std::string_view name, float
 }
 Vec4 vector(const schema::MaterialDataT& material, std::string_view name, Vec4 fallback)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (const auto& p : material.parameters)
     {
         if (p->name == name && p->value.AsVec4Value())
@@ -100,6 +106,7 @@ Vec4 vector(const schema::MaterialDataT& material, std::string_view name, Vec4 f
 }
 Vec4 emission(const schema::MaterialDataT& material)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (const auto& p : material.parameters)
     {
         if (p->name == "emissionColor" && p->value.AsVec3Value())
@@ -112,10 +119,12 @@ Vec4 emission(const schema::MaterialDataT& material)
 }
 float linear(float v)
 {
+    ENGINE_PROFILE_FUNCTION();
     return v <= .04045F ? v / 12.92F : std::pow((v + .055F) / 1.055F, 2.4F);
 }
 float srgb(float v)
 {
+    ENGINE_PROFILE_FUNCTION();
     return v <= .0031308F ? v * 12.92F : 1.055F * std::pow(v, 1 / 2.4F) - .055F;
 }
 
@@ -123,6 +132,7 @@ bool decode(const schema::MaterialDataT& material, std::string_view name, const 
             const io::ImportContext& context, bool color, std::vector<Pixel>& output,
             std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     Guid guid;
     if (!context.identities.path_to_guid(fallback, guid))
     {
@@ -189,7 +199,11 @@ bool decode(const schema::MaterialDataT& material, std::string_view name, const 
         }
         const auto found =
             std::find_if(image->subresources.begin(), image->subresources.end(),
-                         [mip](const auto& p) { return p.mip() == mip && p.face() == 0; });
+                         [mip](const auto& p)
+                         {
+                             ENGINE_PROFILE_FUNCTION_PROBE();
+                             return p.mip() == mip && p.face() == 0;
+                         });
         if (found == image->subresources.end() || found->size() != rgba.size())
         {
             return false;
@@ -199,6 +213,7 @@ bool decode(const schema::MaterialDataT& material, std::string_view name, const 
     output.resize(resolution * resolution);
     auto sample = [&](int x, int y, unsigned c)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         x = (x % int(width) + int(width)) % int(width);
         y = (y % int(height) + int(height)) % int(height);
         float v = rgba[(std::size_t(y) * width + x) * 4 + c] / 255.F;
@@ -225,6 +240,7 @@ bool decode(const schema::MaterialDataT& material, std::string_view name, const 
 void append_mips(schema::TextureDataT& texture, std::vector<Pixel> pixels, unsigned layer,
                  bool normal)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (unsigned mip = 0, size = resolution; size; size >>= 1, ++mip)
     {
         const auto start = texture.data.size();
@@ -274,6 +290,7 @@ void append_mips(schema::TextureDataT& texture, std::vector<Pixel> pixels, unsig
 bool build_terrain_surface(const io::ImportAsset& asset, const io::ImportContext& context,
                            const schema::TerrainGenerationSpecT& recipe, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     flatbuffers::FlatBufferBuilder builder;
     if (asset.subresource_key == "surface")
     {

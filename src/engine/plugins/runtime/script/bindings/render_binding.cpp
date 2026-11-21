@@ -1,4 +1,5 @@
 #include "plugins/runtime/script/bindings/render_binding.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "plugins/runtime/script/bindings/binding_context.hpp"
 #include "runtime/render/render_system.hpp"
@@ -26,6 +27,7 @@ Object.freeze(Render);
 
 RenderSystem* renderer(const Arguments& arguments, int count)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto* binding = BindingContext::current(arguments);
     return binding && arguments.count() == count ? binding->renderer() : nullptr;
@@ -33,6 +35,7 @@ RenderSystem* renderer(const Arguments& arguments, int count)
 
 void viewport_size(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     auto* binding = BindingContext::current(arguments);
     const auto* target = binding != nullptr ? binding->renderer() : nullptr;
@@ -45,6 +48,7 @@ void viewport_size(const Arguments& arguments)
 
 void set_vsync(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* target = renderer(arguments, 1);
     if (target != nullptr && arguments.is_boolean(0))
     {
@@ -54,6 +58,7 @@ void set_vsync(const Arguments& arguments)
 
 void vsync(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     auto* binding = BindingContext::current(arguments);
     const auto* target = binding != nullptr ? binding->renderer() : nullptr;
@@ -65,6 +70,7 @@ void vsync(const Arguments& arguments)
 
 bool read_samples(const Arguments& arguments, std::uint8_t& samples)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!arguments.is_uint32(0))
     {
         return false;
@@ -80,6 +86,7 @@ bool read_samples(const Arguments& arguments, std::uint8_t& samples)
 
 void set_msaa_samples(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* target = renderer(arguments, 1);
     std::uint8_t samples = 1;
     if (target != nullptr && read_samples(arguments, samples))
@@ -90,6 +97,7 @@ void set_msaa_samples(const Arguments& arguments)
 
 void msaa_samples(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* target = renderer(arguments, 0);
     arguments.set_return({});
     if (target != nullptr && target->is_initialized())
@@ -100,6 +108,7 @@ void msaa_samples(const Arguments& arguments)
 
 void supports_msaa_samples(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* target = renderer(arguments, 1);
     std::uint8_t samples = 1;
     if (target != nullptr && read_samples(arguments, samples))
@@ -110,6 +119,7 @@ void supports_msaa_samples(const Arguments& arguments)
 
 void set_max_anisotropy(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* target = renderer(arguments, 1);
     if (target != nullptr && arguments.is_boolean(0))
     {
@@ -119,6 +129,7 @@ void set_max_anisotropy(const Arguments& arguments)
 
 void max_anisotropy(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* target = renderer(arguments, 0);
     arguments.set_return({});
     if (target != nullptr && target->is_initialized())
@@ -129,6 +140,7 @@ void max_anisotropy(const Arguments& arguments)
 
 void supports_max_anisotropy(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* target = renderer(arguments, 0);
     if (target != nullptr)
     {
@@ -140,16 +152,19 @@ void supports_max_anisotropy(const Arguments& arguments)
 
 std::string_view RenderBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "Render";
 }
 
 std::string_view RenderBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 
 bool RenderBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.function("RenderGetViewportSize", viewport_size) &&
            vm.function("RenderSetVSync", set_vsync) && vm.function("RenderGetVSync", vsync) &&
            vm.function("RenderSetMsaaSamples", set_msaa_samples) &&

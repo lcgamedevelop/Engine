@@ -1,4 +1,6 @@
 #include "editor/asset_pipeline/importers/scene_importer.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/resource/virtual_file_system.hpp"
 
 #include "editor/asset_pipeline/asset_io.hpp"
@@ -20,6 +22,7 @@ namespace
 // prefab identity fields remain stable; verify only the schema-defined fields consumed here.
 bool verify_cached_identities(std::span<const std::byte> payload, const schema::SceneData*& scene)
 {
+    ENGINE_PROFILE_FUNCTION();
     scene = nullptr;
     const auto* bytes = reinterpret_cast<const std::uint8_t*>(payload.data());
     if (payload.size() < 2 * sizeof(flatbuffers::uoffset_t) ||
@@ -77,13 +80,18 @@ bool verify_cached_identities(std::span<const std::byte> payload, const schema::
 bool retain_generated_mappings(const ImportAsset& asset, const ImportContext& context,
                                schema::SceneDataT& scene, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!context.previous_catalog || scene.prefab_instances.empty())
     {
         return true;
     }
     const auto found = std::find_if(context.previous_catalog->entries.begin(),
                                     context.previous_catalog->entries.end(),
-                                    [&](const auto& entry) { return entry->guid == asset.guid; });
+                                    [&](const auto& entry)
+                                    {
+                                        ENGINE_PROFILE_FUNCTION_PROBE();
+                                        return entry->guid == asset.guid;
+                                    });
     if (found == context.previous_catalog->entries.end())
     {
         return true;
@@ -118,6 +126,7 @@ bool retain_generated_mappings(const ImportAsset& asset, const ImportContext& co
             std::find_if(previous_instances->begin(), previous_instances->end(),
                          [&](const auto* item)
                          {
+                             ENGINE_PROFILE_FUNCTION_PROBE();
                              return item->prefab_guid()->string_view() == instance->prefab_guid &&
                                     item->root_id() == instance->root_id;
                          });
@@ -129,7 +138,11 @@ bool retain_generated_mappings(const ImportAsset& asset, const ImportContext& co
         {
             const auto explicit_mapping = std::find_if(
                 instance->node_mappings.begin(), instance->node_mappings.end(),
-                [&](const auto& item) { return item->source_id == mapping->source_id(); });
+                [&](const auto& item)
+                {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
+                    return item->source_id == mapping->source_id();
+                });
             if (explicit_mapping == instance->node_mappings.end())
             {
                 instance->node_mappings.emplace_back(mapping->UnPack());
@@ -142,15 +155,18 @@ bool retain_generated_mappings(const ImportAsset& asset, const ImportContext& co
 
 schema::AssetKind SceneAssetImporter::kind() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::scene;
 }
 bool SceneAssetImporter::matches(const std::filesystem::path& source) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return source_extension(source) == ".scene";
 }
 bool SceneAssetImporter::inspect_batch(const ImportContext&, std::string& fingerprint,
                                        std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema_fingerprint({"runtime/scene.fbs", "runtime/prefab.fbs", "runtime/camera.fbs",
                                "runtime/character_controller.fbs"},
                               fingerprint, error);
@@ -158,6 +174,7 @@ bool SceneAssetImporter::inspect_batch(const ImportContext&, std::string& finger
 bool SceneAssetImporter::scan_dependencies(ImportAsset& asset, const ImportContext& context,
                                            std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     asset.build_dependencies.clear();
     asset.runtime_dependencies.clear();
     schema::SceneDataT scene;
@@ -185,6 +202,7 @@ bool SceneAssetImporter::scan_dependencies(ImportAsset& asset, const ImportConte
 bool SceneAssetImporter::convert(const ImportAsset& asset, const ImportContext& context,
                                  std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     schema::SceneDataT scene;
     if (!SceneImporter::read(asset.source, scene, error))
     {
@@ -204,6 +222,7 @@ bool SceneAssetImporter::convert(const ImportAsset& asset, const ImportContext& 
 bool SceneAssetImporter::finalize_dependencies(ImportAsset& asset, const ImportContext& context,
                                                std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     std::vector<std::byte> payload;
     if (!read_generated_payload(asset.guid, context, payload, error))
     {

@@ -1,4 +1,5 @@
 #include "plugins/editor/effects/effect_mcp_tools.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "plugins/editor/mcp/editor_tool_registration.hpp"
 
@@ -7,6 +8,7 @@ namespace engine::plugins::effects
 
 bool register_effect_mcp_tools(mcp::McpSystem& system, mcp::EditorMcpTools& editor)
 {
+    ENGINE_PROFILE_FUNCTION();
     using Json = nlohmann::json;
     return mcp::tools::component_tool(
                system, editor, "set_effect",

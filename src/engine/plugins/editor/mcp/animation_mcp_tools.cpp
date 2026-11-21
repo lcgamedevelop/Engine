@@ -1,9 +1,11 @@
 #include "plugins/editor/mcp/component_mcp_tools.hpp"
+#include "runtime/performance/profiling.hpp"
 
 namespace engine::plugins::mcp
 {
 bool register_animation_tools(McpSystem& system, EditorMcpTools& editor)
 {
+    ENGINE_PROFILE_FUNCTION();
     using Json = nlohmann::json;
     const Json boolean = {{"type", "boolean"}};
     if (!tools::component_tool(

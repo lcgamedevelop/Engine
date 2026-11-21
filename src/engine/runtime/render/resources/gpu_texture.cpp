@@ -1,6 +1,7 @@
 #include "runtime/render/resources/gpu_texture.hpp"
 #include "runtime/render/texture_upload.hpp"
 
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/resource/resource.hpp"
 
@@ -8,6 +9,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <utility>
 #include <vector>
@@ -15,26 +17,57 @@
 namespace engine::render_detail
 {
 
+TextureStagingPixels& TextureStagingPixels::operator=(TextureStagingPixels&& other) noexcept
+{
+    ENGINE_PROFILE_FUNCTION();
+    if (this != &other)
+    {
+        // Release the old record before the vector move frees the old allocation.
+        allocation_ = std::move(other.allocation_);
+        bytes = std::move(other.bytes);
+    }
+    return *this;
+}
+
+void TextureStagingPixels::resize(std::size_t size)
+{
+    ENGINE_PROFILE_FUNCTION();
+#if defined(ENGINE_ENABLE_MEMORY_PROFILING)
+    if (size > bytes.capacity())
+    {
+        allocation_.reset();
+        bytes.resize(size);
+        allocation_.track(memory_profile::Pool::texture_prepare, bytes.data(), bytes.capacity());
+        return;
+    }
+#endif
+    bytes.resize(size);
+}
+
 GpuTexture::~GpuTexture() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     release();
 }
 
 GpuTexture::GpuTexture(GpuTexture&& other) noexcept
     : resource(std::move(other.resource)),
       handle(std::exchange(other.handle, bgfx::TextureHandle{bgfx::kInvalidHandle})),
-      sampler_flags(std::exchange(other.sampler_flags, 0))
+      sampler_flags(std::exchange(other.sampler_flags, 0)), memory(std::move(other.memory))
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 GpuTexture& GpuTexture::operator=(GpuTexture&& other) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (this != &other)
     {
         release();
         resource = std::move(other.resource);
         handle = std::exchange(other.handle, bgfx::TextureHandle{bgfx::kInvalidHandle});
         sampler_flags = std::exchange(other.sampler_flags, 0);
+        memory = std::move(other.memory);
     }
     return *this;
 }
@@ -43,15 +76,18 @@ namespace
 {
 bool block_format(bgfx::TextureFormat::Enum format) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return format == bgfx::TextureFormat::BC7 || format == bgfx::TextureFormat::ASTC4x4 ||
            format == bgfx::TextureFormat::ETC2A;
 }
 std::size_t unit_bytes(bgfx::TextureFormat::Enum format) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return block_format(format) ? 16 : format == bgfx::TextureFormat::RGBA16F ? 8 : 4;
 }
 basist::transcoder_texture_format transcode_format(bgfx::TextureFormat::Enum format)
 {
+    ENGINE_PROFILE_FUNCTION();
     using Target = basist::transcoder_texture_format;
     switch (format)
     {
@@ -72,6 +108,7 @@ basist::transcoder_texture_format transcode_format(bgfx::TextureFormat::Enum for
 std::size_t texture_region_bytes(const PreparedTexture& part, std::uint64_t offset,
                                  std::size_t maximum) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!part.data || part.mip >= part.data->mip_count)
     {
         return 0;
@@ -98,6 +135,7 @@ std::size_t texture_region_bytes(const PreparedTexture& part, std::uint64_t offs
 bool PreparedTexture::describe(ResourceLoader* loader, ResourceHandle source,
                                const bgfx::Caps& caps, std::size_t max_bytes)
 {
+    ENGINE_PROFILE_FUNCTION();
     PreparedTexture candidate;
     candidate.mip = mip;
     candidate.face = face;
@@ -125,6 +163,7 @@ bool PreparedTexture::describe(ResourceLoader* loader, ResourceHandle source,
     const auto encoded_size = static_cast<std::uint32_t>(data->data.size());
     const auto supported = [&](Format::Enum format)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const auto required =
             data->cube_map
                 ? (data->srgb ? BGFX_CAPS_FORMAT_TEXTURE_CUBE_SRGB : BGFX_CAPS_FORMAT_TEXTURE_CUBE)
@@ -206,7 +245,8 @@ bool PreparedTexture::describe(ResourceLoader* loader, ResourceHandle source,
 bool PreparedTexture::prepare()
 {
     ENGINE_PROFILE_ZONE("Render.texturePrepare");
-    pixels.clear();
+    auto& data_bytes = pixels.bytes;
+    data_bytes.clear();
     view = {};
     if (!data || bytes == 0)
     {
@@ -217,40 +257,45 @@ bool PreparedTexture::prepare()
     {
         const auto found = std::find_if(data->subresources.begin(), data->subresources.end(),
                                         [this](const auto& part)
-                                        { return part.mip() == mip && part.face() == face; });
+                                        {
+                                            ENGINE_PROFILE_FUNCTION_PROBE();
+                                            return part.mip() == mip && part.face() == face;
+                                        });
         if (found == data->subresources.end() || byte_offset > found->size() ||
             bytes > found->size() - byte_offset || found->offset() > data->data.size() ||
             found->size() > data->data.size() - found->offset())
         {
-            pixels.clear();
+            data_bytes.clear();
             return false;
         }
-        std::copy_n(data->data.data() + found->offset() + byte_offset, bytes, pixels.data());
+        std::copy_n(data->data.data() + found->offset() + byte_offset, bytes, data_bytes.data());
     }
     else if (data->encoding == schema::TextureEncoding::basis)
     {
         basist::basisu_transcoder decoder;
         const auto size = static_cast<std::uint32_t>(data->data.size());
         if (!decoder.start_transcoding(data->data.data(), size) ||
-            !decoder.transcode_image_level(data->data.data(), size, 0, mip, pixels.data(),
+            !decoder.transcode_image_level(data->data.data(), size, 0, mip, data_bytes.data(),
                                            static_cast<std::uint32_t>(bytes / unit_bytes(format)),
                                            transcode_format(format)))
         {
-            pixels.clear();
+            data_bytes.clear();
             return false;
         }
     }
     else
     {
-        pixels.clear();
+        data_bytes.clear();
         return false;
     }
-    view = pixels;
+    view = data_bytes;
     return true;
 }
 
-bool GpuTexture::create(const PreparedTexture& prepared)
+bool GpuTexture::create(const PreparedTexture& prepared, GpuMemoryTracker* tracker,
+                        SceneScopeId scope, std::uint64_t scene)
 {
+    ENGINE_PROFILE_FUNCTION();
     release();
     const auto* data = prepared.data;
     if (!data ||
@@ -274,6 +319,22 @@ bool GpuTexture::create(const PreparedTexture& prepared)
         return false;
     }
     sampler_flags = static_cast<std::uint32_t>(prepared.flags & BGFX_SAMPLER_BITS_MASK);
+    if (tracker)
+    {
+        bgfx::TextureInfo info{};
+        bgfx::calcTextureSize(info, static_cast<std::uint16_t>(data->width),
+                              static_cast<std::uint16_t>(data->height), 1, data->cube_map,
+                              data->mip_count > 1,
+                              static_cast<std::uint16_t>(data->cube_map ? 1 : data->array_layers),
+                              prepared.format);
+        GpuMemoryEntry entry;
+        entry.kind = GpuMemoryKind::texture;
+        entry.guid = resource.get()->info().guid;
+        entry.creation_scope = scope;
+        entry.creation_scene = scene;
+        entry.logical_bytes = info.storageSize;
+        memory.track(tracker, std::move(entry));
+    }
     return true;
 }
 
@@ -300,7 +361,26 @@ bool GpuTexture::upload(const PreparedTexture& part)
         std::min<std::uint64_t>(width - x, std::min<std::size_t>(units, columns) * block));
     const auto upload_height = static_cast<std::uint16_t>(
         std::min<std::size_t>(height - y, std::max<std::size_t>(1, units / columns) * block));
+#if defined(ENGINE_ENABLE_MEMORY_PROFILING)
+    using memory_profile::BackingAllocation;
+    constexpr auto pool = memory_profile::Pool::texture_upload;
+    auto* copy = BackingAllocation::allocate_block(pool, part.bytes);
+    if (!copy)
+    {
+        return false;
+    }
+    std::memcpy(copy, part.view.data(), part.bytes);
+    const auto* memory = bgfx::makeRef(
+        copy, static_cast<std::uint32_t>(part.bytes),
+        [](void* address, void*) { BackingAllocation::free_block(pool, address); });
+    if (!memory)
+    {
+        BackingAllocation::free_block(pool, copy);
+        return false;
+    }
+#else
     const auto* memory = bgfx::copy(part.view.data(), static_cast<std::uint32_t>(part.bytes));
+#endif
     if (part.data->cube_map)
     {
         bgfx::updateTextureCube(handle, 0, static_cast<std::uint8_t>(part.face),
@@ -318,11 +398,13 @@ bool GpuTexture::upload(const PreparedTexture& part)
 
 void GpuTexture::release() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (bgfx::isValid(handle))
     {
         bgfx::destroy(handle);
     }
     handle = BGFX_INVALID_HANDLE;
+    memory.reset();
     resource.reset();
     sampler_flags = 0;
 }
@@ -333,6 +415,7 @@ namespace engine::render
 {
 bool upload_texture(ResourceLoader& loader, ResourceHandle resource, bgfx::TextureHandle& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (bgfx::isValid(output))
     {
         return false;

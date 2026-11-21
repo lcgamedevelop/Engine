@@ -1,4 +1,6 @@
 #pragma once
+
+#include "runtime/performance/function_profile.hpp"
 #include "plugins/runtime/character_controller/character_types.hpp"
 #include "runtime/scene/component.hpp"
 namespace engine::plugins::character_controller
@@ -14,6 +16,7 @@ public:
     CharacterController() noexcept = default;
     explicit CharacterController(Component c) noexcept : Component(c, component_type)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
     }
     [[nodiscard]] static bool register_type(ComponentRegistry& registry);
     [[nodiscard]] bool initialize();

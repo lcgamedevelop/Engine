@@ -1,4 +1,6 @@
 #include "editor/commands/components/component_edit.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/resource/resource_system.hpp"
 #include "runtime/scene/audio_listener.hpp"
 namespace engine::editor::components
@@ -8,6 +10,7 @@ namespace
 bool read(const Json& arguments, schema::AudioListenerDataT& value, std::vector<ResourceReference>&,
           std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!fields(arguments, {"enabled", "volume"}, error))
     {
         return false;
@@ -21,6 +24,7 @@ bool read(const Json& arguments, schema::AudioListenerDataT& value, std::vector<
 }
 Json write(const schema::AudioListenerDataT& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     Json result = Json::object();
     result["volume"] = value.volume;
     return result;
@@ -29,11 +33,19 @@ Json write(const schema::AudioListenerDataT& value)
 bool register_audio_listener(WorldSystem& world, EditorCommands& commands,
                              SceneCommands& scene_commands)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!register_component<engine::AudioListener, schema::AudioListenerDataT>(
             world, scene_commands, commands, "audio_listener",
             [](Node, const auto& args, auto& data, auto& prepared, auto& error)
-            { return read(args, data, prepared, error); },
-            [](auto, const auto& data) { return write(data); }))
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return read(args, data, prepared, error);
+            },
+            [](auto, const auto& data)
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return write(data);
+            }))
     {
         return false;
     }

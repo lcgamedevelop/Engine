@@ -1,10 +1,12 @@
 #include "plugins/editor/character_controller/character_camera_mcp_tools.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/editor/mcp/editor_tool_registration.hpp"
 #include "runtime/schema/control_json_generated.hpp"
 namespace engine::plugins::character_controller
 {
 bool register_character_camera_mcp_tools(mcp::McpSystem& system, mcp::EditorMcpTools& editor)
 {
+    ENGINE_PROFILE_FUNCTION();
     using Json = nlohmann::json;
     if (!mcp::tools::component_tool(
             system, editor, "set_character_camera",

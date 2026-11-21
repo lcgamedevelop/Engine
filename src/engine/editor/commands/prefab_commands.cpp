@@ -1,4 +1,6 @@
 #include "editor/commands/prefab_commands.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/resource_access.hpp"
 #include "runtime/resource/types/prefab_resource.hpp"
 
@@ -28,6 +30,7 @@ using NodeIdentities = std::map<std::uint64_t, std::shared_ptr<std::uint64_t>>;
 
 NodeIdentities retain_identities(SceneCommands& commands, const Scene& scene)
 {
+    ENGINE_PROFILE_FUNCTION();
     NodeIdentities result;
     std::vector<Node> nodes;
     if (!scene.collect_nodes(nodes))
@@ -43,6 +46,7 @@ NodeIdentities retain_identities(SceneCommands& commands, const Scene& scene)
 
 std::vector<schema::NodeIdMappingT> current_ids(const Scene& scene, const NodeIdentities& ids)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::vector<schema::NodeIdMappingT> result;
     for (const auto& [local, runtime] : ids)
     {
@@ -60,12 +64,14 @@ std::vector<schema::NodeIdMappingT> current_ids(const Scene& scene, const NodeId
 bool rebase_instance(std::optional<Instance>& instance, std::span<const schema::NodeIdMappingT> ids,
                      std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!instance)
     {
         return true;
     }
     const auto remap = [ids](std::uint64_t& id)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         for (const auto& mapping : ids)
         {
             if (mapping.source_id == id)
@@ -110,6 +116,7 @@ bool rebase_instance(std::optional<Instance>& instance, std::span<const schema::
 
 std::optional<Instance> instance_for(const Scene& scene, std::uint64_t local, std::uint64_t& source)
 {
+    ENGINE_PROFILE_FUNCTION();
     source = 0;
     std::vector<Instance> instances;
     if (!scene.collect_prefab_instances(instances))
@@ -131,6 +138,7 @@ std::optional<Instance> instance_for(const Scene& scene, std::uint64_t local, st
 }
 schema::PrefabNodeOverrideT& node_override(Instance& instance, std::uint64_t source)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (auto& value : instance.overrides)
     {
         if (value->node_id == source)
@@ -145,6 +153,7 @@ schema::PrefabNodeOverrideT& node_override(Instance& instance, std::uint64_t sou
 }
 void merge_fields(Fields& target, const Fields& source)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (const auto& field : source)
     {
         if (std::find(target.begin(), target.end(), field) == target.end())
@@ -155,6 +164,7 @@ void merge_fields(Fields& target, const Fields& source)
 }
 bool read_fields(const Json& arguments, Fields& fields, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!arguments.contains("fields") || !arguments["fields"].is_array() ||
         arguments["fields"].empty())
     {
@@ -175,6 +185,7 @@ bool read_fields(const Json& arguments, Fields& fields, std::string& error)
 }
 Component component_argument(Node node, const Json& arguments, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!arguments["componentType"].is_string())
     {
         error = "componentType must use the get_scene componentType name";
@@ -197,6 +208,7 @@ Component component_argument(Node node, const Json& arguments, std::string& erro
 }
 std::string property_name(std::string_view name)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string output;
     for (unsigned char ch : name)
     {
@@ -215,6 +227,7 @@ std::string property_name(std::string_view name)
 bool capture(Instance& instance, std::uint64_t source, Node node, ComponentType type,
              const Fields& fields, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto& entry = node_override(instance, source);
     if (type == ComponentType::NONE)
     {
@@ -322,6 +335,7 @@ bool capture(Instance& instance, std::uint64_t source, Node node, ComponentType 
 void remove_fields(Instance& instance, std::uint64_t source, ComponentType type,
                    const Fields& fields)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (auto& node : instance.overrides)
     {
         if (node->node_id != source)
@@ -330,9 +344,13 @@ void remove_fields(Instance& instance, std::uint64_t source, ComponentType type,
         }
         auto erase = [&](Fields& value)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             std::erase_if(
                 value, [&](const auto& field)
-                { return std::find(fields.begin(), fields.end(), field) != fields.end(); });
+                {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
+                    return std::find(fields.begin(), fields.end(), field) != fields.end();
+                });
         };
         if (type == ComponentType::NONE)
         {
@@ -352,11 +370,17 @@ void remove_fields(Instance& instance, std::uint64_t source, ComponentType type,
                 }
             }
             std::erase_if(node->components, [](const auto& value)
-                          { return value->fields.empty() && !value->removed; });
+                          {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return value->fields.empty() && !value->removed;
+            });
         }
     }
     std::erase_if(instance.overrides, [](const auto& node)
-                  { return !node->removed && node->fields.empty() && node->components.empty(); });
+                  {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return !node->removed && node->fields.empty() && node->components.empty();
+    });
 }
 
 // Existing edits remain responsible for native state and rollback. This record adds only source
@@ -364,6 +388,7 @@ void remove_fields(Instance& instance, std::uint64_t source, ComponentType type,
 bool capture_link(Instance& instance, Scene& scene, const schema::PrefabDataT& prefab,
                   std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::vector<schema::NodeIdMappingT> ids;
     for (const auto& mapping : instance.node_mappings)
     {
@@ -373,7 +398,10 @@ bool capture_link(Instance& instance, Scene& scene, const schema::PrefabDataT& p
     {
         const auto mapping =
             std::find_if(ids.begin(), ids.end(), [&source](const auto& value)
-                         { return value.source_id == source->info->properties->id; });
+                         {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return value.source_id == source->info->properties->id;
+            });
         auto node = mapping != ids.end() ? scene.find_local_node(mapping->target_id) : Node{};
         if (!node || node.transient())
         {
@@ -436,7 +464,10 @@ bool capture_link(Instance& instance, Scene& scene, const schema::PrefabDataT& p
             }
             const auto original = std::find_if(source->components.begin(), source->components.end(),
                                                [&component](const auto& value)
-                                               { return value->payload.type == component.type(); });
+                                               {
+                                                   ENGINE_PROFILE_FUNCTION_PROBE();
+                                                   return value->payload.type == component.type();
+                                               });
             schema::ComponentDataT current;
             current.flags = std::make_unique<schema::ComponentFlagsT>();
             Fields forced;
@@ -539,7 +570,10 @@ bool capture_link(Instance& instance, Scene& scene, const schema::PrefabDataT& p
         }
     }
     std::erase_if(instance.overrides, [](const auto& value)
-                  { return value->fields.empty() && value->components.empty(); });
+                  {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return value->fields.empty() && value->components.empty();
+    });
     return true;
 }
 
@@ -552,9 +586,11 @@ public:
           type_(type), fields_(std::move(fields)), whole_component_(whole_component),
           edit_(std::move(edit))
     {
+        ENGINE_PROFILE_FUNCTION();
     }
     bool apply(std::string& error) override
     {
+        ENGINE_PROFILE_FUNCTION();
         auto node = resolve(error);
         std::uint64_t source = 0;
         const auto current =
@@ -608,6 +644,7 @@ public:
     }
     bool revert(std::string& error) override
     {
+        ENGINE_PROFILE_FUNCTION();
         auto node = resolve(error);
         std::uint64_t source = 0;
         const auto current =
@@ -637,6 +674,7 @@ public:
 private:
     Node resolve(std::string& error) const
     {
+        ENGINE_PROFILE_FUNCTION();
         auto* scene = world_.scene();
         auto node = scene && scene->id() == scene_ ? scene->find_node(*node_) : Node{};
         if (!node)
@@ -665,13 +703,16 @@ public:
           before_(std::move(before)), after_(std::move(after)), edit_(std::move(edit)),
           identities_(retain_identities(scenes, *node.scene()))
     {
+        ENGINE_PROFILE_FUNCTION();
     }
     bool apply(std::string& error) override
     {
+        ENGINE_PROFILE_FUNCTION();
         return change(before_, after_, true, error);
     }
     bool revert(std::string& error) override
     {
+        ENGINE_PROFILE_FUNCTION();
         return change(after_, before_, false, error);
     }
 
@@ -679,6 +720,7 @@ private:
     bool change(const std::optional<Instance>& expected, const std::optional<Instance>& replacement,
                 bool apply, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         auto* scene = world_.scene();
         auto node = scene && scene->id() == scene_ ? scene->find_node(*node_) : Node{};
         if (!node)
@@ -738,6 +780,7 @@ public:
           before_(std::move(before)), after_(std::move(after)),
           identities_(retain_identities(scenes, *node.scene())), fields_(std::move(fields))
     {
+        ENGINE_PROFILE_FUNCTION();
         if (before_.payload.type == ComponentType::MeshRendererData)
         {
             before_materials_ = materials(node.get_component<MeshRenderer>());
@@ -745,16 +788,19 @@ public:
     }
     bool apply(std::string& error) override
     {
+        ENGINE_PROFILE_FUNCTION();
         return change(before_, after_, true, error);
     }
     bool revert(std::string& error) override
     {
+        ENGINE_PROFILE_FUNCTION();
         return change(after_, before_, false, error);
     }
 
 private:
     static std::vector<Json> materials(const MeshRenderer& renderer)
     {
+        ENGINE_PROFILE_FUNCTION();
         std::vector<Json> result;
         for (std::size_t slot = 0; slot < renderer.material_count(); ++slot)
         {
@@ -764,6 +810,7 @@ private:
     }
     static bool restore_materials(MeshRenderer renderer, const std::vector<Json>& snapshots)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (renderer.material_count() != snapshots.size())
         {
             return false;
@@ -780,6 +827,7 @@ private:
     bool change(schema::ComponentDataT expected, schema::ComponentDataT replacement, bool forward,
                 std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         auto* scene = world_.scene();
         if (!scene || scene->id() != scene_)
         {
@@ -859,13 +907,16 @@ public:
         : world_(world), node_(std::move(node)), scene_(scene), before_(std::move(before)),
           after_(std::move(after))
     {
+        ENGINE_PROFILE_FUNCTION();
     }
     bool apply(std::string& error) override
     {
+        ENGINE_PROFILE_FUNCTION();
         return change(before_, after_, error);
     }
     bool revert(std::string& error) override
     {
+        ENGINE_PROFILE_FUNCTION();
         return change(after_, before_, error);
     }
 
@@ -873,6 +924,7 @@ private:
     bool change(const schema::NodeInfoT& expected, const schema::NodeInfoT& value,
                 std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         auto* scene = world_.scene();
         auto node = scene && scene->id() == scene_ ? scene->find_node(*node_) : Node{};
         if (!node || node.enabled() != expected.properties->enabled ||
@@ -894,6 +946,7 @@ bool override_command(WorldSystem& world, SceneCommands& scenes, const Json& arg
                       Json& result, std::unique_ptr<EditorEdit>& edit, std::string& error,
                       bool revert)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!components::fields(arguments, {"componentType", "fields"}, error))
     {
         return false;
@@ -1036,6 +1089,7 @@ bool override_command(WorldSystem& world, SceneCommands& scenes, const Json& arg
 bool wrap_edit(WorldSystem& world, SceneCommands& scenes, std::string_view command,
                const Json& arguments, std::unique_ptr<EditorEdit>& edit, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* scene = world.scene();
     std::vector<Instance> instances;
     if (!scene || !scene->collect_prefab_instances(instances) || instances.empty() ||
@@ -1156,11 +1210,13 @@ bool register_prefab_commands(WorldSystem& world, SceneCommands& scenes,
                               std::map<std::uint64_t, std::shared_ptr<std::uint64_t>>& aliases,
                               EditorCommands& commands)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!commands.register_command(
             "instantiate_prefab", true,
             [&world, &scenes, &aliases](const Json& arguments, Json& result,
                                         std::unique_ptr<EditorEdit>& edit, std::string& error)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 (void)scenes.node_identity(0);
                 return components::prepare_prefab(world, aliases, arguments, result, edit, error);
             }))
@@ -1174,6 +1230,7 @@ bool register_prefab_commands(WorldSystem& world, SceneCommands& scenes,
                 [&world, &scenes, revert](const Json& arguments, Json& result,
                                           std::unique_ptr<EditorEdit>& edit, std::string& error)
                 {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
                     return override_command(world, scenes, arguments, result, edit, error, revert);
                 }))
         {
@@ -1185,6 +1242,7 @@ bool register_prefab_commands(WorldSystem& world, SceneCommands& scenes,
             [&world](const Json& arguments, Json& result, std::unique_ptr<EditorEdit>&,
                      std::string& error)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 if (!components::fields(arguments, {}, error))
                 {
                     return false;
@@ -1235,6 +1293,7 @@ bool register_prefab_commands(WorldSystem& world, SceneCommands& scenes,
             [&world, &scenes](const Json& arguments, Json& result,
                               std::unique_ptr<EditorEdit>& edit, std::string& error)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 if (!components::fields(arguments, {}, error))
                 {
                     return false;
@@ -1264,6 +1323,7 @@ bool register_prefab_commands(WorldSystem& world, SceneCommands& scenes,
             [&world, &scenes](const Json& arguments, Json& result,
                               std::unique_ptr<EditorEdit>& edit, std::string& error)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 if (!components::fields(arguments, {"path"}, error) ||
                     !arguments.contains("path") || !arguments["path"].is_string())
                 {
@@ -1333,6 +1393,9 @@ bool register_prefab_commands(WorldSystem& world, SceneCommands& scenes,
     return commands.set_edit_wrapper(
         [&world, &scenes](std::string_view command, const Json& arguments,
                           std::unique_ptr<EditorEdit>& edit, std::string& error)
-        { return wrap_edit(world, scenes, command, arguments, edit, error); });
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return wrap_edit(world, scenes, command, arguments, edit, error);
+        });
 }
 } // namespace engine::editor

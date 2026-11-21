@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "editor/commands/component_commands.hpp"
 #include "editor/commands/editor_edit.hpp"
 #include "editor/resource_access.hpp"
@@ -52,15 +54,18 @@ struct Target
     explicit Target(WorldSystem& value, NodeAliases* references = nullptr)
         : world(value), aliases(references)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
     }
 
     [[nodiscard]] std::uint64_t resolved_id() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return identity ? *identity : node_id;
     }
 
     [[nodiscard]] Node node(std::string& error) const
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         auto* scene = world.scene();
         if (scene == nullptr || scene->id() != scene_id)
         {
@@ -77,6 +82,7 @@ struct Target
 
     [[nodiscard]] bool read(const Json& arguments, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (!identifier(arguments, "sceneId", scene_id) ||
             !identifier(arguments, "nodeId", node_id))
         {
@@ -116,6 +122,7 @@ public:
         : target_(std::move(target)), before_(std::move(before)), after_(std::move(after)),
           fields_(fields), change_(change)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
     }
 
     PropertyEdit(const PropertyEdit&) = delete;
@@ -125,11 +132,13 @@ public:
 
     [[nodiscard]] bool apply(std::string& error) override
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return change_(target_, before_, after_, fields_, error);
     }
 
     [[nodiscard]] bool revert(std::string& error) override
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return change_(target_, after_, before_, fields_, error);
     }
 

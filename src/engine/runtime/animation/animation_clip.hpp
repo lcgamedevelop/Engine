@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/resource/resource_reference.hpp"
 #include "runtime/resource/types/animation_resource.hpp"
 #include "runtime/resource/types/animation_retarget_profile_resource.hpp"
@@ -32,6 +34,7 @@ struct AnimationPose
 
 inline bool matrix(const std::vector<float>& values, ozz::math::Float4x4& output)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     if (!model_value_utils::affine(values))
     {
         return false;
@@ -45,6 +48,7 @@ inline bool matrix(const std::vector<float>& values, ozz::math::Float4x4& output
 
 inline bool inverse(const ozz::math::Float4x4& value, ozz::math::Float4x4& output)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     ozz::math::SimdInt4 invertible;
     output = ozz::math::Invert(value, &invertible);
     return ozz::math::AreAllTrue1(invertible);
@@ -62,6 +66,7 @@ struct CompiledSkeleton
 
     bool prepare(const ResourceReference& target)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const auto* data = target ? target.data<SkeletonResource>() : nullptr;
         if (data == nullptr || !joint_paths(*data, paths) ||
             !readable_joint_paths(*data, readable_paths))
@@ -120,6 +125,7 @@ struct CompiledAnimation
                  std::shared_ptr<const AnimationRetargetBinding> binding,
                  std::shared_ptr<const ozz::animation::Animation> compiled)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const auto* data = clip.data<AnimationResource>();
         if (!data || !skeleton || !sampling_skeleton || !compiled || !resource.retain(clip) ||
             !source.retain(source_resource))
@@ -168,6 +174,7 @@ using AnimationIdentity =
 
 inline ResourceIdentity identity(const Resource& resource)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return {resource.info().guid, resource.generation()};
 }
 

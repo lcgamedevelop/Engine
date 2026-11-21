@@ -1,4 +1,5 @@
 #include "plugins/runtime/script/bindings/bone_attachment_binding.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/script/bindings/binding_helpers.hpp"
 
 #include "plugins/runtime/script/bindings/binding_context.hpp"
@@ -35,11 +36,13 @@ Object.freeze(BoneAttachment);
 )js";
 void add(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto node = BindingContext::node(arguments);
     arguments.set_return(arguments.count() == 2 && node && node.add_component<BoneAttachment>());
 }
 void set_source(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<BoneAttachment>(arguments, 4);
     std::uint64_t scene = 0, node = 0;
     auto* context = BindingContext::current(arguments);
@@ -53,6 +56,7 @@ void set_source(const Arguments& arguments)
 }
 void settings(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<BoneAttachment>(arguments, 14);
     std::string socket;
     std::array<float, 10> offset{};
@@ -82,25 +86,30 @@ void settings(const Arguments& arguments)
 }
 void detach(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<BoneAttachment>(arguments, 2);
     arguments.set_return(value && value.detach());
 }
 void following(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto value = binding_detail::component<BoneAttachment>(arguments, 2);
     arguments.set_return(value && value.following());
 }
 } // namespace
 std::string_view BoneAttachmentBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "BoneAttachment";
 }
 std::string_view BoneAttachmentBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 bool BoneAttachmentBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.integer("BoneAttachmentKind", static_cast<int>(BoneAttachment::component_type)) &&
            vm.function("BoneAttachmentAdd", add) &&
            vm.function("BoneAttachmentSource", set_source) &&

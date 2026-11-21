@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 // Implementation-only ECS access shared by core systems and selected plugins.
 #include "runtime/scene/component_registry.hpp"
 #include "runtime/scene/ecs_scene.hpp"
@@ -22,6 +24,7 @@ template <class Data> struct ComponentStorage
 template <class T, class Data, class Runtime = void>
 bool register_component_storage(ComponentRegistry& registry)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     using Storage = ecs_detail::ComponentStorage<Data>;
     if (registry.native_world() == nullptr || ecs_is_stage(registry.native_world()) ||
         ecs_stage_is_readonly(registry.native_world()) || registry.contains(T::component_type) ||
@@ -38,6 +41,7 @@ bool register_component_storage(ComponentRegistry& registry)
     ComponentRegistry::Operations ops;
     ops.state = [](Node node) -> ComponentState*
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (!node)
         {
             return nullptr;
@@ -48,6 +52,7 @@ bool register_component_storage(ComponentRegistry& registry)
     };
     ops.data = [](Node node) -> void*
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (!node)
         {
             return nullptr;
@@ -58,6 +63,7 @@ bool register_component_storage(ComponentRegistry& registry)
     };
     ops.runtime = [](Node node) -> void*
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if constexpr (std::is_void_v<Runtime>)
         {
             (void)node;
@@ -75,6 +81,7 @@ bool register_component_storage(ComponentRegistry& registry)
     };
     ops.create = [](Node node) -> Component
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (!node || !ecs_detail::scope_writable(node))
         {
             return {};
@@ -112,6 +119,7 @@ bool register_component_storage(ComponentRegistry& registry)
     };
     ops.remove = [](Node node) -> bool
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (!node || !ecs_detail::scope_writable(node))
         {
             return false;
@@ -132,6 +140,7 @@ bool register_component_storage(ComponentRegistry& registry)
     };
     ops.snapshot = [](Component component, schema::ComponentDataT& output) -> bool
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         output = {};
         const auto* value = component.template read_data<Data>();
         const auto* state = component.state();
@@ -145,6 +154,7 @@ bool register_component_storage(ComponentRegistry& registry)
     };
     ops.build = [](Component component, schema::ComponentDataT& output) -> bool
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if constexpr (std::is_same_v<decltype(&T::build_data), decltype(&Component::build_data)>)
         {
             return component.get_data(output);
@@ -156,6 +166,7 @@ bool register_component_storage(ComponentRegistry& registry)
     };
     ops.restore = [](Component component, const schema::ComponentDataT& input) -> bool
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (!input.flags || input.payload.type != T::component_type ||
             input.payload.value == nullptr)
         {
@@ -166,6 +177,7 @@ bool register_component_storage(ComponentRegistry& registry)
     ops.remap = [](Component component, schema::ComponentDataT& input,
                    std::span<const schema::NodeIdMappingT> mapping) -> bool
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if constexpr (std::is_same_v<decltype(&T::remap_node_references),
                                      decltype(&Component::remap_node_references)>)
         {

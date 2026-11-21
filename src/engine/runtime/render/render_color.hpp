@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include <cmath>
 
 namespace engine::render_detail
@@ -8,6 +10,7 @@ namespace engine::render_detail
 // third_party/notices/bgfx-hdr.md) for display-encoded clear colors.
 inline float display_srgb_to_linear(float color)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return color <= 0.04045F ? color / 12.92F
                              : std::pow((color + 0.055F) / 1.055F, 2.4F);
 }

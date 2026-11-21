@@ -1,4 +1,5 @@
 #include "editor/asset_pipeline/components/scene_component_codec.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "editor/asset_pipeline/components/camera_codec.hpp"
 #include "editor/asset_pipeline/components/environment_codec.hpp"
@@ -32,12 +33,14 @@ namespace
 
 std::vector<std::unique_ptr<SceneComponentCodec>>& extensions()
 {
+    ENGINE_PROFILE_FUNCTION();
     static std::vector<std::unique_ptr<SceneComponentCodec>> entries;
     return entries;
 }
 
 const std::array<const SceneComponentCodec*, 17>& codecs()
 {
+    ENGINE_PROFILE_FUNCTION();
     static const UiCodec ui;
     static const TextCodec text;
     static const AnimatorCodec animator;
@@ -81,11 +84,13 @@ const std::array<const SceneComponentCodec*, 17>& codecs()
 bool SceneComponentCodec::scan_dependencies(const schema::ComponentDataT&, const ImportContext&,
                                             std::vector<Guid>&, std::string&) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return true;
 }
 
 std::span<const std::string_view> SceneComponentCodec::resource_fields() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return {};
 }
 
@@ -93,11 +98,13 @@ bool SceneComponentCodec::remap_node_references(schema::ComponentDataT&,
                                                 std::span<const schema::NodeIdMappingT>,
                                                 std::string&) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return true;
 }
 
 const SceneComponentCodec* find_scene_component_codec(schema::ComponentPayload type) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     for (const auto* codec : codecs())
     {
         if (codec->type() == type)
@@ -117,6 +124,7 @@ const SceneComponentCodec* find_scene_component_codec(schema::ComponentPayload t
 
 const SceneComponentCodec* find_scene_component_codec(std::string_view name) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     for (const auto* codec : codecs())
     {
         if (codec->name() == name)
@@ -136,6 +144,7 @@ const SceneComponentCodec* find_scene_component_codec(std::string_view name) noe
 
 bool register_scene_component_codec(std::unique_ptr<SceneComponentCodec>& codec)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!codec || codec->type() == schema::ComponentPayload::NONE || codec->name().empty() ||
         find_scene_component_codec(codec->type()) || find_scene_component_codec(codec->name()))
     {

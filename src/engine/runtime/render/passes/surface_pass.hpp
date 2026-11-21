@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include <bgfx/bgfx.h>
 
 #include <array>
@@ -32,6 +34,7 @@ public:
                                                const ViewDrawList& list);
     [[nodiscard]] std::span<const std::uint64_t> depth_inputs() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return depth_inputs_;
     }
     [[nodiscard]] bgfx::TextureHandle depth() const noexcept;

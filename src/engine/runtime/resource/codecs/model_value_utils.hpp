@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/schema/common_generated.h"
 
 #include <algorithm>
@@ -10,19 +12,23 @@ namespace engine::model_value_utils
 {
 inline bool number(double value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return std::isfinite(value) && std::abs(value) <= 1.0e12;
 }
 inline bool vector(const schema::Vec3& value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return number(value.x()) && number(value.y()) && number(value.z());
 }
 inline bool scale(const schema::Vec3& value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return vector(value) && std::abs(value.x()) > 1.0e-8 && std::abs(value.y()) > 1.0e-8 &&
            std::abs(value.z()) > 1.0e-8;
 }
 inline bool quaternion(const schema::Vec4& value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     if (!number(value.x()) || !number(value.y()) || !number(value.z()) || !number(value.w()))
     {
         return false;
@@ -33,6 +39,7 @@ inline bool quaternion(const schema::Vec4& value) noexcept
 }
 inline bool affine(std::span<const float> value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     if (value.size() != 16 || !std::all_of(value.begin(), value.end(), number) ||
         std::abs(value[3]) > 1.0e-6F || std::abs(value[7]) > 1.0e-6F ||
         std::abs(value[11]) > 1.0e-6F || std::abs(value[15] - 1.0F) > 1.0e-6F)

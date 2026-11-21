@@ -1,4 +1,5 @@
 #include "ios/editor/plugins/mcp/ios_container.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "editor/asset_pipeline/project_lock.hpp"
 #include "plugins/editor/mcp/mcp_target.hpp"
@@ -38,6 +39,7 @@ enum class FileKind
 
 bool relative_path(std::string_view path)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (path.empty() || path.front() == '/' || path.back() == '/' ||
         path.find_first_of("\\:") != path.npos || path.find('\0') != path.npos)
     {
@@ -62,6 +64,7 @@ bool relative_path(std::string_view path)
 
 bool afc_result(afc_error_t result, std::string_view operation, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (result == AFC_E_SUCCESS)
     {
         return true;
@@ -74,6 +77,7 @@ bool afc_result(afc_error_t result, std::string_view operation, std::string& err
 bool remote_info(afc_client_t client, const std::string& path, FileKind& kind, std::uint64_t& size,
                  std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     kind = FileKind::missing;
     size = 0;
     char** values = nullptr;
@@ -129,6 +133,7 @@ bool remote_info(afc_client_t client, const std::string& path, FileKind& kind, s
 bool xcrun(const McpTarget& target, const std::vector<std::string>& arguments, std::string& output,
            std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     std::vector<std::string> command{PathUtils::to_utf8(target.xcrun_executable)};
     command.insert(command.end(), arguments.begin(), arguments.end());
@@ -180,6 +185,7 @@ struct IosContainer::State
 
     ~State() noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         if (afc)
         {
             if (lock_handle != 0)
@@ -202,6 +208,7 @@ struct IosContainer::State
     bool resolve(std::string_view path, fs::path& local, std::string& remote,
                  std::string& error) const
     {
+        ENGINE_PROFILE_FUNCTION();
         if (!relative_path(path))
         {
             error = "Invalid app-relative iOS sync path";
@@ -244,6 +251,7 @@ struct IosContainer::State
 
     bool info(std::string_view path, FileKind& kind, std::uint64_t& size, std::string& error) const
     {
+        ENGINE_PROFILE_FUNCTION();
         kind = FileKind::missing;
         size = 0;
         fs::path local;
@@ -282,6 +290,7 @@ struct IosContainer::State
 
     bool prepare_root(std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (simulator)
         {
             std::error_code code;
@@ -320,11 +329,13 @@ struct IosContainer::State
 
 IosContainer::IosContainer(const McpTarget& target) noexcept : target_(target)
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 IosContainer::~IosContainer() noexcept = default;
 
 bool IosContainer::open(std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     if (state_)
     {
@@ -459,11 +470,13 @@ bool IosContainer::open(std::string& error)
 
 std::string_view IosContainer::runtime_dir() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return state_ ? std::string_view(state_->runtime_dir) : std::string_view{};
 }
 
 bool IosContainer::directory(std::string_view path, bool& exists, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     exists = false;
     FileKind kind;
     std::uint64_t size = 0;
@@ -482,6 +495,7 @@ bool IosContainer::directory(std::string_view path, bool& exists, std::string& e
 
 bool IosContainer::make_directory(std::string_view path, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!state_ || !relative_path(path))
     {
         error = "Invalid app-relative iOS directory";
@@ -534,6 +548,7 @@ bool IosContainer::make_directory(std::string_view path, std::string& error)
 
 bool IosContainer::lock(std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!make_directory("assets/.sync-lock", error))
     {
         return false;
@@ -567,6 +582,7 @@ bool IosContainer::lock(std::string& error)
 bool IosContainer::read(std::string_view path, std::string& output, bool& exists,
                         std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     exists = false;
     FileKind kind;
@@ -633,6 +649,7 @@ bool IosContainer::read(std::string_view path, std::string& output, bool& exists
 
 bool IosContainer::upload(const fs::path& source, std::string_view path, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!state_ || !relative_path(path))
     {
         error = "Invalid app-relative iOS upload path";
@@ -729,6 +746,7 @@ bool IosContainer::upload(const fs::path& source, std::string_view path, std::st
 bool IosContainer::verify(std::string_view path, std::uint64_t size, std::string_view expected,
                           std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     FileKind kind;
     std::uint64_t actual = 0;
     fs::path local;
@@ -799,6 +817,7 @@ bool IosContainer::verify(std::string_view path, std::uint64_t size, std::string
 
 bool IosContainer::rename(std::string_view source, std::string_view target, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     fs::path from, to;
     std::string remote_from, remote_to;
     FileKind source_kind, target_kind;
@@ -832,6 +851,7 @@ bool IosContainer::rename(std::string_view source, std::string_view target, std:
 
 bool IosContainer::remove(std::string_view path, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     fs::path local;
     std::string remote;
     if (!state_ || !state_->resolve(path, local, remote, error))

@@ -17,6 +17,7 @@
 #include "runtime/engine_config.hpp"
 #include "runtime/gameplay/gameplay_session.hpp"
 #include "runtime/gameplay/script_runtime.hpp"
+#include "runtime/render/gpu_memory.hpp"
 #include "runtime/render/render_constants.hpp"
 #include "runtime/render/render_context.hpp"
 #include "runtime/render/render_extension.hpp"
@@ -2268,11 +2269,39 @@ bool test_scope_frames_and_capture(const engine::EngineConfig& config)
     {
         return false;
     }
+    GpuMemorySnapshot live_memory;
+    const bool observes_memory = renderer.memory_snapshot({}, 32, live_memory);
+    const auto live_mesh = std::ranges::find(live_memory.live, GpuMemoryKind::mesh_geometry,
+                                           &GpuMemoryEntry::kind);
+    if (observes_memory &&
+        !expect(live_mesh != live_memory.live.end() && live_mesh->logical_bytes > 0,
+                "the published scene has a live mesh memory record"))
+    {
+        return false;
+    }
     world.destroy_scene();
     renderer.release_scene();
     if (!expect(!renderer.frame_status(batch, after), "retired scope cannot revive a frame"))
     {
         return false;
+    }
+    if (observes_memory)
+    {
+        GpuMemorySnapshot queued;
+        if (!renderer.memory_snapshot(live_mesh->guid, 32, queued))
+        {
+            return false;
+        }
+        const auto retiring = std::ranges::find(queued.pending, live_mesh->id, &GpuMemoryEntry::id);
+        if (!expect(retiring != queued.pending.end() &&
+                        retiring->phase == GpuMemoryPhase::destroy_queued &&
+                        retiring->release_requested.timestamp_ns >=
+                            live_mesh->created.timestamp_ns &&
+                        retiring->backend_reclaimed.timestamp_ns == 0,
+                    "the mesh waits for the renderer to consume the queued destroy"))
+        {
+            return false;
+        }
     }
     Screenshot red, blue;
     renderer.set_idle_clear_color(0xff0000ff);
@@ -2284,6 +2313,36 @@ bool test_scope_frames_and_capture(const engine::EngineConfig& config)
     if (!screenshot(windows, renderer, fixture.root, "identified-blue", blue))
     {
         return false;
+    }
+    if (observes_memory)
+    {
+        GpuMemorySnapshot reclaimed;
+        if (!render_frames(windows, renderer, 2) ||
+            !renderer.memory_snapshot({}, 32, reclaimed))
+        {
+            return false;
+        }
+        const auto mesh_entry =
+            std::ranges::find(reclaimed.recent_reclaims, live_mesh->id, &GpuMemoryEntry::id);
+        const auto readback = std::ranges::find(reclaimed.recent_reclaims,
+                                              GpuMemoryKind::frame_readback, &GpuMemoryEntry::kind);
+        if (!expect(reclaimed.sequence > live_memory.sequence &&
+                        reclaimed.totals.retiring_count == 0 &&
+                        mesh_entry != reclaimed.recent_reclaims.end() &&
+                        mesh_entry->phase == GpuMemoryPhase::backend_reclaimed &&
+                        mesh_entry->destroy_submitted.timestamp_ns >=
+                            mesh_entry->destroy_queued.timestamp_ns &&
+                        mesh_entry->backend_reclaimed.timestamp_ns >=
+                            mesh_entry->destroy_submitted.timestamp_ns &&
+                        readback != reclaimed.recent_reclaims.end() &&
+                        readback->readback_ready.timestamp_ns >= readback->created.timestamp_ns &&
+                        readback->readback_ready.timestamp_ns <=
+                            readback->destroy_queued.timestamp_ns,
+                    "scene destroy acknowledgement and GPU readback completion have separate times"))
+        {
+            return false;
+        }
+        std::puts("GPU memory reports live mesh, queued destroy, reclaim and completed readback.");
     }
     const auto center = static_cast<std::size_t>(red.height / 2) * red.width + red.width / 2;
     return expect(

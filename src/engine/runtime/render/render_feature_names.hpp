@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/render/render_features.hpp"
 
 #include <array>
@@ -28,6 +30,7 @@ inline constexpr std::array<std::string_view, static_cast<std::size_t>(RenderFea
 
 inline bool parse_feature(std::string_view name, RenderFeature& output) noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     for (std::size_t index = 0; index < feature_names.size(); ++index)
     {
         if (feature_names[index] == name)
@@ -41,6 +44,7 @@ inline bool parse_feature(std::string_view name, RenderFeature& output) noexcept
 
 inline std::string_view feature_reason_name(RenderFeatureReason reason) noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     constexpr std::array names{"none",
                                "device_unavailable",
                                "device_unsupported",

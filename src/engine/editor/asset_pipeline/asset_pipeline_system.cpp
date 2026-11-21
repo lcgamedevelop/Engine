@@ -1,4 +1,6 @@
 #include "editor/asset_pipeline/asset_pipeline_system.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/file_text.hpp"
 #include "runtime/resource/virtual_file_system.hpp"
 
@@ -50,6 +52,7 @@ constexpr std::string_view importer_version = "engine-asset-importers-8";
 
 bool directory(const std::filesystem::path& path, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::error_code code;
     const auto status = std::filesystem::symlink_status(path, code);
     if (code || !std::filesystem::is_directory(status) || std::filesystem::is_symlink(status))
@@ -63,6 +66,7 @@ bool directory(const std::filesystem::path& path, std::string& error)
 
 bool reject_symlink_if_present(const std::filesystem::path& path, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::error_code code;
     const auto status = std::filesystem::symlink_status(path, code);
     if (code == std::errc::no_such_file_or_directory)
@@ -79,6 +83,7 @@ bool reject_symlink_if_present(const std::filesystem::path& path, std::string& e
 
 bool project_idle(const std::filesystem::path& root, std::string_view target, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto hosts = root / "cache/editor-hosts";
     std::error_code code;
     if (!std::filesystem::exists(hosts, code))
@@ -214,6 +219,7 @@ bool project_idle(const std::filesystem::path& root, std::string_view target, st
 
 bool import_threads(const std::filesystem::path& settings, std::size_t& count, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto path = settings / "editor-import.toml";
     std::string text;
     if (!engine::editor::file_detail::read_text(path, text))
@@ -247,6 +253,7 @@ bool import_threads(const std::filesystem::path& settings, std::size_t& count, s
 
 bool target_settings(std::string_view requested, std::string& platform, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     platform = requested;
     if (platform.empty())
     {
@@ -263,6 +270,7 @@ bool target_settings(std::string_view requested, std::string& platform, std::str
 
 bool builtin_identities(GuidMap& identities, std::map<Guid, schema::AssetKind>& kinds)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (const auto& entry : builtin_resource_catalog().entries)
     {
         if (!entry || !identities.add(entry->path, entry->guid))
@@ -278,6 +286,7 @@ bool remembered_paths(const std::filesystem::path& cache,
                       const std::map<Guid, AssetRecord>& previous, std::set<std::string>& paths,
                       std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (const auto& [guid, record] : previous)
     {
         (void)guid;
@@ -323,6 +332,7 @@ bool scan_assets(const std::filesystem::path& assets, const std::filesystem::pat
                  GuidMap& identities, std::map<Guid, schema::AssetKind>& kinds,
                  std::vector<AssetRecord>& records, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::error_code code;
     std::vector<std::filesystem::path> files;
     std::filesystem::recursive_directory_iterator iterator(assets, code);
@@ -441,6 +451,7 @@ bool scan_assets(const std::filesystem::path& assets, const std::filesystem::pat
 
 bool common_fingerprint(const std::string& platform, std::string& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string schemas;
     if (!schema_fingerprint(
             {"runtime/common.fbs", "runtime/asset_catalog.fbs", "runtime/resource_header.fbs"},
@@ -456,6 +467,7 @@ bool inspect_importers(const AssetImporterRegistry& importers, const ImportConte
                        const std::vector<AssetRecord>& records,
                        std::map<std::string, std::string>& fingerprints, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     fingerprints.clear();
     for (const auto& record : records)
     {
@@ -483,6 +495,7 @@ bool calculate_keys(std::vector<AssetRecord>& records, const std::string& common
                     const std::map<std::string, std::string>& fingerprints,
                     std::map<Guid, std::size_t>& by_guid, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::vector<std::size_t> incoming(records.size(), 0);
     std::vector<std::vector<std::size_t>> dependents(records.size());
     for (std::size_t index = 0; index < records.size(); ++index)
@@ -550,6 +563,7 @@ bool calculate_keys(std::vector<AssetRecord>& records, const std::string& common
 
 bool verify_sources(const std::vector<AssetRecord>& records, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::map<std::filesystem::path, std::pair<std::string, std::string>> snapshots;
     for (const auto& record : records)
     {
@@ -579,15 +593,18 @@ bool verify_sources(const std::vector<AssetRecord>& records, std::string& error)
 
 AssetPipelineSystem::AssetPipelineSystem(TaskSystem& tasks) : tasks_(tasks)
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 AssetPipelineSystem::~AssetPipelineSystem() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
 }
 
 bool AssetPipelineSystem::on_initialize(const EngineConfig&)
 {
+    ENGINE_PROFILE_FUNCTION();
     last_error_.clear();
     if (!tasks_.is_initialized())
     {
@@ -606,12 +623,14 @@ bool AssetPipelineSystem::on_initialize(const EngineConfig&)
 
 void AssetPipelineSystem::on_shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     importers_.clear();
     catalog_ = {};
 }
 
 bool AssetPipelineSystem::add_importer(std::unique_ptr<asset_pipeline::AssetImporter>& importer)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::unique_lock lock(build_mutex_, std::try_to_lock);
     if (!lock.owns_lock())
     {
@@ -628,6 +647,7 @@ bool AssetPipelineSystem::add_importer(std::unique_ptr<asset_pipeline::AssetImpo
 
 bool AssetPipelineSystem::set_importer(std::unique_ptr<asset_pipeline::AssetImporter>& importer)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::unique_lock lock(build_mutex_, std::try_to_lock);
     if (!lock.owns_lock())
     {
@@ -645,6 +665,7 @@ bool AssetPipelineSystem::set_importer(std::unique_ptr<asset_pipeline::AssetImpo
 bool AssetPipelineSystem::build_assets(const std::filesystem::path& project_root,
                                        std::string_view requested_target)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::unique_lock build_lock(build_mutex_, std::try_to_lock);
     if (!build_lock.owns_lock())
     {
@@ -822,6 +843,7 @@ bool AssetPipelineSystem::build_assets(const std::filesystem::path& project_root
     }
     const auto fail = [&]()
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         std::string cleanup_error;
         if (!recover_publish(cache, database, cleanup_error))
         {
@@ -905,6 +927,7 @@ bool AssetPipelineSystem::build_assets(const std::filesystem::path& project_root
         tasks.push_back({records[index].asset.path,
                          [&, index]()
                          {
+                             ENGINE_PROFILE_FUNCTION_PROBE();
                              auto& record = records[index];
                              const auto* importer = importers.find(record.asset.importer_id);
                              if (importer == nullptr ||
@@ -1123,16 +1146,19 @@ bool AssetPipelineSystem::build_assets(const std::filesystem::path& project_root
 
 const AssetBuildStats& AssetPipelineSystem::last_build() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return last_build_;
 }
 
 const std::string& AssetPipelineSystem::last_error() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return last_error_;
 }
 
 const schema::AssetCatalogDataT& AssetPipelineSystem::catalog() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return catalog_;
 }
 

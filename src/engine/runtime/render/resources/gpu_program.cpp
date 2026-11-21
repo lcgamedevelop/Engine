@@ -1,5 +1,6 @@
 #include "runtime/render/resources/gpu_program.hpp"
 
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/render/render_constants.hpp"
 #include "runtime/render/resources/gpu_texture.hpp"
@@ -30,6 +31,7 @@ namespace engine::render_detail
 
 GpuProgram::~GpuProgram() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     release();
 }
 
@@ -67,10 +69,12 @@ GpuProgram::GpuProgram(GpuProgram&& other) noexcept
                                               bgfx::ProgramHandle{bgfx::kInvalidHandle})),
       uniforms(std::exchange(other.uniforms, {})), samplers(std::exchange(other.samplers, {}))
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 GpuProgram& GpuProgram::operator=(GpuProgram&& other) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (this != &other)
     {
         release();
@@ -222,6 +226,7 @@ bool GpuProgram::create(const schema::ShaderDataT& shader)
         }
         const auto link_solid_depth = [&](const std::uint8_t* code, std::uint32_t bytes)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             const auto vertex = bgfx::createShader(bgfx::copy(code, bytes));
             if (!bgfx::isValid(vertex))
             {
@@ -341,10 +346,18 @@ bool GpuProgram::create(const schema::ShaderDataT& shader)
             }
             const bool sampler =
                 std::any_of(shader.samplers.begin(), shader.samplers.end(),
-                            [&name](const auto& item) { return item->uniform_name == name; });
+                            [&name](const auto& item)
+                            {
+                                ENGINE_PROFILE_FUNCTION_PROBE();
+                                return item->uniform_name == name;
+                            });
             const bool parameter =
                 std::any_of(shader.parameters.begin(), shader.parameters.end(),
-                            [&name](const auto& item) { return item->uniform_name == name; });
+                            [&name](const auto& item)
+                            {
+                                ENGINE_PROFILE_FUNCTION_PROBE();
+                                return item->uniform_name == name;
+                            });
             if (info.num != 1 || (sampler && parameter) ||
                 (sampler ? info.type != bgfx::UniformType::Sampler
                          : !parameter || info.type != bgfx::UniformType::Vec4))
@@ -363,15 +376,26 @@ bool GpuProgram::create(const schema::ShaderDataT& shader)
     }
     const auto declared = [&reflected](const std::string& name)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return std::any_of(reflected.begin(), reflected.end(),
-                           [&name](const auto& info) { return name == info.name; });
+                           [&name](const auto& info)
+                           {
+                               ENGINE_PROFILE_FUNCTION_PROBE();
+                               return name == info.name;
+                           });
     };
     const auto used_by_pbr_opaque = [&opaque_inputs](std::string_view name)
-    { return std::ranges::find(opaque_inputs, name) != opaque_inputs.end(); };
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return std::ranges::find(opaque_inputs, name) != opaque_inputs.end();
+    };
     for (const auto& parameter : shader.parameters)
     {
         if (std::any_of(uniforms.begin(), uniforms.end(), [&parameter](const auto& uniform)
-                        { return uniform.name == parameter->uniform_name; }))
+                        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return uniform.name == parameter->uniform_name;
+        }))
         {
             continue;
         }
@@ -423,6 +447,7 @@ bool GpuProgram::create(const schema::ShaderDataT& shader)
 
 void GpuProgram::release() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     resource.reset();
     if (bgfx::isValid(rvt_program))
     {
@@ -515,6 +540,7 @@ void GpuProgram::release() noexcept
 bool GpuProgram::prepare_material(const Material& material, const TextureTable& textures,
                                   MaterialBinding& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* shader = &definition;
     output = {};
     MaterialBinding binding;
@@ -578,7 +604,10 @@ bool GpuProgram::prepare_material(const Material& material, const TextureTable& 
             return false;
         }
         auto uniform = std::find_if(uniforms.begin(), uniforms.end(), [&parameter](const auto& item)
-                                    { return item.name == parameter->uniform_name; });
+                                    {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return item.name == parameter->uniform_name;
+        });
         if (uniform == uniforms.end() || parameter->uniform_offset + count > 4)
         {
             return false;
@@ -635,12 +664,18 @@ bool GpuProgram::prepare_material(const Material& material, const TextureTable& 
     // 阴影约定只在阴影使用时报告不支持，普通颜色绘制不受影响。
     const auto parameter = [&](std::string_view name) -> const schema::ShaderParameterT*
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const auto found = std::find_if(definition.parameters.begin(), definition.parameters.end(),
-                                        [&](const auto& value) { return value->name == name; });
+                                        [&](const auto& value)
+                                        {
+                                            ENGINE_PROFILE_FUNCTION_PROBE();
+                                            return value->name == name;
+                                        });
         return found == definition.parameters.end() ? nullptr : found->get();
     };
     const auto prepare_shadow = [&]()
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (const auto* cutoff = parameter("alphaCutoff"))
         {
             const auto* value = cutoff->default_value.AsFloatValue();
@@ -696,6 +731,7 @@ bool GpuProgram::prepare_material(const Material& material, const TextureTable& 
     binding.shadow_valid = prepare_shadow();
     const auto combine = [&](auto value)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         binding.content_hash ^= std::hash<decltype(value)>{}(value) + 0x9e3779b9U +
                                 (binding.content_hash << 6) + (binding.content_hash >> 2);
     };
@@ -723,6 +759,7 @@ bool GpuProgram::bind_material(const MaterialBinding& material,
                                std::span<const bgfx::TextureHandle> frame_textures,
                                bool max_anisotropy, bool pbr_opaque) const
 {
+    ENGINE_PROFILE_FUNCTION();
     if (material.program != this || material.values.size() != uniforms.size() ||
         material.samplers.size() != samplers.size())
     {

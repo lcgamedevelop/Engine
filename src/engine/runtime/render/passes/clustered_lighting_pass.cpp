@@ -21,12 +21,14 @@ static_assert(sizeof(ShadowRecord) == sizeof(float) * 24);
 
 ClusteredLightingPass::~ClusteredLightingPass() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     release();
 }
 
 bool ClusteredLightingPass::prepare(const RenderConfig& config, std::uint16_t width,
                                     std::uint16_t height, std::uint32_t vsm_vectors)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* caps = bgfx::getCaps();
     if (caps == nullptr || (caps->supported & BGFX_CAPS_COMPUTE) == 0 ||
         caps->limits.maxComputeBindings < 2 || caps->limits.maxTextureSamplers < 16 || width == 0 ||
@@ -217,6 +219,7 @@ bool ClusteredLightingPass::cull(bgfx::ViewId view, const CameraSettings& camera
 
 void ClusteredLightingPass::bind_view(bgfx::ViewId view, bool virtual_shadow) const
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!ready_)
     {
         return;
@@ -233,6 +236,7 @@ void ClusteredLightingPass::bind_view(bgfx::ViewId view, bool virtual_shadow) co
 
 void ClusteredLightingPass::bind(bool virtual_shadow) const
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!ready_)
     {
         return;
@@ -249,6 +253,7 @@ void ClusteredLightingPass::bind(bool virtual_shadow) const
 
 void ClusteredLightingPass::release() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (bgfx::isValid(lights_))
     {
         bgfx::destroy(lights_);
@@ -291,6 +296,7 @@ void ClusteredLightingPass::release() noexcept
 
 std::uint32_t ClusteredLightingPass::resource_count() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return static_cast<std::uint32_t>(bgfx::isValid(lights_)) +
            static_cast<std::uint32_t>(bgfx::isValid(clusters_)) +
            static_cast<std::uint32_t>(bgfx::isValid(program_)) +

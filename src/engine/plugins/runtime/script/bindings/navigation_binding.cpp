@@ -1,4 +1,5 @@
 #include "plugins/runtime/script/bindings/navigation_binding.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "plugins/runtime/script/bindings/binding_context.hpp"
 #include "runtime/navigation/navigation_system.hpp"
@@ -55,6 +56,7 @@ Object.freeze(Navigation);
 
 NavigationSystem* system(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* context = BindingContext::current(arguments);
     auto* world = context ? context->world() : nullptr;
     const auto* scene = world ? world->scene() : nullptr;
@@ -63,6 +65,7 @@ NavigationSystem* system(const Arguments& arguments)
 
 bool json_argument(const Arguments& arguments, int index, nlohmann::json& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string text;
     if (!BindingContext::text(arguments, index, text) || text.size() > 128 * 1024)
     {
@@ -74,6 +77,7 @@ bool json_argument(const Arguments& arguments, int index, nlohmann::json& output
 
 bool scalar(const nlohmann::json& object, const char* key, float& output, bool required = false)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto value = object.find(key);
     if (value == object.end())
     {
@@ -94,6 +98,7 @@ bool scalar(const nlohmann::json& object, const char* key, float& output, bool r
 
 bool vector(const nlohmann::json& object, const char* key, Vec3& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto found = object.find(key);
     float x = 0;
     float y = 0;
@@ -109,6 +114,7 @@ bool vector(const nlohmann::json& object, const char* key, Vec3& output)
 
 bool identifier(const nlohmann::json& object, const char* key, std::uint64_t& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto value = object.find(key);
     if (value == object.end() || !value->is_string())
     {
@@ -121,6 +127,7 @@ bool identifier(const nlohmann::json& object, const char* key, std::uint64_t& ou
 
 bool geometry(const Arguments& arguments, std::vector<NavigationGeometry>& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     nlohmann::json values;
     auto* context = BindingContext::current(arguments);
     auto* scene = context && context->world() ? context->world()->scene() : nullptr;
@@ -165,6 +172,7 @@ bool geometry(const Arguments& arguments, std::vector<NavigationGeometry>& outpu
 
 void build(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto* navigation = system(arguments);
     std::vector<NavigationGeometry> meshes;
@@ -206,6 +214,7 @@ void build(const Arguments& arguments)
 
 void path(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     const auto* navigation = system(arguments);
     double coordinates[6]{};
@@ -237,6 +246,7 @@ void path(const Arguments& arguments)
 
 void clear(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* navigation = system(arguments);
     const bool valid = navigation && arguments.count() == 0;
     if (valid)
@@ -248,6 +258,7 @@ void clear(const Arguments& arguments)
 
 void statistic(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(arguments.data() == 0 ? vm::NativeValue(false) : vm::NativeValue{});
     const auto* navigation = system(arguments);
     if (!navigation || arguments.count() != 0)
@@ -274,14 +285,17 @@ void statistic(const Arguments& arguments)
 
 std::string_view NavigationBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "Navigation";
 }
 std::string_view NavigationBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 bool NavigationBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.function("NavigationBuild", build, 0) && vm.function("NavigationReplace", build, 1) &&
            vm.function("NavigationPath", path) && vm.function("NavigationClear", clear) &&
            vm.function("NavigationReady", statistic, 0) &&

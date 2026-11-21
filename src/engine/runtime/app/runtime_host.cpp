@@ -10,6 +10,8 @@
 #include "runtime/log/log_system.hpp"
 #include "runtime/movie/movie_player.hpp"
 #include "runtime/navigation/navigation_system.hpp"
+#include "runtime/performance/memory_profiling.hpp"
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/physics/physics_system.hpp"
 #include "runtime/render/render_system.hpp"
@@ -33,10 +35,12 @@ namespace engine
 {
 RuntimeHost::RuntimeHost() noexcept : engine_(Engine::instance())
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 RuntimeHost::~RuntimeHost() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
 }
 
@@ -46,6 +50,7 @@ bool RuntimeHost::initialize(const EngineConfig& config, ResourceSystem* resourc
                              const RuntimeParallelConfig& parallel,
                              AnimationRetargeterFactory retargeter_factory)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!initialize_presentation(config, resources, loader, threads, parallel))
     {
         return false;
@@ -64,6 +69,7 @@ bool RuntimeHost::initialize_presentation(const EngineConfig& config, ResourceSy
                                           ResourceLoader* loader, ThreadSystem* threads,
                                           const RuntimeParallelConfig& parallel)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (initialized_ || owns_engine_ || engine_.is_initialized() || engine_.system_count() != 0 ||
         (resources != nullptr && !resources->is_initialized()) ||
         (threads != nullptr && !threads->is_initialized()) ||
@@ -73,6 +79,7 @@ bool RuntimeHost::initialize_presentation(const EngineConfig& config, ResourceSy
         return false;
     }
     owns_engine_ = true;
+    memory_profile::begin_startup_capture();
     parallel_ = parallel;
     presentation_config_ = config;
     if (threads == nullptr)
@@ -87,6 +94,7 @@ bool RuntimeHost::initialize_presentation(const EngineConfig& config, ResourceSy
     }
     const auto create_domain = [&](std::unique_ptr<TaskSystem>& domain, TaskConfig settings)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (settings.max_concurrency == 0)
         {
             settings.max_concurrency = threads->worker_count();
@@ -148,6 +156,7 @@ bool RuntimeHost::initialize_presentation(const EngineConfig& config, ResourceSy
     window_->set_event_handler(
         [](void* context, const SDL_Event& event)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             auto& host = *static_cast<RuntimeHost*>(context);
             if (host.event_observer_ != nullptr)
             {
@@ -181,6 +190,7 @@ bool RuntimeHost::initialize_gameplay(const EngineConfig& config,
                                       ScriptRuntimeFactory script_factory, RuntimeSetup setup,
                                       AnimationRetargeterFactory retargeter_factory)
 {
+    ENGINE_PROFILE_FUNCTION();
 #if defined(ENGINE_ENABLE_TRACY)
     tracy::SetThreadName("Engine main");
 #endif
@@ -275,6 +285,7 @@ bool RuntimeHost::begin_gameplay(ScriptRuntimeFactory script_factory, RuntimeSet
                                  std::shared_ptr<const MountList> mounts, std::string_view revision,
                                  std::string_view entry, std::string_view scene)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!initialized_ || startup_requested_ || gameplay_ || !catalog || !mounts || !resources_ ||
         revision.empty() || catalog->revision().empty() ||
         catalog->revision() != resources_->catalog().revision() ||
@@ -297,6 +308,7 @@ bool RuntimeHost::begin_gameplay(ScriptRuntimeFactory script_factory, RuntimeSet
 
 RuntimeStartupStatus RuntimeHost::step_gameplay(double max_seconds)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!initialized_ || !startup_requested_ || !std::isfinite(max_seconds) || max_seconds <= 0)
     {
         return RuntimeStartupStatus::failed;
@@ -356,6 +368,7 @@ RuntimeStartupStatus RuntimeHost::step_gameplay(double max_seconds)
 
 bool RuntimeHost::activate_gameplay()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!initialized_ || startup_status_ != RuntimeStartupStatus::ready || !gameplay_ ||
         !gameplay_->activate_prepared() || !audio_->set_world(world_))
     {
@@ -369,6 +382,7 @@ bool RuntimeHost::activate_gameplay()
 
 bool RuntimeHost::status(RuntimeHostStatus& output) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     output.tick_id = tick_sequence_;
     output.sampled_at_ns =
@@ -387,6 +401,7 @@ bool RuntimeHost::status(RuntimeHostStatus& output) const noexcept
 
 FrameStatus RuntimeHost::fail_runtime(std::string_view code, std::string_view message)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!failed_ || error_code_.empty())
     {
         error_code_ = code;
@@ -409,6 +424,7 @@ FrameStatus RuntimeHost::tick(double delta_time)
 {
     ENGINE_PROFILE_ZONE("Host.tick");
     last_tick_status_ = tick_runtime(delta_time);
+    memory_profile::publish_plots();
     ++tick_sequence_;
     return last_tick_status_;
 }
@@ -510,6 +526,7 @@ FrameStatus RuntimeHost::poll_events(double delta_time)
     }
     const auto fail_input = [&]()
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const std::string_view message = failed_ && error_code_.empty() && !error_.empty()
                                              ? std::string_view(error_)
                                              : std::string_view(input_->last_error());
@@ -589,6 +606,7 @@ FrameStatus RuntimeHost::poll_events(double delta_time)
 
 bool RuntimeHost::set_suspended(bool suspended)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!initialized_ || failed_ || !SDL_IsMainThread())
     {
         return false;
@@ -616,57 +634,68 @@ bool RuntimeHost::set_suspended(bool suspended)
 
 void RuntimeHost::set_event_observer(WindowEventHandler observer, void* context) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     event_observer_ = observer;
     event_observer_context_ = observer == nullptr ? nullptr : context;
 }
 
 GameplaySession* RuntimeHost::gameplay() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return gameplay_.get();
 }
 
 WorldSystem* RuntimeHost::world() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return initialized_ ? world_ : nullptr;
 }
 
 WindowSystem* RuntimeHost::window() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return initialized_ ? window_.get() : nullptr;
 }
 
 InputSystem* RuntimeHost::input() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return initialized_ ? input_.get() : nullptr;
 }
 
 RenderSystem* RuntimeHost::renderer() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return initialized_ ? renderer_ : nullptr;
 }
 
 UiSystem* RuntimeHost::ui() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return initialized_ ? ui_ : nullptr;
 }
 
 void RuntimeHost::request_exit() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     exit_requested_ = true;
 }
 
 TaskSystem* RuntimeHost::tasks() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return initialized_ ? tasks_.get() : nullptr;
 }
 
 MoviePlayer* RuntimeHost::movie_player() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return initialized_ ? movie_player_.get() : nullptr;
 }
 
 void RuntimeHost::reset_gameplay() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     gameplay_active_ = false;
     gameplay_.reset();
     if (renderer_ != nullptr && renderer_->is_initialized())
@@ -690,6 +719,7 @@ void RuntimeHost::reset_gameplay() noexcept
 
 void RuntimeHost::shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     set_event_observer(nullptr, nullptr);
     // 先结束项目回调，再关闭其借用的系统，窗口最后销毁。
     if (window_)

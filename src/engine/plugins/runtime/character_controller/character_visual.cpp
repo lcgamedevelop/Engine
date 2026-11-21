@@ -1,4 +1,5 @@
 #include "plugins/runtime/character_controller/character_visual.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/scene/ecs_storage.hpp"
 
@@ -6,17 +7,20 @@ namespace engine::plugins::character_controller
 {
 bool CharacterVisual::register_type(ComponentRegistry& registry)
 {
+    ENGINE_PROFILE_FUNCTION();
     return register_component_storage<CharacterVisual, Data>(registry);
 }
 
 bool CharacterVisual::valid_settings(const schema::CharacterVisualDataT& value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return value.kind >= schema::CharacterVisualKind::MIN &&
            value.kind <= schema::CharacterVisualKind::MAX;
 }
 
 bool CharacterVisual::get_settings(Data& output) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* value = read_data<Data>();
     output = value ? *value : Data{};
     return value != nullptr;
@@ -24,6 +28,7 @@ bool CharacterVisual::get_settings(Data& output) const noexcept
 
 bool CharacterVisual::set_settings(const schema::CharacterVisualDataT& value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -39,6 +44,7 @@ bool CharacterVisual::set_settings(const schema::CharacterVisualDataT& value) no
 
 bool CharacterVisual::restore_data(const schema::ComponentDataT& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!value.flags)
     {
         return false;

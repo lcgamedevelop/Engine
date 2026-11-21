@@ -1,4 +1,6 @@
 #include "runtime/resource/codecs/skeleton_resource_codec.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/resource/codecs/resource_decode.hpp"
 #include "runtime/resource/codecs/sampling_archive.hpp"
 
@@ -16,17 +18,20 @@ namespace
 {
 bool named(std::string_view name)
 {
+    ENGINE_PROFILE_FUNCTION();
     return !name.empty() && name.size() <= 1024 && name.find('\0') == std::string_view::npos;
 }
 
 bool unit_direction(const schema::Vec3& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     const double length = value.x() * value.x() + value.y() * value.y() + value.z() * value.z();
     return model_value_utils::vector(value) && std::abs(length - 1) < 0.001;
 }
 
 bool ancestor(const schema::SkeletonDataT& skeleton, std::size_t parent, std::size_t child)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (int index = skeleton.joints[child]->parent; index >= 0;
          index = skeleton.joints[index]->parent)
     {
@@ -41,6 +46,7 @@ bool ancestor(const schema::SkeletonDataT& skeleton, std::size_t parent, std::si
 
 bool SkeletonResourceCodec::validate(const schema::SkeletonDataT& data)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (data.schema_version != 2 || !valid_path(data.path) || data.joints.empty() ||
         data.joints.size() > 1024 || data.sockets.size() > 1024 || data.aim_ik.size() > 1024 ||
         data.two_bone_ik.size() > 1024)
@@ -119,14 +125,17 @@ bool SkeletonResourceCodec::validate(const schema::SkeletonDataT& data)
 
 schema::AssetKind SkeletonResourceCodec::kind() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::skeleton;
 }
 
 bool SkeletonResourceCodec::decode(const schema::AssetEntryT& entry, ByteView payload,
                                    std::unique_ptr<Resource>& output, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto validate = [](ByteView payload, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (!resource_decode_detail::verify_flatbuffer(payload, schema::VerifySkeletonDataBuffer,
                                                        "Invalid Skeleton FlatBuffer", error))
         {
@@ -143,11 +152,16 @@ bool SkeletonResourceCodec::decode(const schema::AssetEntryT& entry, ByteView pa
     };
     return resource_decode_detail::decode_flatbuffer<ResourceType>(
         entry, payload, 64U * 1024U * 1024U, validate,
-        [](const std::uint8_t* bytes) { return schema::UnPackSkeletonData(bytes); }, output, error);
+        [](const std::uint8_t* bytes)
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return schema::UnPackSkeletonData(bytes);
+        }, output, error);
 }
 
 bool SkeletonResourceCodec::validate_data(const Resource& resource, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* data = resource_detail::data<ResourceType>(&resource);
     if (!data || !(resource.info().dependencies.empty() && data->path == resource.info().path &&
                    validate(*data)))
@@ -163,6 +177,7 @@ bool SkeletonResourceCodec::validate_dependencies(const Resource& resource,
                                                   ResourceView dependencies,
                                                   std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     return resource.info().dependencies.empty() && dependencies.empty();
 }

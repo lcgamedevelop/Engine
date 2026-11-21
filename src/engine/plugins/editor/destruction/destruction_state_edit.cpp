@@ -1,4 +1,5 @@
 #include "plugins/editor/destruction/destruction_state_edit.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "plugins/runtime/destruction/destruction_component.hpp"
 #include "runtime/scene/collider.hpp"
@@ -21,6 +22,7 @@ DestructionStateEdit::DestructionStateEdit(WorldSystem& world, std::uint64_t sce
       settings_(std::move(settings)), before_(std::move(before)), reset_(reset), center_(center),
       radius_(radius), damage_(damage), impulse_(impulse)
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 DestructionStateEdit::DestructionStateEdit(WorldSystem& world, std::uint64_t scene,
@@ -32,6 +34,7 @@ DestructionStateEdit::DestructionStateEdit(WorldSystem& world, std::uint64_t sce
     : DestructionStateEdit(world, scene, std::move(node), std::move(revision), std::move(settings),
                            std::move(before), false, {}, 0, 0, 0)
 {
+    ENGINE_PROFILE_FUNCTION();
     supports_ = std::move(supports);
     support_refresh_ = true;
     max_gap_ = max_gap;
@@ -47,6 +50,7 @@ DestructionStateEdit::DestructionStateEdit(WorldSystem& world, std::uint64_t sce
     : DestructionStateEdit(world, scene, std::move(node), std::move(revision), std::move(settings),
                            std::move(before), false, {}, 0, 0, 0)
 {
+    ENGINE_PROFILE_FUNCTION();
     stress_ = true;
     gravity_ = gravity;
     elastic_limit_ = elastic_limit;
@@ -56,11 +60,13 @@ DestructionStateEdit::DestructionStateEdit(WorldSystem& world, std::uint64_t sce
 
 bool DestructionStateEdit::affects_scene() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return false;
 }
 
 DestructionComponent DestructionStateEdit::target(std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* scene = world_.scene();
     auto node = scene && scene->id() == scene_ ? scene->find_node(*node_) : Node{};
     auto component = node ? node.get_component<DestructionComponent>() : DestructionComponent{};
@@ -77,6 +83,7 @@ DestructionComponent DestructionStateEdit::target(std::string& error)
 
 bool DestructionStateEdit::apply(std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto component = target(error);
     if (!component)
     {
@@ -155,6 +162,7 @@ bool DestructionStateEdit::apply(std::string& error)
 
 bool DestructionStateEdit::revert(std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto component = target(error);
     if (component && no_change_)
     {

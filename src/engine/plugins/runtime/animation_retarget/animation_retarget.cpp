@@ -1,4 +1,6 @@
 #include "plugins/runtime/animation_retarget/animation_retarget.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/resource/codecs/animation_retarget_resource_codec.hpp"
 #include "runtime/resource/codecs/skeleton_resource_codec.hpp"
@@ -28,28 +30,36 @@ struct ModelPose
 
 bx::Vec3 vector(const schema::Vec3& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     return {static_cast<float>(value.x()), static_cast<float>(value.y()),
             static_cast<float>(value.z())};
 }
 
 bx::Quaternion quaternion(const schema::Vec4& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     return {static_cast<float>(value.x()), static_cast<float>(value.y()),
             static_cast<float>(value.z()), static_cast<float>(value.w())};
 }
 
 bool finite(const bx::Vec3& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
 }
 
 bool local_valid(const schema::JointLocalPose& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto& t = value.translation();
     const auto& r = value.rotation();
     const auto& s = value.scale();
     const double q_length = r.x() * r.x() + r.y() * r.y() + r.z() * r.z() + r.w() * r.w();
-    const auto number = [](double v) { return std::isfinite(v) && std::abs(v) <= 1.0e12; };
+    const auto number = [](double v)
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return std::isfinite(v) && std::abs(v) <= 1.0e12;
+    };
     return number(t.x()) && number(t.y()) && number(t.z()) && number(q_length) &&
            std::abs(q_length - 1) < 0.001 && number(s.x()) && number(s.y()) && number(s.z()) &&
            s.x() > 1.0e-8 && std::abs(s.y() - s.x()) < 1.0e-6 * s.x() &&
@@ -58,6 +68,7 @@ bool local_valid(const schema::JointLocalPose& value)
 
 bool compose(const schema::JointLocalPose& local, const ModelPose& parent, ModelPose& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.translation =
         bx::add(parent.translation,
                 bx::mul(bx::mul(vector(local.translation()), parent.scale), parent.rotation));
@@ -73,6 +84,7 @@ bool prepare_skeleton(const schema::SkeletonDataT& skeleton,
                       std::vector<schema::JointLocalPose>& reference, std::vector<ModelPose>& model,
                       std::map<std::string, std::size_t, std::less<>>& indices)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!SkeletonResourceCodec::validate(skeleton) ||
         (!override_pose.empty() && override_pose.size() != skeleton.joints.size()))
     {
@@ -115,6 +127,7 @@ public:
                  const schema::SkeletonDataT& source, const schema::SkeletonDataT& target,
                  std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         std::map<std::string, std::size_t, std::less<>> source_indices, target_indices;
         std::vector<schema::JointLocalPose> source_reference;
         if (!prepare_skeleton(source, profile.source_reference_pose, source_parents_,
@@ -174,6 +187,7 @@ public:
     bool retarget(std::span<const schema::JointLocalPose> source_local,
                   std::span<schema::JointLocalPose> target_local) const override
     {
+        ENGINE_PROFILE_FUNCTION();
         if (source_local.size() != source_parents_.size() ||
             target_local.size() != target_parents_.size() || !source_local.data() ||
             !target_local.data())
@@ -261,6 +275,7 @@ public:
                  std::shared_ptr<const AnimationRetargetBinding>& output,
                  std::string& error) override
     {
+        ENGINE_PROFILE_FUNCTION();
         output.reset();
         error.clear();
         if (!AnimationRetargetResourceCodec::validate(profile))
@@ -281,6 +296,7 @@ public:
 
 std::unique_ptr<AnimationRetargeter> create_animation_retargeter()
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::make_unique<ReferencePoseRetargeter>();
 }
 } // namespace engine::plugins::animation_retarget

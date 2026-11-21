@@ -1,4 +1,5 @@
 #include "plugins/editor/destruction/destruction_settings_edit.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/resource_access.hpp"
 
 #include "plugins/runtime/destruction/destruction_component.hpp"
@@ -21,15 +22,18 @@ DestructionSettingsEdit::DestructionSettingsEdit(WorldSystem& world, std::uint64
     : world_(world), scene_(scene), node_(std::move(node)), revision_(std::move(revision)),
       before_(std::move(before)), after_(std::move(after)), before_state_(std::move(before_state))
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 bool DestructionSettingsEdit::apply(std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     return replace(before_, after_, after_state_, !captured_, error);
 }
 
 bool DestructionSettingsEdit::revert(std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     return replace(after_, before_, before_state_, false, error);
 }
 
@@ -38,6 +42,7 @@ bool DestructionSettingsEdit::replace(const std::optional<schema::ComponentDataT
                                       const ByteBuffer& replacement_state, bool capture,
                                       std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* scene = world_.scene();
     auto node = scene && scene->id() == scene_ ? scene->find_node(*node_) : Node{};
     if (!node)

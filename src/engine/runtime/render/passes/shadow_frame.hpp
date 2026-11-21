@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/render/render_constants.hpp"
 #include "runtime/render/render_settings.hpp"
 #include "runtime/scene/scene_types.hpp"
@@ -49,12 +51,14 @@ struct ShadowBounds
 
     void reset() noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         minimum.fill(std::numeric_limits<float>::max());
         maximum.fill(std::numeric_limits<float>::lowest());
     }
 
     void include(const std::array<float, 3>& point) noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         for (std::size_t axis = 0; axis < 3; ++axis)
         {
             minimum[axis] = std::min(minimum[axis], point[axis]);
@@ -64,6 +68,7 @@ struct ShadowBounds
 
     [[nodiscard]] bool overlaps_xy(const ShadowBounds& other) const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return minimum[0] <= other.maximum[0] && maximum[0] >= other.minimum[0] &&
                minimum[1] <= other.maximum[1] && maximum[1] >= other.minimum[1];
     }

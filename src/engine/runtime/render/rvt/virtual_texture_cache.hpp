@@ -1,4 +1,6 @@
 #pragma once
+
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/render/rvt.hpp"
 #include "runtime/scene/scene_loading.hpp"
 #include <compare>
@@ -43,18 +45,22 @@ public:
     void release() noexcept;
     [[nodiscard]] const RvtPageBatch& batch() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return batch_;
     }
     [[nodiscard]] const schema::RvtSettingsT& settings() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return settings_;
     }
     [[nodiscard]] const std::map<RvtPageKey, RvtPage>& pages() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return pages_;
     }
     [[nodiscard]] const std::vector<RvtPageKey>& demand() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return demand_;
     }
     [[nodiscard]] Bounds3 bounds(RvtPageKey key) const noexcept;

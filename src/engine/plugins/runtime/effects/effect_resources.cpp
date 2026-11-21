@@ -1,4 +1,5 @@
 #include "plugins/runtime/effects/effect_resources.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "effects_shaders.hpp"
 #include "plugins/runtime/effects/effect_resource_path.hpp"
@@ -15,12 +16,14 @@ namespace engine::plugins::effects::detail
 
 EffectResources::~EffectResources() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     release_textures();
     release_shaders();
 }
 
 EffekseerRendererBGFX::InitArgs EffectResources::renderer_arguments(std::uint16_t view_id)
 {
+    ENGINE_PROFILE_FUNCTION();
     EffekseerRendererBGFX::InitArgs arguments{};
     arguments.squareMaxCount = 16384;
     arguments.viewid = view_id;
@@ -37,6 +40,7 @@ EffekseerRendererBGFX::InitArgs EffectResources::renderer_arguments(std::uint16_
 bgfx_shader_handle_t EffectResources::load_shader(const char* material, const char* name,
                                                   const char* stage, void* context)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto& resources = *static_cast<EffectResources*>(context);
     if (material != nullptr || name == nullptr || stage == nullptr)
     {
@@ -68,6 +72,7 @@ bgfx_shader_handle_t EffectResources::load_shader(const char* material, const ch
 
 int EffectResources::load_texture(const char* name, int, void* context)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto& resources = *static_cast<EffectResources*>(context);
     ResourceReference resource;
     if (name == nullptr || !resources.resolve(name, schema::AssetKind::texture, resource))
@@ -112,6 +117,7 @@ int EffectResources::load_texture(const char* name, int, void* context)
 bool EffectResources::resolve(std::string_view path, schema::AssetKind kind,
                               ResourceReference& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.reset();
     if (loading != nullptr)
     {
@@ -127,6 +133,7 @@ bool EffectResources::resolve(std::string_view path, schema::AssetKind kind,
 
 void EffectResources::unload_texture(int id, void* context)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto& resources = *static_cast<EffectResources*>(context);
     const auto item = resources.textures_.find(id);
     if (item != resources.textures_.end() && --item->second.references == 0)
@@ -138,6 +145,7 @@ void EffectResources::unload_texture(int id, void* context)
 
 bgfx_texture_handle_t EffectResources::texture_handle(int id, void* context)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto& resources = *static_cast<EffectResources*>(context);
     const auto item = resources.textures_.find(id);
     return {item != resources.textures_.end() ? item->second.handle.idx : bgfx::kInvalidHandle};
@@ -145,6 +153,7 @@ bgfx_texture_handle_t EffectResources::texture_handle(int id, void* context)
 
 void EffectResources::release_textures() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     for (const auto& [id, texture] : textures_)
     {
         (void)id;
@@ -156,6 +165,7 @@ void EffectResources::release_textures() noexcept
 
 void EffectResources::release_shaders() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     for (const auto& [name, shader] : shaders_)
     {
         (void)name;

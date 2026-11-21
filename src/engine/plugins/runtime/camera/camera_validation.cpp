@@ -1,4 +1,6 @@
 #include "plugins/runtime/camera/camera_math.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/camera/camera_runtime.hpp"
 #include <set>
 namespace engine::plugins::camera
@@ -6,6 +8,7 @@ namespace engine::plugins::camera
 bool valid_parameter_value(const schema::CameraParameterDataT& d,
                            const schema::CameraParameterValueT& v)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (d.name != v.name || d.type != v.type)
     {
         return false;
@@ -43,6 +46,7 @@ bool valid_parameter_value(const schema::CameraParameterDataT& d,
 bool CameraController::valid_settings(const Data& d, const CameraTypeRegistry& types,
                                       std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     using namespace detail;
     error.clear();
     if (!types.frozen())
@@ -102,6 +106,7 @@ bool CameraController::valid_settings(const Data& d, const CameraTypeRegistry& t
     std::set<std::uint64_t> ids;
     const auto validate_collection = [&](const auto& values, std::string_view type)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const auto* ops = types.module(type);
         for (const auto& v : values)
         {
@@ -130,6 +135,7 @@ bool CameraController::valid_settings(const Data& d, const CameraTypeRegistry& t
     std::map<std::string, schema::Projection> rigs;
     const auto validate_order = [&](const auto& refs, bool output)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         int previous = -1;
         std::set<std::uint64_t> used;
         bool position = false, lens = false;
@@ -237,6 +243,7 @@ bool CameraController::valid_settings(const Data& d, const CameraTypeRegistry& t
         ids.clear();
         const auto check = [&](const auto& values, std::string_view type)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             const auto* ops = types.condition(type);
             for (const auto& v : values)
             {

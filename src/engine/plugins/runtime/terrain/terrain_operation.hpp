@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "plugins/runtime/terrain/terrain_fragment.hpp"
 #include "plugins/runtime/terrain/terrain_state_store.hpp"
 #include "plugins/runtime/terrain/terrain_system.hpp"
@@ -76,6 +78,7 @@ struct TerrainOperation
 
 [[nodiscard]] inline bool terminal(TerrainOperationState state) noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return state == TerrainOperationState::completed || state == TerrainOperationState::cancelled ||
            state == TerrainOperationState::failed;
 }

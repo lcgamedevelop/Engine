@@ -1,4 +1,6 @@
 #include "editor/commands/components/component_edit.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/resource_access.hpp"
 #include "runtime/resource/types/material_resource.hpp"
 #include "runtime/resource/types/texture_resource.hpp"
@@ -17,6 +19,7 @@ namespace
 bool read_parameter(const Material& material, std::string_view name, std::string_view type,
                     std::array<double, 4>& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     if (type == "float")
     {
@@ -75,15 +78,18 @@ public:
 
     explicit MaterialEdit(Target value) : target(value)
     {
+        ENGINE_PROFILE_FUNCTION();
     }
 
     bool apply(std::string& error) override
     {
+        ENGINE_PROFILE_FUNCTION();
         return change(before, after, error);
     }
 
     bool revert(std::string& error) override
     {
+        ENGINE_PROFILE_FUNCTION();
         return change(after, before, error);
     }
 
@@ -91,6 +97,7 @@ private:
     bool change(const std::array<double, 4>& expected, const std::array<double, 4>& replacement,
                 std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         auto node = target.node(error);
         auto component = node.valid() ? node.get_component<MeshRenderer>() : MeshRenderer{};
         if (!component)
@@ -140,6 +147,7 @@ private:
 
 bool read_slot(const Json& arguments, std::size_t& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = 0;
     if (!arguments.contains("slot"))
     {
@@ -159,6 +167,7 @@ class TextureEdit final : public EditorEdit
 public:
     explicit TextureEdit(Target value) : target(value)
     {
+        ENGINE_PROFILE_FUNCTION();
     }
     Target target;
     std::size_t slot = 0;
@@ -169,10 +178,12 @@ public:
     schema::AssetEntryT after;
     bool apply(std::string& error) override
     {
+        ENGINE_PROFILE_FUNCTION();
         return change(before, after, error);
     }
     bool revert(std::string& error) override
     {
+        ENGINE_PROFILE_FUNCTION();
         return change(after, before, error);
     }
 
@@ -180,6 +191,7 @@ private:
     bool change(const schema::AssetEntryT& expected, const schema::AssetEntryT& replacement,
                 std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         auto node = target.node(error);
         auto renderer = node ? node.get_component<MeshRenderer>() : MeshRenderer{};
         auto material = renderer ? renderer.material(slot) : Material{};
@@ -207,6 +219,7 @@ private:
 
 Json material_json(const Material& material)
 {
+    ENGINE_PROFILE_FUNCTION();
     Json parameters = Json::array();
     const auto* shader = material.shader_data();
     if (shader != nullptr)
@@ -279,6 +292,7 @@ Json material_json(const Material& material)
 
 bool restore_material(Material material, const Json& saved)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!material.set_type(saved["typePath"].get<std::string>()) ||
         !material.set_shader(saved["shaderPath"].get<std::string>()))
     {
@@ -352,18 +366,22 @@ public:
 
     explicit MaterialTypeEdit(Target value) : target(value)
     {
+        ENGINE_PROFILE_FUNCTION();
     }
 
     bool apply(std::string& error) override
     {
+        ENGINE_PROFILE_FUNCTION();
         return change(before, after, error);
     }
     bool revert(std::string& error) override
     {
+        ENGINE_PROFILE_FUNCTION();
         return change(after, before, error);
     }
     bool retain_version(std::string_view resource_path)
     {
+        ENGINE_PROFILE_FUNCTION();
         ResourceReference resource;
         return resource_access::load(target.world.resource_loader(), resource_path, resource) &&
                resource_access::collect_versions(resource, versions);
@@ -372,6 +390,7 @@ public:
 private:
     bool change(const Json& expected, Json& replacement, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         auto node = target.node(error);
         auto renderer = node ? node.get_component<MeshRenderer>() : MeshRenderer{};
         auto material = renderer ? renderer.material(slot) : Material{};
@@ -412,6 +431,7 @@ private:
 bool prepare_material(WorldSystem& world, NodeAliases& aliases, const Json& arguments, Json& result,
                       std::unique_ptr<EditorEdit>& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     Target target(world, &aliases);
     if (!fields(arguments, {"sceneId", "nodeId", "name", "type", "value", "slot"}) ||
         !arguments.contains("name") || !arguments.contains("type") ||
@@ -453,7 +473,10 @@ bool prepare_material(WorldSystem& world, NodeAliases& aliases, const Json& argu
     if (!(count == 1 ? scalar(arguments["value"], edit->after[0])
                      : vector(arguments["value"], count, edit->after)) ||
         !std::all_of(edit->after.begin(), edit->after.end(), [](double value)
-                     { return std::abs(value) <= std::numeric_limits<float>::max(); }))
+                     {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return std::abs(value) <= std::numeric_limits<float>::max();
+        }))
     {
         error = "Material value must match its finite numeric type";
         return false;
@@ -470,6 +493,7 @@ bool prepare_material(WorldSystem& world, NodeAliases& aliases, const Json& argu
 bool prepare_texture(WorldSystem& world, NodeAliases& aliases, const Json& arguments, Json& result,
                      std::unique_ptr<EditorEdit>& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     Target target(world, &aliases);
     if (!fields(arguments, {"sceneId", "nodeId", "name", "path", "slot"}) ||
         !arguments.contains("name") || !arguments["name"].is_string() ||
@@ -520,6 +544,7 @@ bool prepare_texture(WorldSystem& world, NodeAliases& aliases, const Json& argum
 bool prepare_material_type(WorldSystem& world, NodeAliases& aliases, const Json& arguments,
                            Json& result, std::unique_ptr<EditorEdit>& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     Target target(world, &aliases);
     if (!fields(arguments, {"sceneId", "nodeId", "slot", "path"}) || !arguments.contains("path") ||
         !arguments["path"].is_string() || !target.read(arguments, error))
@@ -571,6 +596,7 @@ bool prepare_material_type(WorldSystem& world, NodeAliases& aliases, const Json&
 bool prepare_material_blend(WorldSystem& world, NodeAliases& aliases, const Json& arguments,
                             Json& result, std::unique_ptr<EditorEdit>& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     Target target(world, &aliases);
     if (!fields(arguments, {"sceneId", "nodeId", "slot", "mode"}) || !arguments.contains("mode") ||
         (arguments["mode"] != "opaque" && arguments["mode"] != "alpha_blend" &&
@@ -616,11 +642,13 @@ bool prepare_material_blend(WorldSystem& world, NodeAliases& aliases, const Json
 
 Json material_snapshot(const Material& material)
 {
+    ENGINE_PROFILE_FUNCTION();
     return material_json(material);
 }
 
 bool restore_material_snapshot(Material material, const Json& snapshot)
 {
+    ENGINE_PROFILE_FUNCTION();
     return restore_material(material, snapshot);
 }
 } // namespace engine::editor::components

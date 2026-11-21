@@ -239,13 +239,15 @@ cmake --build --preset web-wasm32-release --target engine_export_web
 python3 platforms/web/serve.py output/web/wasm32/release/runtime/engine-showcase
 ```
 
-Web 依赖安装到 `build/dependencies/web/`；原生 shaderc 启用 WGSL/Tint，Wasm 使用 QuickJS、pthread、Emdawnwebgpu 和单线程 bgfx。GPU 回读等待通过 Asyncify 让出应用 worker。SDK 版本和 IDBFS 原文件校验固定，补丁仅应用到构建目录；来源见 [WebGPU 说明](../third_party/notices/webgpu.md)。Debug 使用 `web-wasm32-debug`，只要求编译成功。
+Web 依赖安装到 `build/dependencies/web/`；原生 shaderc 启用 WGSL/Tint，Wasm 使用 QuickJS、pthread、Emdawnwebgpu 和单线程 bgfx。GPU 回读由浏览器缓冲映射回调完成，等待期间应用 worker 继续处理帧。SDK 版本和 IDBFS 原文件校验固定，补丁仅应用到构建目录，来源见 [WebGPU 说明](../third_party/notices/webgpu.md)。Debug 使用 `web-wasm32-debug`，只要求编译成功。
 
 `ENGINE_EXPORT_PROJECT`、`ENGINE_EXPORT_MANIFEST` 和 `ENGINE_EXPORT_PRODUCT` 指定项目、资源清单和应用身份。导出前须关闭同项目原生编辑器；编辑器 idle 或 preview 仍持有原生目标租约。共享管线负责拒绝跨目标导入，重新打开原生编辑器时按原生目标增量重建缓存。
 
 输出为 `output/web/wasm32/<debug|release>/runtime/<product>/`，包含 `index.html`、启动模块、`engine.mjs`、`engine.wasm`、必要 worker、独立 `assets/`、`settings/runtime.json` 与许可证。运行文件必须匹配成功链接回执；整包校验后原子发布，失败保留已有输出。资源不嵌入 Wasm，不包含源工程、SQLite 或本机工具。
 
 页面需要安全上下文、WebGPU、OffscreenCanvas 和跨源隔离；部署服务器设置 `Cross-Origin-Opener-Policy: same-origin`、`Cross-Origin-Embedder-Policy: require-corp`，为 `.wasm` 返回 `application/wasm`、`.mjs` 返回 JavaScript MIME。附带服务仅绑定本机回环地址。页面 Start 由用户触发，浏览器音频及输入权限继续遵守浏览器规则。
+
+Web 宿主按 Canvas 的 CSS 尺寸设置后备缓冲，页面负责布局与宽高比。
 
 首版完整预载所选运行包，再复用普通运行时资源加载；没有 WebGL/Noop 回退、远程分包流式更新或 Web 编辑器。正式构建排除运行态测试端点及临时脚本执行。覆盖范围见 [WebGPU 验证](testing.md#webgpu-导出)。
 

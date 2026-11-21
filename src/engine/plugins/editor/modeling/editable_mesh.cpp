@@ -1,4 +1,6 @@
 #include "plugins/editor/modeling/editable_mesh.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "editor/mesh/mesh_tangents.hpp"
 #include "plugins/editor/modeling/primitive_options.hpp"
@@ -33,6 +35,7 @@ using VertexLookup = std::unordered_map<std::uint64_t, Vector>;
 
 VertexLookup make_lookup(const schema::EditableMeshDataT& data)
 {
+    ENGINE_PROFILE_FUNCTION();
     VertexLookup result;
     result.reserve(data.vertices.size());
     for (const auto& vertex : data.vertices)
@@ -44,12 +47,14 @@ VertexLookup make_lookup(const schema::EditableMeshDataT& data)
 
 Vector lookup_position(const VertexLookup& lookup, std::uint64_t id)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto found = lookup.find(id);
     return found == lookup.end() ? Vector{} : found->second;
 }
 
 Vector lookup_normal(const VertexLookup& lookup, const schema::ModelingFaceT& face)
 {
+    ENGINE_PROFILE_FUNCTION();
     Vector normal{};
     for (std::size_t i = 0; i < face.vertices.size(); ++i)
     {
@@ -64,18 +69,21 @@ Vector lookup_normal(const VertexLookup& lookup, const schema::ModelingFaceT& fa
 
 bool fail(std::string& error, std::string message)
 {
+    ENGINE_PROFILE_FUNCTION();
     error = std::move(message);
     return false;
 }
 
 double orientation(const ProjectedPoint& a, const ProjectedPoint& b, const ProjectedPoint& c)
 {
+    ENGINE_PROFILE_FUNCTION();
     return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
 }
 
 bool on_segment(const ProjectedPoint& a, const ProjectedPoint& b, const ProjectedPoint& point,
                 double tolerance)
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::abs(orientation(a, b, point)) <= tolerance &&
            point[0] >= std::min(a[0], b[0]) - tolerance &&
            point[0] <= std::max(a[0], b[0]) + tolerance &&
@@ -86,6 +94,7 @@ bool on_segment(const ProjectedPoint& a, const ProjectedPoint& b, const Projecte
 bool intersects(const ProjectedPoint& a, const ProjectedPoint& b, const ProjectedPoint& c,
                 const ProjectedPoint& d, double tolerance)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto ab_c = orientation(a, b, c);
     const auto ab_d = orientation(a, b, d);
     const auto cd_a = orientation(c, d, a);
@@ -101,6 +110,7 @@ bool intersects(const ProjectedPoint& a, const ProjectedPoint& b, const Projecte
 
 bool inside(const Ring& ring, const ProjectedPoint& point)
 {
+    ENGINE_PROFILE_FUNCTION();
     bool result = false;
     for (std::size_t i = 0, j = ring.size() - 1; i < ring.size(); j = i++)
     {
@@ -117,6 +127,7 @@ bool inside(const Ring& ring, const ProjectedPoint& point)
 
 double signed_area(const Ring& ring)
 {
+    ENGINE_PROFILE_FUNCTION();
     double result = 0.0;
     for (std::size_t i = 0; i < ring.size(); ++i)
     {
@@ -131,6 +142,7 @@ bool rings_for_face(const VertexLookup& lookup, const schema::ModelingFaceT& fac
                     std::vector<Ring>& rings, std::vector<std::uint64_t>& vertices,
                     std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     rings.clear();
     vertices.clear();
     if (face.vertices.size() < 3 || face.vertices.size() > 65536 || face.holes.size() > 1024)
@@ -154,6 +166,7 @@ bool rings_for_face(const VertexLookup& lookup, const schema::ModelingFaceT& fac
     std::unordered_set<std::uint64_t> used;
     const auto add_ring = [&](const auto& ids, const auto& uv, const auto& colors) -> bool
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (ids.size() < 3 || ids.size() > 65536 || (!uv.empty() && uv.size() != ids.size()) ||
             (!colors.empty() && colors.size() != ids.size()))
         {
@@ -265,6 +278,7 @@ bool rings_for_face(const VertexLookup& lookup, const schema::ModelingFaceT& fac
 bool triangulate_impl(const VertexLookup& lookup, const schema::ModelingFaceT& face,
                       std::vector<std::uint32_t>& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     error.clear();
     std::vector<Ring> rings;
@@ -322,28 +336,44 @@ bool triangulate_impl(const VertexLookup& lookup, const schema::ModelingFaceT& f
 const schema::ModelingVertex* mesh::find_vertex(const schema::EditableMeshDataT& data,
                                                 std::uint64_t id) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto found = std::find_if(data.vertices.begin(), data.vertices.end(),
-                                    [id](const auto& vertex) { return vertex.id() == id; });
+                                    [id](const auto& vertex)
+                                    {
+                                        ENGINE_PROFILE_FUNCTION_PROBE();
+                                        return vertex.id() == id;
+                                    });
     return found == data.vertices.end() ? nullptr : &*found;
 }
 
 schema::ModelingFaceT* mesh::find_face(schema::EditableMeshDataT& data, std::uint64_t id) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto found = std::find_if(data.faces.begin(), data.faces.end(),
-                                    [id](const auto& face) { return face && face->id == id; });
+                                    [id](const auto& face)
+                                    {
+                                        ENGINE_PROFILE_FUNCTION_PROBE();
+                                        return face && face->id == id;
+                                    });
     return found == data.faces.end() ? nullptr : found->get();
 }
 
 const schema::ModelingFaceT* mesh::find_face(const schema::EditableMeshDataT& data,
                                              std::uint64_t id) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto found = std::find_if(data.faces.begin(), data.faces.end(),
-                                    [id](const auto& face) { return face && face->id == id; });
+                                    [id](const auto& face)
+                                    {
+                                        ENGINE_PROFILE_FUNCTION_PROBE();
+                                        return face && face->id == id;
+                                    });
     return found == data.faces.end() ? nullptr : found->get();
 }
 
 bool mesh::validate(const schema::EditableMeshDataT& data, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     if (data.schema_version != 2 || data.next_id == 0 ||
         data.next_id > std::numeric_limits<std::uint64_t>::max() - 10000000 ||
@@ -387,12 +417,14 @@ bool mesh::triangulate_face(const schema::EditableMeshDataT& data,
                             const schema::ModelingFaceT& face, std::vector<std::uint32_t>& output,
                             std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     return triangulate_impl(make_lookup(data), face, output, error);
 }
 
 bool mesh::compile(const schema::EditableMeshDataT& data, std::string_view path,
                    schema::MeshDataT& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     if (!validate(data, error) || data.faces.empty())
     {
@@ -415,6 +447,7 @@ bool mesh::compile(const schema::EditableMeshDataT& data, std::string_view path,
         const auto normal = lookup_normal(lookup, *face);
         const auto accumulate = [&](const auto& ids)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             for (auto id : ids)
             {
                 auto& value = smooth_normals[{id, face->smoothing_group}];
@@ -447,6 +480,7 @@ bool mesh::compile(const schema::EditableMeshDataT& data, std::string_view path,
             const auto axis = math::projection_axis(flat_normal);
             const auto append_ring = [&](const auto& ids, const auto& uv, const auto& colors)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 for (std::size_t i = 0; i < ids.size(); ++i)
                 {
                     const auto point = lookup_position(lookup, ids[i]);
@@ -497,6 +531,7 @@ bool mesh::compile(const schema::EditableMeshDataT& data, std::string_view path,
 bool mesh::from_mesh(const schema::MeshDataT& data, schema::EditableMeshDataT& output,
                      std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     error.clear();
     if (!MeshUtils::validate(data))
@@ -559,6 +594,7 @@ bool mesh::from_mesh(const schema::MeshDataT& data, schema::EditableMeshDataT& o
     }
     const auto root = [&](std::size_t index)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         while (parents[index] != index)
         {
             parents[index] = parents[parents[index]];
@@ -622,6 +658,7 @@ bool mesh::from_mesh(const schema::MeshDataT& data, schema::EditableMeshDataT& o
 bool mesh::serialize(const schema::EditableMeshDataT& data, std::vector<std::uint8_t>& output,
                      std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     if (!validate(data, error))
     {
@@ -636,6 +673,7 @@ bool mesh::serialize(const schema::EditableMeshDataT& data, std::vector<std::uin
 bool mesh::deserialize(std::span<const std::uint8_t> bytes, schema::EditableMeshDataT& output,
                        std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     error.clear();
     if (bytes.empty() || bytes.size() > 256 * 1024 * 1024)
@@ -659,6 +697,7 @@ bool mesh::deserialize(std::span<const std::uint8_t> bytes, schema::EditableMesh
 bool mesh::selected_vertices(const schema::EditableMeshDataT& data, const MeshSelection& selection,
                              std::vector<std::uint64_t>& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     error.clear();
     std::set<std::uint64_t> selected;
@@ -682,6 +721,7 @@ bool mesh::selected_vertices(const schema::EditableMeshDataT& data, const MeshSe
         bool found = false;
         const auto contains = [&](const auto& ring)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             for (std::size_t i = 0; i < ring.size(); ++i)
             {
                 const auto a = ring[i];

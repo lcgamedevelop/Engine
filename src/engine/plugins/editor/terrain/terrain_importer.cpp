@@ -1,4 +1,6 @@
 #include "plugins/editor/terrain/terrain_importer.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/asset_pipeline/asset_io.hpp"
 #include "editor/asset_pipeline/importer_utils.hpp"
 #include "editor/file_text.hpp"
@@ -16,6 +18,7 @@ namespace
 using namespace editor::asset_pipeline;
 bool payload(const ImportContext& context, const Guid& guid, ByteBuffer& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!read_bytes(context.output / guid, output, error))
     {
         return false;
@@ -50,6 +53,7 @@ bool identities(const ImportAsset& asset, const ImportContext& context,
                 const std::vector<TerrainRegionKey>& keys, std::vector<Guid>& output,
                 std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     for (auto key : keys)
     {
@@ -67,23 +71,28 @@ bool identities(const ImportAsset& asset, const ImportContext& context,
 TerrainImporter::TerrainImporter(std::unique_ptr<TerrainGenerator> generator) noexcept
     : generator_(std::move(generator))
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 std::string_view TerrainImporter::id() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "terrain";
 }
 schema::AssetKind TerrainImporter::kind() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::terrain;
 }
 bool TerrainImporter::matches(const std::filesystem::path& path) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return editor::asset_pipeline::source_extension(path) == ".terrain";
 }
 bool TerrainImporter::discover(const ImportAsset& asset, std::vector<ImportSubresource>& output,
                                std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     schema::TerrainSourceDataT source;
     std::vector<TerrainRegionKey> keys;
@@ -109,6 +118,7 @@ bool TerrainImporter::discover(const ImportAsset& asset, std::vector<ImportSubre
 bool TerrainImporter::inspect_batch(const ImportContext&, std::string& fingerprint,
                                     std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!generator_ || generator_->fingerprint().empty())
     {
         error = "Terrain import requires an injected generator with a fingerprint";
@@ -126,6 +136,7 @@ bool TerrainImporter::inspect_batch(const ImportContext&, std::string& fingerpri
 bool TerrainImporter::scan_dependencies(ImportAsset& asset, const ImportContext& context,
                                         std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     asset.build_dependencies.clear();
     asset.runtime_dependencies.clear();
     asset.stream_dependencies.clear();
@@ -196,6 +207,7 @@ bool TerrainImporter::scan_dependencies(ImportAsset& asset, const ImportContext&
 bool TerrainImporter::convert(const ImportAsset& asset, const ImportContext& context,
                               std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     schema::TerrainSourceDataT source;
     if (!read_terrain_file(asset.source, source, error))
     {
@@ -288,11 +300,23 @@ bool TerrainImporter::convert(const ImportAsset& asset, const ImportContext& con
             const schema::TerrainLayerSample default_layer{0, 0, 0, 0, Vec4{1, 0, 0, 0}};
             const bool default_layers =
                 std::all_of(block->layers.begin(), block->layers.end(),
-                            [&](const auto& v) { return v == default_layer; });
+                            [&](const auto& v)
+                            {
+                                ENGINE_PROFILE_FUNCTION_PROBE();
+                                return v == default_layer;
+                            });
             const bool solid = std::all_of(block->density.begin(), block->density.end(),
-                                           [&](float v) { return v == -float(recipe.voxel_size); });
+                                           [&](float v)
+                                           {
+                                               ENGINE_PROFILE_FUNCTION_PROBE();
+                                               return v == -float(recipe.voxel_size);
+                                           });
             const bool air = std::all_of(block->density.begin(), block->density.end(),
-                                         [&](float v) { return v == float(recipe.voxel_size); });
+                                         [&](float v)
+                                         {
+                                             ENGINE_PROFILE_FUNCTION_PROBE();
+                                             return v == float(recipe.voxel_size);
+                                         });
             if (default_layers && (solid || air))
             {
                 region->uniform =
@@ -327,6 +351,7 @@ bool TerrainImporter::convert(const ImportAsset& asset, const ImportContext& con
 bool TerrainImporter::finalize_dependencies(ImportAsset& asset, const ImportContext& context,
                                             std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     asset.stream_dependencies.clear();
     if (!asset.subresource_key.empty())
     {

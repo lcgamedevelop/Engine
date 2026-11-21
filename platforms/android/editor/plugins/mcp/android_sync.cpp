@@ -1,4 +1,6 @@
 #include "editor/file_text.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/editor/mcp/project_mcp_tools.hpp"
 
 #include "plugins/editor/asset_sync/asset_sync_system.hpp"
@@ -32,6 +34,7 @@ constexpr int missing_remote_file = 44;
 
 std::string nonce()
 {
+    ENGINE_PROFILE_FUNCTION();
     static std::atomic_uint64_t counter{0};
     return std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + "-" +
            std::to_string(counter.fetch_add(1));
@@ -39,6 +42,7 @@ std::string nonce()
 
 std::string shell_quote(std::string_view text)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string result = "'";
     for (const char value : text)
     {
@@ -50,6 +54,7 @@ std::string shell_quote(std::string_view text)
 
 std::string reject_symlinks(std::string_view path)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string checks;
     std::size_t end = 0;
     do
@@ -67,6 +72,7 @@ std::string reject_symlinks(std::string_view path)
 
 std::string hex_hash(std::uint64_t hash)
 {
+    ENGINE_PROFILE_FUNCTION();
     constexpr char digits[] = "0123456789abcdef";
     std::string result(16, '0');
     for (std::size_t i = result.size(); i != 0; --i)
@@ -80,6 +86,7 @@ std::string hex_hash(std::uint64_t hash)
 bool run_adb(const McpTarget& target, const std::vector<std::string>& command,
              const fs::path& input_file, std::string& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     std::vector<std::string> arguments{PathUtils::to_utf8(target.adb_executable), "-s",
                                        target.android_serial};
@@ -150,6 +157,7 @@ bool run_adb(const McpTarget& target, const std::vector<std::string>& command,
 bool remote_command(const McpTarget& target, std::string_view script, const fs::path& input_file,
                     std::string& output, int& exit_code, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto marker = "__ENGINE_ADB_" + nonce() + "__";
     const auto command = "run-as " + shell_quote(target.android_package) + " sh -c " +
                          shell_quote(script) + "; _engine_exit=$?; printf '\\n" + marker +
@@ -184,6 +192,7 @@ bool remote_command(const McpTarget& target, std::string_view script, const fs::
 bool remote_ok(const McpTarget& target, std::string_view script, const fs::path& input_file,
                std::string& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     int exit_code = -1;
     if (!remote_command(target, script, input_file, output, exit_code, error))
     {
@@ -200,6 +209,7 @@ bool remote_ok(const McpTarget& target, std::string_view script, const fs::path&
 
 bool probe(const McpTarget& target, std::string& runtime_dir, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string output;
     if (!run_adb(target, {"get-state"}, {}, output, error))
     {
@@ -235,6 +245,7 @@ bool probe(const McpTarget& target, std::string& runtime_dir, std::string& error
 bool read_remote(const McpTarget& target, std::string_view path, std::string& output, bool& exists,
                  std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto quoted = shell_quote(path);
     const auto script = reject_symlinks(path) + "[ -e " + quoted + " ] || exit 44; [ -f " + quoted +
                         " ] || exit 45; cat " + quoted;
@@ -256,6 +267,7 @@ bool read_remote(const McpTarget& target, std::string_view path, std::string& ou
 bool verify_remote_file(const McpTarget& target, std::string_view path, std::uint64_t size,
                         std::string_view expected_hash, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (expected_hash.size() != 16)
     {
         error = "Invalid staged Android file hash: " + std::string(path);
@@ -304,6 +316,7 @@ bool verify_remote_file(const McpTarget& target, std::string_view path, std::uin
 bool upload(const McpTarget& target, const fs::path& local_file, std::string_view remote_file,
             std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto separator = remote_file.rfind('/');
     const auto parent = std::string(remote_file.substr(0, separator));
     const auto quoted = shell_quote(remote_file);
@@ -316,6 +329,7 @@ bool upload(const McpTarget& target, const fs::path& local_file, std::string_vie
 
 bool write_text(const fs::path& path, std::string_view text)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::ofstream output(path, std::ios::binary | std::ios::trunc);
     output.write(text.data(), static_cast<std::streamsize>(text.size()));
     output.close();
@@ -325,6 +339,7 @@ bool write_text(const fs::path& path, std::string_view text)
 void set_reply(const McpTarget& target, std::string_view runtime_dir, Json result,
                std::string& reply)
 {
+    ENGINE_PROFILE_FUNCTION();
     result["deviceSerial"] = target.android_serial;
     result["packageName"] = target.android_package;
     if (!runtime_dir.empty())
@@ -336,6 +351,7 @@ void set_reply(const McpTarget& target, std::string_view runtime_dir, Json resul
 
 bool valid_manifest(const Json& manifest)
 {
+    ENGINE_PROFILE_FUNCTION();
     return manifest.is_object() && manifest.contains("revision") &&
            manifest["revision"].is_string() && manifest.contains("entry") &&
            manifest["entry"].is_string() && manifest.contains("files") &&
@@ -347,6 +363,7 @@ bool valid_manifest(const Json& manifest)
 
 bool ProjectMcpTools::sync_android(const fs::path& source, std::string& reply)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string error;
     std::string runtime_dir;
     const auto token = nonce();
@@ -366,6 +383,7 @@ bool ProjectMcpTools::sync_android(const fs::path& source, std::string& reply)
     bool locked = false;
     const auto cleanup = [&]()
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         std::error_code ignored;
         fs::remove_all(mirror, ignored);
         if (!locked)
@@ -383,6 +401,7 @@ bool ProjectMcpTools::sync_android(const fs::path& source, std::string& reply)
     };
     const auto fail = [&](std::string message)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const bool cleaned = cleanup();
         if (!cleaned)
         {
@@ -526,6 +545,7 @@ bool ProjectMcpTools::sync_android(const fs::path& source, std::string& reply)
 
 bool ProjectMcpTools::set_android_hot_reload(bool enabled, std::string& reply)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string error;
     std::string runtime_dir;
     const auto token = nonce();
@@ -587,10 +607,12 @@ bool ProjectMcpTools::set_android_hot_reload(bool enabled, std::string& reply)
 
 bool ProjectMcpTools::read_android_status(std::string& reply)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string error;
     std::string runtime_dir;
     const auto fail = [&]()
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         set_reply(target_, runtime_dir, {{"error", error}}, reply);
         return false;
     };

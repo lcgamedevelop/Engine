@@ -1,4 +1,6 @@
 #include "plugins/editor/terrain/terrain_source.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/asset_pipeline/toml_helpers.hpp"
 #include "editor/file_text.hpp"
 #include "plugins/runtime/terrain/terrain_samples.hpp"
@@ -17,6 +19,7 @@ namespace
 bool fields(const toml::table& table, std::initializer_list<std::string_view> allowed,
             std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (const auto& [key, value] : table)
     {
         (void)value;
@@ -30,6 +33,7 @@ bool fields(const toml::table& table, std::initializer_list<std::string_view> al
 }
 bool vector(const toml::node* node, Vec3& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::array<double, 3> values{};
     if (!editor::asset_pipeline::numbers(node, values))
     {
@@ -40,6 +44,7 @@ bool vector(const toml::node* node, Vec3& output)
 }
 bool number(const toml::table& table, std::string_view name, double& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!table.contains(name))
     {
         return true;
@@ -55,6 +60,7 @@ bool number(const toml::table& table, std::string_view name, double& output)
 bool brushes(const toml::node* node,
              std::vector<std::unique_ptr<schema::TerrainBrushDataT>>& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!node)
     {
         return true;
@@ -140,6 +146,7 @@ bool brushes(const toml::node* node,
 bool read_terrain_source(std::string_view text, schema::TerrainSourceDataT& output,
                          std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     error.clear();
     if (text.empty() || text.size() > 4 * 1024 * 1024)
@@ -328,13 +335,18 @@ bool read_terrain_source(std::string_view text, schema::TerrainSourceDataT& outp
 bool write_terrain_source(const schema::TerrainSourceDataT& source, std::string& output,
                           std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     if (!source.recipe || source.revision == 0 || source.revision > INT64_MAX)
     {
         error = "Invalid terrain source revision";
         return false;
     }
-    const auto vector = [](Vec3 value) { return toml::array{value.x(), value.y(), value.z()}; };
+    const auto vector = [](Vec3 value)
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return toml::array{value.x(), value.y(), value.z()};
+    };
     const auto& recipe = *source.recipe;
     toml::table table;
     table.insert("schema_version", 2);
@@ -372,6 +384,7 @@ bool write_terrain_source(const schema::TerrainSourceDataT& source, std::string&
     table.insert("material_layers", std::move(layers));
     const auto brushes = [&](const auto& values)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         toml::array result;
         for (const auto& value : values)
         {
@@ -430,6 +443,7 @@ bool write_terrain_source(const schema::TerrainSourceDataT& source, std::string&
 bool read_terrain_file(const std::filesystem::path& path, schema::TerrainSourceDataT& output,
                        std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::error_code ec;
     const auto size = std::filesystem::file_size(path, ec);
     std::string text;
@@ -443,6 +457,7 @@ bool read_terrain_file(const std::filesystem::path& path, schema::TerrainSourceD
 bool terrain_source_keys(const schema::TerrainSourceDataT& source,
                          std::vector<TerrainRegionKey>& keys, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     keys.clear();
     if (!source.recipe)
     {
@@ -470,11 +485,13 @@ bool terrain_source_keys(const schema::TerrainSourceDataT& source,
 }
 std::string terrain_region_name(TerrainRegionKey key)
 {
+    ENGINE_PROFILE_FUNCTION();
     return "regions/" + std::to_string(key.lod()) + "/" + std::to_string(key.x()) + "_" +
            std::to_string(key.y()) + "_" + std::to_string(key.z());
 }
 bool terrain_region_key(std::string_view name, TerrainRegionKey& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     if (!name.starts_with("regions/"))
     {

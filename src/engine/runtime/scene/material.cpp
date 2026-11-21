@@ -1,4 +1,6 @@
 #include "runtime/scene/material.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/scene/material_state.hpp"
 #include "runtime/scene/mesh_renderer_runtime.hpp"
@@ -29,6 +31,7 @@ const schema::ShaderParameterT* find_definition(const ResourceReference& resourc
                                                 std::string_view name,
                                                 schema::MaterialValue value_type)
 {
+    ENGINE_PROFILE_FUNCTION();
     const schema::ShaderDataT* shader = resource ? resource.data<ShaderResource>() : nullptr;
     if (shader == nullptr)
     {
@@ -37,6 +40,7 @@ const schema::ShaderParameterT* find_definition(const ResourceReference& resourc
     const auto iterator = std::find_if(shader->parameters.begin(), shader->parameters.end(),
                                        [name, value_type](const auto& parameter)
                                        {
+                                           ENGINE_PROFILE_FUNCTION_PROBE();
                                            return parameter->exposed && parameter->name == name &&
                                                   parameter->default_value.type == value_type;
                                        });
@@ -46,11 +50,13 @@ const schema::ShaderParameterT* find_definition(const ResourceReference& resourc
 bool valid_values(const ResourceReference& resource, std::string_view name,
                   schema::MaterialValue value_type, std::initializer_list<double> values)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* definition = find_definition(resource, name, value_type);
     return definition != nullptr &&
            std::all_of(values.begin(), values.end(),
                        [definition](double value)
                        {
+                           ENGINE_PROFILE_FUNCTION_PROBE();
                            constexpr double maximum = std::numeric_limits<float>::max();
                            return std::isfinite(value) && value >= -maximum && value <= maximum &&
                                   (!definition->bounded ||
@@ -60,6 +66,7 @@ bool valid_values(const ResourceReference& resource, std::string_view name,
 
 schema::MaterialDataT shader_defaults(std::string_view type_path, const Resource& resource)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto& shader = *resource_detail::data<ShaderResource>(&resource);
     schema::MaterialDataT result;
     result.type_path = type_path;
@@ -81,6 +88,7 @@ schema::MaterialDataT shader_defaults(std::string_view type_path, const Resource
 
 const schema::ShaderSamplerT* find_sampler(const ResourceReference& shader, std::string_view name)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!shader || !shader.data<ShaderResource>())
     {
         return nullptr;
@@ -99,6 +107,7 @@ bool load_textures(const ResourceReference& shader, const ResourceReference* mat
                    schema::MaterialDataT& result,
                    std::map<std::string, ResourceReference, std::less<>>& textures)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* definition = material ? material->data<MaterialResource>() : nullptr;
     const auto& owner = material ? *material : shader;
     for (const auto& sampler : shader.data<ShaderResource>()->samplers)
@@ -139,21 +148,25 @@ bool load_textures(const ResourceReference& shader, const ResourceReference* mat
 
 std::string MaterialState::type_path() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return data_.type_path;
 }
 
 std::string MaterialState::shader_path() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return data_.shader_path;
 }
 
 const schema::ShaderDataT* MaterialState::shader_data() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return shader_resource_ ? shader_resource_.data<ShaderResource>() : nullptr;
 }
 
 bool MaterialState::has_overrides() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* material =
         material_resource_ ? material_resource_.data<MaterialResource>() : nullptr;
     const auto* shader = shader_data();
@@ -178,7 +191,10 @@ bool MaterialState::has_overrides() const noexcept
         ++parameter_count;
         const auto source = std::find_if(material->parameters.begin(), material->parameters.end(),
                                          [&definition](const auto& item)
-                                         { return item && item->name == definition->name; });
+                                         {
+                                             ENGINE_PROFILE_FUNCTION_PROBE();
+                                             return item && item->name == definition->name;
+                                         });
         const auto& expected =
             source == material->parameters.end() ? definition->default_value : (*source)->value;
         const auto* current = find_parameter(definition->name, expected.type);
@@ -189,7 +205,10 @@ bool MaterialState::has_overrides() const noexcept
     }
     const auto resource_sampler_count = static_cast<std::size_t>(std::count_if(
         shader->samplers.begin(), shader->samplers.end(), [](const auto& sampler)
-        { return sampler && sampler->source == schema::ShaderTextureSource::resource; }));
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return sampler && sampler->source == schema::ShaderTextureSource::resource;
+        }));
     if (parameter_count != data_.parameters.size() ||
         data_.textures.size() != resource_sampler_count ||
         textures_.size() != resource_sampler_count)
@@ -212,7 +231,10 @@ bool MaterialState::has_overrides() const noexcept
         {
             const auto source = std::find_if(material->textures.begin(), material->textures.end(),
                                              [&sampler](const auto& item)
-                                             { return item && item->name == sampler->name; });
+                                             {
+                                                 ENGINE_PROFILE_FUNCTION_PROBE();
+                                                 return item && item->name == sampler->name;
+                                             });
             if (source != material->textures.end())
             {
                 expected = (*source)->texture_path;
@@ -220,7 +242,10 @@ bool MaterialState::has_overrides() const noexcept
         }
         const auto current =
             std::find_if(data_.textures.begin(), data_.textures.end(), [&sampler](const auto& item)
-                         { return item && item->name == sampler->name; });
+                         {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return item && item->name == sampler->name;
+            });
         const auto& resource = texture(sampler->name);
         if (current == data_.textures.end() || (*current)->texture_path != expected || !resource ||
             resource->info().path != expected)
@@ -233,6 +258,7 @@ bool MaterialState::has_overrides() const noexcept
 
 bool MaterialState::set_type(std::string_view path)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (data_.type_path == path && material_resource_ && shader_resource_)
     {
         return true;
@@ -256,7 +282,11 @@ bool MaterialState::set_type(std::string_view path)
     {
         const auto destination =
             std::find_if(replacement.parameters.begin(), replacement.parameters.end(),
-                         [&parameter](const auto& item) { return item->name == parameter->name; });
+                         [&parameter](const auto& item)
+                         {
+                             ENGINE_PROFILE_FUNCTION_PROBE();
+                             return item->name == parameter->name;
+                         });
         if (destination == replacement.parameters.end())
         {
             return false;
@@ -277,6 +307,7 @@ bool MaterialState::set_type(std::string_view path)
 
 bool MaterialState::set_shader(std::string_view path)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!material_resource_)
     {
         return false;
@@ -306,11 +337,13 @@ bool MaterialState::set_shader(std::string_view path)
 
 schema::CullMode MaterialState::cull_mode() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return data_.cull_mode;
 }
 
 bool MaterialState::set_cull_mode(schema::CullMode mode) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (mode != schema::CullMode::back && mode != schema::CullMode::front &&
         mode != schema::CullMode::none)
     {
@@ -322,11 +355,13 @@ bool MaterialState::set_cull_mode(schema::CullMode mode) noexcept
 
 schema::BlendMode MaterialState::blend_mode() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return data_.blend_mode;
 }
 
 bool MaterialState::set_blend_mode(schema::BlendMode mode) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (mode < schema::BlendMode::MIN || mode > schema::BlendMode::MAX)
     {
         return false;
@@ -344,6 +379,7 @@ bool MaterialState::set_blend_mode(schema::BlendMode mode) noexcept
 
 bool MaterialState::set_texture(std::string_view name, std::string_view path)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* sampler = find_sampler(shader_resource_, name);
     ResourceReference replacement;
     if (!sampler || sampler->source != schema::ShaderTextureSource::resource || !sampler->exposed ||
@@ -354,7 +390,11 @@ bool MaterialState::set_texture(std::string_view name, std::string_view path)
     }
     const auto current = textures_.find(name);
     const auto binding = std::find_if(data_.textures.begin(), data_.textures.end(),
-                                      [name](const auto& item) { return item->name == name; });
+                                      [name](const auto& item)
+                                      {
+                                          ENGINE_PROFILE_FUNCTION_PROBE();
+                                          return item->name == name;
+                                      });
     if (current == textures_.end() || binding == data_.textures.end())
     {
         return false;
@@ -367,6 +407,7 @@ bool MaterialState::set_texture(std::string_view name, std::string_view path)
 
 bool MaterialState::get_texture(std::string_view name, std::string_view& output) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     const auto* sampler = find_sampler(shader_resource_, name);
     const auto& resource = texture(name);
@@ -380,18 +421,21 @@ bool MaterialState::get_texture(std::string_view name, std::string_view& output)
 
 const Resource* MaterialState::texture(std::string_view name) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto found = textures_.find(name);
     return found == textures_.end() ? nullptr : found->second.get();
 }
 
 ResourceHandle MaterialState::texture_handle(std::string_view name) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto found = textures_.find(name);
     return found == textures_.end() ? ResourceHandle{} : found->second.handle();
 }
 
 bool MaterialState::set_float(std::string_view name, float value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* parameter = find_parameter(name, schema::MaterialValue::FloatValue);
     if (parameter == nullptr ||
         !valid_values(shader_resource_, name, schema::MaterialValue::FloatValue, {value}))
@@ -412,6 +456,7 @@ bool MaterialState::set_float(std::string_view name, float value) noexcept
 
 bool MaterialState::set_v2(std::string_view name, const Vec2& value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* parameter = find_parameter(name, schema::MaterialValue::Vec2Value);
     if (parameter == nullptr ||
         !valid_values(shader_resource_, name, schema::MaterialValue::Vec2Value,
@@ -425,6 +470,7 @@ bool MaterialState::set_v2(std::string_view name, const Vec2& value) noexcept
 
 bool MaterialState::set_v3(std::string_view name, const Vec3& value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* parameter = find_parameter(name, schema::MaterialValue::Vec3Value);
     if (parameter == nullptr ||
         !valid_values(shader_resource_, name, schema::MaterialValue::Vec3Value,
@@ -438,6 +484,7 @@ bool MaterialState::set_v3(std::string_view name, const Vec3& value) noexcept
 
 bool MaterialState::set_v4(std::string_view name, const Vec4& value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* parameter = find_parameter(name, schema::MaterialValue::Vec4Value);
     if (parameter == nullptr ||
         !valid_values(shader_resource_, name, schema::MaterialValue::Vec4Value,
@@ -451,6 +498,7 @@ bool MaterialState::set_v4(std::string_view name, const Vec4& value) noexcept
 
 bool MaterialState::get_float(std::string_view name, float& output) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     output = 0.0F;
     const auto* parameter = find_parameter(name, schema::MaterialValue::FloatValue);
     if (parameter == nullptr)
@@ -468,6 +516,7 @@ bool MaterialState::get_float(std::string_view name, float& output) const noexce
 
 bool MaterialState::get_v2(std::string_view name, Vec2& output) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     const auto* parameter = find_parameter(name, schema::MaterialValue::Vec2Value);
     if (parameter == nullptr)
@@ -486,6 +535,7 @@ bool MaterialState::get_v2(std::string_view name, Vec2& output) const noexcept
 
 bool MaterialState::get_v3(std::string_view name, Vec3& output) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     const auto* parameter = find_parameter(name, schema::MaterialValue::Vec3Value);
     if (parameter == nullptr)
@@ -504,6 +554,7 @@ bool MaterialState::get_v3(std::string_view name, Vec3& output) const noexcept
 
 bool MaterialState::get_v4(std::string_view name, Vec4& output) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     const auto* parameter = find_parameter(name, schema::MaterialValue::Vec4Value);
     if (parameter == nullptr)
@@ -523,12 +574,14 @@ bool MaterialState::get_v4(std::string_view name, Vec4& output) const noexcept
 schema::MaterialParameterT* MaterialState::find_parameter(std::string_view name,
                                                           schema::MaterialValue type) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return const_cast<schema::MaterialParameterT*>(std::as_const(*this).find_parameter(name, type));
 }
 
 const schema::MaterialParameterT*
 MaterialState::find_parameter(std::string_view name, schema::MaterialValue type) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (find_definition(shader_resource_, name, type) == nullptr)
     {
         return nullptr;
@@ -536,6 +589,7 @@ MaterialState::find_parameter(std::string_view name, schema::MaterialValue type)
     const auto iterator = std::find_if(data_.parameters.begin(), data_.parameters.end(),
                                        [name, type](const auto& parameter)
                                        {
+                                           ENGINE_PROFILE_FUNCTION_PROBE();
                                            return parameter != nullptr && parameter->name == name &&
                                                   parameter->value.type == type &&
                                                   parameter->value.value != nullptr;
@@ -546,10 +600,12 @@ MaterialState::find_parameter(std::string_view name, schema::MaterialValue type)
 Material::Material(Component owner, std::size_t slot, std::uint64_t identity) noexcept
     : owner_(owner), slot_(slot), identity_(identity)
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 MaterialState* Material::state() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!owner_.valid() || owner_.type() != MeshRenderer::component_type)
     {
         return nullptr;
@@ -565,16 +621,19 @@ MaterialState* Material::state() const noexcept
 
 bool Material::valid() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return state() != nullptr;
 }
 
 std::uint64_t Material::instance_id() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return valid() ? identity_ : 0;
 }
 
 std::string Material::type_path() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* material_state = state();
     if (!material_state)
     {
@@ -585,6 +644,7 @@ std::string Material::type_path() const noexcept
 
 std::string Material::shader_path() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* material_state = state();
     if (!material_state)
     {
@@ -595,18 +655,21 @@ std::string Material::shader_path() const noexcept
 
 ResourceHandle Material::shader() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* material_state = state();
     return material_state ? material_state->shader_handle() : ResourceHandle{};
 }
 
 ResourceHandle Material::resource() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* material_state = state();
     return material_state ? material_state->resource_handle() : ResourceHandle{};
 }
 
 const schema::ShaderDataT* Material::shader_data() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* material_state = state();
     if (!material_state)
     {
@@ -617,6 +680,7 @@ const schema::ShaderDataT* Material::shader_data() const noexcept
 
 bool Material::has_overrides() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* material_state = state();
     if (!material_state)
     {
@@ -627,6 +691,7 @@ bool Material::has_overrides() const noexcept
 
 bool Material::set_type(std::string_view path)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!MeshRenderer(owner_).writable())
     {
         return false;
@@ -646,6 +711,7 @@ bool Material::set_type(std::string_view path)
 
 bool Material::set_shader(std::string_view path)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!MeshRenderer(owner_).writable())
     {
         return false;
@@ -665,6 +731,7 @@ bool Material::set_shader(std::string_view path)
 
 schema::CullMode Material::cull_mode() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* material_state = state();
     if (!material_state)
     {
@@ -675,6 +742,7 @@ schema::CullMode Material::cull_mode() const noexcept
 
 bool Material::set_cull_mode(schema::CullMode mode) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!MeshRenderer(owner_).writable())
     {
         return false;
@@ -694,6 +762,7 @@ bool Material::set_cull_mode(schema::CullMode mode) noexcept
 
 schema::BlendMode Material::blend_mode() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* material_state = state();
     if (!material_state)
     {
@@ -704,6 +773,7 @@ schema::BlendMode Material::blend_mode() const noexcept
 
 bool Material::set_blend_mode(schema::BlendMode mode) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!MeshRenderer(owner_).writable())
     {
         return false;
@@ -723,6 +793,7 @@ bool Material::set_blend_mode(schema::BlendMode mode) noexcept
 
 bool Material::set_float(std::string_view name, float value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!MeshRenderer(owner_).writable())
     {
         return false;
@@ -742,6 +813,7 @@ bool Material::set_float(std::string_view name, float value) noexcept
 
 bool Material::set_v2(std::string_view name, const Vec2& value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!MeshRenderer(owner_).writable())
     {
         return false;
@@ -761,6 +833,7 @@ bool Material::set_v2(std::string_view name, const Vec2& value) noexcept
 
 bool Material::set_v3(std::string_view name, const Vec3& value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!MeshRenderer(owner_).writable())
     {
         return false;
@@ -780,6 +853,7 @@ bool Material::set_v3(std::string_view name, const Vec3& value) noexcept
 
 bool Material::set_v4(std::string_view name, const Vec4& value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!MeshRenderer(owner_).writable())
     {
         return false;
@@ -799,6 +873,7 @@ bool Material::set_v4(std::string_view name, const Vec4& value) noexcept
 
 bool Material::set_texture(std::string_view name, std::string_view path)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!MeshRenderer(owner_).writable())
     {
         return false;
@@ -818,6 +893,7 @@ bool Material::set_texture(std::string_view name, std::string_view path)
 
 bool Material::get_texture(std::string_view name, std::string_view& output) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     auto* material_state = state();
     if (!material_state)
@@ -829,6 +905,7 @@ bool Material::get_texture(std::string_view name, std::string_view& output) cons
 
 ResourceHandle Material::texture(std::string_view name) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* material_state = state();
     if (!material_state)
     {
@@ -839,6 +916,7 @@ ResourceHandle Material::texture(std::string_view name) const noexcept
 
 bool Material::get_float(std::string_view name, float& output) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     auto* material_state = state();
     if (!material_state)
@@ -850,6 +928,7 @@ bool Material::get_float(std::string_view name, float& output) const noexcept
 
 bool Material::get_v2(std::string_view name, Vec2& output) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     auto* material_state = state();
     if (!material_state)
@@ -861,6 +940,7 @@ bool Material::get_v2(std::string_view name, Vec2& output) const noexcept
 
 bool Material::get_v3(std::string_view name, Vec3& output) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     auto* material_state = state();
     if (!material_state)
@@ -872,6 +952,7 @@ bool Material::get_v3(std::string_view name, Vec3& output) const noexcept
 
 bool Material::get_v4(std::string_view name, Vec4& output) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     auto* material_state = state();
     if (!material_state)

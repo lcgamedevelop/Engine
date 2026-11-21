@@ -2,6 +2,8 @@
 #include "runtime/world/world_scene_scope.hpp"
 
 #include "runtime/log/log_system.hpp"
+#include "runtime/performance/memory_profiling.hpp"
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/resource/types/scene_resource.hpp"
 #include "runtime/scene/ecs_storage.hpp"
@@ -18,6 +20,7 @@
 #include <cmath>
 #include <cstdio>
 #include <limits>
+#include <mutex>
 #include <new>
 #include <numbers>
 #include <string>
@@ -26,18 +29,99 @@
 namespace engine
 {
 
+#if defined(ENGINE_ENABLE_MEMORY_PROFILING)
+namespace
+{
+void enable_flecs_memory_profiling()
+{
+    ENGINE_PROFILE_FUNCTION();
+    static std::once_flag installed;
+    std::call_once(installed,
+                   []
+                   {
+                       const auto current = ecs_os_get_api();
+                       // Flecs may already be in use by the host. Any existing heap can
+                       // have live blocks from before this WorldSystem was initialized.
+                       if (current.malloc_ || current.calloc_ || current.realloc_ ||
+                           current.free_ || current.strdup_)
+                       {
+                           return;
+                       }
+                       using memory_profile::BackingAllocation;
+                       constexpr auto pool = memory_profile::Pool::flecs;
+                       ecs_os_set_api_defaults();
+                       auto api = ecs_os_get_api();
+                       api.malloc_ = [](ecs_size_t size) noexcept -> void*
+                       {
+                           if (size <= 0)
+                           {
+                               return nullptr;
+                           }
+                           ecs_os_linc(&ecs_os_api_malloc_count);
+                           return BackingAllocation::allocate_block(
+                               pool, static_cast<std::size_t>(size));
+                       };
+                       api.calloc_ = [](ecs_size_t size) noexcept -> void*
+                       {
+                           if (size <= 0)
+                           {
+                               return nullptr;
+                           }
+                           ecs_os_linc(&ecs_os_api_calloc_count);
+                           return BackingAllocation::allocate_block(
+                               pool, static_cast<std::size_t>(size), true);
+                       };
+                       api.free_ = [](void* address) noexcept
+                       {
+                           if (address)
+                           {
+                               ecs_os_linc(&ecs_os_api_free_count);
+                               BackingAllocation::free_block(pool, address);
+                           }
+                       };
+                       api.realloc_ = [](void* address, ecs_size_t size) noexcept -> void*
+                       {
+                           if (size < 0)
+                           {
+                               return nullptr;
+                           }
+                           if (size == 0)
+                           {
+                               ecs_os_free(address);
+                               return nullptr;
+                           }
+                           if (address)
+                           {
+                               ecs_os_linc(&ecs_os_api_realloc_count);
+                           }
+                           else
+                           {
+                               ecs_os_linc(&ecs_os_api_malloc_count);
+                           }
+                           return BackingAllocation::reallocate_block(
+                               pool, address, static_cast<std::size_t>(size), 0);
+                       };
+                       ecs_os_set_api(&api);
+                   });
+}
+} // namespace
+#endif
+
 WorldSystem::WorldSystem(ResourceLoader* resources, const SceneRestoreConfig& config) noexcept
     : resources_(resources), restore_config_(config)
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 WorldSystem::~WorldSystem() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
 }
 
 Scene* WorldSystem::create_scene(std::string_view name)
 {
+    ENGINE_PROFILE_ZONE("World.createScene");
     if (!is_initialized() || !can_modify() || scope_write_active_ || scene_ != nullptr ||
         scene_sequence_ == std::numeric_limits<std::uint64_t>::max())
     {
@@ -56,11 +140,13 @@ Scene* WorldSystem::create_scene(std::string_view name)
 
 ResourceLoader* WorldSystem::resource_loader() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return resources_;
 }
 
 Scene* WorldSystem::load_scene(std::string_view path)
 {
+    ENGINE_PROFILE_ZONE("World.loadScene");
     if (!is_initialized() || !can_modify() || scope_write_active_ || !resources_ ||
         scene_sequence_ == std::numeric_limits<std::uint64_t>::max())
     {
@@ -84,6 +170,8 @@ Scene* WorldSystem::load_scene(std::string_view path)
         return nullptr;
     }
     candidate->resource_ = resource.detach();
+    resources_->set_memory_owner(candidate->resource_,
+                                 {ResourceMemoryOwnerKind::scene, world_epoch_, candidate->id()});
     retain_persistent();
     scene_ = candidate.get();
     scenes_.push_back(std::move(candidate));
@@ -94,6 +182,7 @@ Scene* WorldSystem::load_scene(std::string_view path)
 
 void WorldSystem::destroy_scene() noexcept
 {
+    ENGINE_PROFILE_ZONE("World.destroyScenes");
     if (!can_modify() || scope_write_active_)
     {
         return;
@@ -111,21 +200,31 @@ void WorldSystem::destroy_scene() noexcept
 
 void WorldSystem::retain_persistent()
 {
+    ENGINE_PROFILE_FUNCTION();
     scene_ = nullptr;
     for (const auto& scene : scenes_)
     {
         scene->retain_persistent();
     }
-    std::erase_if(scenes_, [](const auto& scene) { return scene->empty(); });
+    std::erase_if(scenes_, [](const auto& scene)
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return scene->empty();
+    });
 }
 
 void WorldSystem::unload_scene() noexcept
 {
+    ENGINE_PROFILE_ZONE("World.unloadScene");
     if (!can_modify() || scope_write_active_)
     {
         return;
     }
-    std::erase_if(scopes_, [](const auto& entry) { return !entry.second->published; });
+    std::erase_if(scopes_, [](const auto& entry)
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return !entry.second->published;
+    });
     retirement_.clear();
     retain_persistent();
     paused_ = false;
@@ -133,44 +232,65 @@ void WorldSystem::unload_scene() noexcept
 
 bool WorldSystem::destroy_scene(std::uint64_t id) noexcept
 {
+    ENGINE_PROFILE_ZONE("World.destroyScene");
     if (!can_modify() || scope_write_active_)
     {
         return false;
     }
     auto target = std::find_if(scenes_.begin(), scenes_.end(),
-                               [id](const auto& item) { return item->id() == id; });
+                               [id](const auto& item)
+                               {
+                                   ENGINE_PROFILE_FUNCTION_PROBE();
+                                   return item->id() == id;
+                               });
     if (target != scenes_.end())
     {
         const auto* owner = target->get();
-        std::erase_if(scopes_, [&](const auto& item) { return item.second->destination == id; });
+        std::erase_if(scopes_, [&](const auto& item)
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return item.second->destination == id;
+        });
         std::erase_if(scenes_,
-                      [owner](const auto& item) { return item->allocation_target_ == owner; });
+                      [owner](const auto& item)
+                      {
+                          ENGINE_PROFILE_FUNCTION_PROBE();
+                          return item->allocation_target_ == owner;
+                      });
     }
     if (scene_ != nullptr && scene_->id() == id)
     {
         scene_ = nullptr;
         paused_ = false;
     }
-    return std::erase_if(scenes_, [id](const auto& scene) { return scene->id() == id; }) != 0;
+    return std::erase_if(scenes_, [id](const auto& scene)
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return scene->id() == id;
+    }) != 0;
 }
 
 Scene* WorldSystem::scene() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return scene_;
 }
 
 const Scene* WorldSystem::scene() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return scene_;
 }
 
 const std::vector<std::unique_ptr<Scene>>& WorldSystem::scenes() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return scenes_;
 }
 
 Node WorldSystem::find_node(std::uint64_t id) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!world_ || id == 0 || !ecs_is_alive(world_, id))
     {
         return {};
@@ -186,18 +306,22 @@ Node WorldSystem::find_node(std::uint64_t id) const noexcept
 
 ecs_world_t* WorldSystem::native_world() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return world_;
 }
 std::uint64_t WorldSystem::epoch() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return world_epoch_;
 }
 bool WorldSystem::can_modify() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return world_ && !ecs_is_stage(world_) && !ecs_stage_is_readonly(world_);
 }
 void WorldSystem::invalidate_scene_state() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     ++state_revision_;
     if (state_revision_ == 0)
     {
@@ -208,6 +332,7 @@ void WorldSystem::invalidate_scene_state() noexcept
 
 bool WorldSystem::set_paused(bool paused) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!is_initialized() || scene_ == nullptr)
     {
         return false;
@@ -218,16 +343,19 @@ bool WorldSystem::set_paused(bool paused) noexcept
 
 bool WorldSystem::paused() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return is_initialized() && scene_ != nullptr && paused_;
 }
 
 ComponentRegistry& WorldSystem::component_registry() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return components_;
 }
 
 bool WorldSystem::on_initialize(const EngineConfig&)
 {
+    ENGINE_PROFILE_ZONE("World.initialize");
     if (restore_config_.nodes_per_step == 0 || !std::isfinite(restore_config_.max_seconds) ||
         restore_config_.max_seconds <= 0.0)
     {
@@ -243,6 +371,9 @@ bool WorldSystem::on_initialize(const EngineConfig&)
         }
     } while (!epochs.compare_exchange_weak(previous, previous + 1, std::memory_order_relaxed));
     world_epoch_ = previous + 1;
+#if defined(ENGINE_ENABLE_MEMORY_PROFILING)
+    enable_flecs_memory_profiling();
+#endif
     world_ = ecs_init();
     if (!world_)
     {
@@ -276,6 +407,7 @@ bool WorldSystem::on_initialize(const EngineConfig&)
             [](flecs::entity entity, const schema::NodePropertiesT& properties,
                const ecs_detail::NodeRuntime& state)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 if (state.scene)
                 {
                     state.scene->unregister_entity(entity.id(), properties.id);
@@ -291,6 +423,7 @@ bool WorldSystem::on_initialize(const EngineConfig&)
         .each(
             [this](flecs::entity entity, const ecs_detail::NodeRuntime& runtime)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 if (!runtime.scope_scene || !runtime.scope_scene->published_ ||
                     runtime.scene != scene_)
                 {
@@ -398,7 +531,10 @@ bool WorldSystem::on_tick(double delta_time)
             retirement_.emplace_back(node, true);
             current.entity(node.id()).children(
                 [&](flecs::entity child)
-                { retirement_.emplace_back(Node(*this, world_epoch_, child.id()), false); });
+                {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
+                    retirement_.emplace_back(Node(*this, world_epoch_, child.id()), false);
+                });
         }
         else
         {
@@ -408,17 +544,23 @@ bool WorldSystem::on_tick(double delta_time)
     std::erase_if(scopes_,
                   [&](const auto& entry)
                   {
+                      ENGINE_PROFILE_FUNCTION_PROBE();
                       const auto& scope = *entry.second;
                       return scope.published &&
                              std::none_of(scenes_.begin(), scenes_.end(),
                                           [&](const auto& scene)
                                           {
+                                              ENGINE_PROFILE_FUNCTION_PROBE();
                                               return scene.get() == scope.published_scene &&
                                                      (scene.get() == scene_ || !scene->empty());
                                           });
                   });
     std::erase_if(scenes_,
-                  [this](const auto& scene) { return scene.get() != scene_ && scene->empty(); });
+                  [this](const auto& scene)
+                  {
+                      ENGINE_PROFILE_FUNCTION_PROBE();
+                      return scene.get() != scene_ && scene->empty();
+                  });
     return refresh_scene_state();
 }
 
@@ -555,6 +697,7 @@ bool WorldSystem::refresh_scene_state()
 
 void WorldSystem::on_shutdown() noexcept
 {
+    ENGINE_PROFILE_ZONE("World.shutdown");
     destroy_scene();
     if (state_query_)
     {

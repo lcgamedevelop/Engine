@@ -1,4 +1,5 @@
 #include "runtime/scene/bone_attachment.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/scene/animator_runtime.hpp"
 #include "runtime/scene/bone_attachment_runtime.hpp"
@@ -11,14 +12,17 @@ namespace engine
 {
 bool BoneAttachment::register_type(ComponentRegistry& registry)
 {
+    ENGINE_PROFILE_FUNCTION();
     return register_component_storage<BoneAttachment, Data, Runtime>(registry);
 }
 BoneAttachment::Runtime* BoneAttachment::runtime() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return runtime_state<Runtime>();
 }
 bool BoneAttachment::valid_settings(const Data& data) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return model_value_utils::vector(data.offset.translation()) &&
            model_value_utils::scale(data.offset.scale()) &&
            model_value_utils::quaternion(data.offset.rotation()) &&
@@ -26,12 +30,14 @@ bool BoneAttachment::valid_settings(const Data& data) noexcept
 }
 bool BoneAttachment::get_settings(Data& output) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* value = read_data<Data>();
     output = value ? *value : Data{};
     return value != nullptr;
 }
 bool BoneAttachment::set_settings(const Data& data)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable() || !valid_settings(data) ||
         (data.follow_enabled && !animation_detail::attachment_can_drive(node())))
     {
@@ -56,6 +62,7 @@ bool BoneAttachment::set_settings(const Data& data)
 }
 bool BoneAttachment::set_source(Animator source)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable() || !source || source.node().scene() != node().scene() ||
         source.node() == node())
     {
@@ -72,6 +79,7 @@ bool BoneAttachment::set_source(Animator source)
 }
 bool BoneAttachment::following() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     Data data;
     if (!get_settings(data) || !active() || !data.follow_enabled || !runtime()->source ||
         !runtime()->source.active() ||
@@ -87,6 +95,7 @@ bool BoneAttachment::following() const noexcept
 }
 bool BoneAttachment::detach()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable() || !following() || !animation_detail::attachment_can_drive(node()))
     {
         return false;
@@ -130,6 +139,7 @@ bool BoneAttachment::detach()
 }
 bool BoneAttachment::restore_data(const schema::ComponentDataT& input)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* data = input.payload.AsBoneAttachmentData();
     if (!writable() || !input.flags || !data || !valid_settings(*data))
     {
@@ -145,6 +155,7 @@ bool BoneAttachment::restore_data(const schema::ComponentDataT& input)
 bool BoneAttachment::remap_node_references(schema::ComponentDataT& input,
                                            std::span<const schema::NodeIdMappingT> mapping) const
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* data = input.payload.AsBoneAttachmentData();
     if (!data)
     {

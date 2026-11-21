@@ -1,5 +1,6 @@
 #include "runtime/scene/component_registry.hpp"
 
+#include "runtime/performance/profiling.hpp"
 #include "runtime/scene/animator.hpp"
 #include "runtime/scene/audio_listener.hpp"
 #include "runtime/scene/audio_source.hpp"
@@ -24,20 +25,24 @@ namespace engine
 {
 bool ComponentRegistry::contains(ComponentType type) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return operations_.contains(type);
 }
 const ComponentRegistry::Operations*
 ComponentRegistry::operations(ComponentType type) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto found = operations_.find(type);
     return found == operations_.end() ? nullptr : &found->second;
 }
 ecs_world_t* ComponentRegistry::native_world() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return world_;
 }
 bool ComponentRegistry::register_type(ComponentType type, const Operations& operations)
 {
+    ENGINE_PROFILE_ZONE("ComponentRegistry.registerType");
     if (!world_ || type == ComponentType::NONE || !operations.create || !operations.remove ||
         !operations.state || !operations.data || !operations.runtime || !operations.snapshot ||
         !operations.build || !operations.restore || !operations.remap)
@@ -48,11 +53,13 @@ bool ComponentRegistry::register_type(ComponentType type, const Operations& oper
 }
 Component ComponentRegistry::create(ComponentType type, Node node) const
 {
+    ENGINE_PROFILE_ZONE("ComponentRegistry.create");
     const auto* ops = operations(type);
     return ops && node && node.world()->native_world() == world_ ? ops->create(node) : Component{};
 }
 Component ComponentRegistry::find(ComponentType type, Node node) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* ops = operations(type);
     if (!ops || !node || node.world()->native_world() != world_)
     {
@@ -64,11 +71,13 @@ Component ComponentRegistry::find(ComponentType type, Node node) const noexcept
 }
 bool ComponentRegistry::remove(ComponentType type, Node node) const
 {
+    ENGINE_PROFILE_ZONE("ComponentRegistry.remove");
     const auto* ops = operations(type);
     return ops && node && node.world()->native_world() == world_ && ops->remove(node);
 }
 bool ComponentRegistry::collect(Node node, std::vector<Component>& output) const
 {
+    ENGINE_PROFILE_ZONE("ComponentRegistry.collect");
     output.clear();
     if (!node || node.world()->native_world() != world_)
     {
@@ -86,6 +95,7 @@ bool ComponentRegistry::collect(Node node, std::vector<Component>& output) const
 }
 bool register_scene_components(ComponentRegistry& registry)
 {
+    ENGINE_PROFILE_FUNCTION();
     return registry.add<Transform>() && registry.add<Camera>() && registry.add<Light>() &&
            registry.add<MeshRenderer>() && registry.add<Collider>() && registry.add<RigidBody>() &&
            registry.add<AudioSource>() && registry.add<AudioListener>() &&

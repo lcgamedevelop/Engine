@@ -1,8 +1,11 @@
 #include "plugins/editor/mcp/render_mcp_tools.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/editor/mcp/editor_tool_registration.hpp"
 
 #include "plugins/editor/mcp/editor_mcp_tools.hpp"
 #include "plugins/runtime/mcp/mcp_system.hpp"
+#include "runtime/resource/resource_memory.hpp"
 #include "runtime/schema/control_json_generated.hpp"
 
 #include <nlohmann/json.hpp>
@@ -15,9 +18,11 @@ namespace engine::plugins::mcp
 
 bool register_render_tools(McpSystem& system, EditorMcpTools& editor)
 {
+    ENGINE_PROFILE_FUNCTION();
     using Json = nlohmann::json;
     const auto color = [](int count)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return Json{{"type", "array"},
                     {"items", {{"type", "number"}, {"minimum", 0}, {"maximum", 1}}},
                     {"minItems", count},
@@ -25,6 +30,7 @@ bool register_render_tools(McpSystem& system, EditorMcpTools& editor)
     };
     const auto add = [&](std::string name, std::string description, Json schema)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const auto command = name;
         return register_editor_command_tool(system, editor, std::move(name), std::move(description),
                                             std::move(schema), command);
@@ -69,6 +75,7 @@ bool register_render_tools(McpSystem& system, EditorMcpTools& editor)
          object_schema(std::move(feature), {"feature", "enabled"}),
          [&editor](const Json& arguments, Json& reply)
          {
+             ENGINE_PROFILE_FUNCTION_PROBE();
              const auto& name = arguments["feature"].get_ref<const std::string&>();
              const bool enabled = arguments["enabled"].get<bool>();
              Json forwarded;
@@ -364,6 +371,15 @@ bool register_render_tools(McpSystem& system, EditorMcpTools& editor)
                       {"required", {"owner", "value"}},
                       {"additionalProperties", false}}}},
                    {"captureId"})) &&
+           add("get_resource_memory",
+               "Read resource payloads, live references and GPU retirement by GUID, or list the "
+               "largest records.",
+               object_schema(
+                   {{"guid", {{"type", "string"}, {"minLength", 36}, {"maxLength", 36}}},
+                    {"limit", {{"type", "integer"}, {"minimum", 1},
+                               {"maximum", ResourceMemoryQuery::maximum_items}}},
+                    {"baseline", {{"type", "object"}}}},
+                   Json::array())) &&
            add("get_scene_load", "Read an identified scene loading request without advancing it.",
                object_schema(
                    {{"loadId",

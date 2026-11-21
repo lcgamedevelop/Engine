@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/schema/animation_generated.h"
 #include "runtime/schema/mesh_generated.h"
 #include "runtime/schema/skeleton_generated.h"
@@ -21,6 +23,7 @@ namespace engine::animation_detail
 {
 inline ozz::math::Float4x4 load_matrix(std::span<const float, 16> value)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     ozz::math::Float4x4 output;
     for (std::size_t column = 0; column < 4; ++column)
     {
@@ -30,6 +33,7 @@ inline ozz::math::Float4x4 load_matrix(std::span<const float, 16> value)
 }
 inline void store_matrix(const ozz::math::Float4x4& value, std::array<float, 16>& output)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     for (std::size_t column = 0; column < 4; ++column)
     {
         ozz::math::StorePtrU(value.cols[column], output.data() + column * 4);
@@ -37,6 +41,7 @@ inline void store_matrix(const ozz::math::Float4x4& value, std::array<float, 16>
 }
 inline std::array<double, 16> double_matrix(const ozz::math::Float4x4& value)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     std::array<float, 16> local;
     store_matrix(value, local);
     std::array<double, 16> result;
@@ -45,24 +50,28 @@ inline std::array<double, 16> double_matrix(const ozz::math::Float4x4& value)
 }
 inline ozz::math::Float4x4 relative_matrix(std::span<const double, 16> value, const Vec3& origin)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     std::array<float, 16> local;
     transform_math::relative(value.data(), origin, local.data());
     return load_matrix(local);
 }
 inline bool invert_matrix(const ozz::math::Float4x4& value, ozz::math::Float4x4& output)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     ozz::math::SimdInt4 invertible;
     output = ozz::math::Invert(value, &invertible);
     return ozz::math::AreAllTrue1(invertible);
 }
 inline ozz::math::SimdFloat4 simd_point(const Vec3& value)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return ozz::math::simd_float4::Load(static_cast<float>(value.x()),
                                         static_cast<float>(value.y()),
                                         static_cast<float>(value.z()), 0.0F);
 }
 inline ozz::math::Float4x4 pose_matrix(const schema::JointLocalPose& value)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return ozz::math::Float4x4::FromAffine(
         simd_point(value.translation()),
         ozz::math::simd_float4::Load(
@@ -73,6 +82,7 @@ inline ozz::math::Float4x4 pose_matrix(const schema::JointLocalPose& value)
 inline bool readable_joint_paths(const schema::SkeletonDataT& skeleton,
                                  std::vector<std::string>& output)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     std::vector<std::string> validated;
     output.clear();
     if (!joint_paths(skeleton, validated))
@@ -93,6 +103,7 @@ inline bool readable_joint_paths(const schema::SkeletonDataT& skeleton,
 }
 inline ozz::math::Float4x4 authored_matrix(const TransformSettings& value)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     constexpr double radians = std::numbers::pi / 180.0;
     const double sx = std::sin(value.rotation.x() * radians);
     const double cx = std::cos(value.rotation.x() * radians);
@@ -121,6 +132,7 @@ inline ozz::math::Float4x4 authored_matrix(const TransformSettings& value)
 // Ozz分解后回构验证，拒绝剪切/退化；Euler与 WorldSystem 既有 Rz*Ry*Rx 一致。
 inline bool decompose_authored(const ozz::math::Float4x4& matrix, TransformSettings& output)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     output = {};
     ozz::math::Float3 translation, scale;
     ozz::math::Quaternion rotation;
@@ -159,12 +171,14 @@ inline bool decompose_authored(const ozz::math::Float4x4& matrix, TransformSetti
 }
 inline float simd_lane(ozz::math::SimdFloat4 value, std::size_t lane)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     float lanes[4];
     ozz::math::StorePtrU(value, lanes);
     return lanes[lane];
 }
 inline void set_simd_lane(ozz::math::SimdFloat4& value, std::size_t lane, float scalar)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     float lanes[4];
     ozz::math::StorePtrU(value, lanes);
     lanes[lane] = scalar;
@@ -172,6 +186,7 @@ inline void set_simd_lane(ozz::math::SimdFloat4& value, std::size_t lane, float 
 }
 inline schema::JointLocalPose local_pose(const ozz::math::SoaTransform& value, std::size_t lane)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return schema::JointLocalPose(
         Vec3(simd_lane(value.translation.x, lane), simd_lane(value.translation.y, lane),
              simd_lane(value.translation.z, lane)),
@@ -183,6 +198,7 @@ inline schema::JointLocalPose local_pose(const ozz::math::SoaTransform& value, s
 inline void set_local_pose(ozz::math::SoaTransform& output, std::size_t lane,
                            const schema::JointLocalPose& value)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     set_simd_lane(output.translation.x, lane, static_cast<float>(value.translation().x()));
     set_simd_lane(output.translation.y, lane, static_cast<float>(value.translation().y()));
     set_simd_lane(output.translation.z, lane, static_cast<float>(value.translation().z()));

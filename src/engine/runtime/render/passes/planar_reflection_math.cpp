@@ -1,4 +1,6 @@
 #include "runtime/render/passes/planar_reflection_math.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/render/render_math.hpp"
 #include "runtime/scene/camera_math.hpp"
 #include <algorithm>
@@ -13,6 +15,7 @@ bool prepare_planar_reflection(const float* plane_world, const float* camera_wor
                                std::array<float, 16>& projection,
                                std::array<float, 16>& view_projection)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (plane_world == nullptr || camera_world == nullptr || camera_projection == nullptr ||
         !finite_matrix(plane_world) || !finite_matrix(camera_world) ||
         !finite_matrix(camera_projection) || !std::isfinite(clip_bias) || clip_bias < 0.0F ||
@@ -129,6 +132,7 @@ PlanarReflectionScissor planar_receiver_scissor(const float* model, const float*
                                                 float distortion, std::uint16_t width,
                                                 std::uint16_t height)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!model || !view_projection || !finite_matrix(model) || !finite_matrix(view_projection) ||
         !std::isfinite(distortion) || distortion < 0 || width == 0 || height == 0)
     {
@@ -210,7 +214,10 @@ PlanarReflectionScissor planar_receiver_scissor(const float* model, const float*
     const double pad_x = double{distortion} * width + 2.0;
     const double pad_y = double{distortion} * height + 2.0;
     const auto pixel = [](double value, double limit)
-    { return static_cast<std::uint16_t>(std::clamp(value, 0.0, limit)); };
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return static_cast<std::uint16_t>(std::clamp(value, 0.0, limit));
+    };
     const auto left = pixel(std::floor((1.0 + low[0]) * 0.5 * width - pad_x), width);
     const auto right = pixel(std::ceil((1.0 + high[0]) * 0.5 * width + pad_x), width);
     const auto top = pixel(std::floor((1.0 - high[1]) * 0.5 * height - pad_y), height);
@@ -228,6 +235,7 @@ std::array<float, 16> planar_culling_projection(const std::array<float, 16>& pro
                                                 const PlanarReflectionScissor& scissor,
                                                 std::uint16_t width, std::uint16_t height)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto result = projection;
     const float sx = static_cast<float>(width) / scissor.width;
     const float sy = static_cast<float>(height) / scissor.height;

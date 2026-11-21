@@ -1,18 +1,22 @@
 #include "editor/asset_pipeline/components/ui_codec.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/scene/ui_component.hpp"
 namespace engine::editor::asset_pipeline
 {
 schema::ComponentPayload UiCodec::type() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::ComponentPayload::UiData;
 }
 std::string_view UiCodec::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "ui";
 }
 bool UiCodec::read(const toml::table& table, schema::ComponentDataT& component,
                    std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     schema::UiDataT data;
     if (table.contains("document"))
     {
@@ -29,6 +33,7 @@ bool UiCodec::read(const toml::table& table, schema::ComponentDataT& component,
 }
 bool UiCodec::validate(const schema::ComponentDataT& component, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* data = component.payload.AsUiData();
     if (!data || !UiComponent::valid_settings(*data))
     {
@@ -39,12 +44,14 @@ bool UiCodec::validate(const schema::ComponentDataT& component, std::string& err
 }
 std::span<const std::string_view> UiCodec::resource_fields() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     static constexpr std::string_view fields[]{"document"};
     return fields;
 }
 
 void UiCodec::write(const schema::ComponentDataT& component, toml::table& table) const
 {
+    ENGINE_PROFILE_FUNCTION();
     table.insert("type", "ui");
     table.insert("document", component.payload.AsUiData()->document_guid);
 }

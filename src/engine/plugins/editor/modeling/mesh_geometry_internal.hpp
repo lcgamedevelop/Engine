@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "plugins/editor/modeling/mesh_geometry.hpp"
 
 #include <algorithm>
@@ -26,51 +28,61 @@ struct Point
 
 inline Point point(const schema::Vec3& value)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return {value.x(), value.y(), value.z()};
 }
 
 inline Point point(const schema::ModelingVertex& value)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return {value.x(), value.y(), value.z()};
 }
 
 inline Point operator+(Point a, Point b)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return {a.x + b.x, a.y + b.y, a.z + b.z};
 }
 
 inline Point operator-(Point a, Point b)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return {a.x - b.x, a.y - b.y, a.z - b.z};
 }
 
 inline Point operator*(Point a, double scale)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return {a.x * scale, a.y * scale, a.z * scale};
 }
 
 inline double dot(Point a, Point b)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return a.x * b.x + a.y * b.y + a.z * b.z;
 }
 
 inline Point cross(Point a, Point b)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
 }
 
 inline double length(Point value)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return std::sqrt(dot(value, value));
 }
 
 inline bool finite(Point value)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
 }
 
 inline bool normalize(Point& value)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     const double size = length(value);
     if (!finite(value) || !std::isfinite(size) || size <= epsilon)
     {
@@ -82,6 +94,7 @@ inline bool normalize(Point& value)
 
 inline Point rotate(Point value, Point axis, double angle)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     const double cosine = std::cos(angle);
     return value * cosine + cross(axis, value) * std::sin(angle) +
            axis * (dot(axis, value) * (1.0 - cosine));
@@ -89,6 +102,7 @@ inline Point rotate(Point value, Point axis, double angle)
 
 inline void basis(Point normal, Point& u, Point& v)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     const Point up = std::abs(normal.y) < 0.9 ? Point{0.0, 1.0, 0.0} : Point{0.0, 0.0, 1.0};
     u = cross(up, normal);
     const bool valid = normalize(u);
@@ -98,6 +112,7 @@ inline void basis(Point normal, Point& u, Point& v)
 
 inline Point position(const schema::EditableMeshDataT& data, std::uint64_t id)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     const auto* vertex = mesh::find_vertex(data, id);
     return vertex == nullptr ? Point{} : point(*vertex);
 }
@@ -105,6 +120,7 @@ inline Point position(const schema::EditableMeshDataT& data, std::uint64_t id)
 inline bool face_normal(const schema::EditableMeshDataT& data, const schema::ModelingFaceT& face,
                         Point& normal)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     normal = {};
     for (std::size_t i = 0; i < face.vertices.size(); ++i)
     {
@@ -117,6 +133,7 @@ inline bool face_normal(const schema::EditableMeshDataT& data, const schema::Mod
 
 inline std::uint64_t add_vertex(schema::EditableMeshDataT& data, Point value)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     const std::uint64_t id = data.next_id++;
     data.vertices.emplace_back(id, value.x, value.y, value.z);
     return id;
@@ -138,6 +155,7 @@ inline void add_face(schema::EditableMeshDataT& data, std::vector<std::uint64_t>
 inline void add_quad(schema::EditableMeshDataT& data, std::uint64_t a, std::uint64_t b,
                      std::uint64_t c, std::uint64_t d, double u0, double u1, double v0, double v1)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     add_face(data, {a, b, c}, {{u0, v0}, {u1, v0}, {u1, v1}}, 0, 1);
     add_face(data, {a, c, d}, {{u0, v0}, {u1, v1}, {u0, v1}}, 0, 1);
 }
@@ -145,6 +163,7 @@ inline void add_quad(schema::EditableMeshDataT& data, std::uint64_t a, std::uint
 inline bool commit(schema::EditableMeshDataT& output, schema::EditableMeshDataT&& candidate,
                    std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     if (!mesh::validate(candidate, error))
     {
         return false;
@@ -158,6 +177,7 @@ inline bool selected_faces(schema::EditableMeshDataT& data,
                            std::span<const std::uint64_t> selection,
                            std::vector<schema::ModelingFaceT*>& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     output.clear();
     if (!mesh::validate(data, error))
     {
@@ -195,6 +215,7 @@ inline bool selected_faces(schema::EditableMeshDataT& data,
 
 inline void remove_unused_vertices(schema::EditableMeshDataT& data)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     std::set<std::uint64_t> used;
     for (const auto& face : data.faces)
     {
@@ -205,11 +226,16 @@ inline void remove_unused_vertices(schema::EditableMeshDataT& data)
         }
     }
     std::erase_if(data.vertices,
-                  [&used](const auto& vertex) { return !used.contains(vertex.id()); });
+                  [&used](const auto& vertex)
+                  {
+                      ENGINE_PROFILE_FUNCTION_PROBE();
+                      return !used.contains(vertex.id());
+                  });
 }
 
 inline std::pair<std::uint64_t, std::uint64_t> edge_key(std::uint64_t a, std::uint64_t b)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return std::minmax(a, b);
 }
 

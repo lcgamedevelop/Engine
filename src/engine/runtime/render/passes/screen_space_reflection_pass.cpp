@@ -1,5 +1,6 @@
 #include "runtime/render/passes/screen_space_reflection_pass.hpp"
 
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/render/render_math.hpp"
 #include "runtime/render/render_settings.hpp"
@@ -26,12 +27,14 @@ constexpr std::uint32_t point_clamp = BGFX_SAMPLER_UVW_CLAMP | BGFX_SAMPLER_MIN_
 
 constexpr std::uint16_t hierarchy_mip(std::uint16_t level)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     // Logical odd and even levels start at physical mip zero in their respective chains.
     return static_cast<std::uint16_t>((level - 1u) & ~1u);
 }
 
 bool valid_settings(const RenderSettings& settings)
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::isfinite(settings.ssr_resolution_scale) && settings.ssr_resolution_scale >= 0.25F &&
            settings.ssr_resolution_scale <= 1.0F && settings.ssr_max_steps >= 8 &&
            settings.ssr_max_steps <= 256 && std::isfinite(settings.ssr_max_distance) &&
@@ -44,6 +47,7 @@ bool valid_settings(const RenderSettings& settings)
 void set_view(bgfx::ViewId view, const char* name, bgfx::FrameBufferHandle target,
               std::uint16_t width, std::uint16_t height)
 {
+    ENGINE_PROFILE_FUNCTION();
     bgfx::setViewName(view, name);
     bgfx::setViewFrameBuffer(view, target);
     bgfx::setViewRect(view, 0, 0, width, height);
@@ -55,6 +59,7 @@ void set_view(bgfx::ViewId view, const char* name, bgfx::FrameBufferHandle targe
 
 ScreenSpaceReflectionPass::ScreenSpaceReflectionPass()
 {
+    ENGINE_PROFILE_FUNCTION();
     programs_.fill(BGFX_INVALID_HANDLE);
     samplers_.fill(BGFX_INVALID_HANDLE);
     uniforms_.fill(BGFX_INVALID_HANDLE);
@@ -64,12 +69,14 @@ ScreenSpaceReflectionPass::ScreenSpaceReflectionPass()
 
 ScreenSpaceReflectionPass::~ScreenSpaceReflectionPass() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     release();
 }
 
 bool ScreenSpaceReflectionPass::prepare(std::uint16_t width, std::uint16_t height,
                                         const RenderSettings& settings)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!settings.ssr_enabled)
     {
         release();
@@ -226,6 +233,7 @@ bool ScreenSpaceReflectionPass::render(const float* view, const float* projectio
                                        bgfx::TextureHandle specular, bgfx::TextureHandle brdf_lut,
                                        const RenderSettings& settings, std::uint64_t depth_revision)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!settings.ssr_enabled || !valid_settings(settings) || !bgfx::isValid(color_frame_) ||
         view == nullptr || projection == nullptr || !finite_matrix(view) ||
         !finite_matrix(projection))
@@ -262,6 +270,7 @@ bool ScreenSpaceReflectionPass::render(const float* view, const float* projectio
                            std::abs(projection[15]) > 0.5F ? 1.0F : 0.0F};
     const auto bind_common = [&]()
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const float target[]{0, 0, has_lut ? 1.0F : 0.0F, 0};
         bgfx::setUniform(uniforms_[0], dimensions);
         bgfx::setUniform(uniforms_[1], parameters);
@@ -323,11 +332,13 @@ bool ScreenSpaceReflectionPass::render(const float* view, const float* projectio
 
 bgfx::TextureHandle ScreenSpaceReflectionPass::texture() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return color_;
 }
 
 void ScreenSpaceReflectionPass::release() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     cached_depth_revision_ = 0;
     for (std::uint16_t index = 1; index < levels_; ++index)
     {
@@ -409,6 +420,7 @@ void ScreenSpaceReflectionPass::release() noexcept
 
 std::uint32_t ScreenSpaceReflectionPass::resource_count() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     std::uint32_t count = static_cast<std::uint32_t>(bgfx::isValid(reflection_)) +
                           static_cast<std::uint32_t>(bgfx::isValid(color_)) +
                           static_cast<std::uint32_t>(bgfx::isValid(reflection_frame_)) +

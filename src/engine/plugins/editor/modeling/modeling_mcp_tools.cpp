@@ -1,4 +1,6 @@
 #include "plugins/editor/modeling/modeling_mcp_tools.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/editor/mcp/editor_tool_registration.hpp"
 
 #include "plugins/editor/mcp/editor_mcp_tools.hpp"
@@ -19,11 +21,13 @@ using Json = nlohmann::json;
 
 Json id()
 {
+    ENGINE_PROFILE_FUNCTION();
     return {{"type", "string"}, {"minLength", 1}, {"maxLength", 20}};
 }
 
 Json selection()
 {
+    ENGINE_PROFILE_FUNCTION();
     const Json ids = {{"type", "array"}, {"items", id()}, {"maxItems", 100000}};
     return mcp::object_schema(
         {{"vertices", ids},
@@ -40,8 +44,10 @@ Json selection()
 bool register_modeling_tools(engine::plugins::mcp::McpSystem& system,
                              engine::plugins::mcp::EditorMcpTools& editor)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto add = [&](std::string name, std::string description, Json schema)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const auto command = name;
         const bool registered = mcp::register_editor_command_tool(
             system, editor, std::move(name), std::move(description), std::move(schema), command);

@@ -1,4 +1,5 @@
 #include "plugins/runtime/camera/camera_type_registry.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/camera/camera_runtime.hpp"
 #include "plugins/runtime/camera/conditions/parameter_camera_condition.hpp"
 #include "plugins/runtime/camera/conditions/state_time_camera_condition.hpp"
@@ -17,6 +18,7 @@ namespace engine::plugins::camera
 const CameraTypeRegistry::ModuleOperations*
 CameraTypeRegistry::module(std::string_view n) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     for (const auto& v : modules_)
     {
         if (v.type == n)
@@ -29,6 +31,7 @@ CameraTypeRegistry::module(std::string_view n) const noexcept
 const CameraTypeRegistry::ConditionOperations*
 CameraTypeRegistry::condition(std::string_view n) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     for (const auto& v : conditions_)
     {
         if (v.type == n)
@@ -40,11 +43,13 @@ CameraTypeRegistry::condition(std::string_view n) const noexcept
 }
 const CameraTypeRegistry* camera_types(WorldSystem& world)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* r = flecs::world(world.native_world()).try_get<CameraWorldRuntime>();
     return r ? r->types : nullptr;
 }
 bool register_camera_components(WorldSystem& world, const CameraTypeRegistry& types)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!types.frozen() || !world.is_initialized() || !world.native_world())
     {
         return false;
@@ -69,6 +74,7 @@ bool register_camera_components(WorldSystem& world, const CameraTypeRegistry& ty
 bool CameraEvaluationContext::parameter(std::string_view n,
                                         schema::CameraParameterValueT& out) const
 {
+    ENGINE_PROFILE_FUNCTION();
     out = {};
     for (const auto& p : parameters)
     {
@@ -82,6 +88,7 @@ bool CameraEvaluationContext::parameter(std::string_view n,
 }
 bool CameraEvaluationContext::target(std::string_view slot, CameraTargetPose& out) const
 {
+    ENGINE_PROFILE_FUNCTION();
     out = {};
     for (std::size_t i = 0; i < target_slots.size() && i < targets.size(); ++i)
     {
@@ -95,6 +102,7 @@ bool CameraEvaluationContext::target(std::string_view slot, CameraTargetPose& ou
 }
 bool register_builtin_camera_types(CameraTypeRegistry& types)
 {
+    ENGINE_PROFILE_FUNCTION();
     return types.add_module<FixedCameraModule>() && types.add_module<FollowCameraModule>() &&
            types.add_module<OrbitCameraModule>() && types.add_module<AimCameraModule>() &&
            types.add_module<LensCameraModule>() && types.add_module<NoiseCameraModule>() &&

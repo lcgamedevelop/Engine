@@ -1,4 +1,6 @@
 #include "editor/render/render_component_commands.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/resource_access.hpp"
 
 #include "editor/commands/components/component_edit.hpp"
@@ -24,6 +26,7 @@ using Json = nlohmann::json;
 
 std::string configured_path(ResourceLoader* loader, std::string_view guid)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string path;
     if (!guid.empty())
     {
@@ -36,6 +39,7 @@ bool retain_resource(ResourceLoader* loader, std::string_view guid,
                      std::vector<schema::AssetEntryT>& versions,
                      std::vector<ResourceReference>& prepared, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (guid.empty())
     {
         return true;
@@ -53,6 +57,7 @@ bool retain_resource(ResourceLoader* loader, std::string_view guid,
 
 bool read_enabled(const Json& arguments, schema::ComponentDataT& data, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!arguments.contains("enabled"))
     {
         return true;
@@ -69,6 +74,7 @@ bool read_enabled(const Json& arguments, schema::ComponentDataT& data, std::stri
 bool prepare_planar(WorldSystem& world, SceneCommands& scene_commands, const Json& arguments,
                     Json& result, std::unique_ptr<EditorEdit>& edit, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!components::fields(arguments, {"enabled", "resolutionScale", "clipBias"}, error) ||
         arguments.size() <= 2)
     {
@@ -123,6 +129,7 @@ bool prepare_planar(WorldSystem& world, SceneCommands& scene_commands, const Jso
 bool prepare_probe(WorldSystem& world, SceneCommands& scene_commands, const Json& arguments,
                    Json& result, std::unique_ptr<EditorEdit>& edit, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!components::fields(arguments, {"enabled", "resource"}, error) || arguments.size() <= 2)
     {
         error = "set_light_probe_volume requires at least one probe field";
@@ -198,10 +205,12 @@ public:
           node_id_(mesh.node().id()), instance_(mesh.instance_id()),
           revision_(mesh.mesh_revision()), arguments_(std::move(arguments))
     {
+        ENGINE_PROFILE_FUNCTION();
     }
 
     bool prepare(const MeshRenderer& mesh, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (!mesh.get_data(before_))
         {
             error = "Cannot read mesh settings";
@@ -274,11 +283,13 @@ public:
 
     bool apply(std::string& error) override
     {
+        ENGINE_PROFILE_FUNCTION();
         auto prepared = std::move(prepared_);
         return change(before_, after_, after_path_, true, error);
     }
     bool revert(std::string& error) override
     {
+        ENGINE_PROFILE_FUNCTION();
         return change(after_, before_, before_path_, false, error);
     }
 
@@ -286,6 +297,7 @@ private:
     bool change(const schema::ComponentDataT& expected, schema::ComponentDataT& replacement,
                 const std::string& path, bool applying, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         auto* scene = world_.scene();
         auto node = scene && scene->id() == scene_id_ ? scene->find_node(*identity_) : Node{};
         auto mesh = node ? node.get_component<MeshRenderer>() : MeshRenderer{};
@@ -364,6 +376,7 @@ private:
 bool prepare_mesh(WorldSystem& world, SceneCommands& scene_commands, const Json& arguments,
                   Json& result, std::unique_ptr<EditorEdit>& edit, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!components::fields(arguments, {"castShadows", "bakeStatic", "lightmap"}, error) ||
         arguments.size() <= 2)
     {
@@ -395,6 +408,7 @@ bool prepare_mesh(WorldSystem& world, SceneCommands& scene_commands, const Json&
 
 nlohmann::json planar_reflection_json(const PlanarReflectionComponent& component)
 {
+    ENGINE_PROFILE_FUNCTION();
     PlanarReflectionSettings settings;
     if (!component.get_settings(settings))
     {
@@ -407,6 +421,7 @@ nlohmann::json planar_reflection_json(const PlanarReflectionComponent& component
 
 nlohmann::json light_probe_volume_json(const LightProbeVolumeComponent& component)
 {
+    ENGINE_PROFILE_FUNCTION();
     LightProbeVolumeSettings settings;
     if (!component.get_settings(settings))
     {
@@ -422,6 +437,7 @@ nlohmann::json light_probe_volume_json(const LightProbeVolumeComponent& componen
 
 nlohmann::json mesh_lighting_json(const MeshRenderer& component)
 {
+    ENGINE_PROFILE_FUNCTION();
     schema::ComponentDataT snapshot;
     if (!component.get_data(snapshot))
     {
@@ -445,13 +461,16 @@ nlohmann::json mesh_lighting_json(const MeshRenderer& component)
 bool register_render_component_commands(WorldSystem& world, SceneCommands& scene_commands,
                                         EditorCommands& commands)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto add_get = [&world, &commands]<typename T>(const char* name, auto write)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return commands.register_command(
             name, false,
             [&world, write](const Json& arguments, Json& result, std::unique_ptr<EditorEdit>&,
                             std::string& error)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 if (!components::fields(arguments, {}, error))
                 {
                     return false;
@@ -474,12 +493,16 @@ bool register_render_component_commands(WorldSystem& world, SceneCommands& scene
     };
     const auto add_set = [&world, &scene_commands, &commands](const char* name, auto prepare)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return commands.register_command(
             name, true,
             [&world, &scene_commands, prepare](const Json& arguments, Json& result,
                                                std::unique_ptr<EditorEdit>& edit,
                                                std::string& error)
-            { return prepare(world, scene_commands, arguments, result, edit, error); });
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return prepare(world, scene_commands, arguments, result, edit, error);
+            });
     };
     return add_get.operator()<PlanarReflectionComponent>("get_planar_reflection",
                                                          planar_reflection_json) &&

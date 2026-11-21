@@ -1,5 +1,8 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
+#include "runtime/render/gpu_memory_tracker.hpp"
 #include "runtime/resource/resource_reference.hpp"
 #include "runtime/resource/types/texture_resource.hpp"
 
@@ -31,12 +34,14 @@ struct GpuGeometry
         static constexpr std::uint32_t capacity = 65536;
         explicit StaticVertexPage(bool white_color) : white(white_color)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
         }
         ~StaticVertexPage() noexcept;
         StaticVertexPage(const StaticVertexPage&) = delete;
         StaticVertexPage& operator=(const StaticVertexPage&) = delete;
 
-        [[nodiscard]] bool create();
+        [[nodiscard]] bool create(GpuMemoryTracker* tracker, SceneScopeId scope,
+                                  std::uint64_t scene);
         [[nodiscard]] bool store(std::span<const GpuVertex> vertices, std::uint32_t& first);
         void release_range(std::uint32_t first, std::uint32_t count) noexcept;
         [[nodiscard]] std::uint64_t byte_size() const noexcept;
@@ -44,6 +49,7 @@ struct GpuGeometry
         const bool white;
         bgfx::DynamicVertexBufferHandle positions = BGFX_INVALID_HANDLE;
         bgfx::DynamicVertexBufferHandle attributes = BGFX_INVALID_HANDLE;
+        [[no_unique_address]] GpuMemoryAllocation memory;
 
     private:
         struct Range
@@ -60,7 +66,8 @@ struct GpuGeometry
     GpuGeometry(const GpuGeometry&) = delete;
     GpuGeometry& operator=(const GpuGeometry&) = delete;
 
-    [[nodiscard]] bool create(const MeshRenderer& renderer, VertexPages* pages);
+    [[nodiscard]] bool create(const MeshRenderer& renderer, VertexPages* pages,
+                              GpuMemoryTracker* tracker, SceneScopeId scope, std::uint64_t scene);
     [[nodiscard]] bool create_base_indices(std::span<const std::uint32_t> source);
     [[nodiscard]] bool skinning_bounds(std::span<const std::array<float, 16>> palette,
                                        std::array<float, 3>& minimum,
@@ -76,19 +83,23 @@ struct GpuGeometry
     [[nodiscard]] std::uint16_t position_buffer_index() const noexcept;
     [[nodiscard]] std::uint32_t first_vertex() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return first_vertex_;
     }
     [[nodiscard]] const StaticVertexPage* vertex_page() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return page_.get();
     }
     [[nodiscard]] std::uint16_t position_stride_bytes() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return page_ || bgfx::isValid(attributes_layout_) ? sizeof(GpuVertex::position)
                                                           : vertex_stride_;
     }
     [[nodiscard]] std::uint64_t vertex_buffer_bytes() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return page_ ? 0 : std::uint64_t{vertex_count} * vertex_stride_ + vertex_padding_;
     }
     [[nodiscard]] std::span<const schema::MeshSubmesh>
@@ -118,7 +129,9 @@ struct GpuGeometry
 
 private:
     [[nodiscard]] bool store_vertices(VertexPages& pages, std::span<const GpuVertex> packed,
-                                      bool white);
+                                      bool white, GpuMemoryTracker* tracker, SceneScopeId scope,
+                                      std::uint64_t scene);
+    [[no_unique_address]] GpuMemoryAllocation memory_;
     std::shared_ptr<StaticVertexPage> page_;
     std::uint32_t first_vertex_ = 0;
     bgfx::VertexLayoutHandle attributes_layout_ = BGFX_INVALID_HANDLE;

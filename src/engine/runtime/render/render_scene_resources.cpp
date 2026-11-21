@@ -3,6 +3,7 @@
 #include "runtime/render/vsm/vsm_types.hpp"
 
 #include "runtime/font/font_system.hpp"
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/render/passes/meshlet_cull_pass.hpp"
 #include "runtime/render/render_surface.hpp"
@@ -38,6 +39,7 @@ using PreparationClock = std::chrono::steady_clock;
 
 bool RenderSystem::RenderPreparation::request_texture(ResourceLoader* loader, ResourceHandle handle)
 {
+    ENGINE_PROFILE_FUNCTION();
     const TextureResource* source = nullptr;
     if (!loader || loader->get(handle, source) != ResourceError::none)
     {
@@ -59,6 +61,7 @@ bool RenderSystem::RenderPreparation::request_texture(ResourceLoader* loader, Re
 
 void RenderSystem::RenderPreparation::detach_observers() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (observed_world && observed_world->is_initialized() &&
         observed_world->epoch() == world_epoch)
     {
@@ -84,6 +87,7 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
     auto& state = *preparation_;
     const auto fail = [&](std::string_view error)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         state.error = error;
         state.status = RenderPrepareStatus::failed;
         return state.status;
@@ -99,6 +103,7 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
     std::uint64_t uploaded = 0;
     const auto budget = [&]
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return items < config_.prepare_items_per_step &&
                (items == 0 ||
                 std::chrono::duration<double>(PreparationClock::now() - begin).count() < seconds);
@@ -212,6 +217,8 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
     auto& resources = *scene_resources_;
     auto* target_scene = scope_preparing_scene_ ? scope_preparing_scene_ : world_->scene();
     const auto target_id = target_scene ? render_detail::target_scope(*target_scene) : 0;
+    const auto creation_scope = SceneScopeId{epoch, target_id};
+    const auto creation_scene = target_scene ? target_scene->id() : 0;
     resources.select_targets(target_id);
     auto& targets = resources.targets();
     if (targets.camera_instance != selected_camera.instance_id())
@@ -226,6 +233,7 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
             std::find_if(resources.pass_targets.begin(), resources.pass_targets.end(),
                          [&](const auto& entry)
                          {
+                             ENGINE_PROFILE_FUNCTION_PROBE();
                              return entry.first != target_id &&
                                     (!world_->scope_candidate({world_->epoch(), entry.first}) ||
                                      (target_scene == world_->scene() &&
@@ -237,9 +245,9 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
             ++items;
             for (auto* source : retired->second->ibl_sources)
             {
-                if (source && --state.texture_users[source] == 0)
+                if (source)
                 {
-                    state.unused_textures.insert(source);
+                    state.release_texture(resources, source);
                 }
             }
             resources.pass_targets.erase(retired);
@@ -247,6 +255,7 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
     }
     const auto includes = [&](std::uint64_t id)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         flecs::world ecs(world_->native_world());
         const auto entity = ecs.entity(id);
         if (!entity.is_alive())
@@ -272,6 +281,7 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
         auto* pending = &state;
         const auto dirty = [pending](std::uint64_t id)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             pending->dirty_nodes.insert(id);
             pending->progress.discovery_complete = false;
             if (pending->status == RenderPrepareStatus::ready)
@@ -286,6 +296,7 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
                 .run(
                     [pending, dirty](flecs::iter& it)
                     {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
                         while (it.next())
                         {
                             const auto* value = it.param<Component>();
@@ -307,6 +318,7 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
                                       .run(
                                           [pending, dirty](flecs::iter& it)
                                           {
+                                              ENGINE_PROFILE_FUNCTION_PROBE();
                                               while (it.next())
                                               {
                                                   pending->ibl_dirty = true;
@@ -315,10 +327,14 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
                                                       std::vector<flecs::entity> descendants;
                                                       const auto mark = [&](flecs::entity entity)
                                                       {
+                                                          ENGINE_PROFILE_FUNCTION_PROBE();
                                                           dirty(entity.id());
                                                           entity.children(
                                                               [&](flecs::entity child)
-                                                              { descendants.push_back(child); });
+                                                              {
+                                                                  ENGINE_PROFILE_FUNCTION_PROBE();
+                                                                  descendants.push_back(child);
+                                                              });
                                                       };
                                                       mark(it.entity(row));
                                                       while (!descendants.empty())
@@ -338,6 +354,7 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
                                       .run(
                                           [pending, dirty](flecs::iter& it)
                                           {
+                                              ENGINE_PROFILE_FUNCTION_PROBE();
                                               while (it.next())
                                               {
                                                   pending->ibl_dirty = true;
@@ -356,6 +373,7 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
                                       .run(
                                           [dirty](flecs::iter& it)
                                           {
+                                              ENGINE_PROFILE_FUNCTION_PROBE();
                                               while (it.next())
                                               {
                                                   for (auto row : it)
@@ -374,6 +392,7 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
                 .run(
                     [pending, dirty](flecs::iter& it)
                     {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
                         while (it.next())
                         {
                             pending->ibl_dirty = true;
@@ -399,6 +418,7 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
         query.each(
             [&](flecs::entity entity, const auto&)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 const auto* runtime = entity.try_get<ecs_detail::NodeRuntime>();
                 bool included = entity.has<ecs_detail::Published>();
                 for (const auto& [scope, value] : scope_preparations_)
@@ -421,7 +441,10 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
         {
             const auto pending_node =
                 std::find_if(state.dirty_nodes.begin(), state.dirty_nodes.end(), [&](auto id)
-                             { return includes(id) || !ecs_is_alive(world_->native_world(), id); });
+                             {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
+                    return includes(id) || !ecs_is_alive(world_->native_world(), id);
+                });
             if (pending_node == state.dirty_nodes.end())
             {
                 break;
@@ -460,7 +483,7 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
             {
                 for (auto* source : mesh->textures)
                 {
-                    ++state.texture_users[source];
+                    state.retain_texture(resources, source);
                 }
                 for (auto* source : mesh->programs)
                 {
@@ -477,10 +500,7 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
                 {
                     for (auto* source : retained->second.textures)
                     {
-                        if (--state.texture_users[source] == 0)
-                        {
-                            state.unused_textures.insert(source);
-                        }
+                        state.release_texture(resources, source);
                     }
                     for (auto* source : retained->second.programs)
                     {
@@ -498,7 +518,10 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
                     resources.mesh_index.erase(found);
                     const auto instance = resources.meshes[index].instance_id;
                     const auto old_lod = [instance](const auto& entry)
-                    { return entry.first.first == instance; };
+                    {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
+                        return entry.first.first == instance;
+                    };
                     std::erase_if(resources.selected_lods, old_lod);
                     std::erase_if(resources.selected_lod_revisions, old_lod);
                     if (index + 1 != resources.meshes.size())
@@ -539,7 +562,8 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
                         auto* pages = render_detail::meshlet_index_compaction_supported()
                                           ? &resources.static_vertex_pages
                                           : nullptr;
-                        if (!geometry->create(renderer, pages))
+                        if (!geometry->create(renderer, pages, gpu_memory_.get(), creation_scope,
+                                              creation_scene))
                         {
                             return fail("Cannot create GPU geometry");
                         }
@@ -564,6 +588,7 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
                 state.pending_materials.insert(id);
                 const auto texture = [&](ResourceHandle handle)
                 {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
                     const Resource* source = nullptr;
                     if (!loader || loader->get(handle, source) != ResourceError::none ||
                         !state.request_texture(loader, handle))
@@ -632,6 +657,7 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
             const auto update_users =
                 [](auto& users, auto& unused, const auto& previous, const auto& next)
             {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
                 for (auto key : previous)
                 {
                     if (std::find(next.begin(), next.end(), key) == next.end() && --users[key] == 0)
@@ -648,8 +674,25 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
                     }
                 }
             };
-            update_users(state.texture_users, state.unused_textures, previous_textures,
-                         mesh ? mesh->textures : std::vector<const Resource*>{});
+            for (auto* source : previous_textures)
+            {
+                if (!mesh || std::find(mesh->textures.begin(), mesh->textures.end(), source) ==
+                                 mesh->textures.end())
+                {
+                    state.release_texture(resources, source);
+                }
+            }
+            if (mesh)
+            {
+                for (auto* source : mesh->textures)
+                {
+                    if (std::find(previous_textures.begin(), previous_textures.end(), source) ==
+                        previous_textures.end())
+                    {
+                        state.retain_texture(resources, source);
+                    }
+                }
+            }
             update_users(state.program_users, state.unused_programs, previous_programs,
                          mesh ? mesh->programs : std::vector<const schema::ShaderDataT*>{});
             if (previous_geometry)
@@ -689,9 +732,15 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
         }
     }
     const auto required_texture = [&](const Resource* source)
-    { return required_textures.contains(source); };
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return required_textures.contains(source);
+    };
     const auto required_program = [&](const schema::ShaderDataT* source)
-    { return required_programs.contains(source); };
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return required_programs.contains(source);
+    };
     {
         ENGINE_PROFILE_ZONE("Render.prepareRetireResources");
         while (!state.unused_textures.empty() && budget())
@@ -799,6 +848,7 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
                     work.completion = tasks_->submit("Render.texturePrepare",
                                                      [weak]
                                                      {
+                                                         ENGINE_PROFILE_FUNCTION_PROBE();
                                                          const auto owned = weak.lock();
                                                          return owned && owned->part.prepare();
                                                      });
@@ -834,7 +884,8 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
                 break;
             }
             auto [texture, inserted] = resources.textures.try_emplace(item->first);
-            if (inserted && !texture->second.create(work.part))
+            if (inserted && !texture->second.create(work.part, gpu_memory_.get(), creation_scope,
+                                                     creation_scene))
             {
                 return fail("Cannot create GPU texture");
             }
@@ -914,20 +965,31 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
                 state.pending_materials.begin(), state.pending_materials.end(),
                 [&](auto id)
                 {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
                     if (!includes(id) || state.dirty_nodes.contains(id))
                     {
                         return false;
                     }
                     const auto mesh =
                         std::find_if(resources.meshes.begin(), resources.meshes.end(),
-                                     [&](const auto& value) { return value.node_id == id; });
+                                     [&](const auto& value)
+                                     {
+                                         ENGINE_PROFILE_FUNCTION_PROBE();
+                                         return value.node_id == id;
+                                     });
                     return mesh != resources.meshes.end() &&
                            std::none_of(mesh->textures.begin(), mesh->textures.end(),
                                         [&](auto source)
-                                        { return state.textures.contains(source); }) &&
+                                        {
+                                            ENGINE_PROFILE_FUNCTION_PROBE();
+                                            return state.textures.contains(source);
+                                        }) &&
                            std::none_of(mesh->programs.begin(), mesh->programs.end(),
                                         [&](auto source)
-                                        { return state.pending_programs.contains(source); });
+                                        {
+                                            ENGINE_PROFILE_FUNCTION_PROBE();
+                                            return state.pending_programs.contains(source);
+                                        });
                 });
             if (pending_material == state.pending_materials.end())
             {
@@ -984,10 +1046,7 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
             {
                 for (auto* source : retained->second.textures)
                 {
-                    if (--state.texture_users[source] == 0)
-                    {
-                        state.unused_textures.insert(source);
-                    }
+                    state.release_texture(resources, source);
                 }
                 for (auto* source : retained->second.programs)
                 {
@@ -1027,6 +1086,7 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
             // Published active environment and preparing scopes share immutable geometry uploads.
             const auto inspect = [&](Scene* scene)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 render_detail::SceneRenderComponents components;
                 EnvironmentSettings environment;
                 return scene && render_detail::scene_render_components(*scene, components) &&
@@ -1145,6 +1205,7 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
         query.each(
             [&](flecs::entity entity, const auto&)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 auto node = render_detail::scope_node(*target_scene, entity.id());
                 const auto plane = node.get_component<PlanarReflectionComponent>();
                 const auto mesh = node.get_component<MeshRenderer>();
@@ -1162,7 +1223,10 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
             });
         std::sort(
             planes.begin(), planes.end(), [](const auto& a, const auto& b)
-            { return a.first == b.first ? a.second.id() < b.second.id() : a.first < b.first; });
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return a.first == b.first ? a.second.id() < b.second.id() : a.first < b.first;
+            });
         for (std::size_t index = 0; index < plane_nodes.size(); ++index)
         {
             if (index < std::min<std::size_t>(planes.size(), config_.maximum_planar_reflections))
@@ -1362,7 +1426,10 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
         state.status = state.progress.discovery_complete &&
                                std::none_of(state.textures.begin(), state.textures.end(),
                                             [&](const auto& value)
-                                            { return required_texture(value.first); }) &&
+                                            {
+                                                ENGINE_PROFILE_FUNCTION_PROBE();
+                                                return required_texture(value.first);
+                                            }) &&
                                std::none_of(state.pending_programs.begin(),
                                             state.pending_programs.end(), required_program) &&
                                std::none_of(state.pending_materials.begin(),
@@ -1378,9 +1445,13 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
     {
         ENGINE_PROFILE_ZONE("Render.profileMemory");
         const auto bytes = [](const auto& values)
-        { return static_cast<std::uint64_t>(values.capacity()) * sizeof(values.front()); };
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return static_cast<std::uint64_t>(values.capacity()) * sizeof(values.front());
+        };
         const auto meshlet_bytes = [&bytes](const schema::MeshletDataT* value)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             return value ? bytes(value->indices) + bytes(value->meshlets) + bytes(value->submeshes)
                          : std::uint64_t{0};
         };
@@ -1406,6 +1477,7 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
             geometry_gpu += geometry->vertex_buffer_bytes() + geometry->index_buffer_bytes();
             const auto gpu_meshlets = [&](const schema::MeshletDataT* value, std::size_t level)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 if (value && bgfx::isValid(geometry->meshlet_debug_offsets(level)))
                 {
                     geometry_gpu += value->meshlets.size() * sizeof(std::uint32_t);
@@ -1468,6 +1540,7 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
 
 void RenderSystem::collect_preparation(bool wait) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!preparation_)
     {
         return;
@@ -1476,6 +1549,7 @@ void RenderSystem::collect_preparation(bool wait) noexcept
     std::erase_if(state.retired_work,
                   [&](auto& work)
                   {
+                      ENGINE_PROFILE_FUNCTION_PROBE();
                       if (work->completion.valid())
                       {
                           if (!wait && work->completion.wait_for(std::chrono::seconds(0)) !=
@@ -1494,13 +1568,20 @@ void RenderSystem::collect_preparation(bool wait) noexcept
                   });
     const auto complete = [&](auto& resources)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        if (render_detail::web_readbacks && wait)
+        {
+            return true;
+        }
         if (resources->capture_pending &&
-            static_cast<std::int32_t>(frame_number_ - resources->capture_ready_frame) >= 0)
+            resources->capture_completion.status(frame_number_) !=
+                render_detail::GpuReadbackStatus::pending)
         {
             resources->capture_pending = false;
         }
         if (resources->hdr_capture_pending &&
-            static_cast<std::int32_t>(frame_number_ - resources->hdr_capture_ready_frame) >= 0)
+            resources->hdr_capture_completion.status(frame_number_) !=
+                render_detail::GpuReadbackStatus::pending)
         {
             resources->hdr_capture_pending = false;
         }
@@ -1511,7 +1592,7 @@ void RenderSystem::collect_preparation(bool wait) noexcept
         std::erase_if(state.retired_scenes, complete);
         if (wait && !state.retired_scenes.empty())
         {
-            frame_number_ = bgfx::frame();
+            submit_frame();
         }
     } while (wait && !state.retired_scenes.empty());
     state.progress.staging_bytes = state.staging_bytes;
@@ -1519,6 +1600,7 @@ void RenderSystem::collect_preparation(bool wait) noexcept
 
 void RenderSystem::release_scene() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     release_rvt();
     release_vsm();
     scope_frames_.clear();
@@ -1587,9 +1669,15 @@ void RenderSystem::release_scene() noexcept
 
 void RenderSystem::release_draw_resources() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (scene_resources_ &&
         (scene_resources_->capture_pending || scene_resources_->hdr_capture_pending))
     {
+        for (auto& [source, texture] : scene_resources_->textures)
+        {
+            (void)source;
+            texture.memory.release_requested();
+        }
         if (!preparation_)
         {
             preparation_ = std::make_unique<RenderPreparation>();
@@ -1601,6 +1689,7 @@ void RenderSystem::release_draw_resources() noexcept
 
 std::uint32_t RenderSystem::gpu_resource_count() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return (scene_resources_ ? scene_resources_->resource_count() : 0) +
            (meshlet_culling_ ? meshlet_culling_->resource_count() : 0) +
            (vsm_pass_ ? vsm_pass_->resource_count() : 0);

@@ -1,4 +1,6 @@
 #include "plugins/editor/terrain/terrain_commands.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/commands/component_commands.hpp"
 #include "editor/commands/scene_commands.hpp"
 #include "editor/resource_access.hpp"
@@ -13,6 +15,7 @@ bool register_terrain_commands(WorldSystem& world, editor::SceneCommands& scenes
                                editor::EditorCommands& commands,
                                const std::filesystem::path& project)
 {
+    ENGINE_PROFILE_FUNCTION();
     using Json = nlohmann::json;
     if (!register_terrain_asset_commands(commands, project) ||
         !editor::components::register_component<TerrainComponent, schema::TerrainDataT>(
@@ -20,6 +23,7 @@ bool register_terrain_commands(WorldSystem& world, editor::SceneCommands& scenes
             [&world](Node, const Json& args, schema::TerrainDataT& data,
                      std::vector<ResourceReference>& prepared, std::string& error)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 if (!editor::components::fields(args, {"settings"}, error) ||
                     !args.contains("settings") ||
                     !schema::control_json::read(args["settings"], data, error))
@@ -44,7 +48,10 @@ bool register_terrain_commands(WorldSystem& world, editor::SceneCommands& scenes
                 return true;
             },
             [](TerrainComponent, const schema::TerrainDataT& data)
-            { return Json{{"settings", schema::control_json::write(data)}}; }))
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return Json{{"settings", schema::control_json::write(data)}};
+            }))
     {
         return false;
     }
@@ -59,6 +66,7 @@ bool register_terrain_commands(WorldSystem& world, editor::SceneCommands& scenes
                 [&world, method](const Json& args, Json& result,
                                  std::unique_ptr<editor::EditorEdit>&, std::string& error)
                 {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
                     if (!editor::components::fields(args, {"request"}, error) ||
                         !args.contains("request"))
                     {

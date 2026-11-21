@@ -1,4 +1,6 @@
 #include "plugins/editor/mcp/project_mcp_tools.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/file_text.hpp"
 
 #include "editor/asset_pipeline/asset_pipeline_system.hpp"
@@ -25,8 +27,12 @@ using Json = nlohmann::json;
 
 bool valid_android_target(const McpTarget& target)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto ascii_letter = [](unsigned char value)
-    { return (value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z'); };
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return (value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z');
+    };
     if (target.android_serial.empty() || target.android_package.empty() ||
         target.adb_executable.empty() || !target.runtime_dir.empty() ||
         target.android_package.find('.') == std::string::npos)
@@ -67,6 +73,7 @@ bool valid_android_target(const McpTarget& target)
 
 bool valid_ios_target(const McpTarget& target)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (target.ios_udid.size() < 20 || target.ios_udid.size() > 64 ||
         target.ios_bundle_identifier.empty() || target.ios_application_name.empty() ||
         !target.runtime_dir.empty() || (target.ios_simulator && target.xcrun_executable.empty()))
@@ -116,6 +123,7 @@ namespace tools
 {
 bool no_symlinks(const fs::path& path)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::error_code error;
     fs::path current;
     for (const auto& component : path)
@@ -137,6 +145,7 @@ bool no_symlinks(const fs::path& path)
 
 bool read_project_status(const fs::path& runtime, Json& status)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto path = runtime / "project-status.json";
     std::error_code error;
     const auto size = fs::file_size(path, error);
@@ -157,6 +166,7 @@ bool read_project_status(const fs::path& runtime, Json& status)
 
 bool editor_alive(const Json& status)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
                          std::chrono::system_clock::now().time_since_epoch())
                          .count();
@@ -166,6 +176,7 @@ bool editor_alive(const Json& status)
 
 bool device_receipt(bool success, const std::string& text, Json& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = Json::parse(text, nullptr, false);
     if (!output.is_object())
     {
@@ -183,10 +194,12 @@ ProjectMcpTools::ProjectMcpTools(engine::editor::AssetPipelineSystem& pipeline,
     : pipeline_(pipeline), builder_(builder), sync_(sync), project_root_(std::move(project_root)),
       target_(std::move(target))
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 bool ProjectMcpTools::initialize()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (initialized_)
     {
         return false;
@@ -260,6 +273,7 @@ bool ProjectMcpTools::initialize()
 
 bool ProjectMcpTools::register_tools(McpSystem& mcp)
 {
+    ENGINE_PROFILE_FUNCTION();
     return initialized_ && register_resource_tools(mcp) && register_runtime_tools(mcp);
 }
 

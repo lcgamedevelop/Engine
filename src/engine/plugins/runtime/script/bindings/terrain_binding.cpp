@@ -1,3 +1,6 @@
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
+
 #if defined(ENGINE_HAS_TERRAIN_PLUGIN) && ENGINE_HAS_TERRAIN_PLUGIN
 #include "plugins/runtime/script/bindings/terrain_binding.hpp"
 #include "plugins/runtime/script/bindings/control_binding_helpers.hpp"
@@ -55,6 +58,7 @@ Object.freeze(TerrainComponent.prototype);Object.freeze(TerrainComponent);
 )js";
 void call(const Arguments& args)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto component = binding_detail::component<terrain::TerrainComponent>(args, 4);
     auto* context = BindingContext::current(args);
     args.set_return({});
@@ -75,6 +79,7 @@ void call(const Arguments& args)
         context->remember_release(key,
                                   [component, cleanup]()
                                   {
+                                      ENGINE_PROFILE_FUNCTION_PROBE();
                                       control_detail::Json result;
                                       std::string error;
                                       (void)terrain::control::call(component, "remove_view",
@@ -91,6 +96,7 @@ void call(const Arguments& args)
         context->remember_release(prefix + "pin/" + id["sequence"].dump(),
                                   [component, id]()
                                   {
+                                      ENGINE_PROFILE_FUNCTION_PROBE();
                                       control_detail::Json result;
                                       std::string error;
                                       (void)terrain::control::call(component, "release_pin", id,
@@ -105,7 +111,10 @@ void call(const Arguments& args)
     {
         const auto id = output;
         context->remember_release(prefix + "operation/" + id["sequence"].dump(), [component, id]()
-                                  { terrain::control::abandon_operation(component, id); });
+                                  {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            terrain::control::abandon_operation(component, id);
+        });
     }
     else if (method == "release_operation")
     {
@@ -116,14 +125,17 @@ void call(const Arguments& args)
 } // namespace
 std::string_view TerrainBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "TerrainComponent";
 }
 std::string_view TerrainBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 bool TerrainBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.integer("TerrainKind", static_cast<int>(terrain::TerrainComponent::component_type)) &&
            vm.function("TerrainAdd", binding_detail::add_component<terrain::TerrainComponent>) &&
            vm.function("TerrainCall", call) &&

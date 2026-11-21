@@ -1,4 +1,6 @@
 #include "runtime/render/mesh_lod_selection.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -11,6 +13,7 @@ float projected_mesh_height(const std::array<float, 3>& minimum,
                             const std::array<float, 3>& maximum, const float* model,
                             const float* view, const float* projection, float near_clip) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const float unsafe = std::numeric_limits<float>::infinity();
     if (!model || !view || !projection || !std::isfinite(near_clip) || near_clip <= 0)
     {
@@ -18,6 +21,7 @@ float projected_mesh_height(const std::array<float, 3>& minimum,
     }
     const auto transform = [](const float* matrix, const std::array<double, 4>& point)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         std::array<double, 4> result{};
         for (std::size_t row = 0; row < 4; ++row)
         {
@@ -44,14 +48,22 @@ float projected_mesh_height(const std::array<float, 3>& minimum,
         }
         const auto camera = transform(view, transform(model, point));
         if (!std::all_of(camera.begin(), camera.end(),
-                         [](double value) { return std::isfinite(value); }) ||
+                         [](double value)
+                         {
+                             ENGINE_PROFILE_FUNCTION_PROBE();
+                             return std::isfinite(value);
+                         }) ||
             -camera[2] <= near_clip)
         {
             return unsafe;
         }
         const auto clip = transform(projection, camera);
         if (!std::all_of(clip.begin(), clip.end(),
-                         [](double value) { return std::isfinite(value); }) ||
+                         [](double value)
+                         {
+                             ENGINE_PROFILE_FUNCTION_PROBE();
+                             return std::isfinite(value);
+                         }) ||
             clip[3] <= 0)
         {
             return unsafe;
@@ -69,6 +81,7 @@ float projected_mesh_height(const std::array<float, 3>& minimum,
 std::size_t select_mesh_lod(const schema::MeshDataT& data, float screen_height,
                             std::size_t previous_level, float hysteresis) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!std::isfinite(screen_height) || screen_height < 0 || !std::isfinite(hysteresis) ||
         hysteresis < 0 || hysteresis >= 1 || !data.skin.empty() || !data.skeleton_guid.empty())
     {

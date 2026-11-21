@@ -10,6 +10,7 @@
 #include "runtime/gameplay/deployment_selection.hpp"
 #include "runtime/gameplay/gameplay_session.hpp"
 #include "runtime/movie/movie_player.hpp"
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/task/task_system.hpp"
 #include "runtime_plugins.hpp"
@@ -60,6 +61,7 @@ namespace
 {
 void print_usage()
 {
+    ENGINE_PROFILE_FUNCTION();
 #if defined(ENGINE_HAS_RUNTIME_MCP_ENDPOINT)
     std::fputs("Usage: engine_app --mcp-project <path> --mcp-runtime-dir <empty-cache-path> "
                "[--frames <positive-count>] [--workers <0..64>]\n",
@@ -77,8 +79,10 @@ namespace engine::host_detail
 bool initialize_runtime_app(RuntimeAppState& state, const AppConfig& requested_app, int argc,
                             char** argv)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto fail = [&](std::string_view message)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         state.error = message;
         if (state.exit_code == 0)
         {
@@ -196,6 +200,7 @@ bool initialize_runtime_app(RuntimeAppState& state, const AppConfig& requested_a
     const bool threads_ready = threads.initialize(config);
     const auto domain = [&](engine::TaskConfig value)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (!value.max_concurrency)
         {
             value.max_concurrency = threads_ready ? threads.worker_count() : 1;
@@ -274,6 +279,7 @@ bool initialize_runtime_app(RuntimeAppState& state, const AppConfig& requested_a
                      engine::TaskSystem& tasks,
                      std::vector<engine::ScenePreparation*>& preparations)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const bool assembled = assemble_runtime_plugins(stage, world, window, physics, navigation,
                                                         renderer, tasks, preparations,
 #if ENGINE_HAS_CAMERA
@@ -305,6 +311,7 @@ bool initialize_runtime_app(RuntimeAppState& state, const AppConfig& requested_a
                         engine::WindowSystem& window, engine::AnimationSystem& animation,
                         engine::MoviePlayer* movies) -> std::unique_ptr<engine::ScriptRuntime>
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return std::make_unique<engine::plugins::script::ScriptSystem>(
             world.resource_loader(), &world, &renderer, &ui, &physics, &navigation, &input, &window,
             &animation, movies);
@@ -351,6 +358,7 @@ bool initialize_runtime_app(RuntimeAppState& state, const AppConfig& requested_a
             "Startup deployment selection",
             [published, persistent, builtin, platform]()
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 const bool selected = engine::gameplay_detail::select_published_deployment(
                     persistent, platform, published->catalog, published->mounts,
                     published->revision, published->entry, published->warning);
@@ -397,6 +405,7 @@ FrameStatus step_runtime_app(RuntimeAppState& state, double delta_time)
     }
     const auto fail = [&](std::string_view message)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         state.exit_code = 1;
         state.error = message;
         return FrameStatus::failed;
@@ -594,6 +603,7 @@ FrameStatus step_runtime_app(RuntimeAppState& state, double delta_time)
 
 void shutdown_runtime_app(RuntimeAppState& state) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const bool was_initialized = state.initialized;
 #if defined(ENGINE_HAS_RUNTIME_MCP_ENDPOINT)
     state.mcp_bridge.shutdown();

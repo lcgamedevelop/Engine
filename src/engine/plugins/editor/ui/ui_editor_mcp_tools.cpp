@@ -1,4 +1,6 @@
 #include "plugins/editor/ui/ui_editor_mcp_tools.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/editor/mcp/editor_tool_registration.hpp"
 
 #include "plugins/editor/mcp/editor_mcp_tools.hpp"
@@ -13,9 +15,11 @@ namespace engine::plugins::ui
 {
 bool register_ui_editor_tools(mcp::McpSystem& system, mcp::EditorMcpTools& editor)
 {
+    ENGINE_PROFILE_FUNCTION();
     using Json = nlohmann::json;
     const auto add = [&](std::string name, std::string description, Json schema)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         auto command = name;
         return mcp::register_editor_command_tool(
             system, editor, std::move(name), std::move(description), std::move(schema), command);

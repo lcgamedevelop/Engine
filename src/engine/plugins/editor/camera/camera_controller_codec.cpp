@@ -1,18 +1,23 @@
 #include "plugins/editor/camera/camera_controller_codec.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/asset_pipeline/control_toml.hpp"
 #include "plugins/runtime/camera/camera_controller.hpp"
 namespace engine::plugins::camera_editor
 {
 schema::ComponentPayload CameraControllerCodec::type() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::ComponentPayload::CameraControllerData;
 }
 std::string_view CameraControllerCodec::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "camera_controller";
 }
 bool CameraControllerCodec::validate(const schema::ComponentDataT& c, std::string& e) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* d = c.payload.AsCameraControllerData();
     if (!d)
     {
@@ -24,6 +29,7 @@ bool CameraControllerCodec::validate(const schema::ComponentDataT& c, std::strin
 bool CameraControllerCodec::read(const toml::table& t, schema::ComponentDataT& c,
                                  std::string& e) const
 {
+    ENGINE_PROFILE_FUNCTION();
     nlohmann::json j;
     schema::CameraControllerDataT d;
     if (!editor::asset_pipeline::control_toml::read_component(t, j, e) ||
@@ -42,6 +48,7 @@ bool CameraControllerCodec::read(const toml::table& t, schema::ComponentDataT& c
 }
 void CameraControllerCodec::write(const schema::ComponentDataT& c, toml::table& t) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* d = c.payload.AsCameraControllerData();
     if (!d)
     {
@@ -54,6 +61,7 @@ bool CameraControllerCodec::remap_node_references(schema::ComponentDataT& c,
                                                   std::span<const schema::NodeIdMappingT> mappings,
                                                   std::string& e) const
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* d = c.payload.AsCameraControllerData();
     if (!d)
     {
@@ -61,6 +69,7 @@ bool CameraControllerCodec::remap_node_references(schema::ComponentDataT& c,
     }
     const auto remap = [&](std::uint64_t& id)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (!id)
         {
             return true;
@@ -93,6 +102,7 @@ bool CameraControllerCodec::remap_node_references(schema::ComponentDataT& c,
 }
 bool register_camera_codec(const camera::CameraTypeRegistry& types)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!types.frozen())
     {
         return false;

@@ -1,4 +1,6 @@
 #pragma once
+
+#include "runtime/performance/function_profile.hpp"
 #include "plugins/runtime/camera/camera_types.hpp"
 namespace engine::plugins::camera
 {
@@ -8,10 +10,12 @@ public:
     using Data = schema::CameraTargetTestDataT;
     static constexpr std::string_view type()
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return "target";
     }
     static const Data* find(const schema::CameraControllerDataT& d, std::uint64_t id)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (d.machine && d.machine->condition_data)
         {
             for (const auto& v : d.machine->condition_data->target_tests)
@@ -26,6 +30,7 @@ public:
     }
     static const Data* find(const schema::CameraStateMachineDataT& d, std::uint64_t id)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (d.condition_data)
         {
             for (const auto& v : d.condition_data->target_tests)

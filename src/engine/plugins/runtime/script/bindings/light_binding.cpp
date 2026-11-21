@@ -1,4 +1,5 @@
 #include "plugins/runtime/script/bindings/light_binding.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/script/bindings/binding_helpers.hpp"
 #include "plugins/runtime/script/bindings/control_binding_helpers.hpp"
 
@@ -51,6 +52,7 @@ Object.freeze(Light);
 
 void get_shadow_method(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto light = binding_detail::component<Light>(arguments, 2);
     LightSettings settings;
     arguments.set_return({});
@@ -61,6 +63,7 @@ void get_shadow_method(const Arguments& arguments)
 }
 void set_shadow_method(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto light = binding_detail::component<Light>(arguments, 3);
     LightSettings settings;
     arguments.set_return(false);
@@ -74,6 +77,7 @@ void set_shadow_method(const Arguments& arguments)
 }
 void get_vsm(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto light = binding_detail::component<Light>(arguments, 2);
     LightSettings settings;
     arguments.set_return({});
@@ -87,6 +91,7 @@ void get_vsm(const Arguments& arguments)
 }
 void set_vsm(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto light = binding_detail::component<Light>(arguments, 3);
     LightSettings settings;
     control_detail::Json json;
@@ -107,6 +112,7 @@ void set_vsm(const Arguments& arguments)
 
 void color(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto node = BindingContext::node(arguments);
     auto light = !node ? Light{} : node.get_component<Light>();
@@ -130,6 +136,7 @@ void color(const Arguments& arguments)
 
 void intensity(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto node = BindingContext::node(arguments);
     auto light = !node ? Light{} : node.get_component<Light>();
@@ -148,6 +155,7 @@ void intensity(const Arguments& arguments)
 }
 void shadows(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto node = BindingContext::node(arguments);
     auto light = !node ? Light{} : node.get_component<Light>();
@@ -172,6 +180,7 @@ void shadows(const Arguments& arguments)
 
 void directional(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto node = BindingContext::node(arguments);
     auto light = !node ? Light{} : node.get_component<Light>();
@@ -190,6 +199,7 @@ void directional(const Arguments& arguments)
 
 void shadow_cascades(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto node = BindingContext::node(arguments);
     auto light = !node ? Light{} : node.get_component<Light>();
@@ -219,6 +229,7 @@ void shadow_cascades(const Arguments& arguments)
 
 void point(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto node = BindingContext::node(arguments);
     auto light = !node ? Light{} : node.get_component<Light>();
@@ -238,6 +249,7 @@ void point(const Arguments& arguments)
 
 void spot(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto node = BindingContext::node(arguments);
     auto light = !node ? Light{} : node.get_component<Light>();
@@ -260,16 +272,19 @@ void spot(const Arguments& arguments)
 
 std::string_view LightBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "Light";
 }
 
 std::string_view LightBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 
 bool LightBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.integer("LightKind", static_cast<int>(Light::component_type)) &&
            vm.function("LightAdd", binding_detail::add_component<Light>) &&
            vm.function("LightColor", color) && vm.function("LightIntensity", intensity) &&

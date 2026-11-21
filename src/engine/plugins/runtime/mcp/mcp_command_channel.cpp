@@ -1,4 +1,6 @@
 #include "plugins/runtime/mcp/mcp_command_channel.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/utils/path_utils.hpp"
 
@@ -22,10 +24,12 @@ constexpr std::size_t message_limit = 1024 * 1024;
 
 bool token(std::string_view value)
 {
+    ENGINE_PROFILE_FUNCTION();
     return !value.empty() && value.size() <= 128 &&
            std::all_of(value.begin(), value.end(),
                        [](unsigned char ch)
                        {
+                           ENGINE_PROFILE_FUNCTION_PROBE();
                            return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
                                   (ch >= '0' && ch <= '9') || ch == '_' || ch == '-';
                        });
@@ -33,6 +37,7 @@ bool token(std::string_view value)
 
 bool plain_path(const fs::path& path)
 {
+    ENGINE_PROFILE_FUNCTION();
     fs::path current;
     for (const auto& part : path)
     {
@@ -53,6 +58,7 @@ bool plain_path(const fs::path& path)
 
 bool read_text(const fs::path& path, std::string& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     std::error_code error;
     const auto size = fs::file_size(path, error);
@@ -73,6 +79,7 @@ bool read_text(const fs::path& path, std::string& output)
 
 bool write_json(const fs::path& path, const Json& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto text = value.dump(-1, ' ', false, Json::error_handler_t::replace) + '\n';
     if (text.size() > message_limit)
     {
@@ -101,10 +108,12 @@ bool write_json(const fs::path& path, const Json& value)
 McpCommandChannel::McpCommandChannel(fs::path directory, std::string session, Handler execute)
     : execute_(std::move(execute)), directory_(std::move(directory)), session_(std::move(session))
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 bool McpCommandChannel::publish_pending()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (pending_.is_null())
     {
         return true;
@@ -130,6 +139,7 @@ bool McpCommandChannel::publish_pending()
 
 bool McpCommandChannel::poll()
 {
+    ENGINE_PROFILE_FUNCTION();
     last_error_.clear();
     if (!pending_.is_null())
     {
@@ -231,15 +241,26 @@ bool McpCommandChannel::poll()
             return false;
         }
         pending_ = std::move(receipt);
-        executed_.insert(id);
-    }
-    else if (executed_.contains(id))
-    {
-        last_error_ = "Original editor command receipt is missing; replay rejected";
-        return false;
     }
     else
     {
+        const auto started = receipts / (id + ".started");
+        if (!plain_path(started))
+        {
+            last_error_ = "Editor command marker path contains a symlink or is inaccessible";
+            return false;
+        }
+        const bool claimed = fs::create_directory(started, code);
+        if (code)
+        {
+            last_error_ = "Cannot record editor command before execution";
+            return false;
+        }
+        if (!claimed)
+        {
+            last_error_ = "Original editor command receipt is missing; replay rejected";
+            return false;
+        }
         const auto command = request["command"].get<std::string>();
         Json result;
         std::string error;
@@ -263,7 +284,6 @@ bool McpCommandChannel::poll()
                     {"requestId", id},           {"command", command.substr(0, 128)},
                     {"success", success},        {"result", std::move(result)},
                     {"error", std::move(error)}, {"completedAtMs", completed_at}};
-        executed_.insert(id);
     }
     last_text_ = std::move(text);
     return publish_pending();
@@ -271,11 +291,13 @@ bool McpCommandChannel::poll()
 
 const Json& McpCommandChannel::last_receipt() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return last_receipt_;
 }
 
 const std::string& McpCommandChannel::last_error() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return last_error_;
 }
 

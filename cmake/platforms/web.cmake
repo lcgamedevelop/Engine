@@ -39,7 +39,8 @@ if(NOT ENGINE_EXPORT_PRODUCT MATCHES "^[a-z][a-z0-9_-]*$")
     message(FATAL_ERROR "ENGINE_EXPORT_PRODUCT must be a lowercase application identity")
 endif()
 function(engine_add_web_runtime target)
-    add_executable(${target} platforms/web/main.cpp src/runtime_entry.cpp ${ARGN})
+    add_executable(${target} platforms/web/main.cpp platforms/web/clock.cpp src/runtime_entry.cpp
+        ${ARGN})
     set_target_properties(${target} PROPERTIES OUTPUT_NAME engine SUFFIX ".mjs")
     target_include_directories(${target} PRIVATE "${PROJECT_SOURCE_DIR}/src"
         "${PROJECT_SOURCE_DIR}/src/engine" "${PROJECT_SOURCE_DIR}/platforms")
@@ -57,18 +58,34 @@ function(engine_add_web_runtime target)
     engine_link_destruction_plugin(${target})
     engine_configure_runtime_settings(${target})
     engine_apply_options(${target})
+    set(_web_exports "'_main','_engine_web_request_exit','_engine_web_storage_open','_engine_web_storage_close','_emscripten_proxy_finish'")
+    if(NOT ENGINE_TRACY_MEMORY_MODE STREQUAL "off")
+        string(APPEND _web_exports ",'_engine_web_request_memory_snapshot'")
+        target_link_libraries(${target} PRIVATE engine::memory_profile nlohmann_json::nlohmann_json)
+        target_compile_definitions(${target} PRIVATE JSON_NOEXCEPTION=1)
+    endif()
+    if(ENGINE_WEB_HEAP_OBSERVATION)
+        target_sources(${target} PRIVATE platforms/web/heap.cpp)
+        target_compile_definitions(${target} PRIVATE ENGINE_ENABLE_WEB_HEAP_OBSERVATION=1)
+        target_link_options(${target} PRIVATE "-sMALLOC=dlmalloc")
+        foreach(_allocation malloc calloc realloc realloc_in_place free
+                aligned_alloc posix_memalign memalign valloc pvalloc)
+            target_link_options(${target} PRIVATE "-Wl,--wrap=${_allocation}")
+        endforeach()
+    endif()
     target_compile_options(${target} PRIVATE --use-port=emdawnwebgpu
         -Wno-dollar-in-identifier-extension)
+    # SDL 在创建浏览器窗口时替换 requestFullscreen 回调，调试构建也需要可写的导出。
     target_link_options(${target} PRIVATE
         "--js-library=${_web_support}/src/lib/libidbfs.js"
+        "-Wl,--wrap=__wasi_clock_time_get"
         "-sMODULARIZE=1" "-sEXPORT_ES6=1" "-sINVOKE_RUN=0" "-sEXIT_RUNTIME=0"
         "-sPROXY_TO_PTHREAD=1" "-sOFFSCREENCANVAS_SUPPORT=1"
         "-sOFFSCREENCANVASES_TO_PTHREAD=#canvas" "-sPTHREAD_POOL_SIZE=8"
         "-sALLOW_MEMORY_GROWTH=1" "-sINITIAL_MEMORY=134217728" "-sMAXIMUM_MEMORY=2147483648"
         "-sSTACK_SIZE=4194304" "-sDEFAULT_PTHREAD_STACK_SIZE=2097152"
-        "-sASYNCIFY=1" "-sASYNCIFY_STACK_SIZE=65536"
-        "-sEXPORTED_FUNCTIONS=['_main','_engine_web_request_exit','_engine_web_storage_open','_engine_web_storage_close','_emscripten_proxy_finish']"
-        "-sEXPORTED_RUNTIME_METHODS=['FS','IDBFS','callMain','PThread']")
+        "-sEXPORTED_FUNCTIONS=[${_web_exports}]"
+        "-sEXPORTED_RUNTIME_METHODS=['FS','IDBFS','callMain','PThread','requestFullscreen']")
 endfunction()
 engine_add_web_runtime(engine_project_app)
 

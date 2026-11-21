@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/schema/animation_retarget_generated.h"
 #include "runtime/schema/skeleton_generated.h"
 
@@ -11,6 +13,7 @@ namespace engine::retarget_resource_detail
 {
 inline bool joint_paths(const schema::SkeletonDataT& skeleton, std::set<std::string>& output)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     output.clear();
     if (skeleton.joints.empty() || skeleton.joints.size() > 1024)
     {
@@ -38,6 +41,7 @@ inline bool joint_paths(const schema::SkeletonDataT& skeleton, std::set<std::str
 inline bool binding_shape(const schema::AnimationRetargetProfileDataT& profile,
                           const schema::SkeletonDataT& source, const schema::SkeletonDataT& target)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     if ((!profile.source_reference_pose.empty() &&
          profile.source_reference_pose.size() != source.joints.size()) ||
         (!profile.target_reference_pose.empty() &&

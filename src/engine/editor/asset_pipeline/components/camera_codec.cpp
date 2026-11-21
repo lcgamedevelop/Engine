@@ -1,4 +1,5 @@
 #include "editor/asset_pipeline/components/camera_codec.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/core/guid_map.hpp"
 
@@ -13,16 +14,19 @@ namespace engine::editor::asset_pipeline
 
 schema::ComponentPayload CameraCodec::type() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::ComponentPayload::CameraData;
 }
 
 std::string_view CameraCodec::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "camera";
 }
 
 bool CameraCodec::validate(const schema::ComponentDataT& component, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
 
     const auto* value = component.payload.AsCameraData();
     if (value == nullptr || !std::isfinite(value->fov_degrees) ||
@@ -42,6 +46,7 @@ bool CameraCodec::validate(const schema::ComponentDataT& component, std::string&
 bool CameraCodec::read(const toml::table& table, schema::ComponentDataT& component,
                        std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
 
     schema::CameraDataT value;
     if ((table.contains("fov_degrees") &&
@@ -78,6 +83,7 @@ bool CameraCodec::read(const toml::table& table, schema::ComponentDataT& compone
 
 void CameraCodec::write(const schema::ComponentDataT& component, toml::table& value) const
 {
+    ENGINE_PROFILE_FUNCTION();
 
     const auto* camera = component.payload.AsCameraData();
     value.insert("type", "camera");

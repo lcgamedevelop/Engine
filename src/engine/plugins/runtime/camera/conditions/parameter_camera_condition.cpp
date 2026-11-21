@@ -1,10 +1,13 @@
 #include "plugins/runtime/camera/conditions/parameter_camera_condition.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/camera/conditions/comparison.hpp"
 namespace engine::plugins::camera
 {
 bool ParameterCameraCondition::validate(const Data& d, const schema::CameraControllerDataT& def,
                                         std::string& e)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* p = detail::parameter(def, d.parameter);
     if (!p || !d.value || p->type != d.value->type ||
         p->type == schema::CameraParameterType::trigger ||
@@ -37,6 +40,7 @@ bool ParameterCameraCondition::validate(const Data& d, const schema::CameraContr
 bool ParameterCameraCondition::evaluate(const Data& d, const CameraEvaluationContext& c,
                                         CameraConditionMatch& out)
 {
+    ENGINE_PROFILE_FUNCTION();
     out = {};
     schema::CameraParameterValueT p;
     if (!d.value || !c.parameter(d.parameter, p) || p.type != d.value->type)
@@ -45,6 +49,7 @@ bool ParameterCameraCondition::evaluate(const Data& d, const CameraEvaluationCon
     }
     const auto number = [](const auto& v) -> double
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (v.type == schema::CameraParameterType::float_value)
         {
             return v.float_value;

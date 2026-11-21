@@ -1,5 +1,7 @@
 #include "runtime/world/world_scene_scope.hpp"
 
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/resource/types/scene_resource.hpp"
 #include "runtime/scene/ecs_storage.hpp"
 #include "runtime/scene/resource_binding.hpp"
@@ -15,6 +17,7 @@ namespace
 {
 std::uint64_t scope_time()
 {
+    ENGINE_PROFILE_FUNCTION();
     return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
                                           std::chrono::steady_clock::now().time_since_epoch())
                                           .count());
@@ -23,6 +26,7 @@ std::uint64_t scope_time()
 
 bool WorldSystem::begin_scope(SceneLoadKind kind, std::uint64_t destination, SceneScopeId& output)
 {
+    ENGINE_PROFILE_ZONE("World.beginScope");
     output = {};
     if (!is_initialized() || !can_modify() || scope_write_active_ || scopes_.size() >= 256 ||
         scene_sequence_ == std::numeric_limits<std::uint64_t>::max() ||
@@ -56,6 +60,7 @@ bool WorldSystem::begin_scope(SceneLoadKind kind, std::uint64_t destination, Sce
 
 bool WorldSystem::restore_scope(SceneScopeId id, const ResourceHandle& handle)
 {
+    ENGINE_PROFILE_ZONE("World.restoreScope");
     const auto found = scopes_.find(id.value);
     if (id.world_epoch != world_epoch_ || found == scopes_.end() || !can_modify() ||
         scope_write_active_)
@@ -75,6 +80,8 @@ bool WorldSystem::restore_scope(SceneScopeId id, const ResourceHandle& handle)
         scope.resource.reset();
         return false;
     }
+    resources_->set_memory_owner(scope.resource.handle(),
+                                 {ResourceMemoryOwnerKind::scene_scope, id.world_epoch, id.value});
     scope.restored = false;
     scope.started_ns = scope_time();
     scope.progress = {};
@@ -88,6 +95,7 @@ bool WorldSystem::restore_scope(SceneScopeId id, const ResourceHandle& handle)
 
 SceneWorkState WorldSystem::step_scope(SceneScopeId id, const SceneWorkBudget& budget)
 {
+    ENGINE_PROFILE_ZONE("World.stepScope");
     const auto found = scopes_.find(id.value);
     if (id.world_epoch != world_epoch_ || found == scopes_.end() || !can_modify() ||
         scope_write_active_ || !std::isfinite(budget.seconds) || budget.seconds <= 0)
@@ -105,6 +113,7 @@ SceneWorkState WorldSystem::step_scope(SceneScopeId id, const SceneWorkBudget& b
     const auto started = scope_time();
     const auto fail = [&]()
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         scope.progress.state = SceneWorkState::failed;
         scope.progress.error_code = "restore_failed";
         scope.progress.error = "Cannot restore or map the candidate scene";
@@ -244,6 +253,7 @@ SceneWorkState WorldSystem::step_scope(SceneScopeId id, const SceneWorkBudget& b
 
 Scene* WorldSystem::scope_candidate(SceneScopeId id) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto found = scopes_.find(id.value);
     if (id.world_epoch != world_epoch_)
     {
@@ -279,6 +289,7 @@ Scene* WorldSystem::scope_candidate(SceneScopeId id) const noexcept
 
 bool WorldSystem::seal_scope(SceneScopeId id)
 {
+    ENGINE_PROFILE_ZONE("World.sealScope");
     const auto found = scopes_.find(id.value);
     if (id.world_epoch != world_epoch_ || found == scopes_.end() || !can_modify() ||
         scope_write_active_)
@@ -299,6 +310,7 @@ bool WorldSystem::seal_scope(SceneScopeId id)
     query.each(
         [&](flecs::entity entity, const ecs_detail::NodeRuntime& runtime)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             const auto node = Node(*this, world_epoch_, entity.id());
             if (runtime.scope_scene == scope.candidate.get())
             {
@@ -328,6 +340,7 @@ bool WorldSystem::seal_scope(SceneScopeId id)
 
 bool WorldSystem::freeze_scope(SceneScopeId id)
 {
+    ENGINE_PROFILE_ZONE("World.freezeScope");
     const auto found = scopes_.find(id.value);
     if (id.world_epoch != world_epoch_ || found == scopes_.end() || !can_modify() ||
         scope_write_active_)
@@ -348,6 +361,7 @@ bool WorldSystem::freeze_scope(SceneScopeId id)
 
 bool WorldSystem::with_scope_write(SceneScopeId id, const std::function<bool(Scene&)>& callback)
 {
+    ENGINE_PROFILE_ZONE("World.writeScope");
     const auto found = scopes_.find(id.value);
     if (!callback || scope_write_active_ || ecs_detail::preparing_scope != 0 ||
         id.world_epoch != world_epoch_ || found == scopes_.end() || !can_modify())
@@ -373,6 +387,7 @@ bool WorldSystem::with_scope_write(SceneScopeId id, const std::function<bool(Sce
 
 bool WorldSystem::scope_status(SceneScopeId id, ScenePreparationSnapshot& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     const auto found = scopes_.find(id.value);
     if (id.world_epoch != world_epoch_ || found == scopes_.end())
@@ -387,6 +402,7 @@ bool WorldSystem::scope_status(SceneScopeId id, ScenePreparationSnapshot& output
 
 bool WorldSystem::publish_scope(SceneScopeId id)
 {
+    ENGINE_PROFILE_ZONE("World.publishScope");
     const auto found = scopes_.find(id.value);
     if (id.world_epoch != world_epoch_ || found == scopes_.end() || !can_modify() ||
         scope_write_active_)
@@ -421,6 +437,12 @@ bool WorldSystem::publish_scope(SceneScopeId id)
     }
     scope.candidate->published_ = true;
     scope.published_scene = scope.candidate.get();
+    if (resources_ && scope.candidate->resource_.id != 0)
+    {
+        resources_->set_memory_owner(scope.candidate->resource_,
+                                     {ResourceMemoryOwnerKind::scene, id.world_epoch,
+                                      scope.candidate->id()});
+    }
     if (scope.kind == SceneLoadKind::replace_scene)
     {
         for (const auto& old : scenes_)
@@ -442,6 +464,7 @@ bool WorldSystem::publish_scope(SceneScopeId id)
 
 bool WorldSystem::activate_scope(SceneScopeId id)
 {
+    ENGINE_PROFILE_ZONE("World.activateScope");
     const auto found = scopes_.find(id.value);
     if (id.world_epoch != world_epoch_ || found == scopes_.end() || !can_modify() ||
         scope_write_active_)
@@ -509,6 +532,7 @@ bool WorldSystem::activate_scope(SceneScopeId id)
 
 bool WorldSystem::cancel_scope(SceneScopeId id)
 {
+    ENGINE_PROFILE_ZONE("World.cancelScope");
     const auto found = scopes_.find(id.value);
     if (id.world_epoch != world_epoch_ || found == scopes_.end() || !can_modify() ||
         (scope_write_active_ || found->second->published))
@@ -525,6 +549,7 @@ bool WorldSystem::cancel_scope(SceneScopeId id)
 
 void WorldSystem::release_scope(SceneScopeId id) noexcept
 {
+    ENGINE_PROFILE_ZONE("World.releaseScope");
     if (scope_write_active_)
     {
         return;

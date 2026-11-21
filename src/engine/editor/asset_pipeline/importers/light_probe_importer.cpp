@@ -1,4 +1,5 @@
 #include "editor/asset_pipeline/importers/light_probe_importer.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/resource/virtual_file_system.hpp"
 
 #include "editor/asset_pipeline/asset_io.hpp"
@@ -13,25 +14,30 @@ namespace engine::editor::asset_pipeline
 {
 std::string_view LightProbeImporter::id() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "light_probe";
 }
 schema::AssetKind LightProbeImporter::kind() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::light_probe;
 }
 bool LightProbeImporter::matches(const std::filesystem::path& source) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return source_extension(source) == ".lightprobe";
 }
 bool LightProbeImporter::inspect_batch(const ImportContext&, std::string& fingerprint,
                                        std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema_fingerprint({"runtime/light_probe.fbs", "runtime/common.fbs"}, fingerprint,
                               error);
 }
 bool LightProbeImporter::convert(const ImportAsset& asset, const ImportContext& context,
                                  std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     ByteBuffer bytes;
     if (!VirtualFileSystem::read_file(asset.source, bytes) || bytes.empty() ||
         bytes.size() > 32U * 1024U * 1024U)

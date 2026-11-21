@@ -1,4 +1,6 @@
 #include "runtime/resource/codecs/font_resource_codec.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/resource/codecs/resource_decode.hpp"
 
 #include <set>
@@ -19,17 +21,20 @@ constexpr std::size_t maximum_kerning = 1024U * 1024U;
 
 bool scalar(std::uint32_t codepoint) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return codepoint <= 0x10ffff && (codepoint < 0xd800 || codepoint > 0xdfff);
 }
 
 bool metric(float value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::isfinite(value) && std::abs(value) <= 128.0F;
 }
 } // namespace
 
 bool FontResourceCodec::validate(const schema::FontDataT& data) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (data.schema_version != 1 || data.family.empty() || data.family.size() > 256 ||
         data.style.empty() || data.style.size() > 256 || data.units_per_em < 16 ||
         data.units_per_em > 16384 || data.glyphs.empty() || data.glyphs.size() > maximum_glyphs ||
@@ -75,9 +80,13 @@ bool FontResourceCodec::validate(const schema::FontDataT& data) noexcept
     }
     const auto has_glyph = [&data](std::uint32_t codepoint)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const auto found = std::lower_bound(data.glyphs.begin(), data.glyphs.end(), codepoint,
                                             [](const auto& glyph, std::uint32_t value)
-                                            { return glyph->codepoint < value; });
+                                            {
+                                                ENGINE_PROFILE_FUNCTION_PROBE();
+                                                return glyph->codepoint < value;
+                                            });
         return found != data.glyphs.end() && (*found)->codepoint == codepoint;
     };
     std::uint64_t previous_pair = 0;
@@ -97,14 +106,17 @@ bool FontResourceCodec::validate(const schema::FontDataT& data) noexcept
 
 schema::AssetKind FontResourceCodec::kind() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::font;
 }
 
 bool FontResourceCodec::decode(const schema::AssetEntryT& entry, ByteView payload,
                                std::unique_ptr<Resource>& output, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto validate = [](ByteView payload, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (!resource_decode_detail::verify_flatbuffer(payload, schema::VerifyFontDataBuffer,
                                                        "Invalid Font FlatBuffer", error))
         {
@@ -123,11 +135,16 @@ bool FontResourceCodec::decode(const schema::AssetEntryT& entry, ByteView payloa
     };
     return resource_decode_detail::decode_flatbuffer<ResourceType>(
         entry, payload, 64U * 1024U * 1024U, validate,
-        [](const std::uint8_t* bytes) { return schema::UnPackFontData(bytes); }, output, error);
+        [](const std::uint8_t* bytes)
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return schema::UnPackFontData(bytes);
+        }, output, error);
 }
 
 bool FontResourceCodec::validate_data(const Resource& resource, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* data = resource_detail::data<ResourceType>(&resource);
     if (!data || !(resource.info().dependencies.empty() && validate(*data)))
     {
@@ -141,6 +158,7 @@ bool FontResourceCodec::validate_data(const Resource& resource, std::string& err
 bool FontResourceCodec::validate_dependencies(const Resource& resource, ResourceView dependencies,
                                               std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     return resource.info().dependencies.empty() && dependencies.empty();
 }

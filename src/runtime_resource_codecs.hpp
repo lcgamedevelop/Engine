@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/resource/codecs/animation_resource_codec.hpp"
 #include "runtime/resource/codecs/animation_retarget_resource_codec.hpp"
 #include "runtime/resource/codecs/audio_resource_codec.hpp"
@@ -33,6 +35,7 @@ namespace
 {
 bool register_runtime_resource_codecs(engine::ResourceSystem& resources)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     if (!resources.add<engine::SourceResourceCodec>() ||
         !resources.add<engine::ScriptResourceCodec>() ||
         !resources.add<engine::SceneResourceCodec>() ||

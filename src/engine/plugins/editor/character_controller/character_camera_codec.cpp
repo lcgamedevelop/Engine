@@ -1,18 +1,22 @@
 #include "plugins/editor/character_controller/character_camera_codec.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/asset_pipeline/control_toml.hpp"
 #include "plugins/runtime/character_controller/character_camera.hpp"
 namespace engine::plugins::character_controller
 {
 schema::ComponentPayload CharacterCameraCodec::type() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::ComponentPayload::CharacterCameraData;
 }
 std::string_view CharacterCameraCodec::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "character_camera";
 }
 bool CharacterCameraCodec::validate(const schema::ComponentDataT& c, std::string& e) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* d = c.payload.AsCharacterCameraData();
     if (!d)
     {
@@ -24,6 +28,7 @@ bool CharacterCameraCodec::validate(const schema::ComponentDataT& c, std::string
 bool CharacterCameraCodec::read(const toml::table& t, schema::ComponentDataT& c,
                                 std::string& e) const
 {
+    ENGINE_PROFILE_FUNCTION();
     nlohmann::json j;
     schema::CharacterCameraDataT d;
     if (!editor::asset_pipeline::control_toml::read_component(t, j, e) ||
@@ -42,6 +47,7 @@ bool CharacterCameraCodec::read(const toml::table& t, schema::ComponentDataT& c,
 }
 void CharacterCameraCodec::write(const schema::ComponentDataT& c, toml::table& t) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* d = c.payload.AsCharacterCameraData();
     if (!d)
     {
@@ -52,6 +58,7 @@ void CharacterCameraCodec::write(const schema::ComponentDataT& c, toml::table& t
 }
 bool register_character_camera_codec()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!editor::asset_pipeline::find_scene_component_codec(
             schema::ComponentPayload::CharacterCameraData))
     {

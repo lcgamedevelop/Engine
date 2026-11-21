@@ -1,4 +1,6 @@
 #include "plugins/editor/modeling/modeling_source_io.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/file_text.hpp"
 
 #include "plugins/editor/modeling/editable_mesh.hpp"
@@ -27,6 +29,7 @@ constexpr std::size_t maximum_source_size = 64 * 1024 * 1024;
 bool safe_asset_path(const fs::path& root, std::string_view name, fs::path& output,
                      std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     const auto relative = PathUtils::from_utf8(name);
     if (name.empty() || name.find('\0') != std::string_view::npos || relative.is_absolute() ||
@@ -75,6 +78,7 @@ bool safe_asset_path(const fs::path& root, std::string_view name, fs::path& outp
 
 bool save_source(const fs::path& path, const schema::EditableMeshDataT& source, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::vector<std::uint8_t> bytes;
     if (!mesh::serialize(source, bytes, error))
     {
@@ -125,6 +129,7 @@ bool save_source(const fs::path& path, const schema::EditableMeshDataT& source, 
 
 bool load_source(const fs::path& path, schema::EditableMeshDataT& source, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::error_code ec;
     const auto size = fs::file_size(path, ec);
     std::string text;
@@ -151,6 +156,7 @@ bool load_source(const fs::path& path, schema::EditableMeshDataT& source, std::s
     bytes.reserve(encoded->size() / 2);
     const auto digit = [](char value) -> int
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (value >= '0' && value <= '9')
         {
             return value - '0';

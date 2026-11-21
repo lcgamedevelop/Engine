@@ -1,12 +1,18 @@
 #include "plugins/runtime/camera/modules/aim_camera_module.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/camera/camera_math.hpp"
 namespace engine::plugins::camera
 {
 bool AimCameraModule::validate(const Data& d, const schema::CameraControllerDataT& def,
                                std::string& e)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto valid_zone = [](Vec2 v)
-    { return detail::bounded(v.x(), 0, 1) && detail::bounded(v.y(), 0, 1); };
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return detail::bounded(v.x(), 0, 1) && detail::bounded(v.y(), 0, 1);
+    };
     return (detail::slot(def, d.target_slot) && detail::finite(d.target_offset) &&
             detail::finite(d.world_up) && detail::length(d.world_up) > 1e-6 &&
             valid_zone(d.screen_position) && valid_zone(d.dead_zone) && valid_zone(d.soft_zone) &&
@@ -18,6 +24,7 @@ bool AimCameraModule::validate(const Data& d, const schema::CameraControllerData
 bool AimCameraModule::evaluate(const Data& d, const Runtime& current, Runtime& next,
                                const CameraEvaluationContext& c, CameraPose& p)
 {
+    ENGINE_PROFILE_FUNCTION();
     using namespace detail;
     CameraTargetPose t;
     if (!c.target(d.target_slot, t))

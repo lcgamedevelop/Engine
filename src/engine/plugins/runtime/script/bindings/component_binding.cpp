@@ -1,4 +1,5 @@
 #include "plugins/runtime/script/bindings/component_binding.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "plugins/runtime/script/bindings/binding_context.hpp"
 #include "runtime/scene/component.hpp"
@@ -48,11 +49,13 @@ Object.freeze(Component);
 
 void valid(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(arguments.count() == 3 && BindingContext::component(arguments).valid());
 }
 
 void identity(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto component = BindingContext::component(arguments);
     arguments.set_return(arguments.count() == 3 && component.valid() ? component.instance_id()
                                                                      : std::uint64_t{0});
@@ -60,6 +63,7 @@ void identity(const Arguments& arguments)
 
 void enabled(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto component = BindingContext::component(arguments);
     if (component.valid() && arguments.count() == 4 && arguments.is_boolean(3))
@@ -70,6 +74,7 @@ void enabled(const Arguments& arguments)
 
 void state(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     const auto target = BindingContext::component(arguments);
     if (!target || arguments.count() != 3)
@@ -95,6 +100,7 @@ void state(const Arguments& arguments)
 
 void set_visible(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto target = BindingContext::component(arguments);
     if (target.valid() && arguments.count() == 4 && arguments.is_boolean(3))
@@ -107,16 +113,19 @@ void set_visible(const Arguments& arguments)
 
 std::string_view ComponentBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "Component";
 }
 
 std::string_view ComponentBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 
 bool ComponentBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.function("ComponentValid", valid) && vm.function("ComponentIdentity", identity) &&
            vm.function("ComponentEnabled", enabled) &&
            vm.function("ComponentLocalEnabled", state, 0) &&

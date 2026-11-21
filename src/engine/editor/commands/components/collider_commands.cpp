@@ -1,4 +1,6 @@
 #include "editor/commands/components/component_edit.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/resource/resource_system.hpp"
 #include "runtime/scene/collider.hpp"
 namespace engine::editor::components
@@ -8,6 +10,7 @@ namespace
 bool read(ResourceLoader* loader, const Json& arguments, schema::ColliderDataT& value,
           std::vector<ResourceReference>& prepared, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!fields(arguments,
                 {"enabled", "shape", "mesh", "halfExtents", "radius", "halfHeight", "center",
                  "friction", "restitution", "isTrigger"},
@@ -106,6 +109,7 @@ bool read(ResourceLoader* loader, const Json& arguments, schema::ColliderDataT& 
 }
 Json write(ResourceLoader* loader, const schema::ColliderDataT& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     Json result = Json::object();
     result["shape"] = schema::EnumNameColliderShape(value.shape);
     result["meshGuid"] = value.mesh_guid;
@@ -128,11 +132,19 @@ Json write(ResourceLoader* loader, const schema::ColliderDataT& value)
 } // namespace
 bool register_collider(WorldSystem& world, EditorCommands& commands, SceneCommands& scene_commands)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!register_component<engine::Collider, schema::ColliderDataT>(
             world, scene_commands, commands, "collider",
             [&world](Node, const auto& args, auto& data, auto& prepared, auto& error)
-            { return read(world.resource_loader(), args, data, prepared, error); },
-            [&world](auto, const auto& data) { return write(world.resource_loader(), data); }))
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return read(world.resource_loader(), args, data, prepared, error);
+            },
+            [&world](auto, const auto& data)
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return write(world.resource_loader(), data);
+            }))
     {
         return false;
     }

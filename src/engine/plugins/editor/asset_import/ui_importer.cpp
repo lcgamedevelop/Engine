@@ -1,4 +1,5 @@
 #include "plugins/editor/asset_import/ui_importer.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "editor/asset_pipeline/asset_io.hpp"
 #include "editor/asset_pipeline/importer_utils.hpp"
@@ -26,17 +27,20 @@ constexpr std::size_t maximum_markup_size = 1024U * 1024U;
 
 bool whitespace(char value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return value == ' ' || value == '\t' || value == '\r' || value == '\n';
 }
 
 bool name_character(char value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return (value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z') ||
            (value >= '0' && value <= '9') || value == '-' || value == '_' || value == ':';
 }
 
 std::string lowercase(std::string_view text)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string result(text);
     for (auto& value : result)
     {
@@ -52,6 +56,7 @@ bool resolve(std::string_view name, schema::AssetKind kind,
              const editor::asset_pipeline::ImportContext& context, Guid& guid, std::string& path,
              std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (GuidMap::valid_guid(name))
     {
         guid = name;
@@ -83,6 +88,7 @@ bool read_references(const toml::table& settings, const char* field, schema::Ass
                      const editor::asset_pipeline::ImportContext& context,
                      std::vector<std::string>& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* references = settings[field].as_array();
     const std::size_t maximum = kind == schema::AssetKind::font ? 64U : 256U;
     if (references == nullptr || references->size() > maximum)
@@ -118,6 +124,7 @@ bool read_settings(const std::filesystem::path& source,
                    const editor::asset_pipeline::ImportContext& context,
                    schema::UiDocumentDataT& document, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto meta = source;
     meta += ".meta";
     toml::table root;
@@ -211,6 +218,7 @@ bool read_settings(const std::filesystem::path& source,
 
 bool validate_style(std::string_view text, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     // RCSS images need additional resource dependency rules. Keep this stage explicit.
     std::string normalized;
     normalized.reserve(text.size());
@@ -237,6 +245,7 @@ bool validate_style(std::string_view text, std::string& error)
 bool validate_markup(const schema::UiDocumentDataT& document,
                      const editor::asset_pipeline::ImportContext& context, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const std::string_view text = document.markup;
     if (text.empty() || text.size() > maximum_markup_size || text.find('\0') != std::string::npos)
     {
@@ -410,6 +419,7 @@ bool read_document(const editor::asset_pipeline::ImportAsset& asset,
                    const editor::asset_pipeline::ImportContext& context,
                    schema::UiDocumentDataT& document, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::vector<std::byte> bytes;
     if (!read_settings(asset.source, context, document, error) ||
         !editor::asset_pipeline::read_bytes(asset.source, bytes, error))
@@ -428,21 +438,25 @@ bool read_document(const editor::asset_pipeline::ImportAsset& asset,
 
 std::string_view UiImporter::id() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "ui";
 }
 
 schema::AssetKind UiImporter::kind() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::ui;
 }
 
 bool UiImporter::matches(const std::filesystem::path& source) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return editor::asset_pipeline::source_extension(source) == ".rml";
 }
 
 std::string_view UiImporter::default_meta() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "\n[ui]\ntextures = []\n\n[[ui.fonts]]\nfamily = \"body\"\nasset = \"\"\n"
            "shader = \"builtin://shaders/font\"\n";
 }
@@ -450,6 +464,7 @@ std::string_view UiImporter::default_meta() const noexcept
 bool UiImporter::inspect_batch(const editor::asset_pipeline::ImportContext&,
                                std::string& fingerprint, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!editor::asset_pipeline::schema_fingerprint({"runtime/ui.fbs"}, fingerprint, error))
     {
         return false;
@@ -462,6 +477,7 @@ bool UiImporter::scan_dependencies(editor::asset_pipeline::ImportAsset& asset,
                                    const editor::asset_pipeline::ImportContext& context,
                                    std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     asset.build_dependencies.clear();
     asset.runtime_dependencies.clear();
     schema::UiDocumentDataT document;
@@ -493,6 +509,7 @@ bool UiImporter::convert(const editor::asset_pipeline::ImportAsset& asset,
                          const editor::asset_pipeline::ImportContext& context,
                          std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     schema::UiDocumentDataT document;
     if (!read_document(asset, context, document, error))
     {

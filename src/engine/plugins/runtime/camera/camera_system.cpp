@@ -1,4 +1,6 @@
 #include "plugins/runtime/camera/camera_system.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/camera/camera_math.hpp"
 #include "plugins/runtime/camera/camera_runtime.hpp"
 #include "plugins/runtime/camera/camera_state_machine.hpp"
@@ -11,6 +13,7 @@ namespace
 {
 void discard_frame(const CameraController::Data& d, CameraControllerRuntime& r, bool triggers)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (std::size_t i = 0; i < d.parameters.size() && i < r.parameter_values.size(); ++i)
     {
         if (d.parameters[i].lifetime == schema::CameraParameterLifetime::frame ||
@@ -22,6 +25,7 @@ void discard_frame(const CameraController::Data& d, CameraControllerRuntime& r, 
 }
 const schema::CameraStateDataT* state(const schema::CameraStateMachineDataT& d, std::string_view id)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (const auto& s : d.states)
     {
         if (s.id == id)
@@ -34,6 +38,7 @@ const schema::CameraStateDataT* state(const schema::CameraStateMachineDataT& d, 
 const schema::CameraTransitionDataT* transition(const schema::CameraStateMachineDataT& d,
                                                 std::string_view id)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (const auto& t : d.transitions)
     {
         if (t.id == id)
@@ -45,6 +50,7 @@ const schema::CameraTransitionDataT* transition(const schema::CameraStateMachine
 }
 CameraPose blend(const CameraPose& a, const CameraPose& b, double t, schema::CameraBlendCurve curve)
 {
+    ENGINE_PROFILE_FUNCTION();
     t = std::clamp(t, 0.0, 1.0);
     switch (curve)
     {
@@ -73,17 +79,21 @@ CameraPose blend(const CameraPose& a, const CameraPose& b, double t, schema::Cam
 } // namespace
 CameraSystem::CameraSystem(WorldSystem& w, PhysicsSystem* p) noexcept : world_(w), physics_(p)
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 CameraSystem::~CameraSystem() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
 }
 bool CameraSystem::on_initialize(const EngineConfig&)
 {
+    ENGINE_PROFILE_FUNCTION();
     return world_.native_world() != nullptr;
 }
 void CameraSystem::on_shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!world_.native_world())
     {
         return;
@@ -98,6 +108,7 @@ void CameraSystem::on_shutdown() noexcept
     query.each(
         [&](flecs::entity e, CameraControllerRuntime& r)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             r = {};
             for (const auto& ops : types->modules())
             {
@@ -107,6 +118,7 @@ void CameraSystem::on_shutdown() noexcept
 }
 bool CameraSystem::on_tick(double dt)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!std::isfinite(dt) || dt < 0 || !world_.refresh_scene_state())
     {
         return false;
@@ -128,6 +140,7 @@ bool CameraSystem::on_tick(double dt)
     query.each(
         [&](flecs::entity e, const auto& storage, CameraControllerRuntime& r)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             auto c = world_.find_node(e.id()).get_component<CameraController>();
             if (!c.active())
             {
@@ -160,6 +173,7 @@ bool CameraSystem::on_tick(double dt)
 }
 bool CameraSystem::update(CameraController controller, double dt)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* storage = flecs::world(world_.native_world())
                               .entity(controller.node().id())
                               .try_get<ecs_detail::ComponentStorage<CameraController::Data>>();
@@ -168,6 +182,7 @@ bool CameraSystem::update(CameraController controller, double dt)
     const auto& types = *camera_types(world_);
     const auto fail = [&](CameraRunState status, std::string message)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         for (const auto& ops : types.modules())
         {
             ops.complete(world_, controller, false);
@@ -241,7 +256,11 @@ bool CameraSystem::update(CameraController controller, double dt)
             }
         }
         float orientation[16];
-        std::transform(m, m + 16, orientation, [](double v) { return float(v); });
+        std::transform(m, m + 16, orientation, [](double v)
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return float(v);
+        });
         targets[i].rotation_xyzw = detail::from_matrix(orientation);
     }
     context.targets = targets;
@@ -273,6 +292,7 @@ bool CameraSystem::update(CameraController controller, double dt)
     const auto evaluate_rig = [&](std::string_view state_id, std::string_view scope, bool cut,
                                   CameraPose& pose) -> bool
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const auto* s = state(*d.machine, state_id);
         if (!s)
         {

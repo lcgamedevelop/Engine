@@ -1,4 +1,6 @@
 #include "editor/asset_pipeline/importers/ktx_texture_importer.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/file_text.hpp"
 #include "runtime/resource/virtual_file_system.hpp"
 
@@ -23,6 +25,7 @@ namespace
 
 std::uint32_t uint32_at(ByteView bytes, std::size_t offset) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::to_integer<std::uint32_t>(bytes[offset]) |
            (std::to_integer<std::uint32_t>(bytes[offset + 1]) << 8U) |
            (std::to_integer<std::uint32_t>(bytes[offset + 2]) << 16U) |
@@ -31,13 +34,17 @@ std::uint32_t uint32_at(ByteView bytes, std::size_t offset) noexcept
 
 bool decode_ktx(ByteView bytes, schema::TextureDataT& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     constexpr std::array<std::uint8_t, 12> identifier{0xab, 0x4b, 0x54, 0x58, 0x20, 0x31,
                                                       0x31, 0xbb, 0x0d, 0x0a, 0x1a, 0x0a};
     if (bytes.size() < 64 || bytes.size() > 63U * 1024U * 1024U ||
         !std::equal(identifier.begin(), identifier.end(), bytes.begin(),
                     [](std::uint8_t a, std::byte b)
-                    { return a == std::to_integer<std::uint8_t>(b); }))
+                    {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
+                        return a == std::to_integer<std::uint8_t>(b);
+                    }))
     {
         return false;
     }
@@ -134,6 +141,7 @@ bool decode_ktx(ByteView bytes, schema::TextureDataT& output)
 bool settings(const std::filesystem::path& source, const schema::TextureDataT& info,
               std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto meta_path = source;
     meta_path += ".meta";
     std::string text;
@@ -203,21 +211,25 @@ bool settings(const std::filesystem::path& source, const schema::TextureDataT& i
 
 std::string_view KtxTextureImporter::id() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "texture_ktx";
 }
 
 schema::AssetKind KtxTextureImporter::kind() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::texture;
 }
 
 bool KtxTextureImporter::matches(const std::filesystem::path& source) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return source_extension(source) == ".ktx";
 }
 
 std::string_view KtxTextureImporter::default_meta() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "\n[texture]\nstorage = \"native\"\nformat = \"auto\"\ncompression = \"none\"\nsrgb = "
            "false\n";
 }
@@ -225,6 +237,7 @@ std::string_view KtxTextureImporter::default_meta() const noexcept
 bool KtxTextureImporter::inspect_batch(const ImportContext&, std::string& fingerprint,
                                        std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!schema_fingerprint({"runtime/texture.fbs"}, fingerprint, error))
     {
         return false;
@@ -236,6 +249,7 @@ bool KtxTextureImporter::inspect_batch(const ImportContext&, std::string& finger
 bool KtxTextureImporter::convert(const ImportAsset& asset, const ImportContext& context,
                                  std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     ByteBuffer bytes;
     schema::TextureDataT texture;
     if (!VirtualFileSystem::read_file(asset.source, bytes) || !decode_ktx(bytes, texture))

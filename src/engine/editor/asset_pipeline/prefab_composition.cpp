@@ -1,4 +1,5 @@
 #include "editor/asset_pipeline/prefab_composition.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "editor/asset_pipeline/components/scene_component_codec.hpp"
 #include "editor/asset_pipeline/importer_utils.hpp"
@@ -16,6 +17,7 @@ bool scan_node_dependencies(const std::vector<std::unique_ptr<schema::NodeDataT>
                             const ImportContext& context, std::vector<Guid>& dependencies,
                             std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (const auto& node : nodes)
     {
         for (const auto& component : node->components)
@@ -141,6 +143,7 @@ namespace
 bool scan_value(const toml::node& value, bool required, const ImportContext& context,
                 std::vector<Guid>& dependencies, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (const auto* array = value.as_array())
     {
         for (const auto& element : *array)
@@ -192,6 +195,7 @@ bool scan_override_dependencies(
     const std::vector<std::unique_ptr<schema::PrefabNodeOverrideT>>& overrides,
     const ImportContext& context, std::vector<Guid>& dependencies, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (const auto& node : overrides)
     {
         if (!node || node->removed)
@@ -238,6 +242,7 @@ bool scan_override_dependencies(
 
 bool compose_scene(schema::SceneDataT& scene, const ImportContext& context, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     schema::SceneDataT candidate(scene);
     std::uint64_t maximum = 0;
     std::set<std::uint64_t> reserved;

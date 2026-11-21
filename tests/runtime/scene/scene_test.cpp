@@ -3,6 +3,7 @@
 #include "scene_snapshot.hpp"
 
 #include "runtime/engine_config.hpp"
+#include "runtime/performance/memory_snapshot.hpp"
 #include "runtime/resource/resource_system.hpp"
 #include "runtime/scene/camera.hpp"
 #include "runtime/scene/light.hpp"
@@ -1883,6 +1884,20 @@ int main()
         return 1;
     }
     services.shutdown();
+    const auto memory = engine::memory_profile::snapshot();
+    if (memory.mode != engine::memory_profile::Mode::off)
+    {
+        const auto& flecs =
+            memory.pools[static_cast<std::size_t>(engine::memory_profile::Pool::flecs)];
+        if (!expect(flecs.peak_bytes > 0 && flecs.current_bytes == 0 &&
+                        flecs.live_allocations == 0,
+                    "Flecs releases the tracked heap after scene and world cycles"))
+        {
+            return 1;
+        }
+        std::printf("Flecs memory peak %llu bytes. All tracked allocations released.\n",
+                    static_cast<unsigned long long>(flecs.peak_bytes));
+    }
     std::puts("Scene, components, material parameters and resource namespaces passed.");
     return 0;
 }

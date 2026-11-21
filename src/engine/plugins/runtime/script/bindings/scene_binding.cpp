@@ -1,4 +1,5 @@
 #include "plugins/runtime/script/bindings/scene_binding.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "plugins/runtime/script/bindings/binding_context.hpp"
 #include "runtime/gameplay/gameplay_session.hpp"
@@ -87,6 +88,7 @@ Object.freeze(Scene);
 
 void create(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     auto* binding = BindingContext::current(arguments);
     std::string name;
@@ -104,6 +106,7 @@ void create(const Arguments& arguments)
 
 void load(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     auto* binding = BindingContext::current(arguments);
     std::string path;
@@ -126,6 +129,7 @@ void load(const Arguments& arguments)
 
 void begin_load(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     auto* binding = BindingContext::current(arguments);
     SceneLoadSpec spec;
@@ -172,6 +176,7 @@ void begin_load(const Arguments& arguments)
 
 void request_scene(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     auto* binding = BindingContext::current(arguments);
     std::uint64_t token = 0;
@@ -196,6 +201,7 @@ void request_scene(const Arguments& arguments)
 
 void request_status(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     auto* binding = BindingContext::current(arguments);
     std::uint64_t token = 0;
@@ -248,6 +254,7 @@ void request_status(const Arguments& arguments)
 
 void request_action(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto* binding = BindingContext::current(arguments);
     std::uint64_t token = 0;
@@ -280,6 +287,7 @@ void request_action(const Arguments& arguments)
 
 void find_node(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     auto* scene = BindingContext::scene(arguments);
     std::string name;
@@ -295,11 +303,13 @@ void find_node(const Arguments& arguments)
 
 void valid(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(arguments.count() == 1 && BindingContext::scene(arguments) != nullptr);
 }
 
 void set_paused(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto* binding = BindingContext::current(arguments);
     if (arguments.count() != 2 || !arguments.is_boolean(1) || binding == nullptr ||
@@ -313,6 +323,7 @@ void set_paused(const Arguments& arguments)
 
 void get_paused(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     auto* binding = BindingContext::current(arguments);
     if (arguments.count() == 1 && binding != nullptr &&
@@ -325,6 +336,7 @@ void get_paused(const Arguments& arguments)
 
 void instantiate_model(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     auto* scene = BindingContext::scene(arguments);
     std::string path;
@@ -342,6 +354,7 @@ void instantiate_model(const Arguments& arguments)
 
 void instantiate_prefab(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     auto* scene = BindingContext::scene(arguments);
     std::string path;
@@ -359,6 +372,7 @@ void instantiate_prefab(const Arguments& arguments)
 
 void destroy(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto* binding = BindingContext::current(arguments);
     if (arguments.count() == 1 && binding && BindingContext::scene(arguments) != nullptr &&
@@ -372,6 +386,7 @@ void destroy(const Arguments& arguments)
 
 void active_camera(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto* scene = BindingContext::scene(arguments);
     std::uint64_t id = 0;
@@ -392,16 +407,19 @@ void active_camera(const Arguments& arguments)
 
 std::string_view SceneBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "Scene";
 }
 
 std::string_view SceneBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 
 bool SceneBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.function("SceneCreate", create) && vm.function("SceneLoad", load) &&
            vm.function("SceneBeginLoad", begin_load, 0) &&
            vm.function("SceneBeginBatch", begin_load, 1) &&

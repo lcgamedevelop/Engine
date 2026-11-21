@@ -1,4 +1,5 @@
 #include "runtime/render/passes/planar_reflection_pass.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/render/passes/planar_reflection_math.hpp"
 #include "runtime/render/render_color.hpp"
 #include "runtime/render/render_sampling.hpp"
@@ -11,12 +12,14 @@ namespace engine::render_detail
 {
 PlanarReflectionPass::~PlanarReflectionPass() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     release();
 }
 
 bool PlanarReflectionPass::prepare(std::uint16_t new_width, std::uint16_t new_height,
                                    std::uint8_t samples)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (new_width == width && new_height == height && samples_ == samples &&
         bgfx::isValid(framebuffer_))
     {
@@ -81,6 +84,7 @@ bool PlanarReflectionPass::prepare(std::uint16_t new_width, std::uint16_t new_he
 bool PlanarReflectionPass::mirror(const float* plane_world, const float* camera_world,
                                   const float* camera_projection, float clip_bias)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* caps = bgfx::getCaps();
     return caps != nullptr && prepare_planar_reflection(
                                   plane_world, camera_world, camera_projection, clip_bias,
@@ -90,6 +94,7 @@ bool PlanarReflectionPass::mirror(const float* plane_world, const float* camera_
 bool PlanarReflectionPass::begin_opaque_depth(bgfx::ViewId view_id,
                                               const PlanarReflectionScissor& scissor)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!bgfx::isValid(depth_framebuffer_))
     {
         return false;
@@ -108,6 +113,7 @@ bool PlanarReflectionPass::begin_opaque_depth(bgfx::ViewId view_id,
 void PlanarReflectionPass::begin(bgfx::ViewId view_id, std::uint32_t clear_color,
                                  bool depth_prepared, const PlanarReflectionScissor& scissor)
 {
+    ENGINE_PROFILE_FUNCTION();
     attached_view_ = view_id;
     // Each view has its own palette slot; subsequent views cannot change this clear.
     const auto palette = static_cast<std::uint8_t>(2 + view_id / 40);
@@ -131,6 +137,7 @@ void PlanarReflectionPass::begin(bgfx::ViewId view_id, std::uint32_t clear_color
 
 void PlanarReflectionPass::release() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (bgfx::isValid(framebuffer_))
     {
         if (attached_view_ != UINT16_MAX)
@@ -165,6 +172,7 @@ void PlanarReflectionPass::release() noexcept
 }
 std::uint32_t PlanarReflectionPass::resource_count() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return static_cast<std::uint32_t>(bgfx::isValid(color_)) +
            static_cast<std::uint32_t>(bgfx::isValid(specular_)) +
            static_cast<std::uint32_t>(bgfx::isValid(depth_)) +

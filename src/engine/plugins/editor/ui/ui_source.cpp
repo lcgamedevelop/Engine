@@ -1,4 +1,6 @@
 #include "plugins/editor/ui/ui_editor_state.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "editor/asset_pipeline/asset_io.hpp"
 #include "editor/asset_pipeline/import_context.hpp"
@@ -27,6 +29,7 @@ constexpr std::size_t max_source = 1024U * 1024U;
 bool safe_path(const fs::path& project, std::string_view logical, fs::path& output,
                std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     if (!GuidMap::valid_path(logical) || logical.find(":") != std::string_view::npos ||
         logical.find('\\') != std::string_view::npos)
@@ -87,6 +90,7 @@ bool safe_path(const fs::path& project, std::string_view logical, fs::path& outp
 }
 bool read_optional(const fs::path& path, std::string& output, bool& exists, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     std::error_code ec;
     exists = fs::exists(path, ec);
@@ -121,6 +125,7 @@ bool read_optional(const fs::path& path, std::string& output, bool& exists, std:
 bool read_pair(const fs::path& path, std::string& source, std::string& metadata, bool& exists,
                std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto meta_path = path;
     meta_path += ".meta";
     bool has_meta = false;
@@ -138,6 +143,7 @@ bool read_pair(const fs::path& path, std::string& source, std::string& metadata,
 }
 Json bindings(const toml::table& meta)
 {
+    ENGINE_PROFILE_FUNCTION();
     Json result{{"fonts", Json::array()}, {"textures", Json::array()}};
     if (const auto* fonts = meta["ui"]["fonts"].as_array())
     {
@@ -166,6 +172,7 @@ Json bindings(const toml::table& meta)
 }
 bool read_meta(std::string_view text, toml::table& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto parsed = toml::parse(text);
     if (!parsed)
     {
@@ -183,6 +190,7 @@ bool read_meta(std::string_view text, toml::table& output, std::string& error)
 }
 bool save_bindings(const Json& args, toml::table& meta, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!meta.contains("ui"))
     {
         meta.insert("ui", toml::table{});
@@ -248,6 +256,7 @@ bool save_bindings(const Json& args, toml::table& meta, std::string& error)
 bool publish_pair(const fs::path& staged, const fs::path& target, const fs::path& stage_dir,
                   bool exists, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto staged_meta = staged;
     staged_meta += ".meta";
     auto target_meta = target;
@@ -303,6 +312,7 @@ bool publish_pair(const fs::path& staged, const fs::path& target, const fs::path
 bool perform_source(const Json& args, bool save, const fs::path& project,
                     const ResourceCatalog& catalog, SourceJob& job)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string path = args["path"].get<std::string>();
     fs::path source_path;
     if (!safe_path(project, path, source_path, job.error))
@@ -473,6 +483,7 @@ bool perform_source(const Json& args, bool save, const fs::path& project,
 bool UiEditorCommands::State::source(std::string_view name, const Json& args, Json& result,
                                      std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (name == "get_ui_source" && args.is_object() && args.contains("job"))
     {
         std::string id;
@@ -542,9 +553,13 @@ bool UiEditorCommands::State::source(std::string_view name, const Json& args, Js
     const auto root = project;
     if (!tasks.submit(
             "UI source", [args, save, root, catalog, job]
-            { return perform_source(args, save, root, *catalog, *job); },
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return perform_source(args, save, root, *catalog, *job);
+            },
             [job](bool success)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 job->success = success;
                 job->done = true;
             },

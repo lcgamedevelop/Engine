@@ -1,4 +1,5 @@
 #include "plugins/runtime/script/bindings/audio_listener_binding.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/script/bindings/binding_helpers.hpp"
 
 #include "plugins/runtime/script/bindings/binding_context.hpp"
@@ -24,6 +25,7 @@ Object.freeze(AudioListener);
 
 void volume(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto node = BindingContext::node(arguments);
     auto listener = !node ? AudioListener{} : node.get_component<AudioListener>();
@@ -44,16 +46,19 @@ void volume(const Arguments& arguments)
 
 std::string_view AudioListenerBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "AudioListener";
 }
 
 std::string_view AudioListenerBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 
 bool AudioListenerBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.integer("AudioListenerKind", static_cast<int>(AudioListener::component_type)) &&
            vm.function("AudioListenerAdd", binding_detail::add_component<AudioListener>) &&
            vm.function("AudioListenerVolume", volume);

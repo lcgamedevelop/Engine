@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/app/runtime_host.hpp"
 #include "runtime/physics/physics_system.hpp"
 #include "runtime/world/world_system.hpp"
@@ -55,6 +57,7 @@ bool assemble_runtime_plugins(
     const engine::plugins::camera::CameraTypeRegistry* camera_types,
     const engine::plugins::character_controller::CharacterAbilityRegistry* abilities)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     (void)stage;
     (void)world;
     (void)window;

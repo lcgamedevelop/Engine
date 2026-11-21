@@ -8,6 +8,34 @@
 
 WebGPU 仅面向 [Web 运行产物](web-host.md#异步-webgpu-表面)。[异步表面准备](#异步表面准备)通过私有状态区分设备待就绪与失败；present_movie_frame 与 render 共用 RenderSubmitStatus。
 
+## GPU 回读
+
+普通截图、HDR、离屏捕获、VSM 和 Meshlet 反馈共用私有 `GpuReadback`。原生按 bgfx 返回的完成帧读取，WebGPU 按缓冲映射回执读取。渲染帧继续提交，调用者使用同一套待定、完成和失败状态处理结果。
+
+```mermaid
+classDiagram
+    class GpuReadback {
+        <<private>>
+        +submit(region, destination) bool
+        +status(frame) GpuReadbackStatus
+        +reset()
+    }
+    class FrameOutput
+    class SceneGpuResources
+    class VirtualShadowPass
+    class MeshletCullPass
+    class WebGpuReadback {
+        <<bgfx Web adapter>>
+    }
+    FrameOutput *-- GpuReadback : 屏幕截图
+    SceneGpuResources *-- GpuReadback : HDR 和离屏捕获
+    VirtualShadowPass *-- GpuReadback : 页面反馈槽
+    MeshletCullPass *-- GpuReadback : 统计槽
+    GpuReadback ..> WebGpuReadback : 映射回执与取消
+```
+
+调用方在回执到达前保留目标缓冲。Web 取消时先撤下目标地址，已提交的回调只结束映射并归还桥接状态。宿主结束浏览器 worker 前让已提交的 GPU 回调返回。原生继续按照已有完成帧规则保留缓冲。
+
 **2026-11-08：已按确认设计实现提交管线，Windows / DirectX 12 定向验收完成。** 新的数据复用、材质绑定和阴影合批关系见[视图提交设计](render-submission.md#提交管线优化设计)，私有签名变化见[本页契约](#提交管线私有契约)，实际验证范围见[测试记录](../../testing.md#渲染性能基线)。不包含 Shader/PSO 预热。
 
 插件的原生纹理接入由 `engine::render::upload_texture(ResourceLoader& loader, ResourceHandle resource, bgfx::TextureHandle& output) -> bool` 提供，声明于 `runtime/render/texture_upload.hpp`。该普通函数在 bgfx API 线程同步准备并上传已加载资源，不加载文件；输出须为空，失败保持为空，成功转交 GPU 纹理所有权，由调用方在 bgfx 关闭前销毁。CPU 资源仅在调用期间保活；插件按需独立持有获取。PreparedTexture/GpuTexture 的转码缓冲、采样标志和生命周期实现继续私有，不向插件公开。bgfx 句柄仅用于原生渲染扩展，不进入场景或脚本接口。
@@ -501,7 +529,7 @@ classDiagram
 - 捕获当前目标实际像素尺寸，返回自上而下、紧密排列的线性 RGBA 浮点数组，RGB 可大于 1；源目标精度为 RGBA16F，读取时转换为 float，不做归一化、曝光或显示色域转换。Alpha 保留源目标值，不宣称为最终透明度。
 - 一次只接受一个未取走的请求；无活动场景或设备、请求已占用时返回 false。相机可能由后续 `render(camera)` 指定，包括独立场景中的相机，因此接受请求时不依赖活动相机；实际提交帧若无有效相机或可绘制内容则取消请求。有效帧已提交后，后续帧临时失去相机或重建 MSAA 目标不会丢弃该帧的读回。设备不支持颜色目标解析/异步回读、目标分配或 GPU 提交失败时置 failed，禁止静默降级为 SDR；MSAA 必须读取正确 resolve 后结果。
 - `complete` 后 `take_hdr_capture` 将结果移动给调用方并回到 idle；其他状态取图返回 false 并清空输出。取消、场景释放、设备重置或关闭时安全退役 GPU 资源并报告 cancelled，失效异步结果不能覆盖后续请求；尚未完成时不得访问结果缓冲。捕获和既有漫反射捕获各自保持独立状态，不改变原接口。
-- 该接口使用 bgfx 的 `TextureRegion`、`blit` 和异步 `read`，借用现有帧号确定回读完成；RGBA16F 转换使用 bx 半浮点转换，行方向按 bgfx `originBottomLeft` 归一化。
+- 该接口使用 bgfx 的 `TextureRegion` 和 `blit`，通过 [GPU 回读](#gpu-回读)接收结果。RGBA16F 转换使用 bx 半浮点转换，行方向按 bgfx `originBottomLeft` 归一化。
 
 ## 渲染提交结果
 
@@ -547,6 +575,7 @@ classDiagram
         +remove_extension(RenderExtension& extension) bool
         +release_scene() void
         +gpu_resource_count() uint32_t
+        +memory_snapshot(guid, limit, output) bool
         +gpu_ready() bool
         +frame_number() uint32_t
         +viewport_size(Vec2& output) bool
@@ -891,3 +920,40 @@ FramePrepareStatus 位于 `engine::render_detail`，仅渲染实现使用；公�
 `present_movie_frame(const MovieFrame&)` 返回既有 RenderSubmitStatus，与 render() 共用语义；不是新增方法，不保留 bool 重载或转换别名。RuntimeHost、影片入口、范围准备及所属测试全部同步适配。RuntimeHost 仅在 submitted 时记录影片首帧；deferred 复用宿主暂停／恢复路径，保留当前影片及启动请求，不累计不可呈现期间的媒体时间；failed 进入原生故障收尾。
 
 范围准备内部也消费 FramePrepareStatus：deferred 保留 working／queued，failed 才锁存范围错误。普通场景、影片和空闲呈现共用这一准备入口，不由 Web 宿主猜测窗口状态或轮询 gpu_ready 来区分故障。
+
+### 渲染内存快照
+
+```mermaid
+classDiagram
+    class RenderSystem
+    class GpuMemoryTracker {
+        +frame_submitted(frame)
+        +device_drained()
+        +snapshot(guid, limit, output)
+    }
+    class GpuMemoryAllocation {
+        +track(tracker, entry)
+        +release_requested()
+        +retain()
+        +wait_for_readback()
+        +readback_ready()
+        +reset()
+    }
+    class GpuMemorySnapshot
+    class GpuTexture
+    class GpuGeometry
+    class StaticVertexPage
+    class FrameOutput
+    RenderSystem *-- GpuMemoryTracker : 由设备初始化和关闭界定
+    GpuTexture *-- GpuMemoryAllocation : 独占纹理
+    GpuGeometry *-- GpuMemoryAllocation : 网格基础几何
+    GpuGeometry --> StaticVertexPage : 共享顶点页
+    StaticVertexPage *-- GpuMemoryAllocation : 页容量只计一次
+    FrameOutput *-- GpuMemoryAllocation : 呈现目标与截图回读目标
+    GpuMemoryAllocation --> GpuMemoryTracker : 协调线程借用
+    GpuMemoryTracker ..> GpuMemorySnapshot : 按请求复制
+```
+
+`memory_snapshot` 在渲染 API 线程按请求读取，关闭内存采集时返回不可用。一个会话跨场景，设备重建开启新会话。资源记录包含独立的分配 ID、类型、可用的资源 GUID、创建场景与范围以及估算容量。创建范围记录最先申请的场景，共享关系以资源图或顶点页 ID 为准。几何记录自己的逻辑大小，顶点页只汇总一次实际申请容量，驱动上报的设备用量独立读取。
+
+纹理最后一个渲染使用者离开时记业务释放，重新使用会撤销待退役状态。拥有者提交销毁后经过 bgfx 的命令消费边界才计入观测到的渲染端回收。普通截图明确记录正在等待读回和确认完成的时点。通用资源的驱动内部物理释放时点尚不可见。设备关闭时按实际后端排空完成记录。只保留有限的最近回收记录，快照报告已覆盖的数量及被覆盖的历史数。

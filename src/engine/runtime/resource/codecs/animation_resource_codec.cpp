@@ -1,4 +1,6 @@
 #include "runtime/resource/codecs/animation_resource_codec.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/resource/codecs/resource_decode.hpp"
 #include "runtime/resource/codecs/sampling_archive.hpp"
 
@@ -16,6 +18,7 @@ namespace
 {
 bool animation_vector(const schema::Vec3& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     // ozz 的平移与缩放关键帧使用 IEEE float16 保存。
     constexpr double maximum = 65504.0;
     return model_value_utils::vector(value) && std::abs(value.x()) <= maximum &&
@@ -24,6 +27,7 @@ bool animation_vector(const schema::Vec3& value)
 
 bool animation_scale(const schema::Vec3& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     constexpr double minimum = 0x1p-24;
     return animation_vector(value) && std::abs(value.x()) >= minimum &&
            std::abs(value.y()) >= minimum && std::abs(value.z()) >= minimum;
@@ -32,6 +36,7 @@ bool animation_scale(const schema::Vec3& value)
 template <typename Key, typename Predicate>
 bool keys(const std::vector<Key>& values, float duration, Predicate validate)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (values.size() > 1000000)
     {
         return false;
@@ -51,6 +56,7 @@ bool keys(const std::vector<Key>& values, float duration, Predicate validate)
 } // namespace
 bool AnimationResourceCodec::validate(const schema::AnimationDataT& data)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (data.schema_version != 2 || !valid_path(data.path) || data.name.empty() ||
         !GuidMap::valid_guid(data.skeleton_guid) || !std::isfinite(data.duration) ||
         data.duration <= 0.0F || !std::isfinite(1.0F / data.duration) || data.duration > 86400.0F ||
@@ -116,6 +122,7 @@ bool AnimationResourceCodec::validate(const schema::AnimationDataT& data)
         }
         const auto record_times = [&times](const auto& keys)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             for (const auto& key : keys)
             {
                 times.insert(key.time());
@@ -136,14 +143,17 @@ bool AnimationResourceCodec::validate(const schema::AnimationDataT& data)
 }
 schema::AssetKind AnimationResourceCodec::kind() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::animation;
 }
 
 bool AnimationResourceCodec::decode(const schema::AssetEntryT& entry, ByteView payload,
                                     std::unique_ptr<Resource>& output, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto validate = [](ByteView payload, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (!resource_decode_detail::verify_flatbuffer(payload, schema::VerifyAnimationDataBuffer,
                                                        "Invalid Animation FlatBuffer", error))
         {
@@ -160,11 +170,15 @@ bool AnimationResourceCodec::decode(const schema::AssetEntryT& entry, ByteView p
     };
     return resource_decode_detail::decode_flatbuffer<ResourceType>(
         entry, payload, 64U * 1024U * 1024U, validate, [](const std::uint8_t* bytes)
-        { return schema::UnPackAnimationData(bytes); }, output, error);
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return schema::UnPackAnimationData(bytes);
+        }, output, error);
 }
 
 bool AnimationResourceCodec::validate_data(const Resource& resource, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* data = resource_detail::data<ResourceType>(&resource);
     if (!data ||
         !(data->path == resource.info().path && validate(*data) &&
@@ -180,6 +194,7 @@ bool AnimationResourceCodec::validate_data(const Resource& resource, std::string
 bool AnimationResourceCodec::validate_dependencies(const Resource& resource,
                                                    ResourceView dependencies, std::string&) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* data = resource_detail::data<AnimationResource>(&resource);
     const auto* skeleton = data ? dependency(dependencies, data->skeleton_guid) : nullptr;
     if (!skeleton || !resource_detail::data<SkeletonResource>(skeleton))

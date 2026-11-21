@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/scene/component.hpp"
 
 namespace engine
@@ -12,6 +14,7 @@ public:
     Transform() noexcept = default;
     explicit Transform(Component component) noexcept : Component(component, component_type)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
     }
     [[nodiscard]] static bool register_type(ComponentRegistry& registry);
     static constexpr ComponentType component_type = ComponentType::TransformData;

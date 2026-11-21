@@ -4,6 +4,7 @@
 #include "runtime/scene/ecs_scene.hpp"
 #include "runtime/scene/ecs_storage.hpp"
 
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/resource/resource_reference.hpp"
 #include "runtime/resource/types/audio_resource.hpp"
@@ -43,6 +44,7 @@ struct Listener
 
 Listener find_listener(const Scene& scene)
 {
+    ENGINE_PROFILE_FUNCTION();
     Listener result;
     std::uint64_t selected_order = UINT64_MAX;
     auto& world = scene.world();
@@ -57,6 +59,7 @@ Listener find_listener(const Scene& scene)
         [&](const auto& listener, const auto& transform, const ecs_detail::NodeRuntime& state,
             const ecs_detail::WorldTransform& pose)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             if (state.scene != &scene || !state.active || !listener.state.flags.enabled ||
                 !transform.state.flags.enabled || !pose.valid || state.order >= selected_order)
             {
@@ -73,6 +76,7 @@ Listener find_listener(const Scene& scene)
 bool spatial_mix(const AudioSource& source, const AudioSource::Data& settings,
                  const Listener& listener, float& gain, float& pan)
 {
+    ENGINE_PROFILE_FUNCTION();
     gain = settings.volume * listener.volume;
     pan = 0.0F;
     if (!settings.spatial)
@@ -118,6 +122,7 @@ bool spatial_mix(const AudioSource& source, const AudioSource::Data& settings,
 
 bool valid_clip(const schema::AudioClipDataT& clip) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return clip.schema_version == 1 && clip.sample_rate >= 8000 && clip.sample_rate <= 192000 &&
            (clip.channels == 1 || clip.channels == 2) && clip.frames > 0 &&
            clip.frames == clip.samples.size() / clip.channels &&
@@ -138,6 +143,7 @@ struct AudioSystem::Impl
 
         ~Voice() noexcept
         {
+            ENGINE_PROFILE_FUNCTION();
             if (stream)
             {
                 SDL_DestroyAudioStream(stream);
@@ -226,17 +232,20 @@ struct AudioSystem::Impl
 
     ~Impl()
     {
+        ENGINE_PROFILE_FUNCTION();
         close_device();
     }
 
     bool fail(std::string_view context)
     {
+        ENGINE_PROFILE_FUNCTION();
         error = std::string(context) + ": " + SDL_GetError();
         return false;
     }
 
     bool open_device()
     {
+        ENGINE_PROFILE_FUNCTION();
         if (device != 0)
         {
             return true;
@@ -265,6 +274,7 @@ struct AudioSystem::Impl
 
     void close_device() noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         voices.clear();
         independent.clear();
         if (device != 0)
@@ -281,6 +291,7 @@ struct AudioSystem::Impl
 
     void refresh_voice(Voice& voice)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (voice.state != AudioVoiceState::playing)
         {
             return;
@@ -387,15 +398,18 @@ struct AudioSystem::Impl
 AudioSystem::AudioSystem(ResourceLoader* resources, WorldSystem* world) noexcept
     : resources_(resources), world_(world)
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 AudioSystem::~AudioSystem() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
 }
 
 bool AudioSystem::on_initialize(const EngineConfig&)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (world_ && (!world_->is_initialized() || world_->resource_loader() != resources_))
     {
         return false;
@@ -473,6 +487,7 @@ bool AudioSystem::on_tick(double)
         const auto process =
             [&](Node node, const ecs_detail::ComponentStorage<AudioSource::Data>& stored) -> bool
         {
+                ENGINE_PROFILE_FUNCTION_PROBE();
             const auto* scene = node.scene();
             (void)scene;
             (void)stored;
@@ -521,6 +536,7 @@ bool AudioSystem::on_tick(double)
             }
             const auto fail_source = [&]()
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 impl_->voices.erase(node.id());
                 engine::ecs_detail::component_runtime(source)->playback_ = AudioPlayback::failed;
                 success = false;
@@ -600,6 +616,7 @@ bool AudioSystem::on_tick(double)
         query.each(
             [&](flecs::entity entity, const ecs_detail::ComponentStorage<AudioSource::Data>& stored)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 if (query_success)
                 {
                     query_success = process(world_->find_node(entity.id()), stored);
@@ -616,6 +633,7 @@ bool AudioSystem::on_tick(double)
 
 void AudioSystem::clear_scene() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!impl_)
     {
         return;
@@ -627,6 +645,7 @@ void AudioSystem::clear_scene() noexcept
                 [&](Node node,
                     const ecs_detail::ComponentStorage<AudioSource::Data>& stored) -> bool
             {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
                 const auto* scene = node.scene();
                 (void)scene;
                 (void)stored;
@@ -649,6 +668,7 @@ void AudioSystem::clear_scene() noexcept
                 [&](flecs::entity entity,
                     const ecs_detail::ComponentStorage<AudioSource::Data>& stored)
                 {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
                     if (query_success)
                     {
                         query_success = process(world_->find_node(entity.id()), stored);
@@ -663,6 +683,7 @@ void AudioSystem::clear_scene() noexcept
 
 void AudioSystem::clear() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     clear_scene();
     if (impl_)
     {
@@ -672,6 +693,7 @@ void AudioSystem::clear() noexcept
 
 bool AudioSystem::set_world(WorldSystem* world)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!impl_ || !is_initialized() ||
         (world && (!world->is_initialized() || world->resource_loader() != resources_)))
     {
@@ -687,6 +709,7 @@ bool AudioSystem::set_world(WorldSystem* world)
 
 bool AudioSystem::play(const ResourceHandle& handle, AudioVoiceHandle& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     ResourceReference clip;
     if (!impl_ || !is_initialized() || !clip.retain(resources_, handle) ||
@@ -725,6 +748,7 @@ bool AudioSystem::play(const ResourceHandle& handle, AudioVoiceHandle& output)
 
 bool AudioSystem::set_paused(AudioVoiceHandle handle, bool paused)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!impl_ || handle.generation != impl_->generation)
     {
         return false;
@@ -769,6 +793,7 @@ bool AudioSystem::set_paused(AudioVoiceHandle handle, bool paused)
 
 bool AudioSystem::stop(AudioVoiceHandle handle)
 {
+    ENGINE_PROFILE_FUNCTION();
     AudioPlaybackStatus status;
     if (!playback(handle, status) ||
         (status.state != AudioVoiceState::playing && status.state != AudioVoiceState::paused))
@@ -792,6 +817,7 @@ bool AudioSystem::stop(AudioVoiceHandle handle)
 
 bool AudioSystem::playback(AudioVoiceHandle handle, AudioPlaybackStatus& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     if (!impl_ || handle.generation != impl_->generation)
     {
@@ -811,6 +837,7 @@ bool AudioSystem::playback(AudioVoiceHandle handle, AudioPlaybackStatus& output)
 
 bool AudioSystem::release(AudioVoiceHandle handle)
 {
+    ENGINE_PROFILE_FUNCTION();
     AudioPlaybackStatus status;
     if (!playback(handle, status) || status.state == AudioVoiceState::playing ||
         status.state == AudioVoiceState::paused)
@@ -823,6 +850,7 @@ bool AudioSystem::release(AudioVoiceHandle handle)
 
 bool AudioSystem::set_paused(bool paused)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!impl_ || !is_initialized())
     {
         return false;
@@ -838,21 +866,25 @@ bool AudioSystem::set_paused(bool paused)
 
 bool AudioSystem::paused() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return impl_ && impl_->paused;
 }
 
 std::size_t AudioSystem::voice_count() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return impl_ ? impl_->voices.size() : 0;
 }
 
 std::string_view AudioSystem::last_error() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return impl_ ? std::string_view(impl_->error) : std::string_view{};
 }
 
 void AudioSystem::on_shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     clear();
     impl_.reset();
 }

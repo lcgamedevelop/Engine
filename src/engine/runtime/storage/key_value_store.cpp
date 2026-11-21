@@ -1,5 +1,6 @@
 #include "runtime/storage/key_value_store.hpp"
 
+#include "runtime/performance/profiling.hpp"
 #include "runtime/storage/storage_file.hpp"
 #include "runtime/utils/path_utils.hpp"
 
@@ -26,12 +27,14 @@ constexpr const char* temporary_name = "kv.json.tmp";
 
 bool fail(std::string& error, std::string_view message)
 {
+    ENGINE_PROFILE_FUNCTION();
     error = message;
     return false;
 }
 
 bool not_loaded(std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (error.empty())
     {
         error = "KV store has not been loaded";
@@ -41,6 +44,7 @@ bool not_loaded(std::string& error)
 
 bool valid_utf8(std::string_view text)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (std::size_t index = 0; index < text.size();)
     {
         const auto first = static_cast<unsigned char>(text[index++]);
@@ -96,6 +100,7 @@ bool valid_utf8(std::string_view text)
 
 bool valid_key(std::string_view key, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (key.empty() || key.size() > maximum_key_size || !valid_utf8(key))
     {
         return fail(error, "KV key must contain 1 to 256 bytes of valid UTF-8");
@@ -105,6 +110,7 @@ bool valid_key(std::string_view key, std::string& error)
 
 bool inspect_directory(const std::filesystem::path& directory, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::error_code code;
     const auto status = std::filesystem::symlink_status(directory, code);
     if (code == std::errc::no_such_file_or_directory ||
@@ -121,6 +127,7 @@ bool inspect_directory(const std::filesystem::path& directory, std::string& erro
 
 bool inspect_file(const std::filesystem::path& path, bool& exists, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     exists = false;
     std::error_code code;
     const auto status = std::filesystem::symlink_status(path, code);
@@ -139,6 +146,7 @@ bool inspect_file(const std::filesystem::path& path, bool& exists, std::string& 
 
 bool encode(const Values& values, std::string& text, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     Json document = Json::object();
     document["version"] = 1;
     auto& entries = document["values"] = Json::object();
@@ -162,6 +170,7 @@ bool encode(const Values& values, std::string& text, std::string& error)
 
 bool read_file(const std::filesystem::path& path, std::string& text, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::error_code code;
     const auto size = std::filesystem::file_size(path, code);
     if (code || size > maximum_file_size)
@@ -189,6 +198,7 @@ bool read_file(const std::filesystem::path& path, std::string& text, std::string
 
 void remove_temporary(const std::filesystem::path& path)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::error_code code;
     (void)std::filesystem::remove(path, code);
 }
@@ -197,6 +207,7 @@ void remove_temporary(const std::filesystem::path& path)
 
 bool KeyValueStore::load(const std::filesystem::path& directory)
 {
+    ENGINE_PROFILE_ZONE("Storage.load");
     loaded_ = false;
     directory_.clear();
     values_.clear();
@@ -262,6 +273,7 @@ bool KeyValueStore::load(const std::filesystem::path& directory)
 
 bool KeyValueStore::get_string(std::string_view key, std::string& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!loaded_)
     {
         value.clear();
@@ -285,6 +297,7 @@ bool KeyValueStore::get_string(std::string_view key, std::string& value)
 
 bool KeyValueStore::set_string(std::string_view key, std::string_view value)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!loaded_)
     {
         return not_loaded(last_error_);
@@ -311,6 +324,7 @@ bool KeyValueStore::set_string(std::string_view key, std::string_view value)
 
 bool KeyValueStore::has_key(std::string_view key)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!loaded_)
     {
         return not_loaded(last_error_);
@@ -321,6 +335,7 @@ bool KeyValueStore::has_key(std::string_view key)
 
 bool KeyValueStore::delete_key(std::string_view key)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!loaded_)
     {
         return not_loaded(last_error_);
@@ -339,6 +354,7 @@ bool KeyValueStore::delete_key(std::string_view key)
 
 bool KeyValueStore::save()
 {
+    ENGINE_PROFILE_ZONE("Storage.save");
     if (!loaded_)
     {
         return not_loaded(last_error_);
@@ -405,11 +421,13 @@ bool KeyValueStore::save()
 
 bool KeyValueStore::is_loaded() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return loaded_;
 }
 
 const std::string& KeyValueStore::last_error() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return last_error_;
 }
 

@@ -1,4 +1,6 @@
 #include "plugins/editor/asset_import/fbx_importer.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/asset_pipeline/animation_sampling.hpp"
 
 #include "editor/asset_pipeline/asset_io.hpp"
@@ -39,6 +41,7 @@ using Documents = std::map<std::filesystem::path, FbxDocument>;
 bool read_material_remaps(const toml::table& settings, const FbxDocument& document,
                           MaterialRemaps& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     if (!settings.contains("material_remaps"))
     {
@@ -93,6 +96,7 @@ bool read_material_remaps(const toml::table& settings, const FbxDocument& docume
 bool resolve_materials(const std::string& key, const ufbx_node& node, const MaterialRemaps& remaps,
                        const ImportContext& context, std::vector<Guid>& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     std::vector<Guid> materials;
     const auto found = remaps.find(key);
@@ -123,6 +127,7 @@ bool resolve_skeleton(const ImportAsset& asset, const ImportContext& context,
                       const Documents& documents, const FbxDocument*& output, Guid& guid,
                       std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = nullptr;
     guid.clear();
     const auto found = documents.find(asset.source);
@@ -180,6 +185,7 @@ bool resolve_skeleton(const ImportAsset& asset, const ImportContext& context,
 bool write_buffer(const ImportAsset& asset, const ImportContext& context,
                   const flatbuffers::FlatBufferBuilder& builder, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     return write_bytes(context.output / asset.guid,
                        std::as_bytes(std::span(builder.GetBufferPointer(), builder.GetSize())),
                        error);
@@ -189,6 +195,7 @@ bool append_model_node(const FbxDocument& document, const ufbx_node& node, std::
                        const ImportAsset& asset, const ImportContext& context,
                        const MaterialRemaps& remaps, schema::ModelDataT& model, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto result = std::make_unique<schema::ModelNodeDataT>();
     const auto& path = document.node_paths.at(&node);
     result->name = path.substr(path.find_last_of('/') + 1);
@@ -227,29 +234,35 @@ bool append_model_node(const FbxDocument& document, const ufbx_node& node, std::
 
 FbxImporter::FbxImporter() : state_(std::make_unique<State>())
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 FbxImporter::~FbxImporter() noexcept = default;
 
 std::string_view FbxImporter::id() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "fbx";
 }
 schema::AssetKind FbxImporter::kind() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::model;
 }
 bool FbxImporter::matches(const std::filesystem::path& source) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return source_extension(source) == ".fbx";
 }
 std::string_view FbxImporter::default_meta() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "sample_rate = 30\nskeleton = \"\"\nnormals = \"import\"\n"
            "scale_factor = 1.0\nrotation_offset = [0.0, 0.0, 0.0]\n";
 }
 bool FbxImporter::discover(const ImportAsset& source, std::vector<ImportSubresource>& output,
                            std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     FbxDocument document;
     if (!load_document(source.source, document, error))
@@ -286,6 +299,7 @@ bool FbxImporter::discover(const ImportAsset& source, std::vector<ImportSubresou
 bool FbxImporter::inspect_batch(const ImportContext& context, std::string& fingerprint,
                                 std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::set<std::filesystem::path> current;
     for (const auto* source : context.sources)
     {
@@ -295,9 +309,17 @@ bool FbxImporter::inspect_batch(const ImportContext& context, std::string& finge
         }
     }
     std::erase_if(state_->documents,
-                  [&](const auto& entry) { return !current.contains(entry.first); });
+                  [&](const auto& entry)
+                  {
+                      ENGINE_PROFILE_FUNCTION_PROBE();
+                      return !current.contains(entry.first);
+                  });
     std::erase_if(state_->material_remaps,
-                  [&](const auto& entry) { return !current.contains(entry.first); });
+                  [&](const auto& entry)
+                  {
+                      ENGINE_PROFILE_FUNCTION_PROBE();
+                      return !current.contains(entry.first);
+                  });
     for (const auto& [source, document] : state_->documents)
     {
         std::string hash;
@@ -331,6 +353,7 @@ bool FbxImporter::inspect_batch(const ImportContext& context, std::string& finge
 bool FbxImporter::scan_dependencies(ImportAsset& asset, const ImportContext& context,
                                     std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     asset.build_dependencies.clear();
     asset.runtime_dependencies.clear();
     const auto document = state_->documents.find(asset.source);
@@ -346,7 +369,10 @@ bool FbxImporter::scan_dependencies(ImportAsset& asset, const ImportContext& con
         return false;
     }
     const auto add = [&](const Guid& guid, schema::AssetKind kind)
-    { return reference(guid, kind, context, asset.runtime_dependencies, error); };
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return reference(guid, kind, context, asset.runtime_dependencies, error);
+    };
     if (asset.subresource_key.empty())
     {
         for (const auto& [key, node] : document->second.meshes)
@@ -392,6 +418,7 @@ bool FbxImporter::scan_dependencies(ImportAsset& asset, const ImportContext& con
 }
 bool FbxImporter::finalize_dependencies(ImportAsset&, const ImportContext&, std::string&) const
 {
+    ENGINE_PROFILE_FUNCTION();
     // 所有转换均已完成；后续封装与发布不再借用 FBX 解析树。
     state_->documents.clear();
     state_->material_remaps.clear();
@@ -401,6 +428,7 @@ bool FbxImporter::finalize_dependencies(ImportAsset&, const ImportContext&, std:
 bool FbxImporter::convert(const ImportAsset& asset, const ImportContext& context,
                           std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto found = state_->documents.find(asset.source);
     if (found == state_->documents.end())
     {

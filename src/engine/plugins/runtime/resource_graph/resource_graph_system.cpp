@@ -1,5 +1,6 @@
 #include "plugins/runtime/resource_graph/resource_graph_system.hpp"
 
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 
 #include "runtime/resource/resource_system.hpp"
@@ -14,6 +15,7 @@
 #include <limits>
 #include <map>
 #include <set>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -24,10 +26,19 @@ namespace
 {
 bool empty(const ResourceHandle& value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return value.owner == 0 && value.id == 0 && value.generation == 0;
 }
 
 using Key = std::pair<std::uint64_t, std::string>;
+
+std::uint64_t monotonic_nanoseconds()
+{
+    ENGINE_PROFILE_FUNCTION();
+    return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                          std::chrono::steady_clock::now().time_since_epoch())
+                                          .count());
+}
 
 struct DependencyIndex
 {
@@ -52,12 +63,14 @@ struct LoadPlan
 
     const schema::AssetEntryT* find(std::string_view guid) const
     {
+        ENGINE_PROFILE_FUNCTION();
         const auto local = memory->find(guid);
         return local == memory->end() ? catalog.find(guid) : &local->second;
     }
 
     bool execute()
     {
+        ENGINE_PROFILE_FUNCTION();
         struct Cursor
         {
             const schema::AssetEntryT* entry;
@@ -126,14 +139,7 @@ struct LoadPlan
 
 struct ResourceGraphSystem::State : std::enable_shared_from_this<State>
 {
-    enum class Phase
-    {
-        queued,
-        reading,
-        decoded,
-        ready,
-        failed
-    };
+    using Phase = ResourceMemoryPhase;
     struct Record
     {
         Key key;
@@ -158,17 +164,24 @@ struct ResourceGraphSystem::State : std::enable_shared_from_this<State>
         ResourceError error = ResourceError::none;
         std::string message;
     };
+    struct Acquisition
+    {
+        Record* record = nullptr;
+        ResourceMemoryOwner memory_owner;
+    };
     struct LoadState
     {
         std::weak_ptr<State> owner;
         std::uint64_t id = 0;
         std::uint64_t generation = 0;
+        ResourceMemoryOwner memory_owner;
         ResourceLoadStatus status = ResourceLoadStatus::loading;
         ResourceLoadProgress progress;
         ResourceLoadProgress observed;
         ResourceLoadStatus observed_status = ResourceLoadStatus::loading;
         void observe()
         {
+            ENGINE_PROFILE_FUNCTION();
             if (progress.completed == observed.completed && progress.total == observed.total &&
                 progress.discovery_complete == observed.discovery_complete &&
                 progress.in_flight == observed.in_flight && status == observed_status)
@@ -176,10 +189,7 @@ struct ResourceGraphSystem::State : std::enable_shared_from_this<State>
                 return;
             }
             ++progress.progress_revision;
-            progress.last_progress_ns =
-                static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                               std::chrono::steady_clock::now().time_since_epoch())
-                                               .count());
+            progress.last_progress_ns = monotonic_nanoseconds();
             observed = progress;
             observed_status = status;
         }
@@ -198,14 +208,16 @@ struct ResourceGraphSystem::State : std::enable_shared_from_this<State>
     TaskSystem& tasks;
     ResourceGraphConfig config;
     const std::uint64_t owner;
+    const std::uint64_t memory_started_ns = monotonic_nanoseconds();
     bool active = false;
     std::uint64_t generation = 0;
     std::uint64_t last_acquisition = 0;
     std::uint64_t last_request = 0;
     std::uint64_t last_record = 0;
+    mutable std::uint64_t memory_sequence = 0;
     std::map<Key, std::unique_ptr<Record>> records;
     std::map<Key, Record*> paths;
-    std::map<std::uint64_t, Record*> acquisitions;
+    std::map<std::uint64_t, Acquisition> acquisitions;
     std::vector<std::shared_ptr<LoadState>> operations;
     std::map<std::uint64_t, std::weak_ptr<LoadState>> requests;
     std::map<Key, std::weak_ptr<LoadPlan>> plans;
@@ -219,16 +231,19 @@ struct ResourceGraphSystem::State : std::enable_shared_from_this<State>
           std::uint64_t owner)
         : resources(resources), tasks(tasks), config(config), owner(owner)
     {
+        ENGINE_PROFILE_FUNCTION();
     }
 
     bool fail(ResourceError value, std::string text)
     {
+        ENGINE_PROFILE_FUNCTION();
         error = value;
         message = std::move(text);
         return false;
     }
     bool success()
     {
+        ENGINE_PROFILE_FUNCTION();
         error = ResourceError::none;
         message.clear();
         return true;
@@ -236,11 +251,13 @@ struct ResourceGraphSystem::State : std::enable_shared_from_this<State>
 
     bool can_acquire()
     {
+        ENGINE_PROFILE_FUNCTION();
         return last_acquisition < std::numeric_limits<std::uint64_t>::max() ||
                fail(ResourceError::budget_exceeded, "Resource acquisition identities exhausted");
     }
     bool add_count(std::uint64_t& count)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (count == std::numeric_limits<std::uint64_t>::max())
         {
             return fail(ResourceError::budget_exceeded, "Resource reference count overflow");
@@ -250,16 +267,18 @@ struct ResourceGraphSystem::State : std::enable_shared_from_this<State>
     }
     Record* lookup(const ResourceHandle& handle) const noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         if (!active || handle.owner != owner || handle.generation != 1 || handle.id == 0)
         {
             return nullptr;
         }
         const auto found = acquisitions.find(handle.id);
-        return found == acquisitions.end() ? nullptr : found->second;
+        return found == acquisitions.end() ? nullptr : found->second.record;
     }
 
     void collect(Record* record, bool deferred = false) noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         // Iterative reverse release avoids stack growth for deep resource closures.
         std::vector<Record*> pending{record};
         while (!pending.empty())
@@ -305,8 +324,9 @@ struct ResourceGraphSystem::State : std::enable_shared_from_this<State>
         }
     }
 
-    bool acquire(Record& record, ResourceHandle& output)
+    bool acquire(Record& record, ResourceHandle& output, ResourceMemoryOwner memory_owner = {})
     {
+        ENGINE_PROFILE_FUNCTION();
         if (!empty(output))
         {
             return fail(ResourceError::busy, "Resource handle output must be empty");
@@ -316,13 +336,14 @@ struct ResourceGraphSystem::State : std::enable_shared_from_this<State>
             return false;
         }
         const auto id = ++last_acquisition;
-        acquisitions.emplace(id, &record);
+        acquisitions.emplace(id, Acquisition{&record, memory_owner});
         output = {owner, id, 1};
         return success();
     }
 
     bool release(ResourceHandle& handle) noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         if (empty(handle))
         {
             return success();
@@ -344,6 +365,7 @@ struct ResourceGraphSystem::State : std::enable_shared_from_this<State>
 
     void unpin(LoadState& operation) noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         // Pins are independent counts, so each record remains alive until its own pin is removed.
         auto pins = std::move(operation.pins);
         for (auto* record : pins)
@@ -355,6 +377,7 @@ struct ResourceGraphSystem::State : std::enable_shared_from_this<State>
     }
     void detach_plan(LoadState& operation)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (operation.attached)
         {
             operation.attached = false;
@@ -366,6 +389,7 @@ struct ResourceGraphSystem::State : std::enable_shared_from_this<State>
     }
     void finish(LoadState& operation, ResourceError value, std::string text)
     {
+        ENGINE_PROFILE_FUNCTION();
         operation.status = ResourceLoadStatus::failed;
         operation.observe();
         operation.error = value;
@@ -374,6 +398,7 @@ struct ResourceGraphSystem::State : std::enable_shared_from_this<State>
     }
     bool cancel(LoadState& operation) noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         if (operation.status == ResourceLoadStatus::delivered ||
             operation.status == ResourceLoadStatus::failed)
         {
@@ -397,6 +422,7 @@ struct ResourceGraphSystem::State : std::enable_shared_from_this<State>
 
     void refresh_generation()
     {
+        ENGINE_PROFILE_FUNCTION();
         if (!active || generation == resources.generation())
         {
             return;
@@ -414,6 +440,7 @@ struct ResourceGraphSystem::State : std::enable_shared_from_this<State>
     }
     bool command()
     {
+        ENGINE_PROFILE_FUNCTION();
         if (!active || !resources.is_initialized() || !tasks.is_initialized())
         {
             return fail(ResourceError::unavailable, "Resource loader is unavailable");
@@ -423,6 +450,7 @@ struct ResourceGraphSystem::State : std::enable_shared_from_this<State>
     }
     bool resolve(std::string_view path_or_guid, std::string& guid)
     {
+        ENGINE_PROFILE_FUNCTION();
         const auto found = paths.find({generation, std::string(path_or_guid)});
         if (found != paths.end())
         {
@@ -445,6 +473,7 @@ struct ResourceGraphSystem::State : std::enable_shared_from_this<State>
     }
     std::shared_ptr<LoadPlan> plan(std::string guid)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (!memory_snapshot)
         {
             auto snapshot = std::make_shared<MemoryEntries>();
@@ -467,7 +496,11 @@ struct ResourceGraphSystem::State : std::enable_shared_from_this<State>
                 return previous;
             }
         }
-        std::erase_if(plans, [](const auto& item) { return item.second.expired(); });
+        std::erase_if(plans, [](const auto& item)
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return item.second.expired();
+        });
         auto result = std::make_shared<LoadPlan>();
         result->catalog = resources.catalog();
         result->root = std::move(guid);
@@ -477,6 +510,7 @@ struct ResourceGraphSystem::State : std::enable_shared_from_this<State>
     }
     Record* make_record(const schema::AssetEntryT& info)
     {
+        ENGINE_PROFILE_FUNCTION();
         const Key key{generation, info.guid};
         const auto existing = records.find(key);
         if (existing != records.end())
@@ -499,6 +533,7 @@ struct ResourceGraphSystem::State : std::enable_shared_from_this<State>
     }
     bool pin(LoadState& operation, Record& record)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (operation.pinned.contains(&record))
         {
             return true;
@@ -526,6 +561,7 @@ struct ResourceGraphSystem::State : std::enable_shared_from_this<State>
     }
     void schedule(Record& record)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (!record.queued && record.phase != Phase::ready && record.phase != Phase::failed)
         {
             record.queued = true;
@@ -534,6 +570,7 @@ struct ResourceGraphSystem::State : std::enable_shared_from_this<State>
     }
     void notify(Record& record)
     {
+        ENGINE_PROFILE_FUNCTION();
         for (const auto& [key, id] : record.waiting_parents)
         {
             const auto found = records.find(key);
@@ -577,6 +614,7 @@ struct ResourceGraphSystem::State : std::enable_shared_from_this<State>
     }
     bool publish(Record& record, std::unique_ptr<Resource>& candidate)
     {
+        ENGINE_PROFILE_FUNCTION();
         std::vector<Record*> dependencies;
         std::vector<const Resource*> values;
         for (const auto& guid : record.info.dependencies)
@@ -615,6 +653,7 @@ struct ResourceGraphSystem::State : std::enable_shared_from_this<State>
     }
     void fail_record(Record& record, ResourceError value, std::string text)
     {
+        ENGINE_PROFILE_FUNCTION();
         record.phase = Phase::failed;
         record.error = value;
         record.message = std::move(text);
@@ -625,6 +664,7 @@ struct ResourceGraphSystem::State : std::enable_shared_from_this<State>
 
     const DependencyIndex& dependency_index(Record& root)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (!root.index)
         {
             auto index = std::make_shared<DependencyIndex>();
@@ -647,11 +687,16 @@ struct ResourceGraphSystem::State : std::enable_shared_from_this<State>
 
     bool attach_plan(LoadState& operation)
     {
+        ENGINE_PROFILE_FUNCTION();
         const auto work = operation.plan;
         if (!work->planning.valid())
         {
             work->planning =
-                tasks.submit("ResourceGraph.plan", [work]() { return work->execute(); }).share();
+                tasks.submit("ResourceGraph.plan", [work]()
+                {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
+                    return work->execute();
+                }).share();
             if (!work->planning.valid())
             {
                 return fail(ResourceError::busy, "Resource planning task domain is full");
@@ -664,12 +709,14 @@ struct ResourceGraphSystem::State : std::enable_shared_from_this<State>
 
     bool admit(Record& record, std::chrono::steady_clock::time_point deadline)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (record.phase == Phase::ready || record.phase == Phase::failed || record.admitted)
         {
             return true;
         }
         const auto reject = [&](ResourceError value, std::string text)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             record.error = value;
             record.message = std::move(text);
             schedule(record);
@@ -712,6 +759,7 @@ struct ResourceGraphSystem::State : std::enable_shared_from_this<State>
 
     void cleanup(std::chrono::steady_clock::time_point deadline)
     {
+        ENGINE_PROFILE_FUNCTION();
         for (const auto& operation : operations)
         {
             if (operation->status == ResourceLoadStatus::loading)
@@ -747,6 +795,7 @@ struct ResourceGraphSystem::State : std::enable_shared_from_this<State>
         std::erase_if(operations,
                       [this](const auto& operation)
                       {
+                          ENGINE_PROFILE_FUNCTION_PROBE();
                           if (operation->status == ResourceLoadStatus::loading ||
                               operation->status == ResourceLoadStatus::ready ||
                               !operation->pins.empty())
@@ -761,6 +810,7 @@ struct ResourceGraphSystem::State : std::enable_shared_from_this<State>
     bool memory_inputs(const Resource& candidate, std::span<const ResourceHandle> handles,
                        std::vector<Record*>& dependencies)
     {
+        ENGINE_PROFILE_FUNCTION();
         const auto& info = candidate.info();
         if (!GuidMap::valid_guid(info.guid) || !GuidMap::valid_path(info.path) ||
             info.path.starts_with("editor://") || info.location || info.kind != candidate.kind())
@@ -802,11 +852,158 @@ struct ResourceGraphSystem::State : std::enable_shared_from_this<State>
         return true;
     }
 
-    bool begin(std::string_view input, std::unique_ptr<ResourceLoad>& output);
+    bool begin(std::string_view input, std::unique_ptr<ResourceLoad>& output,
+               ResourceMemoryOwner memory_owner);
     bool begin_memory(std::unique_ptr<Resource>& candidate, std::span<const ResourceHandle> handles,
                       std::unique_ptr<ResourceLoad>& output);
     void advance();
+    bool observe_memory(const ResourceMemoryQuery& query, ResourceMemorySnapshot& output) const;
 };
+
+bool ResourceGraphSystem::State::observe_memory(const ResourceMemoryQuery& query,
+                                                ResourceMemorySnapshot& output) const
+{
+    ENGINE_PROFILE_ZONE("ResourceGraph.memorySnapshot");
+    output = {};
+    if (!active || memory_sequence == std::numeric_limits<std::uint64_t>::max() ||
+        query.limit == 0 || query.limit > ResourceMemoryQuery::maximum_items ||
+        (!query.guid.empty() && !GuidMap::valid_guid(query.guid)))
+    {
+        return false;
+    }
+
+    struct RankedRecord
+    {
+        const Record* record;
+        Phase phase;
+        std::uint64_t stored_bytes;
+        std::optional<std::uint64_t> cpu_bytes;
+        bool has_payload;
+    };
+    std::vector<RankedRecord> ranked;
+    const auto measure = [&](const Record& record, Phase phase)
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        const auto* payload = record.value ? record.value.get() : record.candidate.get();
+        const auto capacity = payload ? payload->cpu_payload_capacity() : std::nullopt;
+        if (capacity)
+        {
+            ++output.measured_payloads;
+            output.measured_cpu_payload_bytes += *capacity;
+        }
+        else if (payload)
+        {
+            ++output.unmeasured_payloads;
+        }
+        if (query.guid.empty() || query.guid == record.info.guid)
+        {
+            ranked.push_back({&record, phase, record.info.content_size - record.info.header_size,
+                              capacity, payload != nullptr});
+        }
+    };
+    for (const auto& [key, record] : records)
+    {
+        (void)key;
+        measure(*record, record->phase);
+    }
+    for (const auto& record : retired_records)
+    {
+        measure(*record, Phase::retiring);
+    }
+    output.matching_entries = ranked.size();
+    const auto items = std::min<std::size_t>(ranked.size(), query.limit);
+    std::partial_sort(ranked.begin(), ranked.begin() + static_cast<std::ptrdiff_t>(items),
+                      ranked.end(),
+                      [](const RankedRecord& left, const RankedRecord& right)
+                      {
+                          ENGINE_PROFILE_FUNCTION_PROBE();
+                          const auto left_bytes = left.cpu_bytes.value_or(left.stored_bytes);
+                          const auto right_bytes = right.cpu_bytes.value_or(right.stored_bytes);
+                          return left_bytes != right_bytes ? left_bytes > right_bytes
+                                                           : left.record->id < right.record->id;
+                      });
+    ranked.resize(items);
+
+    std::unordered_map<const Record*, std::size_t> selected;
+    selected.reserve(items);
+    output.entries.reserve(items);
+    for (const auto& row : ranked)
+    {
+        const auto& record = *row.record;
+        selected.emplace(&record, output.entries.size());
+        output.entries.push_back({
+            .record_id = record.id,
+            .catalog_generation = record.key.first,
+            .guid = record.info.guid,
+            .path = record.info.path,
+            .kind = record.info.kind,
+            .phase = row.phase,
+            .stored_payload_bytes = row.stored_bytes,
+            .cpu_payload_bytes = row.cpu_bytes,
+            .has_payload = row.has_payload,
+            .holders_truncated = false,
+            .acquisitions = record.acquisitions,
+            .dependency_references = record.dependency_references,
+            .request_references = record.request_references,
+            .holders = {},
+        });
+    }
+    const auto holder = [&](const Record* record, ResourceMemoryHolderKind kind, std::uint64_t id,
+                            ResourceMemoryOwner memory_owner, std::string_view guid, bool pending)
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        const auto found = selected.find(record);
+        if (found == selected.end())
+        {
+            return;
+        }
+        auto& row = output.entries[found->second];
+        if (row.holders.size() == ResourceMemoryQuery::maximum_holders_per_item)
+        {
+            row.holders_truncated = true;
+            return;
+        }
+        row.holders.push_back({kind, id, memory_owner, std::string(guid), pending});
+    };
+    for (const auto& [id, acquisition] : acquisitions)
+    {
+        holder(acquisition.record, ResourceMemoryHolderKind::acquisition, id,
+               acquisition.memory_owner, {}, false);
+    }
+    const auto add_dependencies = [&](const Record& parent, bool retiring)
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        for (const auto* dependency : parent.dependencies)
+        {
+            holder(dependency, ResourceMemoryHolderKind::dependency, parent.id, {},
+                   parent.info.guid, retiring);
+        }
+    };
+    for (const auto& [key, record] : records)
+    {
+        (void)key;
+        add_dependencies(*record, false);
+    }
+    for (const auto& record : retired_records)
+    {
+        add_dependencies(*record, true);
+    }
+    for (const auto& operation : operations)
+    {
+        const std::string_view root = operation->plan ? operation->plan->root : std::string_view{};
+        for (const auto* record : operation->pins)
+        {
+            holder(record, ResourceMemoryHolderKind::load_request, operation->id,
+                   operation->memory_owner, root, operation->status != ResourceLoadStatus::loading);
+        }
+    }
+    output.loader_id = owner;
+    output.session_started_ns = memory_started_ns;
+    output.sequence = ++memory_sequence;
+    output.catalog_generation = generation;
+    output.timestamp_ns = monotonic_nanoseconds();
+    return true;
+}
 
 class GraphResourceLoad final : public ResourceLoad
 {
@@ -815,18 +1012,22 @@ class GraphResourceLoad final : public ResourceLoad
 public:
     explicit GraphResourceLoad(std::shared_ptr<State::LoadState> state) : state_(std::move(state))
     {
+        ENGINE_PROFILE_FUNCTION();
     }
     ~GraphResourceLoad() noexcept override
     {
+        ENGINE_PROFILE_FUNCTION();
         (void)cancel();
     }
     ResourceLoadStatus status(ResourceLoadProgress& output) const noexcept override
     {
+        ENGINE_PROFILE_FUNCTION();
         output = state_->progress;
         return state_->status;
     }
     bool take(ResourceHandle& output) override
     {
+        ENGINE_PROFILE_FUNCTION();
         if (!empty(output) || state_->status != ResourceLoadStatus::ready)
         {
             return false;
@@ -843,6 +1044,7 @@ public:
     }
     bool cancel() noexcept override
     {
+        ENGINE_PROFILE_FUNCTION();
         const auto owner = state_->owner.lock();
         if (owner)
         {
@@ -852,10 +1054,12 @@ public:
     }
     ResourceError error() const noexcept override
     {
+        ENGINE_PROFILE_FUNCTION();
         return state_->error;
     }
     std::string_view last_error() const noexcept override
     {
+        ENGINE_PROFILE_FUNCTION();
         return state_->error == ResourceError::cancelled
                    ? std::string_view("Resource load cancelled")
                    : std::string_view(state_->message);
@@ -866,8 +1070,10 @@ private:
 };
 
 bool ResourceGraphSystem::State::begin(std::string_view input,
-                                       std::unique_ptr<ResourceLoad>& output)
+                                       std::unique_ptr<ResourceLoad>& output,
+                                       ResourceMemoryOwner memory_owner)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!command())
     {
         return false;
@@ -879,6 +1085,7 @@ bool ResourceGraphSystem::State::begin(std::string_view input,
     const auto count = std::count_if(operations.begin(), operations.end(),
                                      [](const auto& op)
                                      {
+                                         ENGINE_PROFILE_FUNCTION_PROBE();
                                          return op->status == ResourceLoadStatus::loading ||
                                                 op->status == ResourceLoadStatus::ready;
                                      });
@@ -895,6 +1102,7 @@ bool ResourceGraphSystem::State::begin(std::string_view input,
     operation->owner = shared_from_this();
     operation->id = ++last_request;
     operation->generation = generation;
+    operation->memory_owner = memory_owner;
     const auto existing = records.find({generation, guid});
     if (existing != records.end() && existing->second->phase == Phase::ready)
     {
@@ -904,7 +1112,7 @@ bool ResourceGraphSystem::State::begin(std::string_view input,
         {
             return fail(ResourceError::budget_exceeded, "Resource progress count is exhausted");
         }
-        if (!acquire(root, operation->result))
+        if (!acquire(root, operation->result, operation->memory_owner))
         {
             return false;
         }
@@ -943,6 +1151,7 @@ bool ResourceGraphSystem::State::begin_memory(std::unique_ptr<Resource>& candida
                                               std::span<const ResourceHandle> handles,
                                               std::unique_ptr<ResourceLoad>& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!command())
     {
         return false;
@@ -958,6 +1167,7 @@ bool ResourceGraphSystem::State::begin_memory(std::unique_ptr<Resource>& candida
     const auto count = std::count_if(operations.begin(), operations.end(),
                                      [](const auto& op)
                                      {
+                                         ENGINE_PROFILE_FUNCTION_PROBE();
                                          return op->status == ResourceLoadStatus::loading ||
                                                 op->status == ResourceLoadStatus::ready;
                                      });
@@ -1013,6 +1223,7 @@ bool ResourceGraphSystem::State::begin_memory(std::unique_ptr<Resource>& candida
 
 void ResourceGraphSystem::State::advance()
 {
+    ENGINE_PROFILE_FUNCTION();
     refresh_generation();
     const auto deadline = std::chrono::steady_clock::now() +
                           std::chrono::duration_cast<std::chrono::steady_clock::duration>(
@@ -1176,7 +1387,7 @@ void ResourceGraphSystem::State::advance()
             {
                 finish(*operation, ResourceError::not_loaded, "Loaded root record is missing");
             }
-            else if (!acquire(*root->second, operation->result))
+            else if (!acquire(*root->second, operation->result, operation->memory_owner))
             {
                 finish(*operation, error, message);
             }
@@ -1209,14 +1420,17 @@ ResourceGraphSystem::ResourceGraphSystem(ResourceSystem& resources, TaskSystem& 
                                          const ResourceGraphConfig& config)
     : state_(std::make_shared<State>(resources, tasks, config, owner_id()))
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 ResourceGraphSystem::~ResourceGraphSystem() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
 }
 
 bool ResourceGraphSystem::on_initialize(const EngineConfig&)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto& state = *state_;
     if (state.owner == 0 || !state.resources.is_initialized() || !state.tasks.is_initialized() ||
         state.config.max_requests == 0 || state.config.completion_budget == 0 ||
@@ -1246,6 +1460,7 @@ bool ResourceGraphSystem::on_tick(double)
 }
 void ResourceGraphSystem::on_shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     auto& state = *state_;
     for (const auto& operation : state.operations)
     {
@@ -1271,6 +1486,7 @@ void ResourceGraphSystem::on_shutdown() noexcept
 
 bool ResourceGraphSystem::load(std::string_view input, ResourceHandle& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto& state = *state_;
     if (!state.command())
     {
@@ -1353,15 +1569,18 @@ bool ResourceGraphSystem::load(std::string_view input, ResourceHandle& output)
     state.unpin(scope);
     return success;
 }
-bool ResourceGraphSystem::begin_load(std::string_view input, std::unique_ptr<ResourceLoad>& output)
+bool ResourceGraphSystem::begin_load(std::string_view input, std::unique_ptr<ResourceLoad>& output,
+                                     ResourceMemoryOwner memory_owner)
 {
-    return state_->begin(input, output);
+    ENGINE_PROFILE_FUNCTION();
+    return state_->begin(input, output, memory_owner);
 }
 
 bool ResourceGraphSystem::load_memory(std::unique_ptr<Resource>& candidate,
                                       std::span<const ResourceHandle> handles,
                                       ResourceHandle& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto& state = *state_;
     if (!state.command())
     {
@@ -1412,11 +1631,13 @@ bool ResourceGraphSystem::begin_load_memory(std::unique_ptr<Resource>& candidate
                                             std::span<const ResourceHandle> handles,
                                             std::unique_ptr<ResourceLoad>& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     return state_->begin_memory(candidate, handles, output);
 }
 
 bool ResourceGraphSystem::acquire_loaded(std::string_view input, ResourceHandle& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto& state = *state_;
     if (!state.command())
     {
@@ -1444,6 +1665,7 @@ bool ResourceGraphSystem::acquire_loaded(std::string_view input, ResourceHandle&
 }
 bool ResourceGraphSystem::retain(const ResourceHandle& handle, ResourceHandle& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!state_->command())
     {
         return false;
@@ -1458,6 +1680,7 @@ bool ResourceGraphSystem::retain(const ResourceHandle& handle, ResourceHandle& o
 bool ResourceGraphSystem::retain_dependency(const ResourceHandle& handle,
                                             std::string_view path_or_guid, ResourceHandle& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!state_->command())
     {
         return false;
@@ -1496,12 +1719,14 @@ bool ResourceGraphSystem::retain_dependency(const ResourceHandle& handle,
 }
 bool ResourceGraphSystem::release(ResourceHandle& handle) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     state_->refresh_generation();
     return state_->release(handle);
 }
 ResourceError ResourceGraphSystem::get(const ResourceHandle& handle,
                                        const Resource*& output) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     output = nullptr;
     if (empty(handle))
     {
@@ -1517,14 +1742,33 @@ ResourceError ResourceGraphSystem::get(const ResourceHandle& handle,
 }
 ResourceError ResourceGraphSystem::error() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return state_->error;
 }
 std::string_view ResourceGraphSystem::last_error() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (state_->error == ResourceError::invalid_handle && state_->message.empty())
     {
         return "Invalid resource acquisition";
     }
     return state_->message;
+}
+
+void ResourceGraphSystem::set_memory_owner(const ResourceHandle& handle,
+                                            ResourceMemoryOwner owner) noexcept
+{
+    ENGINE_PROFILE_FUNCTION();
+    if (state_->lookup(handle))
+    {
+        state_->acquisitions.find(handle.id)->second.memory_owner = owner;
+    }
+}
+
+bool ResourceGraphSystem::memory_snapshot(const ResourceMemoryQuery& query,
+                                          ResourceMemorySnapshot& output) const
+{
+    ENGINE_PROFILE_FUNCTION();
+    return state_->observe_memory(query, output);
 }
 } // namespace engine::plugins::resource_graph

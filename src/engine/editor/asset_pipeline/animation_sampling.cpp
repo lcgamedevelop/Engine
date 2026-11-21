@@ -1,4 +1,5 @@
 #include "editor/asset_pipeline/animation_sampling.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/animation/sampling_data.hpp"
 #include "runtime/resource/codecs/animation_resource_codec.hpp"
@@ -10,6 +11,7 @@ namespace
 {
 template <class T> bool archive(const T& data, std::vector<std::uint8_t>& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     ozz::io::MemoryStream stream;
     ozz::io::OArchive writer(&stream, ozz::kLittleEndian);
     writer << data;
@@ -25,6 +27,7 @@ template <class T> bool archive(const T& data, std::vector<std::uint8_t>& output
 
 bool prepare_skeleton_sampling(schema::SkeletonDataT& data, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     schema::SkeletonDataT candidate(data);
     candidate.schema_version = 2;
     candidate.sampling_encoding = schema::SamplingEncoding::structured;
@@ -54,6 +57,7 @@ bool prepare_skeleton_sampling(schema::SkeletonDataT& data, std::string& error)
 bool prepare_animation_sampling(schema::AnimationDataT& data, const schema::SkeletonDataT& skeleton,
                                 std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     schema::AnimationDataT candidate(data);
     candidate.schema_version = 2;
     candidate.sampling_encoding = schema::SamplingEncoding::structured;

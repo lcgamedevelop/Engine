@@ -30,6 +30,7 @@
 | `execute_batch` | `commands` 数组，每项含 `command` 与 `arguments`；接受各模块已注册的可撤销修改，最多 64 项 |
 | `undo` / `redo` | `sceneId`；撤销或重做一条编辑记录 |
 | `get_request_receipt` | `session`、`requestId`；查询原请求的持久回执 |
+| `get_resource_memory` | 可选 `guid`、`limit`、`baseline`。查询活跃资源、持有方、容量变化和 GPU 退役。见[内存观测](../../runtime/performance.md) |
 | `execute_project_script` | `session`、`runId`、`sourcePath`、`source`、可选 `arguments`；临时编译 TS，在当前运行实例调用默认导出并返回 JSON |
 | `close_editor` | 可选 `delayMs`，整数 100～10000，默认 500；返回关闭已安排的回执，延迟后正常退出编辑器 |
 

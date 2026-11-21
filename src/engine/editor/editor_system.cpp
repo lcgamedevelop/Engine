@@ -1,4 +1,6 @@
 #include "editor/editor_system.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/file_text.hpp"
 
 #include "editor/commands/editor_commands.hpp"
@@ -43,6 +45,7 @@ using Json = nlohmann::json;
 
 std::int64_t timestamp_ms()
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::chrono::duration_cast<std::chrono::milliseconds>(
                std::chrono::system_clock::now().time_since_epoch())
         .count();
@@ -50,6 +53,7 @@ std::int64_t timestamp_ms()
 
 bool plain_path(const fs::path& path)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::error_code error;
     fs::path current;
     for (const auto& part : path)
@@ -71,6 +75,7 @@ bool plain_path(const fs::path& path)
 
 bool read_frame_rate(const fs::path& project_root, std::int32_t& target)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto path = project_root / "settings" / "editor-settings.toml";
     std::string source;
     if (!engine::editor::file_detail::read_text(path, source))
@@ -131,10 +136,12 @@ struct EditorSystem::State
           ScenePreview* scene_preview)
         : gameplay(session), environment(editor_environment), preview(scene_preview)
     {
+        ENGINE_PROFILE_FUNCTION();
     }
 
     void restore_frame_rate() noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         if (editor_frame_rate)
         {
             if (!Engine::instance().set_target_frame_rate(*editor_frame_rate))
@@ -147,6 +154,7 @@ struct EditorSystem::State
 
     void restore_frame_rate_if_stopped() noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         const auto* status = gameplay.script_status();
         if (transition != "starting" && (status == nullptr || !status->running))
         {
@@ -157,6 +165,7 @@ struct EditorSystem::State
 #if defined(ENGINE_ENABLE_TEST_SUPPORT)
     bool execute_script(const Json& arguments, Json& result, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         result = Json::object();
         if (!arguments.is_object() || arguments.size() != 5 || !arguments.contains("session") ||
             arguments["session"] != session || closed || !transition.empty() ||
@@ -201,6 +210,7 @@ struct EditorSystem::State
 
     bool start_gameplay()
     {
+        ENGINE_PROFILE_FUNCTION();
         const auto* current = gameplay.script_status();
         if (current != nullptr && current->running)
         {
@@ -230,6 +240,7 @@ struct EditorSystem::State
 
     Json status_value() const
     {
+        ENGINE_PROFILE_FUNCTION();
         const auto* script = gameplay.script_status();
         const bool running =
             !closed && transition != "starting" && script != nullptr && script->running;
@@ -260,6 +271,7 @@ struct EditorSystem::State
     }
     bool publish(bool force = false)
     {
+        ENGINE_PROFILE_FUNCTION();
         auto status = status_value();
         const auto serialized = status.dump(-1, ' ', false, Json::error_handler_t::replace);
         const auto now = std::chrono::steady_clock::now();
@@ -292,6 +304,7 @@ struct EditorSystem::State
 
     bool control_project(bool start, const Json& arguments, Json& result, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (!arguments.is_object() || !arguments.empty() || closed ||
             (start && !transition.empty()))
         {
@@ -397,15 +410,18 @@ EditorSystem::EditorSystem(EditorEnvironment& environment, GameplaySession* game
                            WorldSystem* world, ScenePreview* preview) noexcept
     : environment_(environment), gameplay_(gameplay), world_(world), preview_(preview)
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 EditorSystem::~EditorSystem() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
 }
 
 bool EditorSystem::on_initialize(const EngineConfig&)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!environment_.is_initialized() || !IMGUI_CHECKVERSION())
     {
         return false;
@@ -450,7 +466,10 @@ bool EditorSystem::on_initialize(const EngineConfig&)
         }
         state_->commands = std::make_unique<EditorCommands>(
             [world = world_]()
-            { return world == nullptr || world->scene() == nullptr ? 0 : world->scene()->id(); });
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return world == nullptr || world->scene() == nullptr ? 0 : world->scene()->id();
+            });
         if (world_ != nullptr)
         {
             state_->scene_commands = std::make_unique<SceneCommands>(*world_);
@@ -464,6 +483,7 @@ bool EditorSystem::on_initialize(const EngineConfig&)
                 [state = state_.get()](const Json& arguments, Json& result,
                                        std::unique_ptr<EditorEdit>&, std::string& error)
                 {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
                     if (!arguments.empty())
                     {
                         error = "Project status has no arguments";
@@ -481,7 +501,10 @@ bool EditorSystem::on_initialize(const EngineConfig&)
                     start ? "start_project" : "stop_project", false,
                     [state = state_.get(), start](const Json& arguments, Json& result,
                                                   std::unique_ptr<EditorEdit>&, std::string& error)
-                    { return state->control_project(start, arguments, result, error); }))
+                    {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
+                        return state->control_project(start, arguments, result, error);
+                    }))
             {
                 return false;
             }
@@ -491,7 +514,10 @@ bool EditorSystem::on_initialize(const EngineConfig&)
                 "execute_project_script", false,
                 [state = state_.get()](const Json& arguments, Json& result,
                                        std::unique_ptr<EditorEdit>&, std::string& error)
-                { return state->execute_script(arguments, result, error); }))
+                {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
+                    return state->execute_script(arguments, result, error);
+                }))
         {
             return false;
         }
@@ -502,6 +528,7 @@ bool EditorSystem::on_initialize(const EngineConfig&)
 
 bool EditorSystem::on_tick(double)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (state_ != nullptr)
     {
         if (state_->transition == "starting")
@@ -530,16 +557,19 @@ bool EditorSystem::on_tick(double)
 
 SceneCommands* EditorSystem::scene_commands() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return state_ ? state_->scene_commands.get() : nullptr;
 }
 
 EditorCommands* EditorSystem::commands() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return is_initialized() && state_ != nullptr ? state_->commands.get() : nullptr;
 }
 
 void EditorSystem::on_shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (state_ != nullptr)
     {
         if (preview_ != nullptr)

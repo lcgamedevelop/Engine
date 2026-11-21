@@ -1,10 +1,12 @@
 #include "runtime/utils/path_utils.hpp"
+#include "runtime/performance/function_profile.hpp"
 
 namespace engine
 {
 
 std::filesystem::path PathUtils::from_utf8(std::string_view text)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     if (text.empty())
     {
         return {};
@@ -15,6 +17,7 @@ std::filesystem::path PathUtils::from_utf8(std::string_view text)
 
 std::string PathUtils::to_utf8(const std::filesystem::path& path)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     const auto text = path.generic_u8string();
     return std::string(reinterpret_cast<const char*>(text.data()), text.size());
 }

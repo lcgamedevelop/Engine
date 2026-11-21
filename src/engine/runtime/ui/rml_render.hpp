@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/resource/resource_reference.hpp"
 
 #include "runtime/font/font_system.hpp"
@@ -19,6 +21,7 @@ public:
                              int logical_height);
     void set_preparing(bool value) noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         preparing_ = value;
     }
     void release() noexcept;

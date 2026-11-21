@@ -1,4 +1,6 @@
 #include "runtime/resource/codecs/model_resource_codec.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/resource/codecs/resource_decode.hpp"
 
 #include "runtime/core/guid_map.hpp"
@@ -14,6 +16,7 @@ namespace engine
 {
 bool ModelResourceCodec::validate(const schema::ModelDataT& data)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (data.schema_version != 2 || !valid_path(data.path) || data.nodes.empty() ||
         data.nodes.size() > 65536)
     {
@@ -45,24 +48,32 @@ bool ModelResourceCodec::validate(const schema::ModelDataT& data)
 }
 schema::AssetKind ModelResourceCodec::kind() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::model;
 }
 
 bool ModelResourceCodec::decode(const schema::AssetEntryT& entry, ByteView payload,
                                 std::unique_ptr<Resource>& output, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto validate = [](ByteView payload, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return resource_decode_detail::verify_flatbuffer(payload, schema::VerifyModelDataBuffer,
                                                          "Invalid Model FlatBuffer", error);
     };
     return resource_decode_detail::decode_flatbuffer<ResourceType>(
         entry, payload, 64U * 1024U * 1024U, validate,
-        [](const std::uint8_t* bytes) { return schema::UnPackModelData(bytes); }, output, error);
+        [](const std::uint8_t* bytes)
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return schema::UnPackModelData(bytes);
+        }, output, error);
 }
 
 bool ModelResourceCodec::validate_data(const Resource& resource, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* data = resource_detail::data<ResourceType>(&resource);
     if (!data)
     {
@@ -111,6 +122,7 @@ bool ModelResourceCodec::validate_data(const Resource& resource, std::string& er
 bool ModelResourceCodec::validate_dependencies(const Resource& resource, ResourceView dependencies,
                                                std::string&) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* data = resource_detail::data<ModelResource>(&resource);
     if (!data)
     {

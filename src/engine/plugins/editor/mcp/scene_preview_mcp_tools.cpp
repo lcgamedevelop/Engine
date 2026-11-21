@@ -1,4 +1,6 @@
 #include "plugins/editor/mcp/scene_preview_mcp_tools.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/editor/mcp/editor_tool_registration.hpp"
 
 #include "plugins/editor/mcp/editor_mcp_tools.hpp"
@@ -14,6 +16,7 @@ namespace engine::plugins::mcp
 
 bool register_scene_preview_tools(McpSystem& system, EditorMcpTools& editor)
 {
+    ENGINE_PROFILE_FUNCTION();
     using Json = nlohmann::json;
     const Json vector = {
         {"type", "array"}, {"items", {{"type", "number"}}}, {"minItems", 3}, {"maxItems", 3}};
@@ -24,6 +27,7 @@ bool register_scene_preview_tools(McpSystem& system, EditorMcpTools& editor)
                       Json::array());
     const auto add = [&](std::string name, std::string description, Json schema)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const auto command = name;
         return register_editor_command_tool(system, editor, std::move(name), std::move(description),
                                             std::move(schema), command);

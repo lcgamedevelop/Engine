@@ -1,4 +1,6 @@
 #pragma once
+
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/render/rvt.hpp"
 #include "runtime/resource/resource_reference.hpp"
 #include <bgfx/bgfx.h>
@@ -14,6 +16,7 @@ class RvtDebugView final
 public:
     explicit RvtDebugView(FontSystem& fonts) noexcept : fonts_(fonts)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
     }
     ~RvtDebugView() noexcept;
     [[nodiscard]] bool prepare_font(ResourceLoader& resources);

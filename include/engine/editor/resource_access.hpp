@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/resource/resource_reference.hpp"
 
 #include <set>
@@ -10,6 +12,7 @@ namespace engine::editor::resource_access
 [[nodiscard]] inline bool load(ResourceLoader* loader, std::string_view path_or_guid,
                                ResourceReference& output)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     if (!loader)
     {
         return false;
@@ -33,6 +36,7 @@ namespace engine::editor::resource_access
                                         std::span<const schema::AssetEntryT> versions,
                                         std::vector<ResourceReference>& output)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     std::vector<ResourceReference> candidate;
     for (const auto& version : versions)
     {
@@ -50,6 +54,7 @@ namespace engine::editor::resource_access
 [[nodiscard]] inline bool collect_versions(const ResourceReference& root,
                                            std::vector<schema::AssetEntryT>& output)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     if (!root)
     {
         return false;
@@ -90,6 +95,7 @@ namespace engine::editor::resource_access
 
 [[nodiscard]] inline const Resource* get(ResourceLoader* loader, ResourceHandle handle) noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     const Resource* resource = nullptr;
     if (loader)
     {
@@ -101,6 +107,7 @@ namespace engine::editor::resource_access
 // 只查询已准备的身份，绝不隐式加载。
 [[nodiscard]] inline bool guid(ResourceLoader* loader, std::string_view path, std::string& output)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     output.clear();
     ResourceReference resource;
     if (!resource.acquire(loader, path))
@@ -115,6 +122,7 @@ namespace engine::editor::resource_access
                                        std::string& output,
                                        std::vector<ResourceReference>& prepared)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     output.clear();
     ResourceReference resource;
     if (!load(loader, path, resource))
@@ -128,6 +136,7 @@ namespace engine::editor::resource_access
 
 [[nodiscard]] inline bool path(ResourceLoader* loader, std::string_view guid, std::string& output)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     output.clear();
     ResourceReference resource;
     if (!resource.acquire(loader, guid))

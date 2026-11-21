@@ -1,4 +1,5 @@
 #include "plugins/runtime/effects/effect_component.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "plugins/runtime/effects/effect_component_runtime.hpp"
 
@@ -18,22 +19,26 @@ namespace engine::plugins::effects
 
 bool EffectComponent::register_type(ComponentRegistry& registry)
 {
+    ENGINE_PROFILE_FUNCTION();
     return register_component_storage<EffectComponent, Data, Runtime>(registry);
 }
 
 EffectComponent::Runtime* EffectComponent::runtime() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return runtime_state<Runtime>();
 }
 
 bool EffectComponent::valid_settings(const schema::EffectDataT& settings) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return (settings.effect_guid.empty() || GuidMap::valid_guid(settings.effect_guid)) &&
            std::isfinite(settings.speed) && settings.speed >= 0.0F && settings.speed <= 16.0F;
 }
 
 bool EffectComponent::get_settings(Data& output) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* value = read_data<Data>();
     output = value ? *value : Data{};
     return value != nullptr;
@@ -41,11 +46,13 @@ bool EffectComponent::get_settings(Data& output) const noexcept
 
 bool EffectComponent::set_settings(const schema::EffectDataT& settings)
 {
+    ENGINE_PROFILE_FUNCTION();
     return apply_settings(settings, {});
 }
 
 bool EffectComponent::apply_settings(const Data& settings, ResourceReference prepared)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -104,6 +111,7 @@ bool EffectComponent::apply_settings(const Data& settings, ResourceReference pre
 
 bool EffectComponent::restore_data(const schema::ComponentDataT& data)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!data.flags)
     {
         return false;
@@ -126,6 +134,7 @@ bool EffectComponent::restore_data(const schema::ComponentDataT& data)
 
 bool EffectComponent::set_effect(std::string_view path)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -153,6 +162,7 @@ bool EffectComponent::set_effect(std::string_view path)
 
 std::string_view EffectComponent::effect_path() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return {};
@@ -163,6 +173,7 @@ std::string_view EffectComponent::effect_path() const noexcept
 
 bool EffectComponent::play() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -183,6 +194,7 @@ bool EffectComponent::play() noexcept
 
 bool EffectComponent::pause() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -199,6 +211,7 @@ bool EffectComponent::pause() noexcept
 
 bool EffectComponent::stop() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -211,6 +224,7 @@ bool EffectComponent::stop() noexcept
 
 bool EffectComponent::playing() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return false;

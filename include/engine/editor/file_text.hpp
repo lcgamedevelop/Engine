@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/resource/virtual_file_system.hpp"
 
 #include <string>
@@ -9,6 +11,7 @@ namespace engine::editor::file_detail
 // 编辑器源文件不是运行资源；只读取物理文件并复制文本。
 [[nodiscard]] inline bool read_text(const std::filesystem::path& path, std::string& output)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     output.clear();
     ByteBuffer bytes;
     if (!VirtualFileSystem::read_file(path, bytes))

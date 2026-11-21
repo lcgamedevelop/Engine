@@ -1,4 +1,6 @@
 #include "editor/scene/scene_preview.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/resource_access.hpp"
 #include "runtime/resource/virtual_file_system.hpp"
 
@@ -47,6 +49,7 @@ using Json = nlohmann::json;
 
 std::int64_t milliseconds()
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::chrono::duration_cast<std::chrono::milliseconds>(
                std::chrono::steady_clock::now().time_since_epoch())
         .count();
@@ -59,10 +62,12 @@ public:
     SourceWatcher(std::atomic<std::uint64_t>& serial, std::atomic<std::int64_t>& changed_at)
         : serial_(serial), changed_at_(changed_at)
     {
+        ENGINE_PROFILE_FUNCTION();
     }
 
     bool initialize(const fs::path& root)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (watcher_.addWatch(PathUtils::to_utf8(root / "assets"), this, true) < 0 ||
             watcher_.addWatch(PathUtils::to_utf8(root / "settings"), this, false) < 0)
         {
@@ -76,6 +81,7 @@ private:
     void handleFileAction(efsw::WatchID, const std::string&, const std::string&, efsw::Action,
                           const std::string&) override
     {
+        ENGINE_PROFILE_FUNCTION();
         changed_at_.store(milliseconds());
         serial_.fetch_add(1);
     }
@@ -88,6 +94,7 @@ private:
 
 bool fields(const Json& value, std::initializer_list<std::string_view> names)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!value.is_object())
     {
         return false;
@@ -104,6 +111,7 @@ bool fields(const Json& value, std::initializer_list<std::string_view> names)
 
 bool vector(const Json& value, Vec3& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!value.is_array() || value.size() != 3)
     {
         return false;
@@ -127,11 +135,13 @@ bool vector(const Json& value, Vec3& output)
 
 Json vector(const Vec3& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     return Json::array({value.x(), value.y(), value.z()});
 }
 
 bool camera_arguments(const Json& arguments, TransformSettings& pose, double& speed)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!fields(arguments, {"position", "rotation", "speed"}) ||
         (arguments.contains("position") && !vector(arguments["position"], pose.position)) ||
         (arguments.contains("rotation") && !vector(arguments["rotation"], pose.rotation)))
@@ -151,6 +161,7 @@ bool camera_arguments(const Json& arguments, TransformSettings& pose, double& sp
 
 bool copy_camera(const Camera& source, TransformSettings& pose)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto transform = source.node().get_component<Transform>();
     double matrix[16]{};
     if (!transform || !transform.world_matrix(matrix))
@@ -224,10 +235,12 @@ struct ScenePreview::State
           renderer(render_system), input(input_system), project_root(std::move(root)),
           import(std::move(callback))
     {
+        ENGINE_PROFILE_FUNCTION();
     }
 
     ~State()
     {
+        ENGINE_PROFILE_FUNCTION();
 #if ENGINE_HAS_ASSET_PIPELINE
         watcher.reset();
 #endif
@@ -243,22 +256,26 @@ struct ScenePreview::State
 
     bool active() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         return camera.valid() && !path.empty();
     }
 
     bool modified() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         return active() && commands != nullptr && commands->mutation_revision() != saved_revision;
     }
 
     bool fail(std::string message)
     {
+        ENGINE_PROFILE_FUNCTION();
         error = std::move(message);
         return false;
     }
 
     void close() noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         if (input_channel.generation() != 0)
         {
             (void)input.set_channel_enabled(input_channel, false,
@@ -285,6 +302,7 @@ struct ScenePreview::State
 
     Json status() const
     {
+        ENGINE_PROFILE_FUNCTION();
         Json view = nullptr;
         TransformSettings pose;
         if (camera && camera.node().get_component<Transform>().get_settings(pose))
@@ -304,6 +322,7 @@ struct ScenePreview::State
 
     bool import_sources()
     {
+        ENGINE_PROFILE_FUNCTION();
         const auto serial = source_serial.load();
         imported_serial = serial;
         if (import && !import(error))
@@ -320,6 +339,7 @@ struct ScenePreview::State
 
     bool checkpoint()
     {
+        ENGINE_PROFILE_FUNCTION();
         if (commands)
         {
             commands->clear_history();
@@ -342,6 +362,7 @@ struct ScenePreview::State
 
     bool open(std::string_view requested, const Json& arguments)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (!initialized || !GuidMap::valid_path(requested) ||
             requested.find(':') != requested.npos || !requested.ends_with(".scene"))
         {
@@ -422,6 +443,7 @@ struct ScenePreview::State
 
     bool refresh(bool discard_changes, bool rebuild)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (!active())
         {
             return fail("No scene preview is active");
@@ -459,12 +481,14 @@ struct ScenePreview::State
 
     bool configure_input()
     {
+        ENGINE_PROFILE_FUNCTION();
         schema::InputChannelDataT data;
         data.enabled = active();
         data.activation = schema::InputActivation::wait_for_neutral;
         const auto action = [&](std::string name, schema::InputActionKind kind,
                                 schema::InputValueMode mode = schema::InputValueMode::state)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             auto value = std::make_unique<schema::InputActionDataT>();
             value->name = std::move(name);
             value->kind = kind;
@@ -480,6 +504,7 @@ struct ScenePreview::State
         auto* look = action("look", schema::InputActionKind::axis2d, schema::InputValueMode::delta);
         const auto binding = [](schema::InputActionDataT& target)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             auto value = std::make_unique<schema::InputBindingDataT>();
             auto* pointer = value.get();
             target.bindings.push_back(std::move(value));
@@ -489,6 +514,7 @@ struct ScenePreview::State
                              schema::InputControlKind kind, std::uint32_t code, double x,
                              double y = 0.0)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             auto value = std::make_unique<schema::InputBindingPartDataT>();
             value->source = {device, kind, code};
             value->weight_x = x;
@@ -531,6 +557,7 @@ struct ScenePreview::State
 
     bool move_camera(double delta_time)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (device_revision != input.frame_state().device_revision() && !configure_input())
         {
             return false;
@@ -583,6 +610,7 @@ struct ScenePreview::State
 
     bool matches_saved_catalog(const ResourceCatalog& catalog) const
     {
+        ENGINE_PROFILE_FUNCTION();
 #if ENGINE_HAS_ASSET_PIPELINE
         if (!saved_import_pending || !saved_import_complete)
         {
@@ -634,6 +662,7 @@ struct ScenePreview::State
 
     void poll_resources()
     {
+        ENGINE_PROFILE_FUNCTION();
         const auto now = milliseconds();
         bool imported = false;
         if (source_serial.load() != imported_serial && now - source_changed_at.load() >= 500)
@@ -725,12 +754,14 @@ ScenePreview::ScenePreview(EditorEnvironment& environment, GameplaySession& game
     : state_(std::make_unique<State>(environment, gameplay, world, renderer, input,
                                      std::move(project_root), std::move(import)))
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 ScenePreview::~ScenePreview() noexcept = default;
 
 bool ScenePreview::initialize(const EngineConfig& config)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto& state = *state_;
     if (state.initialized || !state.environment.is_initialized() || !state.world.is_initialized() ||
         !state.input.is_initialized() || !state.camera_world.initialize(config))
@@ -760,6 +791,7 @@ bool ScenePreview::initialize(const EngineConfig& config)
 
 bool ScenePreview::register_commands(EditorCommands& commands)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto& state = *state_;
     if (!state.initialized || state.commands != nullptr)
     {
@@ -771,6 +803,7 @@ bool ScenePreview::register_commands(EditorCommands& commands)
                [&state](const Json& arguments, Json& result, std::unique_ptr<EditorEdit>&,
                         std::string& error)
                {
+                   ENGINE_PROFILE_FUNCTION_PROBE();
                    const bool discarded = state.modified();
                    if (!fields(arguments, {"path", "camera"}) || !arguments.contains("path") ||
                        !arguments["path"].is_string())
@@ -792,6 +825,7 @@ bool ScenePreview::register_commands(EditorCommands& commands)
                                      [&state](const Json& arguments, Json& result,
                                               std::unique_ptr<EditorEdit>&, std::string& error)
                                      {
+                                         ENGINE_PROFILE_FUNCTION_PROBE();
                                          if (!fields(arguments, {}) || !arguments.empty())
                                          {
                                              error = "close_scene_preview takes no arguments";
@@ -807,6 +841,7 @@ bool ScenePreview::register_commands(EditorCommands& commands)
                                      [&state](const Json& arguments, Json& result,
                                               std::unique_ptr<EditorEdit>&, std::string& error)
                                      {
+                                         ENGINE_PROFILE_FUNCTION_PROBE();
                                          if (!fields(arguments, {}) || !arguments.empty())
                                          {
                                              error = "get_scene_preview takes no arguments";
@@ -820,6 +855,7 @@ bool ScenePreview::register_commands(EditorCommands& commands)
                [&state](const Json& arguments, Json& result, std::unique_ptr<EditorEdit>&,
                         std::string& error)
                {
+                   ENGINE_PROFILE_FUNCTION_PROBE();
                    if (!state.active())
                    {
                        error = "No scene preview is active";
@@ -848,6 +884,7 @@ bool ScenePreview::register_commands(EditorCommands& commands)
                [&state](const Json& arguments, Json& result, std::unique_ptr<EditorEdit>&,
                         std::string& error)
                {
+                   ENGINE_PROFILE_FUNCTION_PROBE();
                    if (!fields(arguments, {"discardChanges"}) ||
                        (arguments.contains("discardChanges") &&
                         !arguments["discardChanges"].is_boolean()))
@@ -869,6 +906,7 @@ bool ScenePreview::register_commands(EditorCommands& commands)
 
 bool ScenePreview::tick(double delta_time)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!state_->initialized || !std::isfinite(delta_time) || delta_time < 0.0)
     {
         return state_->fail("Invalid scene preview frame");
@@ -896,21 +934,25 @@ bool ScenePreview::tick(double delta_time)
 
 void ScenePreview::close() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     state_->close();
 }
 
 bool ScenePreview::active() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return state_->active();
 }
 
 const Camera ScenePreview::camera() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return state_->camera;
 }
 
 void ScenePreview::mark_saved(std::string_view path, std::span<const SceneSavedResource> resources)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (active() && state_->path == path && state_->commands)
     {
         state_->saved_revision = state_->commands->mutation_revision();
@@ -927,6 +969,7 @@ void ScenePreview::mark_saved(std::string_view path, std::span<const SceneSavedR
 
 const std::string& ScenePreview::last_error() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return state_->error;
 }
 } // namespace engine::editor

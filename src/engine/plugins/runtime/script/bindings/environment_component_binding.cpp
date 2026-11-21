@@ -1,4 +1,5 @@
 #include "plugins/runtime/script/bindings/environment_component_binding.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/script/bindings/binding_helpers.hpp"
 #include "plugins/runtime/script/bindings/control_binding_helpers.hpp"
 
@@ -67,6 +68,7 @@ Object.freeze(EnvironmentComponent);
 
 bool read_color(const Arguments& arguments, int index, Color& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     float r = 0.0F;
     float g = 0.0F;
     float b = 0.0F;
@@ -82,6 +84,7 @@ bool read_color(const Arguments& arguments, int index, Color& output)
 
 void ambient(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto target = binding_detail::component<EnvironmentComponent>(arguments, 6);
     if (!target)
     {
@@ -103,6 +106,7 @@ void ambient(const Arguments& arguments)
 
 void tricolor(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto target = binding_detail::component<EnvironmentComponent>(arguments, 12);
     if (!target)
     {
@@ -126,6 +130,7 @@ void tricolor(const Arguments& arguments)
 
 void linear_fog(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto target = binding_detail::component<EnvironmentComponent>(arguments, 8);
     if (!target || !arguments.is_boolean(2))
     {
@@ -148,6 +153,7 @@ void linear_fog(const Arguments& arguments)
 
 void exponential_fog(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto target = binding_detail::component<EnvironmentComponent>(arguments, 8);
     if (!target || !arguments.is_boolean(2) || !arguments.is_boolean(7))
     {
@@ -171,6 +177,7 @@ void exponential_fog(const Arguments& arguments)
 
 void clear_color(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto target = binding_detail::component<EnvironmentComponent>(arguments, 3);
     if (!target || !arguments.is_uint32(2))
     {
@@ -188,6 +195,7 @@ void clear_color(const Arguments& arguments)
 
 void ibl(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto target = binding_detail::component<EnvironmentComponent>(arguments, 4);
     if (!target || !arguments.is_boolean(2))
     {
@@ -208,6 +216,7 @@ void ibl(const Arguments& arguments)
 
 void meshlet_enabled(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto target = binding_detail::component<EnvironmentComponent>(arguments, 2);
     EnvironmentComponent::Data value{};
     arguments.set_return(target && target.get_settings(value) && value.meshlet_culling_enabled);
@@ -215,6 +224,7 @@ void meshlet_enabled(const Arguments& arguments)
 
 void get_rvt(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto component = binding_detail::component<EnvironmentComponent>(arguments, 2);
     EnvironmentSettings settings;
     arguments.set_return({});
@@ -228,6 +238,7 @@ void get_rvt(const Arguments& arguments)
 }
 void set_rvt(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto component = binding_detail::component<EnvironmentComponent>(arguments, 3);
     EnvironmentSettings settings;
     control_detail::Json json;
@@ -248,6 +259,7 @@ void set_rvt(const Arguments& arguments)
 }
 void meshlet_culling(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto target = binding_detail::component<EnvironmentComponent>(arguments, 3);
     EnvironmentComponent::Data value{};
     if (!target || !arguments.is_boolean(2) || !target.get_settings(value))
@@ -261,6 +273,7 @@ void meshlet_culling(const Arguments& arguments)
 
 void atmosphere(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto target = binding_detail::component<EnvironmentComponent>(arguments, 6);
     auto* context = BindingContext::current(arguments);
     std::uint64_t sun_scene = 0, sun_id = 0;
@@ -374,16 +387,19 @@ void atmosphere(const Arguments& arguments)
 
 std::string_view EnvironmentComponentBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "EnvironmentComponent";
 }
 
 std::string_view EnvironmentComponentBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 
 bool EnvironmentComponentBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.integer("EnvironmentKind", static_cast<int>(EnvironmentComponent::component_type)) &&
            vm.function("EnvironmentAdd", binding_detail::add_component<EnvironmentComponent>) &&
            vm.function("EnvironmentGetRvt", get_rvt) && vm.function("EnvironmentSetRvt", set_rvt) &&

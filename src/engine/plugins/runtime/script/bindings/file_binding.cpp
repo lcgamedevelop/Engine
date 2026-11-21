@@ -1,4 +1,5 @@
 #include "plugins/runtime/script/bindings/file_binding.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "plugins/runtime/script/bindings/binding_context.hpp"
 #include "plugins/runtime/script/bindings/data_binding_helpers.hpp"
@@ -29,6 +30,7 @@ Object.freeze(File);
 
 BindingContext* begin(const Arguments& arguments, int count)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* context = BindingContext::current(arguments);
     if (context)
     {
@@ -45,6 +47,7 @@ BindingContext* begin(const Arguments& arguments, int count)
 bool path_argument(BindingContext& context, const Arguments& arguments, int index,
                    std::filesystem::path& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string text;
     if (!arguments.text(index, text) || text.empty() || text.find('\0') != std::string::npos)
     {
@@ -63,6 +66,7 @@ bool path_argument(BindingContext& context, const Arguments& arguments, int inde
 
 void read(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     auto* context = begin(arguments, 1);
     std::filesystem::path path;
@@ -95,6 +99,7 @@ void read(const Arguments& arguments)
 
 void write(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto* context = begin(arguments, 2);
     std::filesystem::path path;
@@ -131,6 +136,7 @@ void write(const Arguments& arguments)
 
 vm::NativeValue entry_value(const FileEntry& entry)
 {
+    ENGINE_PROFILE_FUNCTION();
     constexpr const char* names[] = {"file", "directory", "symlink", "other"};
     return vm::NativeValue::Object{{"path", PathUtils::to_utf8(entry.path)},
                                    {"kind", names[static_cast<unsigned>(entry.kind)]},
@@ -139,6 +145,7 @@ vm::NativeValue entry_value(const FileEntry& entry)
 
 void inspect(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     auto* context = begin(arguments, 1);
     std::filesystem::path path;
@@ -174,6 +181,7 @@ void inspect(const Arguments& arguments)
 
 void change(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     const auto operation = arguments.data();
     auto* context = begin(arguments, operation < 2 ? 1 : 2);
@@ -209,6 +217,7 @@ void change(const Arguments& arguments)
 
 void last_error(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* context = BindingContext::current(arguments);
     arguments.set_return(context ? vm::NativeValue(context->file_error()) : vm::NativeValue{});
 }
@@ -216,14 +225,17 @@ void last_error(const Arguments& arguments)
 
 std::string_view FileBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "File";
 }
 std::string_view FileBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 bool FileBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.function("FileReadText", read, 0) && vm.function("FileReadBytes", read, 1) &&
            vm.function("FileWriteText", write, 0) && vm.function("FileWriteBytes", write, 1) &&
            vm.function("FileStat", inspect, 0) && vm.function("FileList", inspect, 1) &&

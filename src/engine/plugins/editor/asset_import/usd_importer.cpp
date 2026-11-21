@@ -1,4 +1,6 @@
 #include "plugins/editor/asset_import/usd_importer.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "editor/asset_pipeline/asset_io.hpp"
 #include "editor/asset_pipeline/importer_utils.hpp"
@@ -31,6 +33,7 @@ constexpr std::string_view default_material = "00000000-0000-4000-8000-000000000
 bool compile_mesh(const pxr::UsdGeomMesh& source, pxr::UsdGeomXformCache& transforms, double meters,
                   bool z_up, schema::MeshDataT& mesh, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     pxr::VtArray<pxr::GfVec3f> points;
     pxr::VtArray<int> counts;
     pxr::VtArray<int> indices;
@@ -177,20 +180,24 @@ bool compile_mesh(const pxr::UsdGeomMesh& source, pxr::UsdGeomXformCache& transf
 } // namespace
 std::string_view UsdImporter::id() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "usd";
 }
 schema::AssetKind UsdImporter::kind() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::model;
 }
 bool UsdImporter::matches(const std::filesystem::path& source) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto ext = editor::asset_pipeline::source_extension(source);
     return ext == ".usd" || ext == ".usda" || ext == ".usdc";
 }
 bool UsdImporter::inspect_batch(const editor::asset_pipeline::ImportContext& context,
                                 std::string& fingerprint, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::set<std::filesystem::path> current;
     for (const auto* source : context.sources)
     {
@@ -199,7 +206,11 @@ bool UsdImporter::inspect_batch(const editor::asset_pipeline::ImportContext& con
             current.insert(source->source);
         }
     }
-    std::erase_if(parsed_, [&](const auto& entry) { return !current.contains(entry.first); });
+    std::erase_if(parsed_, [&](const auto& entry)
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return !current.contains(entry.first);
+    });
     for (const auto& [path, model] : parsed_)
     {
         std::string hash;
@@ -222,6 +233,7 @@ bool UsdImporter::discover(const editor::asset_pipeline::ImportAsset& source,
                            std::vector<editor::asset_pipeline::ImportSubresource>& output,
                            std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     parsed_.erase(source.source);
     ParsedModel parsed;
@@ -351,6 +363,7 @@ bool UsdImporter::scan_dependencies(editor::asset_pipeline::ImportAsset& asset,
                                     const editor::asset_pipeline::ImportContext& context,
                                     std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     asset.build_dependencies.clear();
     asset.runtime_dependencies.clear();
     const auto item = parsed_.find(asset.source);
@@ -382,6 +395,7 @@ bool UsdImporter::convert(const editor::asset_pipeline::ImportAsset& asset,
                           const editor::asset_pipeline::ImportContext& context,
                           std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto found = parsed_.find(asset.source);
     if (found == parsed_.end())
     {

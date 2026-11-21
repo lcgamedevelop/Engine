@@ -1,5 +1,6 @@
 #include "plugins/runtime/terrain/terrain_islands.hpp"
 #include "plugins/runtime/terrain/terrain_samples.hpp"
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 
 // Six-neighbor island identification follows Godot Voxel Tools (MIT), commit
@@ -19,28 +20,36 @@ using Point = std::array<std::int64_t, 3>;
 using Keys = std::set<TerrainRegionKey, TerrainRegionLess>;
 std::int64_t floor_div(std::int64_t value, std::int64_t divisor)
 {
+    ENGINE_PROFILE_FUNCTION();
     return value / divisor - (value % divisor < 0 ? 1 : 0);
 }
 TerrainRegionKey owner(Point point, std::uint32_t cells)
 {
+    ENGINE_PROFILE_FUNCTION();
     return {std::int32_t(floor_div(point[0], cells)), std::int32_t(floor_div(point[1], cells)),
             std::int32_t(floor_div(point[2], cells)), 0};
 }
 Vec3 position(const schema::TerrainAssetDataT& source, Point point)
 {
+    ENGINE_PROFILE_FUNCTION();
     return {source.origin.x() + point[0] * source.voxel_size,
             source.origin.y() + point[1] * source.voxel_size,
             source.origin.z() + point[2] * source.voxel_size};
 }
 std::size_t offset(Point point, std::uint32_t cells)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto local = [cells](std::int64_t v)
-    { return std::size_t(v - floor_div(v, cells) * cells); };
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return std::size_t(v - floor_div(v, cells) * cells);
+    };
     return (local(point[2]) * cells + local(point[1])) * cells + local(point[0]);
 }
 bool build_fragment(const TerrainReadSnapshot& isolated, const TerrainMesher& mesher,
                     TerrainFragment& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.samples = isolated;
     output.bounds = isolated.source->bounds;
     output.position = output.bounds.minimum();
@@ -167,6 +176,7 @@ bool build_fragment(const TerrainReadSnapshot& isolated, const TerrainMesher& me
 bool isolate(const TerrainReadSnapshot& input, std::span<const Point> points,
              TerrainReadSnapshot& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto source = std::make_shared<schema::TerrainAssetDataT>();
     source->origin = input.source->origin;
     source->voxel_size = input.source->voxel_size;
@@ -414,6 +424,7 @@ bool stage_collapse(const TerrainReadSnapshot& input, const TerrainCollapseSpec&
 bool rebuild_fragment(const TerrainReadSnapshot& input, const TerrainMesher& mesher,
                       TerrainFragment& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     return build_fragment(input, mesher, output, error);
 }
 } // namespace engine::plugins::terrain

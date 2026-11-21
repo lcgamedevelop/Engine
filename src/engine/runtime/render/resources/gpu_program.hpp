@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/render/resources/gpu_sampler.hpp"
 #include "runtime/render/resources/gpu_texture.hpp"
 #include "runtime/render/resources/gpu_uniform.hpp"
@@ -39,6 +41,7 @@ struct GpuProgram
                                      bool max_anisotropy, bool pbr_opaque = false) const;
     [[nodiscard]] bool supports_instancing() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return bgfx::isValid(instanced_program);
     }
     void release() noexcept;

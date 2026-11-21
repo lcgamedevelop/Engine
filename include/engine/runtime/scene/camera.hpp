@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/scene/component.hpp"
 
 #include <cstdint>
@@ -18,6 +20,7 @@ public:
     Camera() noexcept = default;
     explicit Camera(Component component) noexcept : Component(component, component_type)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
     }
     [[nodiscard]] static bool register_type(ComponentRegistry& registry);
     using Runtime = CameraRuntime;

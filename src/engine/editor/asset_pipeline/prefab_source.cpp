@@ -1,4 +1,5 @@
 #include "editor/asset_pipeline/prefab_source.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "editor/asset_pipeline/asset_io.hpp"
 #include "editor/asset_pipeline/scene_importer.hpp"
@@ -14,6 +15,7 @@ namespace
 {
 bool fields(const toml::table& input, std::vector<std::string>& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     const auto* values = input["fields"].as_array();
     if (!values)
@@ -41,6 +43,7 @@ bool fields(const toml::table& input, std::vector<std::string>& output, std::str
 
 toml::array field_array(const std::vector<std::string>& input)
 {
+    ENGINE_PROFILE_FUNCTION();
     toml::array result;
     for (const auto& field : input)
     {
@@ -51,6 +54,7 @@ toml::array field_array(const std::vector<std::string>& input)
 
 bool read_info(const toml::table& table, schema::NodeInfoT& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.properties = std::make_unique<schema::NodePropertiesT>();
     if ((table.contains("parent") &&
          !asset_pipeline::identifier(table.get("parent"), output.parent_id)) ||
@@ -72,6 +76,7 @@ bool read_overrides(const toml::array& input,
                     std::vector<std::unique_ptr<schema::PrefabNodeOverrideT>>& output,
                     std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     std::set<std::uint64_t> nodes;
     for (const auto& item : input)
@@ -144,6 +149,7 @@ bool read_overrides(const toml::array& input,
 bool write_overrides(const std::vector<std::unique_ptr<schema::PrefabNodeOverrideT>>& input,
                      toml::array& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     for (const auto& value : input)
     {
@@ -185,6 +191,7 @@ bool read_instances(const toml::table& input,
                     std::vector<std::unique_ptr<schema::PrefabInstanceDataT>>& output,
                     std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     const auto* instances = input["prefab_instances"].as_array();
     if (!instances)
@@ -254,6 +261,7 @@ bool read_instances(const toml::table& input,
 bool write_instances(const std::vector<std::unique_ptr<schema::PrefabInstanceDataT>>& input,
                      toml::table& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (input.empty())
     {
         return true;
@@ -294,6 +302,7 @@ bool write_instances(const std::vector<std::unique_ptr<schema::PrefabInstanceDat
 bool write_document(const std::filesystem::path& destination, const toml::table& document,
                     std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::ostringstream stream;
     stream << document;
     auto temporary = destination;

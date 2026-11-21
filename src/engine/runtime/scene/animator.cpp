@@ -1,4 +1,5 @@
 #include "runtime/scene/animator.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/scene/animator_runtime.hpp"
 
@@ -26,12 +27,14 @@ namespace
 {
 bool same_resource(const ResourceReference& a, const ResourceReference& b)
 {
+    ENGINE_PROFILE_FUNCTION();
     return (!a && !b) ||
            (a && b && a->info().guid == b->info().guid && a->generation() == b->generation());
 }
 bool validate_overlay(const schema::AnimationDataT& animation,
                       std::span<const schema::AnimationEventMarkerDataT> markers)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto data = animation;
     for (const auto& marker : markers)
     {
@@ -41,6 +44,7 @@ bool validate_overlay(const schema::AnimationDataT& animation,
 }
 bool target_skeleton(Animator animator, ResourceReference& target)
 {
+    ENGINE_PROFILE_FUNCTION();
     target.reset();
     const auto renderer = animator.node().get_component<MeshRenderer>();
     const auto* mesh = renderer ? renderer.mesh_data() : nullptr;
@@ -51,6 +55,7 @@ bool target_skeleton(Animator animator, ResourceReference& target)
 }
 bool committed_pose(Animator animator, ResourceReference& target, MeshRenderer& renderer)
 {
+    ENGINE_PROFILE_FUNCTION();
     target.reset();
     renderer = {};
     if (!animator || !animator.active() ||
@@ -80,30 +85,36 @@ bool committed_pose(Animator animator, ResourceReference& target, MeshRenderer& 
 
 bool Animator::register_type(ComponentRegistry& registry)
 {
+    ENGINE_PROFILE_FUNCTION();
     return register_component_storage<Animator, Data, Runtime>(registry);
 }
 Animator::Runtime* Animator::runtime() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return runtime_state<Runtime>();
 }
 bool Animator::valid_settings(const Data& data) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return (data.animation_guid.empty() || GuidMap::valid_guid(data.animation_guid)) &&
            std::isfinite(data.speed) && data.speed >= 0.0F && data.speed <= 16.0F;
 }
 bool Animator::get_settings(Data& output) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* value = read_data<Data>();
     output = value ? *value : Data{};
     return value != nullptr;
 }
 bool Animator::set_settings(const Data& data)
 {
+    ENGINE_PROFILE_FUNCTION();
     return apply_settings(data, {});
 }
 
 bool Animator::apply_settings(const Data& data, ResourceReference prepared)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable() || !valid_settings(data))
     {
         return false;
@@ -162,6 +173,7 @@ bool Animator::apply_settings(const Data& data, ResourceReference prepared)
 }
 bool Animator::restore_data(const schema::ComponentDataT& input)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* data = input.payload.AsAnimatorData();
     if (!writable() || !input.flags || !data || !set_settings(*data) || !restore_flags(input))
     {
@@ -174,6 +186,7 @@ bool Animator::restore_data(const schema::ComponentDataT& input)
 }
 bool Animator::set_animation(std::string_view path)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -222,10 +235,12 @@ bool Animator::set_animation(std::string_view path)
 }
 bool Animator::play_animation(const AnimationPlayRequest& request)
 {
+    ENGINE_PROFILE_FUNCTION();
     return apply_animation(request, {});
 }
 bool Animator::apply_animation(const AnimationPlayRequest& request, ResourceReference clip)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable() || !active() || request.animation_path.empty() ||
         !std::isfinite(request.fade_seconds) || request.fade_seconds < 0 ||
         !std::isfinite(request.speed) || request.speed < 0 || request.speed > 16)
@@ -353,6 +368,7 @@ bool Animator::apply_animation(const AnimationPlayRequest& request, ResourceRefe
 }
 bool Animator::cross_fade(std::string_view path, double seconds)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable() || !active() || !std::isfinite(seconds) || seconds < 0 || path.empty())
     {
         return false;
@@ -383,11 +399,13 @@ bool Animator::cross_fade(std::string_view path, double seconds)
 }
 std::string_view Animator::animation_path() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return valid() && runtime()->animation_ ? std::string_view(runtime()->animation_->info().path)
                                             : std::string_view{};
 }
 bool Animator::play() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable() || !active() || !runtime()->animation_ ||
         !runtime()->animation_.data<AnimationResource>())
     {
@@ -413,6 +431,7 @@ bool Animator::play() noexcept
 }
 bool Animator::pause() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable() || runtime()->playback_ == AnimationPlayback::stopped)
     {
         return false;
@@ -423,6 +442,7 @@ bool Animator::pause() noexcept
 }
 bool Animator::stop() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -454,6 +474,7 @@ bool Animator::stop() noexcept
 }
 bool Animator::seek(double seconds) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -487,14 +508,17 @@ bool Animator::seek(double seconds) noexcept
 }
 AnimationPlayback Animator::playback() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return valid() ? runtime()->playback_ : AnimationPlayback::stopped;
 }
 double Animator::time() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return valid() ? runtime()->time_ : 0;
 }
 bool Animator::get_playback_info(AnimatorPlaybackInfo& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     if (!valid())
     {
@@ -519,6 +543,7 @@ bool Animator::get_playback_info(AnimatorPlaybackInfo& output) const
 }
 bool Animator::get_bone_pose(std::string_view path, AnimationPoseTransform& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     ResourceReference target;
     MeshRenderer renderer;
@@ -551,6 +576,7 @@ bool Animator::get_bone_pose(std::string_view path, AnimationPoseTransform& outp
 }
 bool Animator::get_socket_pose(std::string_view name, AnimationPoseTransform& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     ResourceReference target;
     MeshRenderer renderer;
@@ -580,14 +606,17 @@ bool Animator::get_socket_pose(std::string_view name, AnimationPoseTransform& ou
 }
 bool Animator::set_aim_ik_target(std::string_view name, const AnimationIkTarget& target)
 {
+    ENGINE_PROFILE_FUNCTION();
     return writable() && animation_detail::set_ik_target(*this, name, target, false);
 }
 bool Animator::set_two_bone_ik_target(std::string_view name, const AnimationIkTarget& target)
 {
+    ENGINE_PROFILE_FUNCTION();
     return writable() && animation_detail::set_ik_target(*this, name, target, true);
 }
 bool Animator::get_ik_target(std::string_view name, AnimationIkTarget& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     if (!valid())
     {
@@ -603,6 +632,7 @@ bool Animator::get_ik_target(std::string_view name, AnimationIkTarget& output) c
 }
 bool Animator::set_event_markers(std::span<const schema::AnimationEventMarkerDataT> markers)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable() || !runtime()->animation_ || !runtime()->animation_.data<AnimationResource>() ||
         runtime()->track_revision_ == std::numeric_limits<std::uint64_t>::max() ||
         !validate_overlay(*runtime()->animation_.data<AnimationResource>(), markers))
@@ -615,6 +645,7 @@ bool Animator::set_event_markers(std::span<const schema::AnimationEventMarkerDat
 }
 void Animator::clear_event_markers() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (writable())
     {
         runtime()->event_markers_.clear();

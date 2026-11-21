@@ -14,4 +14,4 @@ if (result.status !== 0) throw new Error("Cannot generate the Web catalog access
 await copyFile(join(here, "catalog.ts"), join(output, "catalog.ts"));
 await build({ entryPoints: [join(output, "catalog.ts")], outfile: join(output, "catalog.mjs"),
     bundle: true, format: "esm", platform: "browser", target: "es2022", minify: true,
-    nodePaths: [join(here, "node_modules")], legalComments: "eof" });
+    external: ["./profiling.mjs"], nodePaths: [join(here, "node_modules")], legalComments: "eof" });

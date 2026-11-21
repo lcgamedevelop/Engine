@@ -1,4 +1,5 @@
 #include "editor/asset_pipeline/project_lock.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/utils/path_utils.hpp"
 
@@ -20,6 +21,7 @@ namespace engine::editor::asset_pipeline
 
 ProjectLock::~ProjectLock() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
 #if defined(_WIN32)
     if (handle_ != nullptr)
     {
@@ -36,6 +38,7 @@ ProjectLock::~ProjectLock() noexcept
 
 bool ProjectLock::acquire(const std::filesystem::path& file, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     bool acquired = false;
     if (!try_acquire(file, acquired, error))
     {
@@ -50,6 +53,7 @@ bool ProjectLock::acquire(const std::filesystem::path& file, std::string& error)
 
 bool ProjectLock::try_acquire(const std::filesystem::path& file, bool& acquired, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     acquired = false;
     error.clear();
     if (handle_ != nullptr || descriptor_ >= 0)

@@ -1,4 +1,6 @@
 #include "plugins/editor/modeling/mesh_geometry.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "plugins/editor/modeling/mesh_geometry_internal.hpp"
 
@@ -32,9 +34,11 @@ struct Corner
 
 std::vector<Corner> corners(const schema::ModelingFaceT& face)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::vector<Corner> result;
     const auto append = [&](const auto& vertices, const auto& texcoords, const auto& colors)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         for (std::size_t i = 0; i < vertices.size(); ++i)
         {
             Corner corner;
@@ -60,6 +64,7 @@ std::vector<Corner> corners(const schema::ModelingFaceT& face)
 
 bool status_ok(const manifold::Manifold& solid, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto status = solid.Status();
     if (status != manifold::Manifold::Error::NoError)
     {
@@ -73,6 +78,7 @@ bool status_ok(const manifold::Manifold& solid, std::string& error)
 bool to_solid(const schema::EditableMeshDataT& data, manifold::Manifold& output,
               Provenance& provenance, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!mesh::validate(data, error))
     {
         return false;
@@ -134,6 +140,7 @@ bool from_solid(const manifold::Manifold& solid, const Provenance& provenance,
                 std::uint32_t cap_material, std::uint64_t next_id,
                 schema::EditableMeshDataT& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!status_ok(solid, error))
     {
         return false;
@@ -154,6 +161,7 @@ bool from_solid(const manifold::Manifold& solid, const Provenance& provenance,
     std::iota(parent.begin(), parent.end(), 0);
     const auto root = [&](std::uint64_t index)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         while (parent[index] != index)
         {
             index = parent[index];
@@ -245,6 +253,7 @@ bool from_solid(const manifold::Manifold& solid, const Provenance& provenance,
 
 bool clip_open(schema::EditableMeshDataT& data, Point normal, double offset, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     schema::EditableMeshDataT candidate;
     candidate.schema_version = 2;
     if (data.primitive)
@@ -256,6 +265,7 @@ bool clip_open(schema::EditableMeshDataT& data, Point normal, double offset, std
     std::map<std::pair<std::uint64_t, std::uint64_t>, std::uint64_t> intersections;
     const auto intersection = [&](const Corner& a, const Corner& b)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const Point pa = math::position(candidate, a.vertex);
         const Point pb = math::position(candidate, b.vertex);
         const double da = math::dot(normal, pa) - offset;
@@ -320,7 +330,10 @@ bool clip_open(schema::EditableMeshDataT& data, Point normal, double offset, std
             }
             polygon.erase(std::unique(polygon.begin(), polygon.end(),
                                       [](const auto& a, const auto& b)
-                                      { return a.vertex == b.vertex; }),
+                                      {
+                                          ENGINE_PROFILE_FUNCTION_PROBE();
+                                          return a.vertex == b.vertex;
+                                      }),
                           polygon.end());
             if (polygon.size() > 1 && polygon.front().vertex == polygon.back().vertex)
             {
@@ -353,6 +366,7 @@ bool mesh::boolean_operation(schema::EditableMeshDataT& data,
                              const schema::EditableMeshDataT& other, MeshBooleanOperation operation,
                              std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     manifold::Manifold first;
     manifold::Manifold second;
     Provenance provenance;
@@ -382,6 +396,7 @@ bool mesh::boolean_operation(schema::EditableMeshDataT& data,
 
 bool mesh::clip(schema::EditableMeshDataT& data, const MeshClipOptions& options, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     Point normal = math::point(options.normal);
     const double size = math::length(normal);
@@ -416,6 +431,7 @@ bool mesh::clip(schema::EditableMeshDataT& data, const MeshClipOptions& options,
 bool mesh::bevel(schema::EditableMeshDataT& data, const MeshBevelOptions& options,
                  std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     if (options.edges.empty() || options.edges.size() > 4096 || !std::isfinite(options.width) ||
         options.width <= 0.0 || options.segments == 0 || options.segments > 64 ||
@@ -525,6 +541,7 @@ bool mesh::bevel(schema::EditableMeshDataT& data, const MeshBevelOptions& option
             std::sqrt((1.0 + cosine) * 0.5) * options.profile / (1.0 - options.profile);
         const auto curve = [&](double t)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             const double a = (1.0 - t) * (1.0 - t);
             const double b = 2.0 * t * (1.0 - t) * weight;
             const double c = t * t;

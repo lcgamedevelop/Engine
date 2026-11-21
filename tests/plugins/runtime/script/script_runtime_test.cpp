@@ -17,6 +17,7 @@
 #include "runtime/gameplay/gameplay_session.hpp"
 #include "runtime/input/input_system.hpp"
 #include "runtime/log/log_system.hpp"
+#include "runtime/performance/memory_profiling.hpp"
 #include "runtime/movie/movie_player.hpp"
 #include "runtime/physics/physics_system.hpp"
 #include "runtime/render/render_system.hpp"
@@ -129,7 +130,7 @@ bool fixture(const fs::path& workspace, std::string_view revision,
     output.root = workspace / "versions" / engine::PathUtils::from_utf8(revision);
     output.mounts = {{"content", output.root}};
     engine::schema::AssetCatalogDataT data;
-    data.schema_version = 6;
+    data.schema_version = 4;
     data.revision = revision;
     data.target_platform = target_platform();
     const auto add = [&](std::string path, std::string module, engine::schema::AssetKind kind,
@@ -3361,6 +3362,7 @@ int main(int argc, char** argv)
         std::fprintf(stderr, "Usage: engine_script_runtime_test <test-output-directory>\n");
         return 1;
     }
+    engine::memory_profile::begin_startup_capture();
     std::error_code error;
     const auto workspace = fs::absolute(engine::PathUtils::from_utf8(argv[1]), error);
     if (error || workspace == workspace.root_path())
@@ -3392,7 +3394,7 @@ int main(int argc, char** argv)
         return 1;
     }
     test_support::ResourceServices services;
-    const bool passed =
+    bool passed =
         services.initialize(config) && run_cases(services, workspace) &&
         run_prepared_catalog_cases(services, workspace) &&
         run_project_script_cases(services, workspace) &&
@@ -3423,6 +3425,18 @@ int main(int argc, char** argv)
     services.shutdown();
     engine::LogSystem::instance().shutdown();
     engine::App::shutdown();
+#if defined(ENGINE_SCRIPT_BACKEND_QUICKJS)
+    const auto memory = engine::memory_profile::snapshot();
+    if (memory.mode != engine::memory_profile::Mode::off)
+    {
+        const auto& heap =
+            memory.pools[static_cast<std::size_t>(engine::memory_profile::Pool::quickjs)];
+        passed &= expect(heap.peak_bytes > 0 && heap.current_bytes == 0 &&
+                             heap.live_allocations == 0,
+                         "QuickJS returns its backing blocks after VM shutdown");
+    }
+#endif
+    engine::memory_profile::publish_plots();
     if (passed)
     {
         std::puts("Script runtime PASS: ES modules, scenes, components, snapshots, hot reload and "

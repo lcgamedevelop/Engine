@@ -1,4 +1,5 @@
 #include "plugins/editor/destruction/destruction_codec.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/resource/builtin_resources.hpp"
 
@@ -16,16 +17,19 @@ namespace engine::plugins::destruction
 
 schema::ComponentPayload DestructionCodec::type() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::ComponentPayload::DestructionData;
 }
 
 std::string_view DestructionCodec::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "destruction";
 }
 
 bool DestructionCodec::validate(const schema::ComponentDataT& component, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* value = component.payload.AsDestructionData();
     if (!value || !DestructionComponent::valid_settings(*value))
     {
@@ -38,6 +42,7 @@ bool DestructionCodec::validate(const schema::ComponentDataT& component, std::st
 bool DestructionCodec::read(const toml::table& table, schema::ComponentDataT& component,
                             std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     constexpr std::array<std::string_view, 7> fields = {
         "type", "enabled", "destruction", "material", "density", "friction", "restitution"};
     for (const auto& [name, field] : table)
@@ -104,6 +109,7 @@ bool DestructionCodec::scan_dependencies(const schema::ComponentDataT& component
                                          const editor::asset_pipeline::ImportContext& context,
                                          std::vector<Guid>& dependencies, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!validate(component, error))
     {
         return false;
@@ -120,12 +126,14 @@ bool DestructionCodec::scan_dependencies(const schema::ComponentDataT& component
 
 std::span<const std::string_view> DestructionCodec::resource_fields() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     static constexpr std::string_view fields[]{"destruction", "material"};
     return fields;
 }
 
 void DestructionCodec::write(const schema::ComponentDataT& component, toml::table& table) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto& value = *component.payload.AsDestructionData();
     table.insert("type", "destruction");
     table.insert("destruction", value.destruction_guid);
@@ -137,6 +145,7 @@ void DestructionCodec::write(const schema::ComponentDataT& component, toml::tabl
 
 bool register_destruction_codec()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (editor::asset_pipeline::find_scene_component_codec(
             schema::ComponentPayload::DestructionData))
     {

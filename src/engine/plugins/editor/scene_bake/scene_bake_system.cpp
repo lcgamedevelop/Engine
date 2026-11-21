@@ -1,4 +1,6 @@
 #include "plugins/editor/scene_bake/scene_bake_system.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/resource_access.hpp"
 #include "runtime/resource/types/texture_resource.hpp"
 
@@ -30,6 +32,7 @@ bool bounded_integer(const Json& arguments, const char* name, std::uint16_t fall
                      std::uint16_t minimum, std::uint16_t maximum, bool power_of_two,
                      std::uint16_t& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = fallback;
     const auto found = arguments.find(name);
     if (found == arguments.end())
@@ -47,6 +50,7 @@ bool bounded_integer(const Json& arguments, const char* name, std::uint16_t fall
 
 bool lighting_settings(const Json& args, LightingBakeSettings& settings, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::uint16_t resolution, hemisphere, bounces, passes;
     if (!bounded_integer(args, "resolution", 64, 16, 512, true, resolution) ||
         !bounded_integer(args, "hemisphereResolution", 16, 16, 128, true, hemisphere) ||
@@ -180,11 +184,13 @@ struct SceneBakeSystem::State
 
     bool busy() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         return status == "running" || status == "cancelling" || status == "publishing";
     }
 
     Json report() const
     {
+        ENGINE_PROFILE_FUNCTION();
         Json outputs = Json::array();
         if (status == "complete")
         {
@@ -214,19 +220,23 @@ SceneBakeSystem::SceneBakeSystem(ResourceSystem& resources, RenderSystem& render
     : state_(std::make_unique<State>(resources, renderer, tasks, world, std::move(project_root),
                                      std::move(validate), std::move(publish)))
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 SceneBakeSystem::~SceneBakeSystem() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
 }
 
 bool SceneBakeSystem::register_commands(editor::EditorCommands& commands)
 {
+    ENGINE_PROFILE_FUNCTION();
     return commands.register_command(
                "bake_scene", false,
                [this](const Json& arguments, Json& result, std::unique_ptr<editor::EditorEdit>&,
                       std::string& error)
                {
+                   ENGINE_PROFILE_FUNCTION_PROBE();
                    auto& s = *state_;
                    if (!is_initialized() || !s.renderer.gpu_ready() || s.busy())
                    {
@@ -374,6 +384,7 @@ bool SceneBakeSystem::register_commands(editor::EditorCommands& commands)
                [this](const Json& arguments, Json& result, std::unique_ptr<editor::EditorEdit>&,
                       std::string& error)
                {
+                   ENGINE_PROFILE_FUNCTION_PROBE();
                    if (!arguments.empty() &&
                        (arguments.size() != 1 || !arguments.contains("job") ||
                         !arguments["job"].is_string() || arguments["job"] != state_->job))
@@ -389,6 +400,7 @@ bool SceneBakeSystem::register_commands(editor::EditorCommands& commands)
                [this](const Json& arguments, Json& result, std::unique_ptr<editor::EditorEdit>&,
                       std::string& error)
                {
+                   ENGINE_PROFILE_FUNCTION_PROBE();
                    if (arguments.size() != 1 || !arguments.contains("job") ||
                        !arguments["job"].is_string() || arguments["job"] != state_->job ||
                        (state_->gpu == nullptr && state_->lighting == nullptr))
@@ -415,14 +427,17 @@ bool SceneBakeSystem::register_commands(editor::EditorCommands& commands)
 
 bool SceneBakeSystem::busy() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return state_->busy();
 }
 bool SceneBakeSystem::on_initialize(const EngineConfig&)
 {
+    ENGINE_PROFILE_FUNCTION();
     return state_->validate && state_->publish;
 }
 bool SceneBakeSystem::on_tick(double)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto& s = *state_;
     if (!s.busy() || (!s.gpu && !s.lighting))
     {
@@ -478,6 +493,7 @@ bool SceneBakeSystem::on_tick(double)
 }
 void SceneBakeSystem::on_shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (state_->lighting)
     {
         state_->lighting->shutdown();

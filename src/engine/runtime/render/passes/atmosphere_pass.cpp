@@ -1,4 +1,6 @@
 #include "runtime/render/passes/atmosphere_pass.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/render/render_constants.hpp"
 #include "runtime/render/render_settings.hpp"
@@ -38,6 +40,7 @@ enum Uniform : std::size_t
 
 bgfx::ProgramHandle compute_program(const std::uint8_t* bytes, std::uint32_t size)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto shader = bgfx::createShader(bgfx::copy(bytes, size));
     return bgfx::isValid(shader) ? bgfx::createProgram(shader, true)
                                  : bgfx::ProgramHandle{bgfx::kInvalidHandle};
@@ -46,11 +49,13 @@ bgfx::ProgramHandle compute_program(const std::uint8_t* bytes, std::uint32_t siz
 
 AtmospherePass::~AtmospherePass() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     release();
 }
 
 bool AtmospherePass::supported() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* caps = bgfx::getCaps();
     return caps && (caps->supported & BGFX_CAPS_COMPUTE) &&
            caps->limits.maxViews > atmosphere_capture_skyview &&
@@ -59,6 +64,7 @@ bool AtmospherePass::supported() noexcept
 
 bool AtmospherePass::initialize()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (bgfx::isValid(programs_[0]))
     {
         return true;
@@ -108,7 +114,11 @@ bool AtmospherePass::initialize()
     bgfx::VertexLayout layout;
     layout.begin().add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float).end();
     fullscreen_ = bgfx::createVertexBuffer(bgfx::copy(vertices, sizeof(vertices)), layout);
-    const auto valid = [](auto handle) { return bgfx::isValid(handle); };
+    const auto valid = [](auto handle)
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return bgfx::isValid(handle);
+    };
     if (!std::all_of(programs_.begin(), programs_.end(), valid) ||
         !std::all_of(uniforms_.begin(), uniforms_.end(), valid) ||
         !std::all_of(samplers_.begin(), samplers_.end(), valid) ||
@@ -122,6 +132,7 @@ bool AtmospherePass::initialize()
 
 void AtmospherePass::set_medium() const
 {
+    ENGINE_PROFILE_FUNCTION();
     for (std::size_t index = 0; index < physical_.size(); ++index)
     {
         bgfx::setUniform(uniforms_[index], physical_[index].data());
@@ -132,6 +143,7 @@ bool AtmospherePass::draw(std::uint64_t scene_id, const RenderSettings& settings
                           const SceneDrawView& view, std::size_t view_index,
                           bgfx::ViewId skyview_compute)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto& data = settings.atmosphere;
     if (scene_id_ != scene_id || !data.atmosphere_enabled || !settings.atmosphere_sun_valid)
     {
@@ -248,11 +260,13 @@ bool AtmospherePass::draw(std::uint64_t scene_id, const RenderSettings& settings
 
 bool AtmospherePass::submitted_for(std::uint64_t scene_id) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return scene_id != 0 && scene_id == submitted_scene_id_;
 }
 
 void AtmospherePass::release() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     for (auto& handle : programs_)
     {
         if (bgfx::isValid(handle))
@@ -306,10 +320,16 @@ void AtmospherePass::release() noexcept
 
 std::uint32_t AtmospherePass::resource_count() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto count = [](const auto& handles)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return static_cast<std::uint32_t>(std::count_if(
-            handles.begin(), handles.end(), [](auto handle) { return bgfx::isValid(handle); }));
+            handles.begin(), handles.end(), [](auto handle)
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return bgfx::isValid(handle);
+            }));
     };
     return count(programs_) + count(uniforms_) + count(samplers_) + count(medium_) +
            count(skyview_) + static_cast<std::uint32_t>(bgfx::isValid(fullscreen_));

@@ -1,4 +1,6 @@
 #include "plugins/editor/mcp/component_mcp_tools.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/editor/mcp/editor_tool_registration.hpp"
 
 namespace engine::plugins::mcp
@@ -6,12 +8,14 @@ namespace engine::plugins::mcp
 
 bool register_prefab_tools(McpSystem& system, EditorMcpTools& editor)
 {
+    ENGINE_PROFILE_FUNCTION();
     using Json = nlohmann::json;
     const Json path = {{"type", "string"}, {"minLength", 1}, {"maxLength", 1024}};
     const Json identity = {{"type", "string"}, {"minLength", 1}};
     const auto add = [&system, &editor](std::string name, std::string description, Json properties,
                                         Json required)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const auto command = name;
         return register_editor_command_tool(
             system, editor, std::move(name), std::move(description),

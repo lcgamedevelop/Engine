@@ -1,4 +1,5 @@
 #include "runtime/scene/component.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/scene/component_registry.hpp"
 #include "runtime/scene/ecs_scene.hpp"
@@ -12,6 +13,7 @@ namespace engine
 {
 std::uint64_t next_component_instance_id() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     static std::atomic<std::uint64_t> sequence{0};
     auto current = sequence.load(std::memory_order_relaxed);
     while (current != std::numeric_limits<std::uint64_t>::max())
@@ -27,10 +29,12 @@ std::uint64_t next_component_instance_id() noexcept
 Component::Component(Node node, ComponentType type, std::uint64_t instance) noexcept
     : node_(node), type_(type), instance_id_(instance)
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 Component::Component(Component value, ComponentType expected) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (value.type_ == expected)
     {
         *this = value;
@@ -39,6 +43,7 @@ Component::Component(Component value, ComponentType expected) noexcept
 
 ComponentState* Component::state() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!node_ || instance_id_ == 0)
     {
         return nullptr;
@@ -50,32 +55,39 @@ ComponentState* Component::state() const noexcept
 
 bool Component::valid() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return state() != nullptr;
 }
 bool Component::writable() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return valid() && ecs_detail::scope_writable(node_);
 }
 Node Component::node() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return node_;
 }
 std::uint64_t Component::instance_id() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return instance_id_;
 }
 ComponentType Component::type() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return type_;
 }
 
 bool Component::enabled() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* current = state();
     return current && current->flags.enabled;
 }
 bool Component::set_enabled(bool value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -86,15 +98,18 @@ bool Component::set_enabled(bool value) noexcept
 }
 bool Component::active() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return enabled() && node_.active();
 }
 bool Component::visible() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* current = state();
     return current && current->flags.visible;
 }
 bool Component::set_visible(bool value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -105,15 +120,18 @@ bool Component::set_visible(bool value) noexcept
 }
 bool Component::visible_in_hierarchy() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return visible() && node_.visible_in_hierarchy();
 }
 bool Component::transient() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* current = state();
     return current && current->transient;
 }
 bool Component::set_transient(bool value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -123,6 +141,7 @@ bool Component::set_transient(bool value) noexcept
 }
 void Component::modified() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* current = state();
     if (!current)
     {
@@ -143,6 +162,7 @@ void Component::modified() noexcept
 }
 bool Component::restore_flags(const schema::ComponentDataT& data) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!data.flags || !writable())
     {
         return false;
@@ -153,6 +173,7 @@ bool Component::restore_flags(const schema::ComponentDataT& data) noexcept
 }
 const void* Component::read_value() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return nullptr;
@@ -161,11 +182,13 @@ const void* Component::read_value() const noexcept
 }
 void* Component::write_value() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return writable() ? node_.world()->component_registry().operations(type_)->data(node_)
                       : nullptr;
 }
 void* Component::runtime_value() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return nullptr;
@@ -174,23 +197,27 @@ void* Component::runtime_value() const noexcept
 }
 bool Component::get_data(schema::ComponentDataT& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     return valid() &&
            node_.world()->component_registry().operations(type_)->snapshot(*this, output);
 }
 bool Component::build_data(schema::ComponentDataT& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     return valid() && node_.world()->component_registry().operations(type_)->build(*this, output);
 }
 bool Component::restore_data(const schema::ComponentDataT& data)
 {
+    ENGINE_PROFILE_FUNCTION();
     return writable() &&
            node_.world()->component_registry().operations(type_)->restore(*this, data);
 }
 bool Component::remap_node_references(schema::ComponentDataT& data,
                                       std::span<const schema::NodeIdMappingT> mapping) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return valid() &&
            node_.world()->component_registry().operations(type_)->remap(*this, data, mapping);
 }

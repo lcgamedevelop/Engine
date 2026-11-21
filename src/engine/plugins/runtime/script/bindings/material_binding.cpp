@@ -1,4 +1,5 @@
 #include "plugins/runtime/script/bindings/material_binding.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "plugins/runtime/script/bindings/binding_context.hpp"
 #include "runtime/scene/mesh_renderer.hpp"
@@ -62,6 +63,7 @@ Object.freeze(Material);
 
 Material material(const Arguments& arguments, int count, std::string& name)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto node = BindingContext::node(arguments);
     auto mesh = !node ? MeshRenderer{} : node.get_component<MeshRenderer>();
@@ -73,6 +75,7 @@ Material material(const Arguments& arguments, int count, std::string& name)
 
 void valid(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto node = BindingContext::node(arguments);
     auto mesh = !node ? MeshRenderer{} : node.get_component<MeshRenderer>();
     arguments.set_return(mesh.valid() && arguments.count() == 3 && arguments.is_uint32(2) &&
@@ -81,6 +84,7 @@ void valid(const Arguments& arguments)
 
 void identity(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto node = BindingContext::node(arguments);
     const auto mesh = node ? node.get_component<MeshRenderer>() : MeshRenderer{};
     arguments.set_return(mesh && arguments.count() == 3 && arguments.is_uint32(2)
@@ -90,6 +94,7 @@ void identity(const Arguments& arguments)
 
 void set_texture(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string name;
     std::string path;
     auto value = material(arguments, 5, name);
@@ -99,6 +104,7 @@ void set_texture(const Arguments& arguments)
 
 void get_texture(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string name;
     auto value = material(arguments, 4, name);
     arguments.set_return({});
@@ -111,6 +117,7 @@ void get_texture(const Arguments& arguments)
 
 void type(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string path;
     auto value = material(arguments, 4, path);
     arguments.set_return(value.valid() && value.set_type(path));
@@ -118,6 +125,7 @@ void type(const Arguments& arguments)
 
 void shader(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string path;
     auto value = material(arguments, 4, path);
     arguments.set_return(value.valid() && value.set_shader(path));
@@ -125,6 +133,7 @@ void shader(const Arguments& arguments)
 
 void set_cull_mode(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string mode;
     auto value = material(arguments, 4, mode);
     if (!value || (mode != "back" && mode != "front" && mode != "none"))
@@ -139,6 +148,7 @@ void set_cull_mode(const Arguments& arguments)
 
 void get_cull_mode(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     auto node = BindingContext::node(arguments);
     auto mesh = node.valid() ? node.get_component<MeshRenderer>() : MeshRenderer{};
@@ -154,6 +164,7 @@ void get_cull_mode(const Arguments& arguments)
 
 void set_blend_mode(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string mode;
     auto value = material(arguments, 4, mode);
     if (!value || (mode != "opaque" && mode != "alpha_blend" && mode != "premultiplied"))
@@ -168,6 +179,7 @@ void set_blend_mode(const Arguments& arguments)
 
 void get_blend_mode(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     auto node = BindingContext::node(arguments);
     auto mesh = node ? node.get_component<MeshRenderer>() : MeshRenderer{};
@@ -182,6 +194,7 @@ void get_blend_mode(const Arguments& arguments)
 
 void set_float(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string name;
     auto value = material(arguments, 5, name);
     float number = 0.0F;
@@ -191,6 +204,7 @@ void set_float(const Arguments& arguments)
 
 void set_v2(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string name;
     auto value = material(arguments, 6, name);
     double x = 0.0;
@@ -201,6 +215,7 @@ void set_v2(const Arguments& arguments)
 
 void set_v3(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string name;
     auto value = material(arguments, 7, name);
     double x = 0.0;
@@ -214,6 +229,7 @@ void set_v3(const Arguments& arguments)
 
 void set_v4(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string name;
     auto value = material(arguments, 8, name);
     double x = 0.0;
@@ -229,16 +245,19 @@ void set_v4(const Arguments& arguments)
 
 std::string_view MaterialBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "Material";
 }
 
 std::string_view MaterialBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 
 bool MaterialBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.function("MaterialValid", valid) && vm.function("MaterialIdentity", identity) &&
            vm.function("MaterialTexture", set_texture) &&
            vm.function("MaterialGetTexture", get_texture) && vm.function("MaterialType", type) &&

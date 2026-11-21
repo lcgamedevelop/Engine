@@ -1,4 +1,6 @@
 #include "plugins/editor/modeling/mesh_primitives.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "plugins/editor/modeling/modeling_math.hpp"
 #include "plugins/editor/modeling/primitive_options.hpp"
@@ -24,12 +26,14 @@ constexpr double pi = std::numbers::pi_v<double>;
 
 bool fail(std::string& error, std::string message)
 {
+    ENGINE_PROFILE_FUNCTION();
     error = std::move(message);
     return false;
 }
 
 void box(schema::EditableMeshDataT& data, const Vector& size)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::vector<Id> vertices;
     for (const auto& point : std::vector<Vector>{{-1, -1, -1},
                                                  {1, -1, -1},
@@ -54,6 +58,7 @@ void box(schema::EditableMeshDataT& data, const Vector& size)
 void extruded_outline(schema::EditableMeshDataT& data, const std::vector<ProjectedPoint>& points,
                       double depth)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::vector<Id> back;
     std::vector<Id> front;
     for (const auto& point : points)
@@ -75,6 +80,7 @@ void extruded_outline(schema::EditableMeshDataT& data, const std::vector<Project
 void cylinder(schema::EditableMeshDataT& data, const schema::ModelingPrimitiveDataT& options,
               bool cone)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::vector<Id> bottom;
     std::vector<Id> top;
     const auto count = options.segments;
@@ -121,6 +127,7 @@ void cylinder(schema::EditableMeshDataT& data, const schema::ModelingPrimitiveDa
 
 void sphere(schema::EditableMeshDataT& data, const schema::ModelingPrimitiveDataT& options)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto count = options.segments;
     const auto rings = options.rings;
     const auto north = math::add_vertex(data, {0, options.radius, 0});
@@ -162,6 +169,7 @@ void sphere(schema::EditableMeshDataT& data, const schema::ModelingPrimitiveData
 
 void torus(schema::EditableMeshDataT& data, const schema::ModelingPrimitiveDataT& options)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::vector<std::vector<Id>> rows;
     for (std::uint32_t i = 0; i < options.segments; ++i)
     {
@@ -196,6 +204,7 @@ void torus(schema::EditableMeshDataT& data, const schema::ModelingPrimitiveDataT
 
 void pipe(schema::EditableMeshDataT& data, const schema::ModelingPrimitiveDataT& options)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::vector<Id> outer_bottom;
     std::vector<Id> outer_top;
     std::vector<Id> inner_bottom;
@@ -241,9 +250,11 @@ void pipe(schema::EditableMeshDataT& data, const schema::ModelingPrimitiveDataT&
 
 void curved_stairs(schema::EditableMeshDataT& data, const schema::ModelingPrimitiveDataT& options)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::map<std::tuple<std::uint32_t, std::uint32_t, bool>, Id> vertices;
     const auto vertex = [&](std::uint32_t boundary, std::uint32_t height, bool outer)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const auto key = std::make_tuple(boundary, height, outer);
         const auto found = vertices.find(key);
         if (found != vertices.end())
@@ -292,6 +303,7 @@ void curved_stairs(schema::EditableMeshDataT& data, const schema::ModelingPrimit
 
 void icosphere(schema::EditableMeshDataT& data, const schema::ModelingPrimitiveDataT& options)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto golden = (1.0 + std::sqrt(5.0)) * 0.5;
     std::vector<Id> vertices;
     for (const auto& point : std::vector<Vector>{{-1, golden, 0},
@@ -323,6 +335,7 @@ void icosphere(schema::EditableMeshDataT& data, const schema::ModelingPrimitiveD
         std::map<std::pair<Id, Id>, Id> midpoints;
         const auto midpoint = [&](Id a, Id b)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             const auto key = std::minmax(a, b);
             const auto found = midpoints.find(key);
             if (found != midpoints.end())
@@ -394,6 +407,7 @@ void icosphere(schema::EditableMeshDataT& data, const schema::ModelingPrimitiveD
 // 保留球面/环面的接缝，按弧长缩放；其余平面按正交局部基投影。
 void metric_uv(schema::EditableMeshDataT& data, const schema::ModelingPrimitiveDataT& options)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::unordered_map<Id, Vector> positions;
     positions.reserve(data.vertices.size());
     for (const auto& vertex : data.vertices)
@@ -448,6 +462,7 @@ void metric_uv(schema::EditableMeshDataT& data, const schema::ModelingPrimitiveD
 bool mesh::create(const schema::ModelingPrimitiveDataT& input, schema::EditableMeshDataT& output,
                   std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto options = input;
     output = {};
     error.clear();
@@ -603,6 +618,7 @@ bool mesh::polygon(std::span<const schema::Vec3> points,
                    const std::vector<std::vector<schema::Vec3>>& holes,
                    schema::EditableMeshDataT& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     error.clear();
     if (points.size() < 3 || points.size() > 65536 || holes.size() > 1024)

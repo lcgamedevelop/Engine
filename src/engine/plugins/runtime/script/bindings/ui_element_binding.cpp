@@ -1,4 +1,5 @@
 #include "plugins/runtime/script/bindings/ui_element_binding.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "plugins/runtime/script/bindings/binding_context.hpp"
 #include "runtime/scene/node.hpp"
@@ -95,6 +96,7 @@ Object.freeze(UiElement);
 
 UiSystem* element(const Arguments& arguments, UiElementHandle& handle)
 {
+    ENGINE_PROFILE_FUNCTION();
     handle = {};
     auto node = BindingContext::node(arguments);
     auto* binding = BindingContext::current(arguments);
@@ -113,12 +115,14 @@ UiSystem* element(const Arguments& arguments, UiElementHandle& handle)
 
 void valid(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     UiElementHandle handle;
     arguments.set_return(arguments.count() == 4 && element(arguments, handle) != nullptr);
 }
 
 void get_string(const Arguments& arguments, bool (UiSystem::*read)(UiElementHandle, std::string&))
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     UiElementHandle handle;
     auto* ui = element(arguments, handle);
@@ -133,22 +137,26 @@ void get_string(const Arguments& arguments, bool (UiSystem::*read)(UiElementHand
 
 void identifier(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     get_string(arguments, &UiSystem::element_id);
 }
 
 void text(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     get_string(arguments, &UiSystem::text);
 }
 
 void value(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     get_string(arguments, &UiSystem::value);
 }
 
 void set_string(const Arguments& arguments,
                 bool (UiSystem::*write)(UiElementHandle, std::string_view))
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     UiElementHandle handle;
     auto* ui = element(arguments, handle);
@@ -161,21 +169,25 @@ void set_string(const Arguments& arguments,
 
 void set_text(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     set_string(arguments, &UiSystem::set_text);
 }
 
 void set_value(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     set_string(arguments, &UiSystem::set_value);
 }
 
 void set_image(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     set_string(arguments, &UiSystem::set_image);
 }
 
 void set_boolean(const Arguments& arguments, bool (UiSystem::*write)(UiElementHandle, bool))
 {
+    ENGINE_PROFILE_FUNCTION();
     UiElementHandle handle;
     auto* ui = element(arguments, handle);
     arguments.set_return(arguments.count() == 5 && ui != nullptr && arguments.is_boolean(4) &&
@@ -184,16 +196,19 @@ void set_boolean(const Arguments& arguments, bool (UiSystem::*write)(UiElementHa
 
 void set_visible(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     set_boolean(arguments, &UiSystem::set_visible);
 }
 
 void set_enabled(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     set_boolean(arguments, &UiSystem::set_enabled);
 }
 
 void set_class(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     UiElementHandle handle;
     auto* ui = element(arguments, handle);
     std::string name;
@@ -204,6 +219,7 @@ void set_class(const Arguments& arguments)
 
 void set_style(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     UiElementHandle handle;
     auto* ui = element(arguments, handle);
     std::string name, value;
@@ -214,6 +230,7 @@ void set_style(const Arguments& arguments)
 
 void poll_event(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     auto* binding = BindingContext::current(arguments);
     auto* ui = binding == nullptr ? nullptr : binding->ui();
@@ -260,16 +277,19 @@ void poll_event(const Arguments& arguments)
 
 std::string_view UiElementBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "UiElement";
 }
 
 std::string_view UiElementBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 
 bool UiElementBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.function("UiElementValid", valid) && vm.function("UiElementId", identifier) &&
            vm.function("UiElementText", text) && vm.function("UiElementValue", value) &&
            vm.function("UiElementTextSet", set_text) &&

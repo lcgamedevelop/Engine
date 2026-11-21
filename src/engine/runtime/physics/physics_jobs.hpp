@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/performance/profiling.hpp"
 #include "runtime/task/task_system.hpp"
 
@@ -34,6 +36,7 @@ public:
     PhysicsJobs() = default;
     ~PhysicsJobs() noexcept override
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         wait_for_wrappers();
     }
     PhysicsJobs(const PhysicsJobs&) = delete;
@@ -43,6 +46,7 @@ public:
 
     void initialize(JPH::uint max_jobs, JPH::uint max_barriers, TaskSystem* tasks)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         tasks_ = tasks;
         wrapper_capacity_ = max_jobs;
         JPH::JobSystemWithBarrier::Init(max_barriers);
@@ -54,6 +58,7 @@ public:
 
     int GetMaxConcurrency() const override
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         // The calling thread can execute jobs while waiting on Jolt's own barrier.
         return tasks_ != nullptr ? static_cast<int>(tasks_->max_concurrency()) + 1 : 1;
     }
@@ -61,6 +66,7 @@ public:
     JobHandle CreateJob(const char* name, JPH::ColorArg color, const JobFunction& function,
                         JPH::uint32 dependencies = 0) override
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
 #if defined(ENGINE_ENABLE_TRACY)
         if (TracyIsConnected)
         {
@@ -70,6 +76,7 @@ public:
                 name, color,
                 [label = std::move(label), function]()
                 {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
                     ZoneTransientN(zone, label.c_str(), true);
                     function();
                 },
@@ -102,6 +109,7 @@ private:
     JobHandle create_job(const char* name, JPH::ColorArg color, const JobFunction& function,
                          JPH::uint32 dependencies)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         auto index = jobs_.ConstructObject(name, color, this, function, dependencies);
         while (index == JPH::FixedSizeFreeList<Job>::cInvalidObjectIndex)
         {
@@ -120,6 +128,7 @@ private:
 
     void QueueJob(Job* job) override
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (tasks_ == nullptr)
         {
             // Jolt's barrier runs ready jobs on the caller when no workers are supplied.
@@ -139,6 +148,7 @@ private:
         job->AddRef();
         const auto execute = [job, pending = pending_]()
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             job->Execute();
             job->Release();
             if (pending->fetch_sub(1, std::memory_order_acq_rel) == 1)
@@ -160,6 +170,7 @@ private:
 
     void QueueJobs(Job** jobs, JPH::uint count) override
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         for (JPH::uint index = 0; index < count; ++index)
         {
             QueueJob(jobs[index]);
@@ -168,6 +179,7 @@ private:
 
     void FreeJob(Job* job) override
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         jobs_.DestructObject(job);
     }
 

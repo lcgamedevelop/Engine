@@ -1,4 +1,6 @@
 #include "plugins/editor/animation_tools/animation_authoring_mcp_tools.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/editor/mcp/editor_tool_registration.hpp"
 
 #include "plugins/editor/mcp/editor_mcp_tools.hpp"
@@ -10,11 +12,13 @@ namespace engine::plugins::animation_tools
 {
 bool register_animation_authoring_mcp_tools(mcp::McpSystem& system, mcp::EditorMcpTools& editor)
 {
+    ENGINE_PROFILE_FUNCTION();
     using Json = nlohmann::json;
     const Json text = {{"type", "string"}, {"minLength", 1}, {"maxLength", 1024}};
     const Json number = {{"type", "number"}};
     const auto vector = [](int count)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return Json{{"type", "array"},
                     {"items", {{"type", "number"}}},
                     {"minItems", count},
@@ -22,7 +26,10 @@ bool register_animation_authoring_mcp_tools(mcp::McpSystem& system, mcp::EditorM
     };
     const Json order = {{"type", "integer"}, {"minimum", 0}, {"maximum", 65535}};
     const auto entries = [](Json item, int limit)
-    { return Json{{"type", "array"}, {"items", std::move(item)}, {"maxItems", limit}}; };
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return Json{{"type", "array"}, {"items", std::move(item)}, {"maxItems", limit}};
+    };
     const Json sockets = entries(mcp::object_schema({{"name", text},
                                                      {"joint_path", text},
                                                      {"translation", vector(3)},
@@ -62,6 +69,7 @@ bool register_animation_authoring_mcp_tools(mcp::McpSystem& system, mcp::EditorM
         4096);
     const auto add = [&](const char* name, const char* description, Json schema)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return mcp::register_editor_command_tool(system, editor, name, description,
                                                  std::move(schema), name);
     };

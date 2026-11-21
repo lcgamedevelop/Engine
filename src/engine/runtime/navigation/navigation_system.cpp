@@ -1,5 +1,6 @@
 #include "runtime/navigation/navigation_system.hpp"
 
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/schema/mesh_generated.h"
 #include "runtime/task/task_system.hpp"
@@ -91,11 +92,13 @@ struct NavigationData
 
 bool bounded(double value, double minimum, double maximum)
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::isfinite(value) && value >= minimum && value <= maximum;
 }
 
 bool valid_vector(const Vec3& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     return bounded(value.x(), -maximum_coordinate, maximum_coordinate) &&
            bounded(value.y(), -maximum_coordinate, maximum_coordinate) &&
            bounded(value.z(), -maximum_coordinate, maximum_coordinate);
@@ -103,6 +106,7 @@ bool valid_vector(const Vec3& value)
 
 bool valid_bounds(const NavigationBounds& bounds, bool volume)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid_vector(bounds.minimum) || !valid_vector(bounds.maximum))
     {
         return false;
@@ -118,6 +122,7 @@ bool valid_bounds(const NavigationBounds& bounds, bool volume)
 bool valid_settings(const NavigationSettings& settings, const NavigationBounds& bounds,
                     int& columns, int& rows)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid_bounds(bounds, true) || !bounded(settings.cell_size, 0.05F, 2) ||
         !bounded(settings.cell_height, 0.025F, 1) || !bounded(settings.agent_height, 0.1F, 10) ||
         !bounded(settings.agent_radius, 0, 4) ||
@@ -163,7 +168,11 @@ bool prepare_geometry(std::span<const NavigationGeometry> sources, const Vec3& o
             mesh->vertices.empty() != mesh->indices.empty() ||
             mesh->vertices.size() > maximum_vertices - output.vertices.size() / 3 ||
             mesh->indices.size() / 3 > maximum_triangles - output.triangles.size() / 3 ||
-            !std::all_of(m.begin(), m.end(), [](double value) { return std::isfinite(value); }) ||
+            !std::all_of(m.begin(), m.end(), [](double value)
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return std::isfinite(value);
+            }) ||
             std::abs(m[3]) > 0.000001F || std::abs(m[7]) > 0.000001F ||
             std::abs(m[11]) > 0.000001F || std::abs(m[15] - 1) > 0.000001F)
         {
@@ -236,6 +245,7 @@ bool prepare_geometry(std::span<const NavigationGeometry> sources, const Vec3& o
 
 rcConfig tile_config(const NavigationData& data, int x, int z)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto& settings = data.settings;
     rcConfig config{};
     config.cs = settings.cell_size;
@@ -435,6 +445,7 @@ bool build_tiles(const NavigationData& data, const InputGeometry& input,
                  std::vector<TileData>& tiles, TaskSystem* tasks, std::size_t threshold,
                  std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (tasks != nullptr && tiles.size() >= threshold)
     {
         std::vector<std::string> errors(tiles.size());
@@ -445,7 +456,10 @@ bool build_tiles(const NavigationData& data, const InputGeometry& input,
             TaskDescription task;
             task.name = "Navigation.tile";
             task.execute = [&, index]
-            { return build_tile(data, input, tiles[index], errors[index]); };
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return build_tile(data, input, tiles[index], errors[index]);
+            };
             descriptions.push_back(std::move(task));
         }
         auto completion = tasks->submit_batch(std::move(descriptions));
@@ -456,7 +470,11 @@ bool build_tiles(const NavigationData& data, const InputGeometry& input,
                 return true;
             }
             const auto failure = std::find_if(errors.begin(), errors.end(),
-                                              [](const auto& value) { return !value.empty(); });
+                                              [](const auto& value)
+                                              {
+                                                  ENGINE_PROFILE_FUNCTION_PROBE();
+                                                  return !value.empty();
+                                              });
             error = failure != errors.end() ? *failure : "Navigation tile batch failed";
             return false;
         }
@@ -474,6 +492,7 @@ bool build_tiles(const NavigationData& data, const InputGeometry& input,
 
 bool initialize_grid(NavigationData& data)
 {
+    ENGINE_PROFILE_FUNCTION();
     data.mesh.reset(dtAllocNavMesh());
     data.query.reset(dtAllocNavMeshQuery());
     if (!data.mesh || !data.query)
@@ -497,6 +516,7 @@ bool initialize_grid(NavigationData& data)
 
 bool add_tile(NavigationData& data, TileData& tile)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!tile.data)
     {
         return true;
@@ -512,6 +532,7 @@ bool add_tile(NavigationData& data, TileData& tile)
 
 bool complete(dtStatus status)
 {
+    ENGINE_PROFILE_FUNCTION();
     return dtStatusSucceed(status) &&
            (status & (DT_PARTIAL_RESULT | DT_BUFFER_TOO_SMALL | DT_OUT_OF_NODES)) == 0;
 }
@@ -528,6 +549,7 @@ struct CrowdAgent
 
 std::uint64_t next_agent_generation() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     static std::atomic<std::uint64_t> next{1};
     auto value = next.load(std::memory_order_relaxed);
     while (value != std::numeric_limits<std::uint64_t>::max())
@@ -542,6 +564,7 @@ std::uint64_t next_agent_generation() noexcept
 
 bool valid_agent_settings(const NavigationAgentSettings& settings, const NavigationData& data)
 {
+    ENGINE_PROFILE_FUNCTION();
     return bounded(settings.radius, 0.01F, std::min(10.0F, data.settings.agent_radius)) &&
            bounded(settings.height, 0.01F, std::min(100.0F, data.settings.agent_height)) &&
            bounded(settings.max_speed, 0.01F, 1000) &&
@@ -552,6 +575,7 @@ bool valid_agent_settings(const NavigationAgentSettings& settings, const Navigat
 
 dtCrowdAgentParams agent_parameters(const NavigationAgentSettings& settings)
 {
+    ENGINE_PROFILE_FUNCTION();
     dtCrowdAgentParams parameters{};
     parameters.radius = settings.radius;
     parameters.height = settings.height;
@@ -568,6 +592,7 @@ dtCrowdAgentParams agent_parameters(const NavigationAgentSettings& settings)
 bool project_position(const NavigationData& data, const Vec3& value, dtPolyRef& reference,
                       float* projected)
 {
+    ENGINE_PROFILE_FUNCTION();
     reference = 0;
     if (!valid_vector(value) || value.x() < data.bounds.minimum.x() ||
         value.x() > data.bounds.maximum.x() || value.y() < data.bounds.minimum.y() ||
@@ -603,6 +628,7 @@ struct NavigationSystem::State
 
     CrowdAgent* agent(NavigationAgentHandle handle)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (handle.generation == 0 || handle.slot >= agents.size() ||
             agents[handle.slot].generation != handle.generation)
         {
@@ -614,6 +640,7 @@ struct NavigationSystem::State
 
     void stop_motion(CrowdAgent& record)
     {
+        ENGINE_PROFILE_FUNCTION();
         record.state.velocity = {};
         record.target_reference = 0;
         if (!crowd || record.index < 0)
@@ -634,6 +661,7 @@ struct NavigationSystem::State
 
     bool request_target(CrowdAgent& record)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (!data || !crowd || record.index < 0)
         {
             stop_motion(record);
@@ -673,6 +701,7 @@ struct NavigationSystem::State
 
     bool add_agent(CrowdAgent& record)
     {
+        ENGINE_PROFILE_FUNCTION();
         record.index = -1;
         record.state.velocity = {};
         record.state.status = NavigationAgentStatus::invalid;
@@ -708,6 +737,7 @@ struct NavigationSystem::State
 
     void refresh_agent(CrowdAgent& record)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (!crowd || record.index < 0)
         {
             return;
@@ -757,6 +787,7 @@ struct NavigationSystem::State
 
     void detach_crowd()
     {
+        ENGINE_PROFILE_FUNCTION();
         for (auto& record : agents)
         {
             if (record.generation != 0)
@@ -773,6 +804,7 @@ struct NavigationSystem::State
 
     bool restore_crowd()
     {
+        ENGINE_PROFILE_FUNCTION();
         if (agents.empty())
         {
             return true;
@@ -812,6 +844,7 @@ struct NavigationSystem::State
 
     void clear_crowd() noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         crowd.reset();
         agents.clear();
         accumulated = 0;
@@ -819,6 +852,7 @@ struct NavigationSystem::State
 
     void changed() noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         if (revision < std::numeric_limits<std::uint64_t>::max())
         {
             ++revision;
@@ -827,6 +861,7 @@ struct NavigationSystem::State
 
     void invalidate(const std::vector<TileData>& tiles)
     {
+        ENGINE_PROFILE_FUNCTION();
         rebuilt = 0;
         if (!data)
         {
@@ -855,15 +890,18 @@ struct NavigationSystem::State
 NavigationSystem::NavigationSystem(TaskSystem* tasks, std::size_t parallel_tile_threshold) noexcept
     : tasks_(tasks), parallel_tile_threshold_(parallel_tile_threshold)
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 NavigationSystem::~NavigationSystem() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
 }
 
 bool NavigationSystem::on_initialize(const EngineConfig&)
 {
+    ENGINE_PROFILE_FUNCTION();
     if ((tasks_ != nullptr && !tasks_->is_initialized()) || parallel_tile_threshold_ == 0 ||
         parallel_tile_threshold_ > static_cast<std::size_t>(maximum_tiles))
     {
@@ -875,6 +913,7 @@ bool NavigationSystem::on_initialize(const EngineConfig&)
 
 void NavigationSystem::clear() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (state_)
     {
         state_->clear_crowd();
@@ -890,21 +929,25 @@ void NavigationSystem::clear() noexcept
 
 bool NavigationSystem::ready() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return state_ && state_->data;
 }
 
 std::uint64_t NavigationSystem::revision() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return state_ ? state_->revision : 0;
 }
 
 std::size_t NavigationSystem::rebuilt_tiles() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return state_ ? state_->rebuilt : 0;
 }
 
 std::string_view NavigationSystem::last_error() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return state_ ? std::string_view(state_->error) : std::string_view{};
 }
 
@@ -925,6 +968,7 @@ bool NavigationSystem::build(std::span<const NavigationGeometry> geometry,
     candidate->settings = settings;
     const auto fail = [&](std::string error)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         clear();
         state_->error = std::move(error);
         return false;
@@ -1023,6 +1067,7 @@ bool NavigationSystem::replace(std::span<const NavigationGeometry> geometry,
     }
     const auto fail = [&](std::string error)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         state_->invalidate(tiles);
         state_->error = std::move(error) + "; affected navigation tiles were invalidated";
         return false;
@@ -1074,6 +1119,7 @@ bool NavigationSystem::find_path(const Vec3& start, const Vec3& end,
     auto& data = *state_->data;
     const auto inside = [&](const Vec3& value)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return valid_vector(value) && value.x() >= data.bounds.minimum.x() &&
                value.x() <= data.bounds.maximum.x() && value.y() >= data.bounds.minimum.y() &&
                value.y() <= data.bounds.maximum.y() && value.z() >= data.bounds.minimum.z() &&
@@ -1139,6 +1185,7 @@ bool NavigationSystem::find_path(const Vec3& start, const Vec3& end,
 
 bool NavigationSystem::configure_crowd(std::uint32_t capacity)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!ready())
     {
         if (state_)
@@ -1159,7 +1206,11 @@ bool NavigationSystem::configure_crowd(std::uint32_t capacity)
     }
     if (state_->agents.size() != capacity &&
         std::any_of(state_->agents.begin(), state_->agents.end(),
-                    [](const CrowdAgent& record) { return record.generation != 0; }))
+                    [](const CrowdAgent& record)
+                    {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
+                        return record.generation != 0;
+                    }))
     {
         state_->error = "Cannot change crowd capacity while agents exist";
         return false;
@@ -1177,6 +1228,7 @@ bool NavigationSystem::configure_crowd(std::uint32_t capacity)
 bool NavigationSystem::create_agent(const Vec3& position, const NavigationAgentSettings& settings,
                                     NavigationAgentHandle& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     if (!ready() || !state_->crowd)
     {
@@ -1192,7 +1244,11 @@ bool NavigationSystem::create_agent(const Vec3& position, const NavigationAgentS
         return false;
     }
     const auto free = std::find_if(state_->agents.begin(), state_->agents.end(),
-                                   [](const CrowdAgent& record) { return record.generation == 0; });
+                                   [](const CrowdAgent& record)
+                                   {
+                                       ENGINE_PROFILE_FUNCTION_PROBE();
+                                       return record.generation == 0;
+                                   });
     if (free == state_->agents.end())
     {
         state_->error = "Navigation crowd capacity exhausted";
@@ -1222,6 +1278,7 @@ bool NavigationSystem::create_agent(const Vec3& position, const NavigationAgentS
 bool NavigationSystem::set_agent_settings(NavigationAgentHandle handle,
                                           const NavigationAgentSettings& settings)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!state_)
     {
         return false;
@@ -1248,6 +1305,7 @@ bool NavigationSystem::set_agent_settings(NavigationAgentHandle handle,
 
 bool NavigationSystem::set_agent_target(NavigationAgentHandle handle, const Vec3& target)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!state_)
     {
         return false;
@@ -1278,6 +1336,7 @@ bool NavigationSystem::set_agent_target(NavigationAgentHandle handle, const Vec3
 
 bool NavigationSystem::stop_agent(NavigationAgentHandle handle)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!state_)
     {
         return false;
@@ -1298,6 +1357,7 @@ bool NavigationSystem::stop_agent(NavigationAgentHandle handle)
 
 bool NavigationSystem::remove_agent(NavigationAgentHandle handle)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!state_)
     {
         return false;
@@ -1318,6 +1378,7 @@ bool NavigationSystem::remove_agent(NavigationAgentHandle handle)
 
 bool NavigationSystem::agent_state(NavigationAgentHandle handle, NavigationAgentState& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     if (!state_)
     {
@@ -1370,6 +1431,7 @@ bool NavigationSystem::step_crowd(double delta_time)
 
 void NavigationSystem::on_shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     state_.reset();
 }
 

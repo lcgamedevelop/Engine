@@ -1,4 +1,6 @@
 #include "plugins/runtime/script/bindings/physics_binding.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "plugins/runtime/script/bindings/binding_context.hpp"
 #include "runtime/physics/physics_system.hpp"
@@ -191,11 +193,13 @@ Object.freeze(Physics);
 
 vm::NativeValue vector(const Vec3& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm::NativeValue::Object{{"x", value.x()}, {"y", value.y()}, {"z", value.z()}};
 }
 
 vm::NativeValue::Object object_value(const PhysicsObject& object)
 {
+    ENGINE_PROFILE_FUNCTION();
     return {{"sceneId", object.scene_id},
             {"nodeId", object.node_id},
             {"kind", object.kind == PhysicsObjectKind::character ? "character" : "collider"},
@@ -204,6 +208,7 @@ vm::NativeValue::Object object_value(const PhysicsObject& object)
 
 bool query_allowed(const BindingContext& binding)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* world = binding.world();
     if (!world || !world->is_initialized())
     {
@@ -216,6 +221,7 @@ bool query_allowed(const BindingContext& binding)
     return std::any_of(world->scenes().begin(), world->scenes().end(),
                        [&](const auto& scene)
                        {
+                           ENGINE_PROFILE_FUNCTION_PROBE();
                            std::vector<Node> nodes;
                            return scene->collect_nodes(nodes) && !nodes.empty() &&
                                   binding.find_node(scene->id(), nodes.front().id()).valid();
@@ -224,6 +230,7 @@ bool query_allowed(const BindingContext& binding)
 
 void impacts(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     vm::NativeValue::Array output;
     auto* binding = BindingContext::current(arguments);
     auto* physics = binding ? binding->physics() : nullptr;
@@ -252,6 +259,7 @@ void impacts(const Arguments& arguments)
 
 void cast_sphere(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     auto* binding = BindingContext::current(arguments);
     auto* physics = binding ? binding->physics() : nullptr;
@@ -279,6 +287,7 @@ void cast_sphere(const Arguments& arguments)
 
 void contact_target(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     const auto node = BindingContext::node(arguments);
     const auto* binding = BindingContext::current(arguments);
@@ -312,6 +321,7 @@ void contact_target(const Arguments& arguments)
 bool query_context(const Arguments& arguments, int filter_offset, PhysicsSystem*& physics,
                    PhysicsQueryFilter& filter)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* binding = BindingContext::current(arguments);
     physics = binding ? binding->physics() : nullptr;
     std::uint64_t ignored_scene = 0;
@@ -340,6 +350,7 @@ bool query_context(const Arguments& arguments, int filter_offset, PhysicsSystem*
 
 bool query_vectors(const Arguments& arguments, Vec3& first, Vec3& second)
 {
+    ENGINE_PROFILE_FUNCTION();
     double values[6]{};
     for (int index = 0; index < 6; ++index)
     {
@@ -355,6 +366,7 @@ bool query_vectors(const Arguments& arguments, Vec3& first, Vec3& second)
 
 void query(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     PhysicsSystem* physics = nullptr;
     PhysicsQueryFilter filter;
@@ -384,6 +396,7 @@ void query(const Arguments& arguments)
 
 void overlap(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     PhysicsSystem* physics = nullptr;
     PhysicsQueryFilter filter;
@@ -416,6 +429,7 @@ void overlap(const Arguments& arguments)
 
 void object_valid(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto* binding = BindingContext::current(arguments);
     auto* physics = binding ? binding->physics() : nullptr;
@@ -437,6 +451,7 @@ void object_valid(const Arguments& arguments)
 
 void contacts(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     vm::NativeValue::Array output;
     auto* binding = BindingContext::current(arguments);
     auto* physics = binding ? binding->physics() : nullptr;
@@ -469,14 +484,17 @@ void contacts(const Arguments& arguments)
 
 std::string_view PhysicsBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "Physics";
 }
 std::string_view PhysicsBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 bool PhysicsBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.function("PhysicsGetImpacts", impacts) &&
            vm.function("PhysicsCastSphere", cast_sphere) &&
            vm.function("PhysicsQueryRay", query, 0) &&

@@ -1,4 +1,6 @@
 #include "runtime/animation/animation_ik.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/animation/animation_ik_target.hpp"
 #include "runtime/resource/types/skeleton_resource.hpp"
@@ -10,6 +12,7 @@ using namespace ik_detail;
 bool set_ik_target(Animator actor, std::string_view name, const AnimationIkTarget& target,
                    bool two_bone)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto renderer = actor.node().get_component<MeshRenderer>();
     const auto* mesh = renderer ? renderer.mesh_data() : nullptr;
     auto* resources = actor.node().world()->resource_loader();
@@ -25,7 +28,10 @@ bool set_ik_target(Animator actor, std::string_view name, const AnimationIkTarge
         return false;
     }
     auto found = std::find_if(resolved.begin(), resolved.end(), [&](const auto& item)
-                              { return item.name == name && item.two_bone == two_bone; });
+                              {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return item.name == name && item.two_bone == two_bone;
+    });
     if (found == resolved.end())
     {
         return false;

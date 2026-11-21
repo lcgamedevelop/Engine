@@ -1,4 +1,6 @@
 #include "editor/asset_pipeline/components/text_codec.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "editor/asset_pipeline/toml_helpers.hpp"
 #include "runtime/scene/text_component.hpp"
@@ -11,16 +13,19 @@ namespace engine::editor::asset_pipeline
 
 schema::ComponentPayload TextCodec::type() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::ComponentPayload::TextData;
 }
 
 std::string_view TextCodec::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "text";
 }
 
 bool TextCodec::validate(const schema::ComponentDataT& component, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* value = component.payload.AsTextData();
     if (value == nullptr || !engine::TextComponent::valid_settings(*value) ||
         value->shader_path.empty())
@@ -34,10 +39,12 @@ bool TextCodec::validate(const schema::ComponentDataT& component, std::string& e
 bool TextCodec::read(const toml::table& table, schema::ComponentDataT& component,
                      std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     schema::TextDataT value;
     value.shader_path = "builtin://shaders/font";
     const auto read_string = [&table, &error](std::string_view key, std::string& output)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (!table.contains(key))
         {
             return true;
@@ -86,12 +93,14 @@ bool TextCodec::read(const toml::table& table, schema::ComponentDataT& component
 
 std::span<const std::string_view> TextCodec::resource_fields() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     static constexpr std::string_view fields[]{"font", "shader"};
     return fields;
 }
 
 void TextCodec::write(const schema::ComponentDataT& component, toml::table& table) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* value = component.payload.AsTextData();
     table.insert("type", "text");
     table.insert("font", value->font_guid);

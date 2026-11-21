@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include <cstdint>
 #include <span>
 #include <string_view>
@@ -8,6 +10,7 @@ namespace engine::plugins::script::vm
 {
 [[nodiscard]] inline bool valid_utf8(std::string_view text) noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     std::size_t index = 0;
     while (index < text.size())
     {
@@ -46,6 +49,7 @@ namespace engine::plugins::script::vm
 
 [[nodiscard]] inline bool valid_utf16(std::span<const std::uint16_t> text) noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     for (std::size_t index = 0; index < text.size(); ++index)
     {
         const auto unit = text[index];

@@ -1,5 +1,6 @@
 #include "runtime/render/passes/surface_pass.hpp"
 
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/render/render_constants.hpp"
 #include "runtime/render/render_submission.hpp"
@@ -15,11 +16,13 @@ namespace engine::render_detail
 
 SurfacePass::~SurfacePass() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     release();
 }
 
 bool SurfacePass::prepare(std::uint16_t width, std::uint16_t height, bool material_surface)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (bgfx::isValid(framebuffer_) && width == width_ && height == height_ &&
         material_surface == material_surface_)
     {
@@ -46,7 +49,11 @@ bool SurfacePass::prepare(std::uint16_t width, std::uint16_t height, bool materi
     }
     targets_[2] = bgfx::createTexture2D(width, height, false, 1, bgfx::TextureFormat::D32F, flags);
     const auto first = material_surface ? targets_.begin() : targets_.begin() + 2;
-    if (!std::all_of(first, targets_.end(), [](auto h) { return bgfx::isValid(h); }))
+    if (!std::all_of(first, targets_.end(), [](auto h)
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return bgfx::isValid(h);
+    }))
     {
         release();
         return false;
@@ -66,10 +73,12 @@ bool SurfacePass::prepare(std::uint16_t width, std::uint16_t height, bool materi
 
 bool SurfacePass::can_combine_depth(const RenderFrameData& frame, const ViewDrawList& list) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return material_surface_ && can_submit_opaque_depth(frame, list) &&
            std::all_of(list.opaque.begin(), list.opaque.end(),
                        [&](const auto& item)
                        {
+                           ENGINE_PROFILE_FUNCTION_PROBE();
                            const auto& mesh = frame.meshes[item.mesh];
                            const auto* program = mesh.gpu->materials[item.slot].program;
                            return bgfx::isValid(program->surface_program);
@@ -78,6 +87,7 @@ bool SurfacePass::can_combine_depth(const RenderFrameData& frame, const ViewDraw
 
 void SurfacePass::begin(const float* view, const float* projection, bool combined_depth)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (auto id : {ambient_occlusion_depth_view, surface_view})
     {
         if ((id == surface_view && !material_surface_) ||
@@ -102,6 +112,7 @@ void SurfacePass::begin(const float* view, const float* projection, bool combine
 
 bgfx::TextureHandle SurfacePass::depth() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return targets_[2];
 }
 
@@ -113,13 +124,17 @@ std::uint64_t SurfacePass::identify_depth(const SceneDrawView& draw, const Rende
     inputs.clear();
     const auto append_floats = [&](std::span<const float> values)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         for (const auto value : values)
         {
             inputs.push_back(std::bit_cast<std::uint32_t>(value));
         }
     };
     const auto append_resource = [&](ResourceHandle handle)
-    { inputs.insert(inputs.end(), {handle.owner, handle.id, handle.generation}); };
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        inputs.insert(inputs.end(), {handle.owner, handle.id, handle.generation});
+    };
     append_floats({draw.view, 16});
     append_floats({draw.projection, 16});
     inputs.insert(inputs.end(),
@@ -176,23 +191,31 @@ std::uint64_t SurfacePass::identify_depth(const SceneDrawView& draw, const Rende
 
 bgfx::TextureHandle SurfacePass::normal_roughness() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return targets_[0];
 }
 
 bgfx::TextureHandle SurfacePass::specular() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return targets_[1];
 }
 
 std::uint32_t SurfacePass::resource_count() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return static_cast<std::uint32_t>(bgfx::isValid(framebuffer_)) +
            static_cast<std::uint32_t>(std::count_if(targets_.begin(), targets_.end(),
-                                                    [](auto h) { return bgfx::isValid(h); }));
+                                                    [](auto h)
+                                                    {
+                                                        ENGINE_PROFILE_FUNCTION_PROBE();
+                                                        return bgfx::isValid(h);
+                                                    }));
 }
 
 void SurfacePass::release() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     depth_inputs_.clear();
     candidate_inputs_.clear();
     if (bgfx::isValid(framebuffer_))

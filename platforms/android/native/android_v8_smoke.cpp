@@ -1,4 +1,5 @@
 #include "v8_smoke.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include <android/log.h>
 #include <jni.h>
@@ -8,6 +9,7 @@ namespace
 
 void log_message(const char* message)
 {
+    ENGINE_PROFILE_FUNCTION();
     __android_log_write(ANDROID_LOG_INFO, "EngineV8", message);
 }
 
@@ -16,6 +18,7 @@ void log_message(const char* message)
 extern "C" JNIEXPORT jboolean JNICALL Java_org_engine_minimal_EngineActivity_nativeRunV8Smoke(
     JNIEnv* environment, jclass, jstring icu_data_file)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (icu_data_file == nullptr)
     {
         __android_log_write(ANDROID_LOG_ERROR, "EngineV8", "FAIL: ICU data path is missing");

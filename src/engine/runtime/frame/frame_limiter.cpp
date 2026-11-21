@@ -1,4 +1,5 @@
 #include "runtime/frame/frame_limiter.hpp"
+#include "runtime/performance/function_profile.hpp"
 
 #include <thread>
 
@@ -7,6 +8,7 @@ namespace engine
 
 bool FrameLimiter::set_target_frame_rate(std::int32_t rate) noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     if (rate != -1 && rate <= 0)
     {
         return false;
@@ -17,17 +19,20 @@ bool FrameLimiter::set_target_frame_rate(std::int32_t rate) noexcept
 
 std::int32_t FrameLimiter::target_frame_rate() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return target_frame_rate_;
 }
 
 void FrameLimiter::begin_frame() noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     frame_start_ = std::chrono::steady_clock::now();
     frame_started_ = true;
 }
 
 void FrameLimiter::end_frame()
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     if (!frame_started_)
     {
         return;
@@ -48,6 +53,7 @@ void FrameLimiter::end_frame()
 
 void FrameLimiter::reset() noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     frame_start_ = {};
     target_frame_rate_ = -1;
     frame_started_ = false;

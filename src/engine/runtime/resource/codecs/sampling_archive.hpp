@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/schema/animation_generated.h"
 #include "runtime/schema/skeleton_generated.h"
 
@@ -21,6 +23,7 @@ struct Cursor
     bool valid = true;
     std::span<const std::uint8_t> take(std::size_t count)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (count > bytes.size())
         {
             valid = false;
@@ -32,6 +35,7 @@ struct Cursor
     }
     std::uint32_t integer(std::size_t width)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const auto value = take(width);
         std::uint32_t result = 0;
         for (std::size_t i = 0; i < value.size(); ++i)
@@ -42,22 +46,26 @@ struct Cursor
     }
     float scalar()
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return std::bit_cast<float>(integer(4));
     }
     bool text(std::string_view expected, bool terminated)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const auto value = take(expected.size());
         return valid && std::equal(value.begin(), value.end(), expected.begin(), expected.end()) &&
                (!terminated || integer(1) == 0);
     }
     bool header(std::string_view tag, std::uint32_t version)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return integer(1) == 1 && text(tag, true) && integer(4) == version && valid;
     }
 };
 
 inline bool skeleton(const schema::SkeletonDataT& data)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     if (data.sampling_encoding == schema::SamplingEncoding::structured)
     {
         return data.sampling_archive.empty() && data.sampling_joint_order.empty();
@@ -165,6 +173,7 @@ inline bool skeleton(const schema::SkeletonDataT& data)
 
 inline bool animation(const schema::AnimationDataT& data)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     if (data.sampling_encoding == schema::SamplingEncoding::structured)
     {
         return data.sampling_archive.empty() && data.sampling_channels.empty();
@@ -173,7 +182,11 @@ inline bool animation(const schema::AnimationDataT& data)
         data.sampling_archive.size() > 64 * 1024 * 1024 || data.sampling_channels.empty() ||
         data.sampling_channels.size() > 1024 ||
         std::any_of(data.sampling_channels.begin(), data.sampling_channels.end(),
-                    [](auto value) { return (value & ~7) != 0; }))
+                    [](auto value)
+                    {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
+                        return (value & ~7) != 0;
+                    }))
     {
         return false;
     }

@@ -1,4 +1,5 @@
 #include "plugins/runtime/script/bindings/rigid_body_binding.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/script/bindings/binding_helpers.hpp"
 
 #include "plugins/runtime/script/bindings/binding_context.hpp"
@@ -48,6 +49,7 @@ Object.freeze(RigidBody);
 
 void motion(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<RigidBody>(arguments, 3);
     std::string name;
     if (!value || !BindingContext::text(arguments, 2, name))
@@ -81,6 +83,7 @@ void motion(const Arguments& arguments)
 
 void mass(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<RigidBody>(arguments, 3);
     float number = 0.0F;
     if (value.valid() && BindingContext::scalar(arguments, 2, number))
@@ -98,6 +101,7 @@ void mass(const Arguments& arguments)
 
 void set_vector(const Arguments& arguments, bool impulse)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<RigidBody>(arguments, 5);
     double x = 0.0;
     double y = 0.0;
@@ -113,16 +117,19 @@ void set_vector(const Arguments& arguments, bool impulse)
 
 void velocity(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     set_vector(arguments, false);
 }
 
 void impulse(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     set_vector(arguments, true);
 }
 
 void get_velocity(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto value = binding_detail::component<RigidBody>(arguments, 2);
     arguments.set_return({});
     if (!value)
@@ -135,6 +142,7 @@ void get_velocity(const Arguments& arguments)
 }
 void get_sleeping(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto body = binding_detail::component<RigidBody>(arguments, 2);
     bool sleeping = false;
     arguments.set_return({});
@@ -145,6 +153,7 @@ void get_sleeping(const Arguments& arguments)
 }
 void set_sleeping(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto body = binding_detail::component<RigidBody>(arguments, 3);
     arguments.set_return(body && arguments.is_boolean(2) &&
                          body.set_sleeping(arguments.boolean(2)));
@@ -153,16 +162,19 @@ void set_sleeping(const Arguments& arguments)
 
 std::string_view RigidBodyBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "RigidBody";
 }
 
 std::string_view RigidBodyBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 
 bool RigidBodyBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.integer("RigidBodyKind", static_cast<int>(RigidBody::component_type)) &&
            vm.function("RigidBodyAdd", binding_detail::add_component<RigidBody>) &&
            vm.function("RigidBodyMotion", motion) && vm.function("RigidBodyMass", mass) &&

@@ -1,4 +1,5 @@
 #include "plugins/editor/ui/ui_editor_state.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include <algorithm>
 #include <array>
@@ -11,6 +12,7 @@ namespace
 {
 std::uint8_t button(std::string_view name)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (name == "left")
     {
         return SDL_BUTTON_LEFT;
@@ -27,6 +29,7 @@ std::uint8_t button(std::string_view name)
 }
 std::uint16_t modifier(SDL_Keycode key)
 {
+    ENGINE_PROFILE_FUNCTION();
     switch (key)
     {
     case SDLK_LSHIFT:
@@ -51,10 +54,12 @@ std::uint16_t modifier(SDL_Keycode key)
 }
 bool same(UiElementHandle a, UiElementHandle b)
 {
+    ENGINE_PROFILE_FUNCTION();
     return a.document_id == b.document_id && a.element_id == b.element_id;
 }
 bool descendant(UiSystem& ui, UiElementHandle hit, UiElementHandle target)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (std::size_t depth = 0; depth < 256 && hit.document_id == target.document_id; ++depth)
     {
         if (same(hit, target))
@@ -72,6 +77,7 @@ bool descendant(UiSystem& ui, UiElementHandle hit, UiElementHandle target)
 }
 bool native_pressed()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (SDL_GetMouseState(nullptr, nullptr) != 0)
     {
         return true;
@@ -100,6 +106,7 @@ bool native_pressed()
 }
 Json receipt(const InputJob& job)
 {
+    ENGINE_PROFILE_FUNCTION();
     return {{"job", job.id},
             {"status", job.status},
             {"completedEvents", job.completed},
@@ -112,6 +119,7 @@ Json receipt(const InputJob& job)
 } // namespace
 SDL_Keycode input_key(std::string_view text)
 {
+    ENGINE_PROFILE_FUNCTION();
     // Explicit names ensure every accepted key is mapped by the existing RmlUi bridge.
     if (text.size() == 1)
     {
@@ -176,6 +184,7 @@ SDL_Keycode input_key(std::string_view text)
 }
 bool validate_input(const Json& events, std::uint64_t document, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!events.is_array() || events.empty() || events.size() > 256)
     {
         error = "events must contain 1..256 events";
@@ -309,6 +318,7 @@ bool validate_input(const Json& events, std::uint64_t document, std::string& err
 bool UiEditorCommands::State::input(std::string_view name, const Json& args, Json& result,
                                     std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (name == "get_ui_input" || name == "cancel_ui_input")
     {
         std::string id;
@@ -429,6 +439,7 @@ bool UiEditorCommands::State::input(std::string_view name, const Json& args, Jso
 }
 void UiEditorCommands::State::cancel_input(std::string_view reason) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (active.empty())
     {
         return;
@@ -446,6 +457,7 @@ void UiEditorCommands::State::cancel_input(std::string_view reason) noexcept
 }
 void UiEditorCommands::State::tick_input()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (active.empty())
     {
         return;
@@ -509,6 +521,7 @@ void UiEditorCommands::State::tick_input()
 }
 bool UiEditorCommands::State::execute_event(InputJob& job, const Json& step, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto type = step["type"].get<std::string>();
     UiElementHandle target;
     UiElementInfo info;

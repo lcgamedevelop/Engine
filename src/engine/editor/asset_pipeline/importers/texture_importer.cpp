@@ -1,4 +1,6 @@
 #include "editor/asset_pipeline/importers/texture_importer.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/file_text.hpp"
 #include "runtime/resource/virtual_file_system.hpp"
 
@@ -53,6 +55,7 @@ struct TextureSettings
 
 bool dimensions(std::uint32_t width, std::uint32_t height)
 {
+    ENGINE_PROFILE_FUNCTION();
     return width != 0 && height != 0 && width <= maximum_dimension && height <= maximum_dimension &&
            static_cast<std::uint64_t>(width) * height <= maximum_pixels;
 }
@@ -60,6 +63,7 @@ bool dimensions(std::uint32_t width, std::uint32_t height)
 bool settings(const std::filesystem::path& source, bool hdr, TextureSettings& output,
               std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.srgb = !hdr;
     output.format = hdr ? schema::TextureFormat::rgba16f : schema::TextureFormat::auto_format;
     auto path = source;
@@ -146,6 +150,7 @@ bool settings(const std::filesystem::path& source, bool hdr, TextureSettings& ou
     const auto integer =
         [&](const char* name, std::uint32_t minimum, std::uint32_t maximum, std::uint32_t& result)
     {
+            ENGINE_PROFILE_FUNCTION_PROBE();
         if (!table->contains(name))
         {
             return true;
@@ -197,6 +202,7 @@ bool settings(const std::filesystem::path& source, bool hdr, TextureSettings& ou
 bool native_texture(schema::TextureDataT& texture, std::span<const std::uint8_t> encoded,
                     std::string_view platform, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (texture.format == schema::TextureFormat::auto_format)
     {
         if (platform == "windows" || platform == "linux")
@@ -282,6 +288,7 @@ bool native_texture(schema::TextureDataT& texture, std::span<const std::uint8_t>
 bool read_image(std::span<const std::uint8_t> bytes, std::string_view extension,
                 basisu::image& image, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* data = bytes.data();
     if (extension == ".png")
     {
@@ -338,7 +345,10 @@ bool read_image(std::span<const std::uint8_t> bytes, std::string_view extension,
     if (extension == ".tga")
     {
         const auto u16 = [&](std::size_t offset)
-        { return std::uint32_t(data[offset]) | (std::uint32_t(data[offset + 1]) << 8); };
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return std::uint32_t(data[offset]) | (std::uint32_t(data[offset + 1]) << 8);
+        };
         if (bytes.size() < 18 || !dimensions(u16(12), u16(14)))
         {
             error = "invalid TGA header or unsupported texture dimensions";
@@ -364,6 +374,7 @@ bool read_image(std::span<const std::uint8_t> bytes, std::string_view extension,
     {
         const auto u32 = [&](std::size_t offset)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             return (std::uint32_t(data[offset]) << 24) | (std::uint32_t(data[offset + 1]) << 16) |
                    (std::uint32_t(data[offset + 2]) << 8) | std::uint32_t(data[offset + 3]);
         };
@@ -382,6 +393,7 @@ bool read_image(std::span<const std::uint8_t> bytes, std::string_view extension,
 bool read_hdr(std::span<const std::uint8_t> bytes, std::string_view extension,
               basisu::imagef& image, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     bool luminance = false;
     if (extension == ".exr")
     {
@@ -491,18 +503,21 @@ bool read_hdr(std::span<const std::uint8_t> bytes, std::string_view extension,
 
 std::string_view TextureImporter::default_meta() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "\n[texture]\nstorage = \"basis\"\nformat = \"auto\"\ncompression = \"uastc\"\n"
            "compression_level = 2\nmipmaps = true\n";
 }
 
 std::string_view TextureImporter::version() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     // TinyEXR 3.3 and stb 2026-08-02 also change decoding, independent of the BasisU version.
     return "basisu-" BASISU_LIB_VERSION_STRING "-texture-importer-4-native-map-1";
 }
 
 bool TextureImporter::initialize(std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     TextureResourceCodec::initialize_transcoder();
     if (!basisu::basisu_encoder_init())
     {
@@ -515,6 +530,7 @@ bool TextureImporter::initialize(std::string& error)
 bool TextureImporter::convert(const ImportAsset& asset, const ImportContext& context,
                               std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     TextureSettings configuration;
     const auto extension = source_extension(asset.source);
     const bool hdr = extension == ".hdr" || extension == ".exr";
@@ -619,10 +635,12 @@ bool TextureImporter::convert(const ImportAsset& asset, const ImportContext& con
 
 schema::AssetKind TextureImporter::kind() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::texture;
 }
 bool TextureImporter::matches(const std::filesystem::path& source) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto extension = source_extension(source);
     return extension == ".png" || extension == ".jpg" || extension == ".jpeg" ||
            extension == ".tga" || extension == ".qoi" || extension == ".hdr" || extension == ".exr";
@@ -630,6 +648,7 @@ bool TextureImporter::matches(const std::filesystem::path& source) const
 bool TextureImporter::inspect_batch(const ImportContext& context, std::string& fingerprint,
                                     std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!schema_fingerprint({"runtime/texture.fbs"}, fingerprint, error))
     {
         return false;
@@ -640,6 +659,7 @@ bool TextureImporter::inspect_batch(const ImportContext& context, std::string& f
 bool TextureImporter::prepare_batch(const ImportContext&, TaskDescription& task,
                                     std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     task = {};
     return initialize(error);
 }

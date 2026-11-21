@@ -1,4 +1,5 @@
 #include "plugins/runtime/script/bindings/audio_source_binding.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/script/bindings/binding_helpers.hpp"
 
 #include "plugins/runtime/script/bindings/binding_context.hpp"
@@ -68,6 +69,7 @@ Object.freeze(AudioSource);
 
 void clip(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<AudioSource>(arguments, 3);
     std::string path;
     if (value.valid() && BindingContext::text(arguments, 2, path))
@@ -78,6 +80,7 @@ void clip(const Arguments& arguments)
 
 void set_scalar(const Arguments& arguments, float schema::AudioSourceDataT::* field)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<AudioSource>(arguments, 3);
     float number = 0.0F;
     if (value.valid() && BindingContext::scalar(arguments, 2, number))
@@ -95,16 +98,19 @@ void set_scalar(const Arguments& arguments, float schema::AudioSourceDataT::* fi
 
 void volume(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     set_scalar(arguments, &schema::AudioSourceDataT::volume);
 }
 
 void pitch(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     set_scalar(arguments, &schema::AudioSourceDataT::pitch);
 }
 
 void set_boolean(const Arguments& arguments, bool schema::AudioSourceDataT::* field)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<AudioSource>(arguments, 3);
     if (value.valid() && arguments.is_boolean(2))
     {
@@ -121,21 +127,25 @@ void set_boolean(const Arguments& arguments, bool schema::AudioSourceDataT::* fi
 
 void loop(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     set_boolean(arguments, &schema::AudioSourceDataT::loop);
 }
 
 void spatial(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     set_boolean(arguments, &schema::AudioSourceDataT::spatial);
 }
 
 void awake(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     set_boolean(arguments, &schema::AudioSourceDataT::play_on_awake);
 }
 
 void distances(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<AudioSource>(arguments, 4);
     float minimum = 0.0F;
     float maximum = 0.0F;
@@ -156,30 +166,35 @@ void distances(const Arguments& arguments)
 
 void play(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<AudioSource>(arguments, 2);
     arguments.set_return(value.valid() && value.play());
 }
 
 void pause(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<AudioSource>(arguments, 2);
     arguments.set_return(value.valid() && value.pause());
 }
 
 void stop(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto value = binding_detail::component<AudioSource>(arguments, 2);
     arguments.set_return(value.valid() && value.stop());
 }
 
 void playing(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto value = binding_detail::component<AudioSource>(arguments, 2);
     arguments.set_return(value.valid() && value.playing());
 }
 
 void playback(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto value = binding_detail::component<AudioSource>(arguments, 2);
     arguments.set_return({});
     if (!value)
@@ -214,16 +229,19 @@ void playback(const Arguments& arguments)
 
 std::string_view AudioSourceBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "AudioSource";
 }
 
 std::string_view AudioSourceBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 
 bool AudioSourceBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.integer("AudioSourceKind", static_cast<int>(AudioSource::component_type)) &&
            vm.function("AudioSourceAdd", binding_detail::add_component<AudioSource>) &&
            vm.function("AudioSourceClip", clip) && vm.function("AudioSourceVolume", volume) &&

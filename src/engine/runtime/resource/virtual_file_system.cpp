@@ -1,6 +1,7 @@
 #include "runtime/resource/virtual_file_system.hpp"
 #include "runtime/utils/hash_utils.hpp"
 
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/schema/asset_catalog_generated.h"
 #include "runtime/task/task_system.hpp"
@@ -30,6 +31,7 @@ using Stream = std::unique_ptr<SDL_IOStream, decltype(&SDL_CloseIO)>;
 
 bool valid_relative_path(std::string_view path)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (const unsigned char character : path)
     {
         if (character < 32 || character == 127 || character == '\\' || character == ':')
@@ -55,12 +57,14 @@ bool valid_relative_path(std::string_view path)
 
 bool apk_root(const std::filesystem::path& path)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto encoded = path.generic_u8string();
     return encoded == u8"apk:/assets" || encoded.starts_with(u8"apk:/assets/");
 }
 
 bool contained_file(const std::filesystem::path& root, const std::filesystem::path& relative)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (apk_root(root))
     {
         return true;
@@ -88,6 +92,7 @@ bool contained_file(const std::filesystem::path& root, const std::filesystem::pa
 
 Stream open_file(const std::filesystem::path& path)
 {
+    ENGINE_PROFILE_FUNCTION();
     Stream stream(nullptr, SDL_CloseIO);
     const auto encoded = path.u8string();
     if (encoded.empty() || encoded.find(u8'\0') != std::u8string::npos)
@@ -133,6 +138,7 @@ Stream open_file(const std::filesystem::path& path)
 
 bool read_exact(SDL_IOStream* stream, ByteBuffer& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::size_t position = 0;
     while (position < output.size())
     {
@@ -158,6 +164,7 @@ struct FileRead::State
 
     bool cancel() noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         if (status == FileReadStatus::delivered || status == FileReadStatus::failed)
         {
             return false;
@@ -172,20 +179,24 @@ struct FileRead::State
 
 FileRead::FileRead(std::shared_ptr<State> state) noexcept : state_(std::move(state))
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 FileRead::~FileRead() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     (void)cancel();
 }
 
 FileReadStatus FileRead::status() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return state_->status;
 }
 
 bool FileRead::take(ByteBuffer& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     if (state_->status != FileReadStatus::ready)
     {
@@ -198,16 +209,19 @@ bool FileRead::take(ByteBuffer& output)
 
 bool FileRead::cancel() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return state_->cancel();
 }
 
 FileError FileRead::error() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return state_->error;
 }
 
 std::string_view FileRead::last_error() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (state_->error == FileError::cancelled)
     {
         return "File read cancelled";
@@ -241,6 +255,7 @@ struct VirtualFileSystem::AsyncState
 
     ~AsyncState() noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         // 准备任务持 shared_ptr；最后一个准备任务返回之后才会销毁队列。
         // 尚未派发的回调随 requests 销毁，绝不回调已关闭的业务对象。
         for (const auto& request : requests)
@@ -263,16 +278,19 @@ struct VirtualFileSystem::AsyncState
 VirtualFileSystem::VirtualFileSystem() noexcept = default;
 VirtualFileSystem::~VirtualFileSystem() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown_async();
 }
 
 VirtualFileSystem::VirtualFileSystem(VirtualFileSystem&& other) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     *this = std::move(other);
 }
 
 VirtualFileSystem& VirtualFileSystem::operator=(VirtualFileSystem&& other) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     // 移动只用于尚未启用异步读取的值；活动系统保持稳定地址。
     assert(!async_ && !other.async_);
     if (this != &other)
@@ -286,6 +304,7 @@ VirtualFileSystem& VirtualFileSystem::operator=(VirtualFileSystem&& other) noexc
 
 bool VirtualFileSystem::fail(FileError error, std::string_view message)
 {
+    ENGINE_PROFILE_FUNCTION();
     error_ = error;
     last_error_ = message;
     return false;
@@ -293,20 +312,24 @@ bool VirtualFileSystem::fail(FileError error, std::string_view message)
 
 FileError VirtualFileSystem::error() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return error_;
 }
 
 std::string_view VirtualFileSystem::last_error() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return last_error_;
 }
 
 bool VirtualFileSystem::configure_async(TaskSystem& tasks, const FileAsyncConfig& config)
 {
+    ENGINE_PROFILE_ZONE("File.configureAsync");
     const bool unclaimed =
         async_ && std::any_of(async_->operations.begin(), async_->operations.end(),
                               [](const auto& weak)
                               {
+                                  ENGINE_PROFILE_FUNCTION_PROBE();
                                   const auto operation = weak.lock();
                                   return operation &&
                                          (operation->status == FileReadStatus::reading ||
@@ -334,6 +357,7 @@ bool VirtualFileSystem::configure_async(TaskSystem& tasks, const FileAsyncConfig
 
 void VirtualFileSystem::shutdown_async() noexcept
 {
+    ENGINE_PROFILE_ZONE("File.shutdownAsync");
     if (async_)
     {
         for (const auto& weak : async_->operations)
@@ -352,6 +376,7 @@ void VirtualFileSystem::shutdown_async() noexcept
 bool VirtualFileSystem::begin_read(const schema::FileLocationT& location, std::uint64_t offset,
                                    std::uint64_t size, std::unique_ptr<FileRead>& output)
 {
+    ENGINE_PROFILE_ZONE("File.beginRead");
     if (output)
     {
         return fail(FileError::busy, "File read output already owns an operation");
@@ -361,7 +386,10 @@ bool VirtualFileSystem::begin_read(const schema::FileLocationT& location, std::u
         return fail(FileError::unavailable, "Asynchronous file reading is not configured");
     }
     const auto mount = std::find_if(mounts_.begin(), mounts_.end(), [&location](const auto& value)
-                                    { return value.name == location.mount; });
+                                    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return value.name == location.mount;
+    });
     constexpr auto maximum_offset = static_cast<std::uint64_t>(std::numeric_limits<Sint64>::max());
     if (mount == mounts_.end() || !valid_relative_path(location.path))
     {
@@ -395,6 +423,7 @@ bool VirtualFileSystem::begin_read(const schema::FileLocationT& location, std::u
             ENGINE_PROFILE_ZONE("File.prepare");
             auto finish = [&request](bool success)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 request->prepared.store(true, std::memory_order_release);
                 return success;
             };
@@ -532,6 +561,7 @@ std::uint32_t VirtualFileSystem::poll_async(std::uint32_t completion_budget)
     std::erase_if(state->operations,
                   [](const auto& weak)
                   {
+                      ENGINE_PROFILE_FUNCTION_PROBE();
                       const auto operation = weak.lock();
                       return !operation || operation->status == FileReadStatus::delivered ||
                              operation->status == FileReadStatus::failed ||
@@ -544,6 +574,7 @@ std::uint32_t VirtualFileSystem::poll_async(std::uint32_t completion_budget)
 
 bool VirtualFileSystem::configure(const MountList& mounts)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::set<std::string> names;
     for (const auto& mount : mounts)
     {
@@ -580,9 +611,13 @@ bool VirtualFileSystem::configure(const MountList& mounts)
 bool VirtualFileSystem::read(const schema::FileLocationT& location, std::uint64_t offset,
                              std::uint64_t size, ByteBuffer& output)
 {
+    ENGINE_PROFILE_ZONE("File.readRange");
     output.clear();
     const auto mount = std::find_if(mounts_.begin(), mounts_.end(), [&location](const auto& value)
-                                    { return value.name == location.mount; });
+                                    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return value.name == location.mount;
+    });
     constexpr auto maximum_offset = static_cast<std::uint64_t>(std::numeric_limits<Sint64>::max());
     if (mount == mounts_.end() || !valid_relative_path(location.path))
     {
@@ -628,6 +663,7 @@ bool VirtualFileSystem::read(const schema::FileLocationT& location, std::uint64_
 bool VirtualFileSystem::read_file(const std::filesystem::path& path, ByteBuffer& output,
                                   std::string* error, std::uint64_t maximum_bytes)
 {
+    ENGINE_PROFILE_ZONE("File.readAll");
     output.clear();
     if (error)
     {
@@ -635,6 +671,7 @@ bool VirtualFileSystem::read_file(const std::filesystem::path& path, ByteBuffer&
     }
     const auto failed = [error](std::string_view message)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (error)
         {
             error->assign(message);
@@ -680,6 +717,7 @@ bool VirtualFileSystem::read_file(const std::filesystem::path& path, ByteBuffer&
 bool VirtualFileSystem::hash_file(const std::filesystem::path& path, std::uint64_t& hash,
                                   std::uint64_t& size)
 {
+    ENGINE_PROFILE_ZONE("File.hash");
     hash = 0;
     size = 0;
     auto stream = open_file(path);
@@ -724,6 +762,7 @@ bool VirtualFileSystem::hash_file(const std::filesystem::path& path, std::uint64
 
 const MountList& VirtualFileSystem::mounts() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return mounts_;
 }
 

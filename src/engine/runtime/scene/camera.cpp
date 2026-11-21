@@ -1,4 +1,6 @@
 #include "runtime/scene/camera.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/scene/camera_runtime.hpp"
 
@@ -18,6 +20,7 @@ namespace engine
 
 bool Camera::register_type(ComponentRegistry& registry)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!register_component_storage<Camera, Data, Runtime>(registry))
     {
         return false;
@@ -28,6 +31,7 @@ bool Camera::register_type(ComponentRegistry& registry)
         .each(
             [](flecs::entity entity, const auto&)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 const auto metadata = entity.target<ecs_detail::SceneMember>();
                 auto* info = metadata ? metadata.try_get_mut<schema::SceneInfoT>() : nullptr;
                 const auto* properties = entity.try_get<schema::NodePropertiesT>();
@@ -41,11 +45,13 @@ bool Camera::register_type(ComponentRegistry& registry)
 
 Camera::Runtime* Camera::runtime() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return runtime_state<Runtime>();
 }
 
 bool Camera::get_settings(Data& output) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* value = read_data<Data>();
     output = value ? *value : Data{};
     return value != nullptr;
@@ -53,6 +59,7 @@ bool Camera::get_settings(Data& output) const noexcept
 
 bool Camera::set_settings(const CameraSettings& settings) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -74,6 +81,7 @@ bool Camera::set_settings(const CameraSettings& settings) noexcept
 
 bool Camera::set_hidden_meshes(std::span<const std::uint64_t> mesh_instance_ids)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -92,6 +100,7 @@ bool Camera::set_hidden_meshes(std::span<const std::uint64_t> mesh_instance_ids)
 bool Camera::screen_point_to_ray(const Vec2& point, const Vec2& viewport_size, Vec3& origin,
                                  Vec3& direction) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     origin = {};
     direction = {};
     if (!valid())
@@ -110,6 +119,7 @@ bool Camera::screen_point_to_ray(const Vec2& point, const Vec2& viewport_size, V
 bool Camera::viewport_point_to_ray(const Vec2& point, double aspect, Vec3& origin,
                                    Vec3& direction) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     origin = {};
     direction = {};
     if (!valid())
@@ -174,6 +184,7 @@ bool Camera::viewport_point_to_ray(const Vec2& point, double aspect, Vec3& origi
 
 void Camera::clear_hidden_meshes() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return;
@@ -183,6 +194,7 @@ void Camera::clear_hidden_meshes() noexcept
 
 bool Camera::mesh_visible(std::uint64_t mesh_instance_id) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return false;
@@ -194,6 +206,7 @@ bool Camera::mesh_visible(std::uint64_t mesh_instance_id) const noexcept
 
 bool Camera::restore_data(const schema::ComponentDataT& data)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!data.flags)
     {
         return false;

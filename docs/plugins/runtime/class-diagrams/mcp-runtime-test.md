@@ -82,7 +82,7 @@ classDiagram
 通道唯一拥有传输与去重记录，EditorSystem 不监听文件、不保存协议回执。文件位于明确的 channel_directory：`editor-command.json` 输入，`editor-receipt.json` 为最近回执，`editor-receipts/<session>/<requestId>.json` 保存原请求回执。基础请求为 `{session,requestId,command,arguments}`，回执为 `{session,requestId,command,success,result,error,completedAtMs}`；编辑目标的 projectRoot 由编辑端适配验证，不进入普通运行时核心。
 
 - 输入与回执均限制为 1 MiB，读取前后检查长度；session/requestId 仅允许不超过 128 个 ASCII 字母、数字、下划线或连字符。旧会话拒绝，历史回执须校验身份与字段类型。
-- 同一 session/requestId 只执行一次。先持久化独立回执，再更新最近快照；写回失败保留已经执行的结果，只重试落盘，不重放操作。回执文件被删除不清除进程内已执行身份。超大结果产生同 ID 的有界失败回执。
+- 同一 session/requestId 只执行一次。通道在调用 Handler 前原子创建 `editor-receipts/<session>/<requestId>.started` 目录，保留执行身份。先持久化独立回执，再更新最近快照。写回失败时仅保留待发布结果并重试落盘。已标记开始的请求如果缺少回执，会拒绝重放。超大结果产生同 ID 的有界失败回执。
 - Handler 返回值及 success 表示本次命令校验、同步执行或受理是否成功；completedAtMs 是 Handler 完成时间。异步启动、加载、截图各自返回原生操作身份，命令成功不等于这些操作已经完成。
 - 原回执一经执行确定就保持不变。异步业务错误保存在对应原生结果记录，不回写成另一条命令的 last_error，也不把受理成功回执后来改成失败。业务终态与原命令回执一起归档。
 - 传输超时表示尚未取得回执，继续查询原 requestId；取得 prepareId/loadId/captureId 后，业务等待使用对应查询。两种 pending 的解释明确区分，不重复发起副作用。

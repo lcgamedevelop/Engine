@@ -1,4 +1,5 @@
 #include "runtime/window/window_system.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/engine_config.hpp"
 
@@ -20,6 +21,7 @@ constexpr SDL_InitFlags sdl_flags = SDL_INIT_VIDEO | SDL_INIT_EVENTS;
 
 bool valid_mode(const SDL_DisplayMode& mode)
 {
+    ENGINE_PROFILE_FUNCTION();
     return mode.w > 0 && mode.h > 0 && std::isfinite(mode.pixel_density) &&
            mode.pixel_density > 0.0F && std::isfinite(mode.refresh_rate) &&
            mode.refresh_rate >= 0.0F;
@@ -27,6 +29,7 @@ bool valid_mode(const SDL_DisplayMode& mode)
 
 bool SDLCALL watch_application_state(void* userdata, SDL_Event* event)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto& background = *static_cast<std::atomic<bool>*>(userdata);
     switch (event->type)
     {
@@ -49,16 +52,19 @@ WindowSystem::WindowSystem() noexcept = default;
 
 WindowSystem::~WindowSystem() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
 }
 
 bool WindowSystem::exit_requested() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return exit_requested_;
 }
 
 bool WindowSystem::request_exit() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!is_initialized() || window_ == nullptr || !SDL_IsMainThread())
     {
         return false;
@@ -69,6 +75,7 @@ bool WindowSystem::request_exit() noexcept
 
 bool WindowSystem::size(WindowSize& output) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     if (!is_initialized() || window_ == nullptr || !SDL_IsMainThread())
     {
@@ -91,6 +98,7 @@ bool WindowSystem::size(WindowSize& output) const noexcept
 
 bool WindowSystem::safe_area(WindowRect& output) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     if (!is_initialized() || window_ == nullptr || !SDL_IsMainThread())
     {
@@ -113,6 +121,7 @@ bool WindowSystem::safe_area(WindowRect& output) const noexcept
 
 bool WindowSystem::display_modes(std::vector<DisplayMode>& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     if (!is_initialized() || window_ == nullptr || !SDL_IsMainThread())
     {
@@ -151,6 +160,7 @@ bool WindowSystem::display_modes(std::vector<DisplayMode>& output) const
 
 bool WindowSystem::mode(WindowMode& output) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     output = WindowMode::windowed;
     if (!is_initialized() || window_ == nullptr || !SDL_IsMainThread())
     {
@@ -166,6 +176,7 @@ bool WindowSystem::mode(WindowMode& output) const noexcept
 
 bool WindowSystem::set_size(std::uint32_t logical_width, std::uint32_t logical_height)
 {
+    ENGINE_PROFILE_FUNCTION();
     constexpr auto maximum = static_cast<std::uint32_t>(std::numeric_limits<int>::max());
     WindowMode current;
     if (logical_width == 0 || logical_height == 0 || logical_width > maximum ||
@@ -179,6 +190,7 @@ bool WindowSystem::set_size(std::uint32_t logical_width, std::uint32_t logical_h
 
 bool WindowSystem::set_mode(WindowMode requested, const DisplayMode* exclusive_mode)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!is_initialized() || window_ == nullptr || !SDL_IsMainThread())
     {
         return false;
@@ -234,6 +246,7 @@ bool WindowSystem::set_mode(WindowMode requested, const DisplayMode* exclusive_m
 
 bool WindowSystem::mouse_mode(MouseMode& output) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     output = MouseMode::normal;
     if (!is_initialized() || window_ == nullptr || !SDL_IsMainThread())
     {
@@ -247,6 +260,7 @@ bool WindowSystem::mouse_mode(MouseMode& output) const noexcept
 
 bool WindowSystem::set_mouse_mode(MouseMode requested)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!is_initialized() || window_ == nullptr || !SDL_IsMainThread())
     {
         return false;
@@ -265,6 +279,7 @@ bool WindowSystem::set_mouse_mode(MouseMode requested)
 
 bool WindowSystem::can_render() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!is_initialized() || window_ == nullptr || exit_requested_ ||
         background_.load(std::memory_order_relaxed))
     {
@@ -297,17 +312,20 @@ bool WindowSystem::can_render() const noexcept
 
 SDL_Window* WindowSystem::native_window() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return window_;
 }
 
 void WindowSystem::set_event_handler(WindowEventHandler handler, void* context) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     event_handler_ = handler;
     event_context_ = context;
 }
 
 bool WindowSystem::on_initialize(const EngineConfig& config)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (config.window_title.empty())
     {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Window title must not be empty");
@@ -346,7 +364,10 @@ bool WindowSystem::on_initialize(const EngineConfig& config)
     }
     watching_events_ = true;
 
-    SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+    SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE;
+#if !defined(SDL_PLATFORM_EMSCRIPTEN)
+    flags |= SDL_WINDOW_HIGH_PIXEL_DENSITY;
+#endif
 #if defined(SDL_PLATFORM_MACOS) || defined(SDL_PLATFORM_IOS)
     flags |= SDL_WINDOW_METAL;
 #elif defined(SDL_PLATFORM_ANDROID)
@@ -365,6 +386,7 @@ bool WindowSystem::on_initialize(const EngineConfig& config)
 
 bool WindowSystem::on_tick(double)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (window_ == nullptr)
     {
         return false;
@@ -396,6 +418,7 @@ bool WindowSystem::on_tick(double)
 
 void WindowSystem::on_shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     set_event_handler(nullptr, nullptr);
     if (watching_events_)
     {

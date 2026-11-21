@@ -1,9 +1,11 @@
 #include "runtime/core/guid_map.hpp"
+#include "runtime/performance/function_profile.hpp"
 
 namespace engine
 {
 bool GuidMap::valid_path(std::string_view path) noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     if (path.starts_with("builtin://"))
     {
         path.remove_prefix(10);
@@ -45,6 +47,7 @@ bool GuidMap::valid_path(std::string_view path) noexcept
 
 bool GuidMap::valid_guid(std::string_view guid) noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     if (guid.size() != 36)
     {
         return false;
@@ -74,6 +77,7 @@ bool GuidMap::valid_guid(std::string_view guid) noexcept
 
 bool GuidMap::add(std::string_view path, std::string_view guid)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     if (!valid_path(path) || !valid_guid(guid) || paths_.contains(path) || guids_.contains(guid))
     {
         return false;
@@ -85,6 +89,7 @@ bool GuidMap::add(std::string_view path, std::string_view guid)
 
 bool GuidMap::path_to_guid(std::string_view path, Guid& output) const
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     const auto found = paths_.find(path);
     if (found == paths_.end())
     {
@@ -97,6 +102,7 @@ bool GuidMap::path_to_guid(std::string_view path, Guid& output) const
 
 bool GuidMap::guid_to_path(std::string_view guid, std::string& output) const
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     const auto found = guids_.find(guid);
     if (found == guids_.end())
     {
@@ -109,12 +115,14 @@ bool GuidMap::guid_to_path(std::string_view guid, std::string& output) const
 
 void GuidMap::clear() noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     paths_.clear();
     guids_.clear();
 }
 
 std::size_t GuidMap::size() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return paths_.size();
 }
 

@@ -1,4 +1,5 @@
 #include "plugins/runtime/script/bindings/ui_component_binding.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/script/bindings/binding_helpers.hpp"
 
 #include "plugins/runtime/script/bindings/binding_context.hpp"
@@ -39,6 +40,7 @@ Object.freeze(UiComponent);
 
 UiComponent view(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto node = BindingContext::node(arguments);
     auto component = !node ? UiComponent{} : node.get_component<UiComponent>();
     std::uint64_t id = 0;
@@ -50,6 +52,7 @@ UiComponent view(const Arguments& arguments)
 
 UiSystem* system(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* context = BindingContext::current(arguments);
     auto* ui = context == nullptr ? nullptr : context->ui();
     return ui != nullptr && ui->is_initialized() ? ui : nullptr;
@@ -57,6 +60,7 @@ UiSystem* system(const Arguments& arguments)
 
 void set_document(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto component = view(arguments);
     std::string path;
@@ -68,6 +72,7 @@ void set_document(const Arguments& arguments)
 
 void find_element(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     auto component = view(arguments);
     auto* ui = system(arguments);
@@ -85,6 +90,7 @@ void find_element(const Arguments& arguments)
 
 void document_identifier(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto component = view(arguments);
     auto* ui = system(arguments);
     const auto id = arguments.count() == 3 && component.valid() && ui != nullptr
@@ -97,16 +103,19 @@ void document_identifier(const Arguments& arguments)
 
 std::string_view UiComponentBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "UiComponent";
 }
 
 std::string_view UiComponentBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 
 bool UiComponentBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.integer("UiComponentKind", static_cast<int>(UiComponent::component_type)) &&
            vm.function("UiComponentAdd", binding_detail::add_component<UiComponent>) &&
            vm.function("UiDocumentSet", set_document) &&

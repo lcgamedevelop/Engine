@@ -1,4 +1,5 @@
 #include "plugins/runtime/camera/camera_state_machine.hpp"
+#include "runtime/performance/profiling.hpp"
 namespace engine::plugins::camera
 {
 bool CameraStateMachine::select(const schema::CameraStateMachineDataT& data,
@@ -6,6 +7,7 @@ bool CameraStateMachine::select(const schema::CameraStateMachineDataT& data,
                                 const CameraEvaluationContext& context,
                                 const CameraTypeRegistry& types, CameraTransitionRequest& out) const
 {
+    ENGINE_PROFILE_FUNCTION();
     out = {};
     for (auto index : context.outgoing_transitions)
     {
@@ -61,6 +63,7 @@ bool CameraStateMachine::select(const schema::CameraStateMachineDataT& data,
 void CameraStateMachine::commit(const CameraTransitionRequest& request,
                                 CameraMachineRuntime& next) const
 {
+    ENGINE_PROFILE_FUNCTION();
     if (request.selected)
     {
         next.source_state_id = request.from;

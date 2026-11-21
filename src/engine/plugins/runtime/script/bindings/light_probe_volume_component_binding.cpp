@@ -1,4 +1,5 @@
 #include "plugins/runtime/script/bindings/light_probe_volume_component_binding.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/script/bindings/binding_helpers.hpp"
 
 #include "plugins/runtime/script/bindings/binding_context.hpp"
@@ -24,6 +25,7 @@ Object.freeze(LightProbeVolumeComponent);
 )js";
 void resource(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto node = BindingContext::node(arguments);
     auto component =
@@ -39,14 +41,17 @@ void resource(const Arguments& arguments)
 } // namespace
 std::string_view LightProbeVolumeComponentBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "LightProbeVolumeComponent";
 }
 std::string_view LightProbeVolumeComponentBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 bool LightProbeVolumeComponentBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.integer("LightProbeVolumeKind",
                       static_cast<int>(LightProbeVolumeComponent::component_type)) &&
            vm.function("LightProbeVolumeAdd",

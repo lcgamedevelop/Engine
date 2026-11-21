@@ -1,4 +1,6 @@
 #include "plugins/runtime/script/vm/script_vm.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/script/vm/text_encoding.hpp"
 
 #include "runtime/app/app.hpp"
@@ -31,6 +33,7 @@ namespace fs = std::filesystem;
 #if defined(SDL_PLATFORM_ANDROID) && ENGINE_V8_HAS_I18N
 bool read_file_text(const std::filesystem::path& path, std::string& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     ByteBuffer bytes;
     if (!VirtualFileSystem::read_file(path, bytes))
@@ -47,6 +50,7 @@ bool read_file_text(const std::filesystem::path& path, std::string& output)
 [[nodiscard]] bool contained_file(const fs::path& root, std::string_view relative, fs::path& path,
                                   bool directory = false)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::error_code error;
     const auto canonical_root = fs::canonical(root, error);
     if (error || !fs::is_directory(canonical_root, error) || error)
@@ -83,6 +87,7 @@ bool read_file_text(const std::filesystem::path& path, std::string& output)
 [[nodiscard]] bool prepare_directory(const fs::path& root, std::string_view relative,
                                      fs::path& directory)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::error_code error;
     fs::create_directories(root / PathUtils::from_utf8(relative), error);
     return !error && contained_file(root, relative, directory, true);
@@ -91,6 +96,7 @@ bool read_file_text(const std::filesystem::path& path, std::string& output)
 [[nodiscard]] bool cache_file(const fs::path& directory, std::string_view name,
                               std::string_view bytes)
 {
+    ENGINE_PROFILE_FUNCTION();
     const fs::path target = directory / PathUtils::from_utf8(name);
     std::error_code error;
     const auto status = fs::symlink_status(target, error);
@@ -125,6 +131,7 @@ bool read_file_text(const std::filesystem::path& path, std::string& output)
 #if ENGINE_V8_HAS_I18N
 [[nodiscard]] bool prepare_icu_path(std::string& path)
 {
+    ENGINE_PROFILE_FUNCTION();
 #if defined(SDL_PLATFORM_ANDROID)
     if (!App::is_initialized())
     {
@@ -154,6 +161,7 @@ bool read_file_text(const std::filesystem::path& path, std::string& output)
 
 [[nodiscard]] v8::MaybeLocal<v8::String> js_string(v8::Isolate* isolate, std::string_view text)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (text.size() > maximum_text_size)
     {
         return {};
@@ -164,6 +172,7 @@ bool read_file_text(const std::filesystem::path& path, std::string& output)
 
 std::string value_text(v8::Isolate* isolate, v8::Local<v8::Value> value)
 {
+    ENGINE_PROFILE_FUNCTION();
     const v8::String::Utf8Value text(isolate, value);
     return *text == nullptr ? std::string{}
                             : std::string(*text, static_cast<std::size_t>(text.length()));
@@ -177,6 +186,7 @@ struct V8Process
 
     ~V8Process()
     {
+        ENGINE_PROFILE_FUNCTION();
         if (ready)
         {
             (void)v8::V8::Dispose();
@@ -186,6 +196,7 @@ struct V8Process
 
     [[nodiscard]] bool initialize()
     {
+        ENGINE_PROFILE_FUNCTION();
         if (ready || attempted)
         {
             return ready;
@@ -223,6 +234,7 @@ struct V8Process
 
 std::shared_ptr<V8Process> v8_process()
 {
+    ENGINE_PROFILE_FUNCTION();
     // 静态引用保留平台到进程退出；isolate 的引用覆盖静态析构顺序，不能先释放平台。
     static const auto process = std::make_shared<V8Process>();
     return process;
@@ -231,6 +243,7 @@ std::shared_ptr<V8Process> v8_process()
 [[nodiscard]] v8::MaybeLocal<v8::Value> native_value(v8::Isolate* isolate, const NativeValue& value,
                                                      std::size_t depth = 0)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (depth > 64)
     {
         return {};
@@ -320,55 +333,66 @@ public:
                 std::int32_t data) noexcept
         : arguments_(arguments), owner_(owner), data_(data)
     {
+        ENGINE_PROFILE_FUNCTION();
     }
 
     int count() const noexcept override
     {
+        ENGINE_PROFILE_FUNCTION();
         return arguments_.Length();
     }
 
     void* owner() const noexcept override
     {
+        ENGINE_PROFILE_FUNCTION();
         return owner_;
     }
 
     std::int32_t data() const noexcept override
     {
+        ENGINE_PROFILE_FUNCTION();
         return data_;
     }
 
     bool is_boolean(int index) const override
     {
+        ENGINE_PROFILE_FUNCTION();
         return valid_index(index) && arguments_[index]->IsBoolean();
     }
 
     bool boolean(int index) const override
     {
+        ENGINE_PROFILE_FUNCTION();
         return is_boolean(index) && arguments_[index]->IsTrue();
     }
 
     bool is_int32(int index) const override
     {
+        ENGINE_PROFILE_FUNCTION();
         return valid_index(index) && arguments_[index]->IsInt32();
     }
 
     std::int32_t integer(int index) const override
     {
+        ENGINE_PROFILE_FUNCTION();
         return is_int32(index) ? arguments_[index].As<v8::Int32>()->Value() : 0;
     }
 
     bool is_uint32(int index) const override
     {
+        ENGINE_PROFILE_FUNCTION();
         return valid_index(index) && arguments_[index]->IsUint32();
     }
 
     std::uint32_t unsigned_integer(int index) const override
     {
+        ENGINE_PROFILE_FUNCTION();
         return is_uint32(index) ? arguments_[index].As<v8::Uint32>()->Value() : 0;
     }
 
     bool identifier(int index, std::uint64_t& output) const override
     {
+        ENGINE_PROFILE_FUNCTION();
         output = 0;
         if (!valid_index(index) || !arguments_[index]->IsBigInt())
         {
@@ -385,6 +409,7 @@ public:
 
     bool number(int index, double& output) const override
     {
+        ENGINE_PROFILE_FUNCTION();
         output = 0.0;
         if (!valid_index(index) || !arguments_[index]->IsNumber())
         {
@@ -401,6 +426,7 @@ public:
 
     bool text(int index, std::string& output) const override
     {
+        ENGINE_PROFILE_FUNCTION();
         output.clear();
         if (!valid_index(index) || !arguments_[index]->IsString() ||
             arguments_[index].As<v8::String>()->Length() > static_cast<int>(maximum_text_size))
@@ -426,6 +452,7 @@ public:
 
     bool bytes(int index, ByteBuffer& output) const override
     {
+        ENGINE_PROFILE_FUNCTION();
         output.clear();
         if (!valid_index(index) || !arguments_[index]->IsUint8Array())
         {
@@ -448,6 +475,7 @@ public:
     }
     void set_return(const NativeValue& value) const override
     {
+        ENGINE_PROFILE_FUNCTION();
         v8::Local<v8::Value> result;
         if (!native_value(arguments_.GetIsolate(), value).ToLocal(&result))
         {
@@ -459,6 +487,7 @@ public:
 
     void type_error(std::string_view message) const override
     {
+        ENGINE_PROFILE_FUNCTION();
         auto* isolate = arguments_.GetIsolate();
         v8::Local<v8::String> text;
         if (js_string(isolate, message).ToLocal(&text))
@@ -470,6 +499,7 @@ public:
 private:
     [[nodiscard]] bool valid_index(int index) const noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         return index >= 0 && index < arguments_.Length();
     }
 
@@ -489,6 +519,7 @@ public:
 
     ~V8Vm() noexcept override
     {
+        ENGINE_PROFILE_FUNCTION();
         if (isolate_ == nullptr)
         {
             return;
@@ -509,6 +540,7 @@ public:
 
     bool initialize(void* owner) override
     {
+        ENGINE_PROFILE_FUNCTION();
         error_.clear();
         if (isolate_ != nullptr)
         {
@@ -551,6 +583,7 @@ public:
 
     bool function(std::string_view name, NativeCallback callback, std::int32_t data) override
     {
+        ENGINE_PROFILE_FUNCTION();
         error_.clear();
         if (!can_register() || callback == nullptr)
         {
@@ -579,6 +612,7 @@ public:
 
     bool integer(std::string_view name, std::int32_t value) override
     {
+        ENGINE_PROFILE_FUNCTION();
         error_.clear();
         if (!can_register())
         {
@@ -594,6 +628,7 @@ public:
 
     bool string(std::string_view name, std::string_view value) override
     {
+        ENGINE_PROFILE_FUNCTION();
         error_.clear();
         if (!can_register())
         {
@@ -611,6 +646,7 @@ public:
 
     bool seal_bindings() override
     {
+        ENGINE_PROFILE_FUNCTION();
         error_.clear();
         if (!can_register())
         {
@@ -633,6 +669,7 @@ public:
 
     bool prepare(std::string_view entry, SourceLoader loader) override
     {
+        ENGINE_PROFILE_FUNCTION();
         error_.clear();
         if (!ready() || !sealed_ || !modules_.empty() || !loader || entry.empty())
         {
@@ -662,6 +699,7 @@ public:
 
     bool start() override
     {
+        ENGINE_PROFILE_FUNCTION();
         error_.clear();
         if (!ready() || !prepared_ || !gameplay_.IsEmpty())
         {
@@ -717,6 +755,7 @@ public:
 
     bool call_gameplay(std::string_view name, bool require_true) override
     {
+        ENGINE_PROFILE_FUNCTION();
         error_.clear();
         if (!ready() || gameplay_.IsEmpty())
         {
@@ -730,6 +769,7 @@ public:
 
     bool call_binding(std::string_view name) override
     {
+        ENGINE_PROFILE_FUNCTION();
         error_.clear();
         if (!ready())
         {
@@ -750,6 +790,7 @@ public:
 
     bool drain_jobs() override
     {
+        ENGINE_PROFILE_FUNCTION();
         error_.clear();
         if (!ready())
         {
@@ -778,6 +819,7 @@ public:
 #if defined(ENGINE_ENABLE_TEST_SUPPORT)
     bool execute_script(const ProjectScriptRequest& request, std::string& result_json) override
     {
+        ENGINE_PROFILE_FUNCTION();
         result_json.clear();
         error_.clear();
         if (!ready() || gameplay_.IsEmpty() || script_executing_ ||
@@ -840,11 +882,13 @@ public:
 
     const std::string& last_error() const noexcept override
     {
+        ENGINE_PROFILE_FUNCTION();
         return error_;
     }
 
     const std::vector<std::string>& loaded_modules() const noexcept override
     {
+        ENGINE_PROFILE_FUNCTION();
         return loaded_modules_;
     }
 
@@ -852,6 +896,7 @@ private:
 #if defined(ENGINE_ENABLE_TEST_SUPPORT)
     static void require_cached_module(const v8::FunctionCallbackInfo<v8::Value>& arguments)
     {
+        ENGINE_PROFILE_FUNCTION();
         auto* isolate = arguments.GetIsolate();
         auto* machine = static_cast<V8Vm*>(isolate->GetData(0));
         const auto data = arguments.DataV2();
@@ -861,6 +906,7 @@ private:
                                 : 0;
         const auto reject = [isolate](const std::string& error)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             v8::Local<v8::String> message;
             if (js_string(isolate, error).ToLocal(&message))
             {
@@ -907,6 +953,7 @@ private:
 
     static void invoke(const v8::FunctionCallbackInfo<v8::Value>& arguments)
     {
+        ENGINE_PROFILE_FUNCTION();
         auto* isolate = arguments.GetIsolate();
         auto* vm = static_cast<V8Vm*>(isolate->GetData(0));
         const auto data = arguments.DataV2();
@@ -925,22 +972,26 @@ private:
 
     [[nodiscard]] bool ready() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         return isolate_ != nullptr && !context_.IsEmpty();
     }
 
     [[nodiscard]] bool can_register() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         return ready() && !sealed_;
     }
 
     bool fail(std::string message)
     {
+        ENGINE_PROFILE_FUNCTION();
         error_ = std::move(message);
         return false;
     }
 
     bool exception(v8::TryCatch& caught, std::string message)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (caught.HasCaught())
         {
             message += ": " + value_text(isolate_, caught.Exception());
@@ -959,6 +1010,7 @@ private:
 
     void module_error(std::string_view message)
     {
+        ENGINE_PROFILE_FUNCTION();
         v8::Local<v8::String> text;
         if (js_string(isolate_, message).ToLocal(&text))
         {
@@ -969,6 +1021,7 @@ private:
     [[nodiscard]] bool define(v8::Local<v8::Object> object, std::string_view name,
                               v8::Local<v8::Value> value)
     {
+        ENGINE_PROFILE_FUNCTION();
         const auto context = context_.Get(isolate_);
         v8::Local<v8::String> key;
         constexpr auto attributes =
@@ -980,6 +1033,7 @@ private:
 
     [[nodiscard]] v8::MaybeLocal<v8::Module> load_module(const std::string& path)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (const auto found = modules_.find(path); found != modules_.end())
         {
             return found->second.Get(isolate_);
@@ -1019,6 +1073,7 @@ private:
                                               v8::Local<v8::FixedArray> attributes,
                                               v8::Local<v8::Module> referrer)
     {
+        ENGINE_PROFILE_FUNCTION();
         auto* isolate = v8::Isolate::GetCurrent();
         auto* vm = static_cast<V8Vm*>(isolate->GetData(0));
         if (vm == nullptr || vm->context_.Get(isolate) != context)
@@ -1051,6 +1106,7 @@ private:
     [[nodiscard]] bool call(v8::Local<v8::Object> object, std::string_view name, bool require_true,
                             std::string_view prefix)
     {
+        ENGINE_PROFILE_FUNCTION();
         const auto context = context_.Get(isolate_);
         v8::TryCatch caught(isolate_);
         v8::Local<v8::String> key;
@@ -1079,6 +1135,7 @@ private:
                                                       v8::Local<v8::String>,
                                                       v8::Local<v8::FixedArray>)
     {
+        ENGINE_PROFILE_FUNCTION();
         auto* isolate = v8::Isolate::GetCurrent();
         auto* vm = static_cast<V8Vm*>(isolate->GetData(0));
         if (vm != nullptr
@@ -1103,6 +1160,7 @@ private:
 
     static void promise_rejection(v8::PromiseRejectMessage message)
     {
+        ENGINE_PROFILE_FUNCTION();
         auto* isolate = v8::Isolate::GetCurrent();
         auto* vm = static_cast<V8Vm*>(isolate->GetData(0));
         if (vm == nullptr)
@@ -1111,7 +1169,10 @@ private:
         }
         const auto found =
             std::find_if(vm->rejections_.begin(), vm->rejections_.end(), [&](const auto& rejection)
-                         { return rejection.promise.Get(isolate) == message.GetPromise(); });
+                         {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return rejection.promise.Get(isolate) == message.GetPromise();
+            });
         if (message.GetEvent() == v8::kPromiseHandlerAddedAfterReject)
         {
             if (found != vm->rejections_.end())
@@ -1156,6 +1217,7 @@ private:
 
 std::unique_ptr<ScriptVm> create_script_vm()
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::make_unique<V8Vm>();
 }
 

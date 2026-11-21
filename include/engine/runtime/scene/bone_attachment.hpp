@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/scene/animator.hpp"
 
 namespace engine
@@ -14,6 +16,7 @@ public:
     BoneAttachment() noexcept = default;
     explicit BoneAttachment(Component component) noexcept : Component(component, component_type)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
     }
     [[nodiscard]] static bool register_type(ComponentRegistry& registry);
     [[nodiscard]] static bool valid_settings(const Data& data) noexcept;

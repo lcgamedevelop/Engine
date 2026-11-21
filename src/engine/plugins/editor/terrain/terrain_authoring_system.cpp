@@ -1,4 +1,6 @@
 #include "plugins/editor/terrain/terrain_authoring_system.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/asset_pipeline/asset_io.hpp"
 #include "editor/asset_pipeline/asset_metadata.hpp"
 #include "editor/asset_pipeline/project_lock.hpp"
@@ -42,6 +44,7 @@ namespace
 {
 bool retain_import_metadata(TerrainAuthoringJob& job, std::string current, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto before = toml::parse(job.metadata);
     auto after = toml::parse(current);
     if (!before || !after)
@@ -71,7 +74,10 @@ bool retain_import_metadata(TerrainAuthoringJob& job, std::string current, std::
     for (const auto& old : old_ids)
     {
         const auto found = std::find_if(new_ids.begin(), new_ids.end(), [&](const auto& value)
-                                        { return value.subresource_key == old.subresource_key; });
+                                        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return value.subresource_key == old.subresource_key;
+        });
         if (found == new_ids.end() || found->guid != old.guid || found->kind != old.kind)
         {
             error = "Terrain subresource identity changed outside this edit";
@@ -84,6 +90,7 @@ bool retain_import_metadata(TerrainAuthoringJob& job, std::string current, std::
 }
 bool atomic_text(const fs::path& destination, const std::string& text, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::error_code ec;
     fs::create_directories(destination.parent_path(), ec);
     if (ec)
@@ -110,6 +117,7 @@ bool atomic_text(const fs::path& destination, const std::string& text, std::stri
 bool prepare_job(TerrainAuthoringJob& job, const TerrainGenerator& generator,
                  const TerrainMesher& mesher)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string& error = job.snapshot.error;
     std::error_code ec;
     if (job.spec.expected_source_revision >= INT64_MAX ||
@@ -294,7 +302,11 @@ bool prepare_job(TerrainAuthoringJob& job, const TerrainGenerator& generator,
         ++job.completed;
     }
     std::sort(source->regions.begin(), source->regions.end(),
-              [](const auto& a, const auto& b) { return TerrainRegionLess{}(a->key, b->key); });
+              [](const auto& a, const auto& b)
+              {
+                  ENGINE_PROFILE_FUNCTION_PROBE();
+                  return TerrainRegionLess{}(a->key, b->key);
+              });
     TerrainMeshInput preview;
     preview.samples = std::move(samples);
     preview.key = sample_key;
@@ -322,9 +334,11 @@ class TerrainSourceEdit final : public editor::EditorEdit
 public:
     explicit TerrainSourceEdit(std::shared_ptr<TerrainAuthoringJob> job) : job_(std::move(job))
     {
+        ENGINE_PROFILE_FUNCTION();
     }
     ~TerrainSourceEdit() noexcept override
     {
+        ENGINE_PROFILE_FUNCTION();
         if (!published_ && job_->snapshot.state == TerrainAuthoringState::ready_to_publish)
         {
             job_->edit_issued = false;
@@ -334,20 +348,24 @@ public:
     }
     bool affects_scene() const noexcept override
     {
+        ENGINE_PROFILE_FUNCTION();
         return false;
     }
     bool apply(std::string& error) override
     {
+        ENGINE_PROFILE_FUNCTION();
         return change(false, error);
     }
     bool revert(std::string& error) override
     {
+        ENGINE_PROFILE_FUNCTION();
         return change(true, error);
     }
 
 private:
     bool change(bool undo, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         auto& job = *job_;
         io::ProjectLock lock;
         bool locked = false;
@@ -455,13 +473,16 @@ TerrainAuthoringSystem::TerrainAuthoringSystem(editor::EditorEnvironment& enviro
     : environment_(environment), tasks_(tasks), generator_(std::move(generator)),
       mesher_(std::move(mesher))
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 TerrainAuthoringSystem::~TerrainAuthoringSystem() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
 }
 bool TerrainAuthoringSystem::on_initialize(const EngineConfig&)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!environment_.is_initialized() || !tasks_.is_initialized() || !generator_ || !mesher_ ||
         generator_->fingerprint().empty())
     {
@@ -472,6 +493,7 @@ bool TerrainAuthoringSystem::on_initialize(const EngineConfig&)
 }
 bool TerrainAuthoringSystem::start(const TerrainAuthoringSpec& spec, TerrainAuthoringId& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     if (!is_initialized() || spec.path.empty() || !spec.source.recipe)
     {
@@ -507,6 +529,7 @@ bool TerrainAuthoringSystem::start(const TerrainAuthoringSpec& spec, TerrainAuth
 }
 bool TerrainAuthoringSystem::status(TerrainAuthoringId id, TerrainAuthoringSnapshot& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     const auto found = jobs_.find(id.sequence);
     if (id.session != session_ || found == jobs_.end())
@@ -532,6 +555,7 @@ bool TerrainAuthoringSystem::status(TerrainAuthoringId id, TerrainAuthoringSnaps
 }
 bool TerrainAuthoringSystem::cancel(TerrainAuthoringId id)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto found = jobs_.find(id.sequence);
     if (id.session != session_ || found == jobs_.end() || !found->second->snapshot.can_cancel ||
         found->second->edit_issued)
@@ -551,6 +575,7 @@ bool TerrainAuthoringSystem::cancel(TerrainAuthoringId id)
 bool TerrainAuthoringSystem::make_edit(TerrainAuthoringId id,
                                        std::unique_ptr<editor::EditorEdit>& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.reset();
     auto found = jobs_.find(id.sequence);
     if (id.session != session_ || found == jobs_.end() ||
@@ -567,6 +592,7 @@ bool TerrainAuthoringSystem::make_edit(TerrainAuthoringId id,
 }
 bool TerrainAuthoringSystem::release(TerrainAuthoringId id)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto found = jobs_.find(id.sequence);
     if (id.session != session_ || found == jobs_.end() || found->second->future.valid() ||
         found->second->snapshot.state == TerrainAuthoringState::queued)
@@ -578,6 +604,7 @@ bool TerrainAuthoringSystem::release(TerrainAuthoringId id)
 }
 bool TerrainAuthoringSystem::on_tick(double)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (auto& [id, owned] : jobs_)
     {
         auto& job = *owned;
@@ -610,7 +637,10 @@ bool TerrainAuthoringSystem::on_tick(double)
         {
             owned->snapshot.state = TerrainAuthoringState::preparing;
             owned->future = tasks_.submit("Terrain authoring", [this, job = owned]()
-                                          { return prepare_job(*job, *generator_, *mesher_); });
+                                          {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return prepare_job(*job, *generator_, *mesher_);
+            });
             if (!owned->future.valid())
             {
                 owned->snapshot.state = TerrainAuthoringState::queued;
@@ -622,6 +652,7 @@ bool TerrainAuthoringSystem::on_tick(double)
 }
 void TerrainAuthoringSystem::on_shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     for (auto& [id, job] : jobs_)
     {
         *job->cancelled = true;

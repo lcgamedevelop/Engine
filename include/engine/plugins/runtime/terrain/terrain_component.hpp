@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "plugins/runtime/terrain/terrain_operations.hpp"
 #include "runtime/scene/collider.hpp"
 #include "runtime/scene/component.hpp"
@@ -21,6 +23,7 @@ public:
     TerrainComponent() noexcept = default;
     explicit TerrainComponent(Component component) noexcept : Component(component, component_type)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
     }
     [[nodiscard]] static bool register_type(ComponentRegistry& registry);
     [[nodiscard]] static bool valid_settings(const Data& settings) noexcept;

@@ -1,4 +1,6 @@
 #include "plugins/editor/asset_build/asset_build_system.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/file_text.hpp"
 
 #include "plugins/editor/asset_build/builtin_resources.hpp"
@@ -51,6 +53,7 @@ struct BuildManifest
 
 bool relative_path(const std::filesystem::path& path)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto text = PathUtils::to_utf8(path);
     if (text.empty() || path.is_absolute() || path.has_root_path() ||
         text.find_first_of("\\:") != std::string::npos || text.find('\0') != std::string::npos)
@@ -69,6 +72,7 @@ bool relative_path(const std::filesystem::path& path)
 
 bool inspect_path(const std::filesystem::path& path, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::filesystem::path current;
     std::error_code code;
     for (const auto& part : path)
@@ -92,9 +96,11 @@ bool inspect_path(const std::filesystem::path& path, std::string& error)
 
 bool item_name(std::string_view value)
 {
+    ENGINE_PROFILE_FUNCTION();
     return !value.empty() && std::all_of(value.begin(), value.end(),
                                          [](char ch)
                                          {
+                                             ENGINE_PROFILE_FUNCTION_PROBE();
                                              return (ch >= 'a' && ch <= 'z') ||
                                                     (ch >= '0' && ch <= '9') || ch == '-' ||
                                                     ch == '_';
@@ -104,6 +110,7 @@ bool item_name(std::string_view value)
 bool read_startup_movie(const std::filesystem::path& root, std::string_view platform,
                         std::string& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     const auto path = root / "settings/runtime-game.toml";
     std::error_code code;
@@ -176,6 +183,7 @@ bool read_startup_movie(const std::filesystem::path& root, std::string_view plat
 bool read_paths(const toml::table& table, std::string_view key, bool required,
                 std::vector<std::string>& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* node = table.get(key);
     if (node == nullptr && !required)
     {
@@ -205,6 +213,7 @@ bool read_paths(const toml::table& table, std::string_view key, bool required,
 bool read_manifest(const std::filesystem::path& root, const std::filesystem::path& path,
                    std::span<const std::string> selected, BuildManifest& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!relative_path(path) || *path.begin() != "settings" || !inspect_path(root / path, error))
     {
         error = "build manifest must be a relative file inside project settings/";
@@ -345,13 +354,18 @@ bool read_manifest(const std::filesystem::path& root, const std::filesystem::pat
         }
     }
     std::sort(output.items.begin(), output.items.end(),
-              [](const auto& left, const auto& right) { return left.name < right.name; });
+              [](const auto& left, const auto& right)
+              {
+                  ENGINE_PROFILE_FUNCTION_PROBE();
+                  return left.name < right.name;
+              });
     return true;
 }
 
 bool collect(const ResourceCatalog& catalog, std::string_view guid, std::set<Guid>& visited,
              std::set<Guid>& resources, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::vector<Guid> pending{std::string(guid)};
     while (!pending.empty())
     {
@@ -380,6 +394,7 @@ bool collect(const ResourceCatalog& catalog, std::string_view guid, std::set<Gui
 
 bool select_resources(const ResourceCatalog& catalog, BuildManifest& manifest, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (manifest.all_resources)
     {
         BuildItem all;
@@ -469,6 +484,7 @@ bool select_resources(const ResourceCatalog& catalog, BuildManifest& manifest, s
 bool copy_reusable(const std::filesystem::path& from, const std::filesystem::path& to,
                    std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::error_code code;
     std::filesystem::create_hard_link(from, to, code);
     if (code)
@@ -487,6 +503,7 @@ bool copy_reusable(const std::filesystem::path& from, const std::filesystem::pat
 bool read_entity(const std::filesystem::path& cache, const schema::AssetEntryT& entry,
                  ByteBuffer& bytes, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto file = cache / "gen" / entry.guid;
     ByteBuffer payload;
     if (!inspect_path(file, error) || !pipeline::read_bytes(file, bytes, error) ||
@@ -501,6 +518,7 @@ bool read_entity(const std::filesystem::path& cache, const schema::AssetEntryT& 
 bool verify_output(const ResourceCatalog& catalog, const std::filesystem::path& root,
                    const std::set<Guid>& resources)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::filesystem::path file;
     std::uint64_t expected_size = 0;
     for (const auto& guid : resources)
@@ -529,6 +547,7 @@ bool verify_output(const ResourceCatalog& catalog, const std::filesystem::path& 
 bool recover_output(const std::filesystem::path& output, const std::filesystem::path& backup,
                     std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::error_code code;
     if (!std::filesystem::exists(backup, code))
     {
@@ -559,6 +578,7 @@ bool recover_output(const std::filesystem::path& output, const std::filesystem::
 bool publish_output(const std::filesystem::path& staged, const std::filesystem::path& output,
                     const std::filesystem::path& backup, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::error_code code;
     const bool existed = std::filesystem::exists(output, code);
     if (!code && existed)
@@ -594,20 +614,24 @@ bool publish_output(const std::filesystem::path& staged, const std::filesystem::
 AssetBuildSystem::AssetBuildSystem(engine::editor::AssetPipelineSystem& pipeline) noexcept
     : pipeline_(pipeline)
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 AssetBuildSystem::~AssetBuildSystem() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
 }
 
 bool AssetBuildSystem::on_initialize(const EngineConfig&)
 {
+    ENGINE_PROFILE_FUNCTION();
     return pipeline_.is_initialized();
 }
 
 void AssetBuildSystem::on_shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 bool AssetBuildSystem::build(const std::filesystem::path& project_root,
@@ -615,6 +639,7 @@ bool AssetBuildSystem::build(const std::filesystem::path& project_root,
                              std::span<const std::string> selected,
                              std::string_view target_platform)
 {
+    ENGINE_PROFILE_FUNCTION();
     last_error_.clear();
     if (!is_initialized() || !pipeline_.is_initialized() || building_)
     {
@@ -627,6 +652,7 @@ bool AssetBuildSystem::build(const std::filesystem::path& project_root,
         bool& running;
         ~BuildScope() noexcept
         {
+            ENGINE_PROFILE_FUNCTION();
             running = false;
         }
     } scope{building_};
@@ -753,7 +779,11 @@ bool AssetBuildSystem::build(const std::filesystem::path& project_root,
         }
     }
     std::sort(data.entries.begin(), data.entries.end(),
-              [](const auto& left, const auto& right) { return left->guid < right->guid; });
+              [](const auto& left, const auto& right)
+              {
+                  ENGINE_PROFILE_FUNCTION_PROBE();
+                  return left->guid < right->guid;
+              });
     data.revision = pipeline::hash_text(fingerprint);
     stats.resource_count = data.entries.size();
     stats.revision = data.revision;
@@ -779,6 +809,7 @@ bool AssetBuildSystem::build(const std::filesystem::path& project_root,
     }
     const auto fail = [&]()
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         std::error_code cleanup;
         std::filesystem::remove_all(staged, cleanup);
         return false;
@@ -874,11 +905,13 @@ bool AssetBuildSystem::build(const std::filesystem::path& project_root,
 
 const ResourceBuildStats& AssetBuildSystem::last_build() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return last_build_;
 }
 
 const std::string& AssetBuildSystem::last_error() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return last_error_;
 }
 

@@ -1,4 +1,5 @@
 #include "runtime_entry.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/log/log_system.hpp"
 #include "runtime/window/window_system.hpp"
@@ -28,6 +29,7 @@ void shutdown_ios_app() noexcept;
 
 bool SDLCALL on_lifecycle(void* userdata, SDL_Event* event)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto& context = *static_cast<IosAppContext*>(userdata);
     if (!SDL_IsMainThread() || !context.runtime.initialized || context.closing)
     {
@@ -56,6 +58,7 @@ bool SDLCALL on_lifecycle(void* userdata, SDL_Event* event)
 
 void SDLCALL on_frame(void* userdata)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto& context = *static_cast<IosAppContext*>(userdata);
     if (!context.runtime.initialized || context.frame_active || context.closing)
     {
@@ -96,6 +99,7 @@ void SDLCALL on_frame(void* userdata)
 
 void shutdown_ios_app() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!application)
     {
         return;
@@ -129,6 +133,7 @@ void shutdown_ios_app() noexcept
 
 bool initialize_ios_app(int argc, char** argv)
 {
+    ENGINE_PROFILE_FUNCTION();
     application.reset(new (std::nothrow) IosAppContext{});
     if (!application)
     {
@@ -173,5 +178,6 @@ bool initialize_ios_app(int argc, char** argv)
 
 int main(int argc, char* argv[])
 {
+    ENGINE_PROFILE_FUNCTION();
     return initialize_ios_app(argc, argv) ? 0 : 1;
 }

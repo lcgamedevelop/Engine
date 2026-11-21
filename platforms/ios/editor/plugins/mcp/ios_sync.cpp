@@ -1,4 +1,6 @@
 #include "plugins/editor/mcp/project_mcp_tools.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "editor/file_text.hpp"
 #include "ios/editor/plugins/mcp/ios_container.hpp"
@@ -22,6 +24,7 @@ using Json = nlohmann::json;
 
 std::string nonce()
 {
+    ENGINE_PROFILE_FUNCTION();
     static std::atomic_uint64_t counter{0};
     return std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + "-" +
            std::to_string(counter.fetch_add(1));
@@ -29,6 +32,7 @@ std::string nonce()
 
 bool write_text(const fs::path& path, std::string_view text)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::ofstream output(path, std::ios::binary | std::ios::trunc);
     output.write(text.data(), static_cast<std::streamsize>(text.size()));
     output.close();
@@ -37,6 +41,7 @@ bool write_text(const fs::path& path, std::string_view text)
 
 bool manifest_valid(const Json& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     return value.is_object() && value.contains("revision") && value["revision"].is_string() &&
            value.contains("entry") && value["entry"].is_string() && value.contains("files") &&
            value["files"].is_array() && value.contains("deleted") && value["deleted"].is_array();
@@ -45,6 +50,7 @@ bool manifest_valid(const Json& value)
 void set_reply(const McpTarget& target, const ios_detail::IosContainer& container, Json result,
                std::string& reply)
 {
+    ENGINE_PROFILE_FUNCTION();
     result["targetPlatform"] = "ios";
     result["deviceUdid"] = target.ios_udid;
     result["bundleIdentifier"] = target.ios_bundle_identifier;
@@ -60,6 +66,7 @@ void set_reply(const McpTarget& target, const ios_detail::IosContainer& containe
 
 bool ProjectMcpTools::sync_ios(const fs::path& source, std::string& reply)
 {
+    ENGINE_PROFILE_FUNCTION();
     ios_detail::IosContainer container(target_);
     const auto token = nonce();
     const auto staging = "assets/.staging-" + token;
@@ -70,6 +77,7 @@ bool ProjectMcpTools::sync_ios(const fs::path& source, std::string& reply)
     bool manifest_owned = false;
     const auto cleanup = [&]()
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         bool success = true;
         std::string ignored;
         if (staging_owned)
@@ -90,6 +98,7 @@ bool ProjectMcpTools::sync_ios(const fs::path& source, std::string& reply)
     };
     const auto fail = [&](std::string error)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (!cleanup())
         {
             error += "; owned iOS staging cleanup was incomplete";
@@ -230,6 +239,7 @@ bool ProjectMcpTools::sync_ios(const fs::path& source, std::string& reply)
 
 bool ProjectMcpTools::set_ios_hot_reload(bool enabled, std::string& reply)
 {
+    ENGINE_PROFILE_FUNCTION();
     ios_detail::IosContainer container(target_);
     std::string error;
     if (!container.open(error))
@@ -286,10 +296,12 @@ bool ProjectMcpTools::set_ios_hot_reload(bool enabled, std::string& reply)
 
 bool ProjectMcpTools::read_ios_status(std::string& reply)
 {
+    ENGINE_PROFILE_FUNCTION();
     ios_detail::IosContainer container(target_);
     std::string error;
     const auto fail = [&]()
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         set_reply(target_, container, {{"error", error}}, reply);
         return false;
     };

@@ -1,5 +1,8 @@
 #include "runtime/render/renderer_callbacks.hpp"
 
+#include "runtime/performance/memory_profiling.hpp"
+
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 
 #if defined(ENGINE_ENABLE_TRACY)
@@ -26,6 +29,7 @@ namespace
 {
 
 #if defined(ENGINE_ENABLE_TRACY)
+// bgfx 区间的生命周期横跨 begin/end 回调，使用该手动栈配对。
 thread_local std::vector<TracyCZoneCtx> bgfx_profile_stack;
 
 void begin_bgfx_profile(const char* name, std::uint32_t color, const char* file, std::uint16_t line)
@@ -50,10 +54,12 @@ struct ImageWriter final : bx::WriterI
 {
     explicit ImageWriter(SDL_IOStream& stream) noexcept : stream_(stream)
     {
+        ENGINE_PROFILE_FUNCTION();
     }
 
     std::int32_t write(const void* data, std::int32_t size, bx::Error* error) override
     {
+        ENGINE_PROFILE_FUNCTION();
         if (size < 0)
         {
             error->setError(bx::kErrorReaderWriterWrite, "Invalid image write size");
@@ -81,6 +87,7 @@ struct RenderSystem::RendererCallbacks::Capture
     std::uint32_t pitch = 0;
     bool yflip = false;
     std::vector<std::byte> pixels;
+    [[no_unique_address]] memory_profile::Allocation pixels_allocation;
 
     bool save() const
     {
@@ -115,6 +122,7 @@ struct RenderSystem::RendererCallbacks::Capture
 
 void RenderSystem::RendererCallbacks::process(TaskSystem* tasks)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (writing.valid())
     {
         if (writing.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
@@ -135,7 +143,11 @@ void RenderSystem::RendererCallbacks::process(TaskSystem* tasks)
     if (tasks != nullptr)
     {
         // 闭包只拥有像素与路径，不借用渲染器；拒绝提交时保留读回槽下帧重试。
-        writing = tasks->submit("Render.capture_encode_write", [next] { return next->save(); });
+        writing = tasks->submit("Render.capture_encode_write", [next]
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return next->save();
+        });
         if (!writing.valid())
         {
             return;
@@ -154,6 +166,7 @@ void RenderSystem::RendererCallbacks::process(TaskSystem* tasks)
 
 void RenderSystem::RendererCallbacks::finish() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     // 生命周期边界允许等待；正常帧只在 process() 中非阻塞查询。
     if (writing.valid())
     {
@@ -169,6 +182,7 @@ void RenderSystem::RendererCallbacks::finish() noexcept
 void RenderSystem::RendererCallbacks::fatal(const char* file, std::uint16_t line,
                                             bgfx::Fatal::Enum code, const char* message)
 {
+    ENGINE_PROFILE_FUNCTION();
     SDL_LogError(SDL_LOG_CATEGORY_RENDER, "bgfx fatal %s:%u: %s", file, line, message);
     if (code != bgfx::Fatal::DebugCheck)
     {
@@ -180,6 +194,7 @@ void RenderSystem::RendererCallbacks::fatal(const char* file, std::uint16_t line
 void RenderSystem::RendererCallbacks::traceVargs(const char*, std::uint16_t, const char* format,
                                                  va_list arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     SDL_LogMessageV(SDL_LOG_CATEGORY_RENDER, SDL_LOG_PRIORITY_DEBUG, format, arguments);
 }
 
@@ -218,29 +233,35 @@ void RenderSystem::RendererCallbacks::profilerEnd()
 
 std::uint32_t RenderSystem::RendererCallbacks::cacheReadSize(std::uint64_t)
 {
+    ENGINE_PROFILE_FUNCTION();
     return 0;
 }
 
 bool RenderSystem::RendererCallbacks::cacheRead(std::uint64_t, void*, std::uint32_t)
 {
+    ENGINE_PROFILE_FUNCTION();
     return false;
 }
 
 void RenderSystem::RendererCallbacks::cacheWrite(std::uint64_t, const void*, std::uint32_t)
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 void RenderSystem::RendererCallbacks::captureBegin(std::uint32_t, std::uint32_t, std::uint32_t,
                                                    bgfx::TextureFormat::Enum, bool)
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 void RenderSystem::RendererCallbacks::captureEnd()
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 void RenderSystem::RendererCallbacks::captureFrame(const void*, std::uint32_t)
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 void RenderSystem::RendererCallbacks::screenShot(const char* path, std::uint32_t width,
@@ -275,6 +296,8 @@ void RenderSystem::RendererCallbacks::screenShot(const char* path, std::uint32_t
     next->yflip = yflip;
     const auto* begin = static_cast<const std::byte*>(data);
     next->pixels.assign(begin, begin + static_cast<std::size_t>(bytes));
+    next->pixels_allocation.track(memory_profile::Pool::screenshot_encode, next->pixels.data(),
+                                 next->pixels.capacity());
     capture = std::move(next);
     status.store(ScreenshotStatus::pending);
 }

@@ -1,4 +1,6 @@
 #include "plugins/runtime/terrain/terrain_state_store.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "plugins/runtime/terrain/terrain_samples.hpp"
 #include "runtime/core/guid_map.hpp"
@@ -23,6 +25,7 @@ namespace
 namespace fs = std::filesystem;
 bool owned_path(const fs::path& root, const fs::path& path, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto relative = path.lexically_relative(root);
     if (root.empty() || relative.empty() || relative.is_absolute())
     {
@@ -32,6 +35,7 @@ bool owned_path(const fs::path& root, const fs::path& path, std::string& error)
     auto current = root;
     const auto check = [&]()
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         std::error_code ec;
         const auto status = fs::symlink_status(current, ec);
         if ((ec && ec != std::errc::no_such_file_or_directory) || fs::is_symlink(status))
@@ -62,26 +66,35 @@ bool owned_path(const fs::path& root, const fs::path& path, std::string& error)
 }
 bool safe_token(std::string_view value)
 {
+    ENGINE_PROFILE_FUNCTION();
     return !value.empty() && value.size() <= 96 &&
            std::all_of(value.begin(), value.end(),
                        [](char c)
                        {
+                           ENGINE_PROFILE_FUNCTION_PROBE();
                            return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
                                   (c >= '0' && c <= '9') || c == '-' || c == '_';
                        });
 }
 bool content_key(std::string_view value)
 {
+    ENGINE_PROFILE_FUNCTION();
     return value.size() == 16 &&
            std::all_of(value.begin(), value.end(),
-                       [](char c) { return (c >= 'a' && c <= 'f') || (c >= '0' && c <= '9'); });
+                       [](char c)
+                       {
+                           ENGINE_PROFILE_FUNCTION_PROBE();
+                           return (c >= 'a' && c <= 'f') || (c >= '0' && c <= '9');
+                       });
 }
 ByteView view(const flatbuffers::FlatBufferBuilder& builder)
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::as_bytes(std::span(builder.GetBufferPointer(), builder.GetSize()));
 }
 bool read_bounded(const fs::path& path, std::uint64_t limit, ByteBuffer& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     FileEntry entry;
     if (!VirtualFileSystem::stat(path, entry, error) || entry.kind != FileKind::file ||
@@ -94,6 +107,7 @@ bool read_bounded(const fs::path& path, std::uint64_t limit, ByteBuffer& output,
 }
 bool validate(const schema::TerrainCheckpointDataT& data, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (data.schema_version != 2 || !GuidMap::valid_guid(data.base_guid) ||
         !content_key(data.base_hash) || !safe_token(data.checkpoint_id) || data.revision == 0 ||
         data.next_debris_id == 0 || data.regions.size() > 1024U * 1024U ||
@@ -104,6 +118,7 @@ bool validate(const schema::TerrainCheckpointDataT& data, std::string& error)
     }
     const auto regions_valid = [&](const auto& regions)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         std::set<TerrainRegionKey, TerrainRegionLess> keys;
         for (const auto& region : regions)
         {
@@ -157,9 +172,11 @@ bool validate(const schema::TerrainCheckpointDataT& data, std::string& error)
 } // namespace
 TerrainStateStore::TerrainStateStore(std::filesystem::path root) : root_(std::move(root))
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 TerrainStateStore::~TerrainStateStore() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     cancel();
 }
 
@@ -167,6 +184,7 @@ bool TerrainStateStore::stage(const schema::TerrainCheckpointDataT& snapshot,
                               std::span<const schema::TerrainBlockDataT> blocks,
                               std::string_view slot, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     if (!staged_.empty() || root_.empty() || !safe_token(slot) || !validate(snapshot, error))
     {
@@ -239,6 +257,7 @@ bool TerrainStateStore::stage(const schema::TerrainCheckpointDataT& snapshot,
     }
     const auto validate_references = [&](const auto& references)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         for (const auto& region : references)
         {
             schema::TerrainBlockDataT payload;
@@ -301,6 +320,7 @@ bool TerrainStateStore::stage(const schema::TerrainCheckpointDataT& snapshot,
 
 bool TerrainStateStore::publish(std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     if (staged_.empty())
     {
@@ -343,6 +363,7 @@ bool TerrainStateStore::publish(std::string& error)
 bool TerrainStateStore::read(std::string_view slot, schema::TerrainCheckpointDataT& output,
                              std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     error.clear();
     ByteBuffer bytes;
@@ -374,6 +395,7 @@ bool TerrainStateStore::read(std::string_view slot, schema::TerrainCheckpointDat
 bool TerrainStateStore::read_block(std::string_view slot, std::string_view key,
                                    schema::TerrainBlockDataT& output, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     error.clear();
     ByteBuffer bytes;
@@ -402,9 +424,17 @@ bool TerrainStateStore::read_block(std::string_view slot, std::string_view key,
         (candidate->uniform ? count != 1 : count != 512 && count != 4096 && count != 32768) ||
         candidate->layers.size() != count ||
         !std::all_of(candidate->density.begin(), candidate->density.end(),
-                     [](float v) { return std::isfinite(v); }) ||
+                     [](float v)
+                     {
+                         ENGINE_PROFILE_FUNCTION_PROBE();
+                         return std::isfinite(v);
+                     }) ||
         !std::all_of(candidate->layers.begin(), candidate->layers.end(),
-                     [](const auto& layer) { return terrain_detail::layer_valid(layer, 256); }))
+                     [](const auto& layer)
+                     {
+                         ENGINE_PROFILE_FUNCTION_PROBE();
+                         return terrain_detail::layer_valid(layer, 256);
+                     }))
     {
         error = "Invalid terrain checkpoint block samples";
         return false;
@@ -415,6 +445,7 @@ bool TerrainStateStore::read_block(std::string_view slot, std::string_view key,
 
 void TerrainStateStore::cancel() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!staged_.empty())
     {
         std::string ignored;

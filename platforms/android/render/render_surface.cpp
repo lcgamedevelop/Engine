@@ -1,4 +1,5 @@
 #include "runtime/render/render_surface.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "android/native/android_surface.hpp"
 
@@ -9,6 +10,7 @@ namespace engine::render_detail
 
 bool RenderSurface::prepare(bgfx::Init& init, bool& available)
 {
+    ENGINE_PROFILE_FUNCTION();
     available = false;
     if (window_ == nullptr || current_.nwh != nullptr || rendering_registered_)
     {
@@ -45,6 +47,7 @@ bool RenderSurface::prepare(bgfx::Init& init, bool& available)
 
 bool RenderSurface::read_platform_data(bgfx::PlatformData& data, bgfx::SwapChain& swap_chain) const
 {
+    ENGINE_PROFILE_FUNCTION();
     data = {};
     swap_chain.nwh = nullptr;
     swap_chain.ndt = nullptr;
@@ -61,6 +64,7 @@ bool RenderSurface::read_platform_data(bgfx::PlatformData& data, bgfx::SwapChain
 
 void RenderSurface::release() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (current_.nwh != nullptr)
     {
         ANativeWindow_release(static_cast<ANativeWindow*>(current_.nwh));
@@ -76,6 +80,7 @@ void RenderSurface::release() noexcept
 
 bool RenderSurface::start_watching()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!SDL_AddEventWatch(watch_surface_lifecycle, this))
     {
         SDL_LogError(SDL_LOG_CATEGORY_RENDER, "Renderer event watch failed: %s", SDL_GetError());
@@ -87,6 +92,7 @@ bool RenderSurface::start_watching()
 
 void RenderSurface::stop_watching() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (watching_events_)
     {
         SDL_RemoveEventWatch(watch_surface_lifecycle, this);
@@ -96,6 +102,7 @@ void RenderSurface::stop_watching() noexcept
 
 bool SDLCALL RenderSurface::watch_surface_lifecycle(void* userdata, SDL_Event* event)
 {
+    ENGINE_PROFILE_FUNCTION();
     // JNI 暂停握手转为 SDL 主线程事件；其他线程不得关闭 bgfx。
     const bool suspend =
         event->type == SDL_EVENT_WILL_ENTER_BACKGROUND ||

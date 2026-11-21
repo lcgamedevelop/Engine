@@ -1,4 +1,6 @@
 #include "editor/scene/scene_persistence.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/resource_access.hpp"
 #include "runtime/resource/types/model_resource.hpp"
 #include "runtime/resource/virtual_file_system.hpp"
@@ -41,6 +43,7 @@ using Json = nlohmann::json;
 
 bool no_symlinks(const fs::path& path)
 {
+    ENGINE_PROFILE_FUNCTION();
     fs::path cursor;
     for (const auto& part : path)
     {
@@ -58,6 +61,7 @@ bool no_symlinks(const fs::path& path)
 bool scene_path(const fs::path& root, const std::string& text, fs::path& output, std::string& error,
                 bool prefab = false)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto relative = PathUtils::from_utf8(text);
     if (text.empty() || text.size() > 1024 || text.find('\0') != std::string::npos ||
         text.find_first_of("\\:") != std::string::npos || relative.is_absolute() ||
@@ -101,6 +105,7 @@ public:
 
     ~SourceTransaction() noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         if (!preserve_staging)
         {
             std::error_code ec;
@@ -110,6 +115,7 @@ public:
 
     bool remember(const fs::path& path, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (!no_symlinks(path))
         {
             error = "Scene resource path contains symbolic links";
@@ -155,6 +161,7 @@ public:
 
     bool publish(const fs::path& temporary, const fs::path& path, bool& changed, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         changed = false;
         if (!no_symlinks(path))
         {
@@ -201,6 +208,7 @@ public:
 
     bool rollback() noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         bool result = true;
         for (auto item = files.rbegin(); item != files.rend(); ++item)
         {
@@ -226,6 +234,7 @@ public:
 bool write_material(ResourceLoader* loader, const Material& material, const fs::path& path,
                     std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* shader = material.shader_data();
     const auto* shader_resource = resource_access::get(loader, material.shader());
     if (!shader || !shader_resource)
@@ -330,6 +339,7 @@ bool write_material(ResourceLoader* loader, const Material& material, const fs::
 
 bool source_digest(const fs::path& path, std::string& digest, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     ByteBuffer content;
     if (!no_symlinks(path) || !VirtualFileSystem::read_file(path, content))
     {
@@ -343,6 +353,7 @@ bool source_digest(const fs::path& path, std::string& digest, std::string& error
 bool existing_guid(const fs::path& source, std::string_view importer, Guid& guid,
                    std::string& meta_hash, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string text;
     if (!asset_pipeline::read_or_create_asset_meta(source, {}, importer, {}, false, text, guid,
                                                    error))
@@ -377,6 +388,7 @@ struct ScenePersistence::State
 bool ScenePersistence::State::matches_saved_source(const fs::path& path, std::uint64_t scene_id,
                                                    std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     if (saved_scene_id != scene_id)
     {
         return true;
@@ -405,6 +417,7 @@ bool ScenePersistence::State::save(WorldSystem& world, const fs::path& project_r
                                    Json& result, std::vector<SceneSavedResource>& changes,
                                    std::string& error, bool prefab)
 {
+    ENGINE_PROFILE_FUNCTION();
     changes.clear();
     if (!arguments.is_object() || arguments.size() != (prefab ? 3 : 2) ||
         !arguments.contains("sceneId") || !arguments["sceneId"].is_string() ||
@@ -453,6 +466,7 @@ bool ScenePersistence::State::save(WorldSystem& world, const fs::path& project_r
     }
     const auto selected = [subtree](const Node& node)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (!subtree)
         {
             return true;
@@ -538,6 +552,7 @@ bool ScenePersistence::State::save(WorldSystem& world, const fs::path& project_r
     const auto export_path = [&](const fs::path& folder, const std::string& name,
                                  std::string_view extension, fs::path& output)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         for (std::size_t suffix = 0; suffix < 4096; ++suffix)
         {
             const auto filename = name + (suffix ? "-override-" + std::to_string(suffix) : "") +
@@ -573,6 +588,7 @@ bool ScenePersistence::State::save(WorldSystem& world, const fs::path& project_r
     const auto resolve_guid = [&](const fs::path& path, std::string_view importer, Guid& guid,
                                   std::string& meta_hash, bool& changed)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         auto meta = path;
         meta += ".meta";
         if (!no_symlinks(path) || !no_symlinks(meta))
@@ -629,6 +645,7 @@ bool ScenePersistence::State::save(WorldSystem& world, const fs::path& project_r
     const auto publish = [&](const fs::path& staged, const fs::path& path,
                              std::string_view importer, Guid& guid, bool& changed)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         SceneSavedResource published;
         published.source = path;
         if (!matches_saved_source(path, scene_id, error) ||
@@ -649,6 +666,7 @@ bool ScenePersistence::State::save(WorldSystem& world, const fs::path& project_r
     };
     const auto rollback = [&]()
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (!transaction.rollback())
         {
             transaction.preserve_staging = true;
@@ -710,7 +728,10 @@ bool ScenePersistence::State::save(WorldSystem& world, const fs::path& project_r
                 const bool removed =
                     std::any_of(instance.overrides.begin(), instance.overrides.end(),
                                 [&mapping](const auto& value)
-                                { return value->node_id == mapping->source_id && value->removed; });
+                                {
+                                    ENGINE_PROFILE_FUNCTION_PROBE();
+                                    return value->node_id == mapping->source_id && value->removed;
+                                });
                 if (!member && (mapping->retired || removed))
                 {
                     continue;
@@ -804,6 +825,7 @@ bool ScenePersistence::State::save(WorldSystem& world, const fs::path& project_r
             }
             const auto overridden = [component_override](std::string_view field)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 return component_override && std::find(component_override->fields.begin(),
                                                        component_override->fields.end(),
                                                        field) != component_override->fields.end();
@@ -1036,6 +1058,7 @@ namespace
 bool create_model_prefab(WorldSystem& world, const fs::path& project_root, const Json& arguments,
                          Json& result, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!arguments.is_object() || arguments.size() != 2 || !arguments.contains("model") ||
         !arguments["model"].is_string() || !arguments.contains("path") ||
         !arguments["path"].is_string())
@@ -1120,17 +1143,22 @@ ScenePersistence::ScenePersistence(WorldSystem& world, fs::path project_root,
     : state_(std::make_unique<State>()), world_(world), project_root_(std::move(project_root)),
       writer_(std::move(writer)), saved_(std::move(saved))
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 ScenePersistence::~ScenePersistence() noexcept = default;
 
 bool ScenePersistence::register_commands(EditorCommands& commands)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!commands.register_command(
             "create_prefab_from_model", false,
             [this](const Json& arguments, Json& result, std::unique_ptr<EditorEdit>&,
                    std::string& error)
-            { return create_model_prefab(world_, project_root_, arguments, result, error); }))
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return create_model_prefab(world_, project_root_, arguments, result, error);
+            }))
     {
         return false;
     }
@@ -1138,6 +1166,7 @@ bool ScenePersistence::register_commands(EditorCommands& commands)
                                    [this](const Json& arguments, Json& result,
                                           std::unique_ptr<EditorEdit>&, std::string& error)
                                    {
+                                       ENGINE_PROFILE_FUNCTION_PROBE();
                                        std::vector<SceneSavedResource> changes;
                                        return state_->save(world_, project_root_, writer_,
                                                            arguments, result, changes, error, true);
@@ -1150,6 +1179,7 @@ bool ScenePersistence::register_commands(EditorCommands& commands)
         [this](const Json& arguments, Json& result, std::unique_ptr<EditorEdit>&,
                std::string& error)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             std::vector<SceneSavedResource> changes;
             if (!state_->save(world_, project_root_, writer_, arguments, result, changes, error))
             {

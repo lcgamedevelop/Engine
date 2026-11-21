@@ -1,10 +1,13 @@
 #pragma once
+
+#include "runtime/performance/function_profile.hpp"
 #include "plugins/runtime/camera/camera_controller.hpp"
 #include "runtime/schema/control_json_generated.hpp"
 namespace engine::plugins::camera::detail
 {
 inline nlohmann::json status_json(const CameraStatus& s)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     static constexpr const char* states[] = {"inactive", "waiting", "ready",
                                              "blending", "blocked", "error"};
     return {{"runState", states[static_cast<int>(s.run_state)]},
@@ -23,6 +26,7 @@ inline nlohmann::json status_json(const CameraStatus& s)
 inline bool read_parameters(CameraController solver, const nlohmann::json& j,
                             std::vector<schema::CameraParameterValueT>& values)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     values.clear();
     if (!j.is_object())
     {

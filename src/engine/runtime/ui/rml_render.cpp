@@ -1,4 +1,6 @@
 #include "runtime/ui/rml_render.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/render/frame_counters.hpp"
 #include "runtime/resource/types/shader_resource.hpp"
 #include "runtime/resource/types/texture_resource.hpp"
@@ -31,6 +33,7 @@ constexpr auto sampler_flags = BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP;
 
 bool supported_texture(const Resource& resource)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* data = resource_detail::data<TextureResource>(&resource);
     if (data && !data->cube_map && data->format != schema::TextureFormat::rgba16f &&
         data->format != schema::TextureFormat::rg16f &&
@@ -47,15 +50,18 @@ bool supported_texture(const Resource& resource)
 RmlRender::RmlRender(FontSystem& fonts, RmlFont& font_engine) noexcept
     : fonts_(fonts), font_engine_(font_engine)
 {
+    ENGINE_PROFILE_FUNCTION();
     bx::mtxIdentity(transform_.data());
 }
 RmlRender::~RmlRender()
 {
+    ENGINE_PROFILE_FUNCTION();
     release();
 }
 bool RmlRender::begin(std::uint32_t width, std::uint32_t height, int logical_width,
                       int logical_height)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!healthy_)
     {
         return false;
@@ -117,6 +123,7 @@ bool RmlRender::begin(std::uint32_t width, std::uint32_t height, int logical_wid
 }
 bool RmlRender::activate(const std::string& key, const ResourceReference& document)
 {
+    ENGINE_PROFILE_FUNCTION();
     active_key_.clear();
     if (!document || !document.data<UiResource>())
     {
@@ -155,8 +162,12 @@ bool RmlRender::activate(const std::string& key, const ResourceReference& docume
 }
 void RmlRender::prune(std::span<const std::string> keys)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto alive = [&](const std::string& key)
-    { return std::find(keys.begin(), keys.end(), key) != keys.end(); };
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return std::find(keys.begin(), keys.end(), key) != keys.end();
+    };
     if (!alive(active_key_))
     {
         active_key_.clear();
@@ -164,6 +175,7 @@ void RmlRender::prune(std::span<const std::string> keys)
     std::erase_if(documents_,
                   [&](const auto& entry)
                   {
+                      ENGINE_PROFILE_FUNCTION_PROBE();
                       if (alive(entry.first))
                       {
                           return false;
@@ -182,6 +194,7 @@ void RmlRender::prune(std::span<const std::string> keys)
 }
 bool RmlRender::texture_guid(std::string_view key, std::string_view path, std::string& guid) const
 {
+    ENGINE_PROFILE_FUNCTION();
     guid.clear();
     const auto document = documents_.find(key);
     if (document == documents_.end())
@@ -198,11 +211,13 @@ bool RmlRender::texture_guid(std::string_view key, std::string_view path, std::s
 }
 bool RmlRender::healthy() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return healthy_;
 }
 Rml::CompiledGeometryHandle RmlRender::CompileGeometry(Rml::Span<const Rml::Vertex> vertices,
                                                        Rml::Span<const int> indices)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (vertices.empty() || indices.empty() || vertices.size() > 1000000 ||
         indices.size() > 3000000)
     {
@@ -227,6 +242,7 @@ Rml::CompiledGeometryHandle RmlRender::CompileGeometry(Rml::Span<const Rml::Vert
 void RmlRender::RenderGeometry(Rml::CompiledGeometryHandle handle, Rml::Vector2f translation,
                                Rml::TextureHandle texture)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto found = geometries_.find(handle);
     if (found == geometries_.end())
     {
@@ -354,10 +370,12 @@ void RmlRender::RenderGeometry(Rml::CompiledGeometryHandle handle, Rml::Vector2f
 }
 void RmlRender::ReleaseGeometry(Rml::CompiledGeometryHandle geometry)
 {
+    ENGINE_PROFILE_FUNCTION();
     geometries_.erase(geometry);
 }
 Rml::TextureHandle RmlRender::LoadTexture(Rml::Vector2i& dimensions, const Rml::String& source)
 {
+    ENGINE_PROFILE_FUNCTION();
     dimensions = {};
     const bool is_font = source.starts_with("engine-font/");
     const std::string_view prefix = is_font ? "engine-font/" : "engine-ui/";
@@ -439,7 +457,11 @@ Rml::TextureHandle RmlRender::LoadTexture(Rml::Vector2i& dimensions, const Rml::
     {
         const auto part =
             std::find_if(data.subresources.begin(), data.subresources.end(),
-                         [](const auto& value) { return value.mip() == 0 && value.face() == 0; });
+                         [](const auto& value)
+                         {
+                             ENGINE_PROFILE_FUNCTION_PROBE();
+                             return value.mip() == 0 && value.face() == 0;
+                         });
         if (part == data.subresources.end() || part->offset() > data.data.size() ||
             part->size() > data.data.size() - part->offset())
         {
@@ -509,6 +531,7 @@ Rml::TextureHandle RmlRender::LoadTexture(Rml::Vector2i& dimensions, const Rml::
 Rml::TextureHandle RmlRender::GenerateTexture(Rml::Span<const Rml::byte> source,
                                               Rml::Vector2i dimensions)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (dimensions.x <= 0 || dimensions.y <= 0 || dimensions.x > 8192 || dimensions.y > 8192 ||
         source.size() != static_cast<std::size_t>(dimensions.x) * dimensions.y * 4)
     {
@@ -531,6 +554,7 @@ Rml::TextureHandle RmlRender::GenerateTexture(Rml::Span<const Rml::byte> source,
 }
 void RmlRender::ReleaseTexture(Rml::TextureHandle texture)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto it = textures_.find(texture);
     if (it == textures_.end())
     {
@@ -544,10 +568,12 @@ void RmlRender::ReleaseTexture(Rml::TextureHandle texture)
 }
 void RmlRender::EnableScissorRegion(bool enabled)
 {
+    ENGINE_PROFILE_FUNCTION();
     scissor_enabled_ = enabled;
 }
 void RmlRender::SetScissorRegion(Rml::Rectanglei region)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto x = std::clamp(static_cast<int>(std::floor(region.Left() * scale_x_)), 0,
                               static_cast<int>(width_));
     const auto y = std::clamp(static_cast<int>(std::floor(region.Top() * scale_y_)), 0,
@@ -561,6 +587,7 @@ void RmlRender::SetScissorRegion(Rml::Rectanglei region)
 }
 void RmlRender::SetTransform(const Rml::Matrix4f* matrix)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (matrix)
     {
         for (int column = 0; column < 4; ++column)
@@ -579,6 +606,7 @@ void RmlRender::SetTransform(const Rml::Matrix4f* matrix)
 }
 void RmlRender::release() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     healthy_ = true;
     for (const auto& [id, texture] : textures_)
     {

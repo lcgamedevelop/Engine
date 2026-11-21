@@ -1,4 +1,6 @@
 #include "editor/commands/scene_commands.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "editor/commands/components/component_edit.hpp"
 #include "editor/commands/editor_commands.hpp"
@@ -24,6 +26,7 @@ using components::Target;
 
 std::vector<std::uint8_t> node_snapshot(const Node& node)
 {
+    ENGINE_PROFILE_FUNCTION();
     schema::NodeDataT data;
     data.info = std::make_unique<schema::NodeInfoT>();
     if (!node.build_info(*data.info))
@@ -63,15 +66,18 @@ public:
 
     explicit StateEdit(Target value) : target(std::move(value))
     {
+        ENGINE_PROFILE_FUNCTION();
     }
 
     bool apply(std::string& error) override
     {
+        ENGINE_PROFILE_FUNCTION();
         return change(before_enabled, before_visible, after_enabled, after_visible, error);
     }
 
     bool revert(std::string& error) override
     {
+        ENGINE_PROFILE_FUNCTION();
         return change(after_enabled, after_visible, before_enabled, before_visible, error);
     }
 
@@ -79,6 +85,7 @@ private:
     bool change(bool expected_enabled, bool expected_visible, bool enabled, bool visible,
                 std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         auto node = target.node(error);
         if (!node)
         {
@@ -118,6 +125,7 @@ private:
 bool prepare_state(WorldSystem& world, NodeAliases& aliases, const Json& arguments, Json& result,
                    std::unique_ptr<EditorEdit>& output, std::string& error, bool component_state)
 {
+    ENGINE_PROFILE_FUNCTION();
     Target target(world, &aliases);
     if (!fields(arguments,
                 component_state
@@ -191,11 +199,13 @@ public:
 
     CreateNodeEdit(WorldSystem& world, NodeAliases& aliases) : target(world, &aliases)
     {
+        ENGINE_PROFILE_FUNCTION();
         target.identity = std::make_shared<std::uint64_t>(0);
     }
 
     bool apply(std::string& error) override
     {
+        ENGINE_PROFILE_FUNCTION();
         auto* scene = target.world.scene();
         if (!scene || scene->id() != target.scene_id)
         {
@@ -238,6 +248,7 @@ public:
 
     bool revert(std::string& error) override
     {
+        ENGINE_PROFILE_FUNCTION();
         auto node = target.node(error);
         if (!node)
         {
@@ -282,19 +293,23 @@ public:
     std::shared_ptr<std::uint64_t> before_identity;
     explicit ActiveCameraEdit(Target value) : target(value)
     {
+        ENGINE_PROFILE_FUNCTION();
     }
     bool apply(std::string& error) override
     {
+        ENGINE_PROFILE_FUNCTION();
         return change(before_identity ? *before_identity : before, target.resolved_id(), error);
     }
     bool revert(std::string& error) override
     {
+        ENGINE_PROFILE_FUNCTION();
         return change(target.resolved_id(), before_identity ? *before_identity : before, error);
     }
 
 private:
     bool change(std::uint64_t expected, std::uint64_t replacement, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         auto* scene = target.world.scene();
         if (!scene || scene->id() != target.scene_id)
         {
@@ -321,6 +336,7 @@ private:
 bool prepare_create_node(WorldSystem& world, NodeAliases& aliases, const Json& arguments,
                          Json& result, std::unique_ptr<EditorEdit>& edit, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto created = std::make_unique<CreateNodeEdit>(world, aliases);
     if (!fields(arguments, {"sceneId", "name", "component"}) ||
         !identifier(arguments, "sceneId", created->target.scene_id) ||
@@ -348,6 +364,7 @@ bool prepare_create_node(WorldSystem& world, NodeAliases& aliases, const Json& a
 bool prepare_active_camera(WorldSystem& world, NodeAliases& aliases, const Json& arguments,
                            Json& result, std::unique_ptr<EditorEdit>& edit, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     Target target(world, &aliases);
     if (!fields(arguments, {"sceneId", "nodeId"}) || !target.read(arguments, error))
     {
@@ -377,10 +394,12 @@ bool prepare_active_camera(WorldSystem& world, NodeAliases& aliases, const Json&
 
 SceneCommands::SceneCommands(WorldSystem& world) noexcept : world_(world)
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 void SceneCommands::synchronize_aliases() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* scene = world_.scene();
     const auto generation = scene ? scene->id() : 0;
     if (scene_id_ != generation)
@@ -392,6 +411,7 @@ void SceneCommands::synchronize_aliases() noexcept
 
 std::shared_ptr<std::uint64_t> SceneCommands::node_identity(std::uint64_t id)
 {
+    ENGINE_PROFILE_FUNCTION();
     synchronize_aliases();
     if (!world_.scene() || !world_.scene()->find_node(id))
     {
@@ -407,6 +427,7 @@ std::shared_ptr<std::uint64_t> SceneCommands::node_identity(std::uint64_t id)
 
 bool SceneCommands::register_commands(EditorCommands& commands)
 {
+    ENGINE_PROFILE_FUNCTION();
 #if ENGINE_HAS_ASSET_PIPELINE
     if (!register_prefab_commands(world_, *this, node_aliases_, commands))
     {
@@ -417,6 +438,7 @@ bool SceneCommands::register_commands(EditorCommands& commands)
                                      [this](const Json& arguments, Json& result,
                                             std::unique_ptr<EditorEdit>& edit, std::string& error)
                                      {
+                                         ENGINE_PROFILE_FUNCTION_PROBE();
                                          synchronize_aliases();
                                          return components::prepare_model(
                                              world_, node_aliases_, arguments, result, edit, error);
@@ -430,11 +452,15 @@ bool SceneCommands::register_commands(EditorCommands& commands)
            commands.register_command("get_scene", false,
                                      [this](const Json& arguments, Json& result,
                                             std::unique_ptr<EditorEdit>&, std::string& error)
-                                     { return query_scene(world_, arguments, result, error); }) &&
+                                     {
+                                         ENGINE_PROFILE_FUNCTION_PROBE();
+                                         return query_scene(world_, arguments, result, error);
+                                     }) &&
            commands.register_command("create_node", true,
                                      [this](const Json& arguments, Json& result,
                                             std::unique_ptr<EditorEdit>& edit, std::string& error)
                                      {
+                                         ENGINE_PROFILE_FUNCTION_PROBE();
                                          synchronize_aliases();
                                          return prepare_create_node(world_, node_aliases_,
                                                                     arguments, result, edit, error);
@@ -443,6 +469,7 @@ bool SceneCommands::register_commands(EditorCommands& commands)
                                      [this](const Json& arguments, Json& result,
                                             std::unique_ptr<EditorEdit>& edit, std::string& error)
                                      {
+                                         ENGINE_PROFILE_FUNCTION_PROBE();
                                          synchronize_aliases();
                                          return prepare_state(world_, node_aliases_, arguments,
                                                               result, edit, error, false);
@@ -451,6 +478,7 @@ bool SceneCommands::register_commands(EditorCommands& commands)
                                      [this](const Json& arguments, Json& result,
                                             std::unique_ptr<EditorEdit>& edit, std::string& error)
                                      {
+                                         ENGINE_PROFILE_FUNCTION_PROBE();
                                          synchronize_aliases();
                                          return prepare_state(world_, node_aliases_, arguments,
                                                               result, edit, error, true);
@@ -459,6 +487,7 @@ bool SceneCommands::register_commands(EditorCommands& commands)
                                      [this](const Json& arguments, Json& result,
                                             std::unique_ptr<EditorEdit>& edit, std::string& error)
                                      {
+                                         ENGINE_PROFILE_FUNCTION_PROBE();
                                          synchronize_aliases();
                                          return prepare_active_camera(
                                              world_, node_aliases_, arguments, result, edit, error);
@@ -467,6 +496,7 @@ bool SceneCommands::register_commands(EditorCommands& commands)
                                      [this](const Json& arguments, Json& result,
                                             std::unique_ptr<EditorEdit>& edit, std::string& error)
                                      {
+                                         ENGINE_PROFILE_FUNCTION_PROBE();
                                          synchronize_aliases();
                                          return components::prepare_transform(
                                              world_, node_aliases_, arguments, result, edit, error);
@@ -475,6 +505,7 @@ bool SceneCommands::register_commands(EditorCommands& commands)
                                      [this](const Json& arguments, Json& result,
                                             std::unique_ptr<EditorEdit>& edit, std::string& error)
                                      {
+                                         ENGINE_PROFILE_FUNCTION_PROBE();
                                          synchronize_aliases();
                                          return components::prepare_light(
                                              world_, node_aliases_, arguments, result, edit, error);
@@ -483,6 +514,7 @@ bool SceneCommands::register_commands(EditorCommands& commands)
                                      [this](const Json& arguments, Json& result,
                                             std::unique_ptr<EditorEdit>& edit, std::string& error)
                                      {
+                                         ENGINE_PROFILE_FUNCTION_PROBE();
                                          synchronize_aliases();
                                          return components::prepare_material_blend(
                                              world_, node_aliases_, arguments, result, edit, error);
@@ -491,6 +523,7 @@ bool SceneCommands::register_commands(EditorCommands& commands)
                                      [this](const Json& arguments, Json& result,
                                             std::unique_ptr<EditorEdit>& edit, std::string& error)
                                      {
+                                         ENGINE_PROFILE_FUNCTION_PROBE();
                                          synchronize_aliases();
                                          return components::prepare_material_type(
                                              world_, node_aliases_, arguments, result, edit, error);
@@ -499,6 +532,7 @@ bool SceneCommands::register_commands(EditorCommands& commands)
                                      [this](const Json& arguments, Json& result,
                                             std::unique_ptr<EditorEdit>& edit, std::string& error)
                                      {
+                                         ENGINE_PROFILE_FUNCTION_PROBE();
                                          synchronize_aliases();
                                          return components::prepare_material(
                                              world_, node_aliases_, arguments, result, edit, error);
@@ -507,6 +541,7 @@ bool SceneCommands::register_commands(EditorCommands& commands)
                                      [this](const Json& arguments, Json& result,
                                             std::unique_ptr<EditorEdit>& edit, std::string& error)
                                      {
+                                         ENGINE_PROFILE_FUNCTION_PROBE();
                                          synchronize_aliases();
                                          return components::prepare_camera(
                                              world_, node_aliases_, arguments, result, edit, error);
@@ -515,6 +550,7 @@ bool SceneCommands::register_commands(EditorCommands& commands)
                                      [this](const Json& arguments, Json& result,
                                             std::unique_ptr<EditorEdit>& edit, std::string& error)
                                      {
+                                         ENGINE_PROFILE_FUNCTION_PROBE();
                                          synchronize_aliases();
                                          return components::prepare_texture(
                                              world_, node_aliases_, arguments, result, edit, error);

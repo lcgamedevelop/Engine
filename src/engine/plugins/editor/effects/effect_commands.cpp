@@ -1,4 +1,6 @@
 #include "plugins/editor/effects/effect_commands.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/resource_access.hpp"
 
 #include "editor/commands/component_commands.hpp"
@@ -17,6 +19,7 @@ using Json = nlohmann::json;
 bool read(ResourceLoader* loader, const Json& arguments, schema::EffectDataT& value,
           std::vector<ResourceReference>& prepared, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!editor::components::fields(arguments,
                                     {"enabled", "effect", "speed", "loop", "playOnAwake"}, error))
     {
@@ -76,6 +79,7 @@ bool read(ResourceLoader* loader, const Json& arguments, schema::EffectDataT& va
 
 Json write(ResourceLoader* loader, const schema::EffectDataT& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string path;
     if (!value.effect_guid.empty())
     {
@@ -93,12 +97,17 @@ Json write(ResourceLoader* loader, const schema::EffectDataT& value)
 bool register_effect_commands(WorldSystem& world, editor::SceneCommands& scene_commands,
                               editor::EditorCommands& commands)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!editor::components::register_component<EffectComponent, schema::EffectDataT>(
             world, scene_commands, commands, "effect",
             [&world](Node, const Json& args, auto& data, auto& prepared, auto& error)
-            { return read(world.resource_loader(), args, data, prepared, error); },
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return read(world.resource_loader(), args, data, prepared, error);
+            },
             [&world](EffectComponent component, const auto& data)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 auto result = write(world.resource_loader(), data);
                 if (component)
                 {
@@ -111,11 +120,13 @@ bool register_effect_commands(WorldSystem& world, editor::SceneCommands& scene_c
     }
     const auto control = [&world, &commands](const char* name, bool (EffectComponent::*operation)())
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return commands.register_command(
             name, false,
             [&world, operation](const Json& arguments, Json& result,
                                 std::unique_ptr<editor::EditorEdit>&, std::string& error)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 if (!editor::components::fields(arguments, {}, error))
                 {
                     return false;

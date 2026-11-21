@@ -1,4 +1,6 @@
 #include "editor/asset_pipeline/prefab_importer.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/utils/hash_utils.hpp"
 
 #include "editor/asset_pipeline/components/scene_component_codec.hpp"
@@ -22,6 +24,7 @@ using Nodes = std::vector<std::unique_ptr<schema::NodeDataT>>;
 
 std::uint64_t stable_id(std::string_view key)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto value = hash::fnv1a(key);
     // 保留正常递增 ID 空间；碰撞由调用方明确拒绝。
     return (value & 0x3fffffffffffffffULL) | 0x4000000000000000ULL;
@@ -31,6 +34,7 @@ bool apply_nodes(Nodes& nodes,
                  const std::vector<std::unique_ptr<schema::PrefabNodeOverrideT>>& overrides,
                  const std::map<std::uint64_t, std::uint64_t>& mapping, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::set<std::uint64_t> removed;
     for (const auto& value : overrides)
     {
@@ -41,7 +45,10 @@ bool apply_nodes(Nodes& nodes,
         }
         const auto id = mapping.at(value->node_id);
         const auto found = std::find_if(nodes.begin(), nodes.end(), [id](const auto& node)
-                                        { return node->info->properties->id == id; });
+                                        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return node->info->properties->id == id;
+        });
         if (found == nodes.end())
         {
             if (value->removed)
@@ -98,7 +105,11 @@ bool apply_nodes(Nodes& nodes,
             const auto type = component->component->payload.type;
             const auto current =
                 std::find_if(node.components.begin(), node.components.end(),
-                             [type](const auto& item) { return item->payload.type == type; });
+                             [type](const auto& item)
+                             {
+                                 ENGINE_PROFILE_FUNCTION_PROBE();
+                                 return item->payload.type == type;
+                             });
             if (component->removed)
             {
                 if (current != node.components.end())
@@ -136,7 +147,10 @@ bool apply_nodes(Nodes& nodes,
         }
     }
     std::erase_if(nodes, [&removed](const auto& node)
-                  { return removed.contains(node->info->properties->id); });
+                  {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return removed.contains(node->info->properties->id);
+    });
     return true;
 }
 } // namespace
@@ -144,6 +158,7 @@ bool apply_nodes(Nodes& nodes,
 bool PrefabImporter::read(const std::filesystem::path& source, schema::PrefabDataT& output,
                           std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     toml::table table;
     if (!asset_pipeline::read_table(source, table, error))
@@ -232,6 +247,7 @@ bool PrefabImporter::read(const std::filesystem::path& source, schema::PrefabDat
 bool PrefabImporter::write(const std::filesystem::path& destination,
                            const schema::PrefabDataT& data, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!validate(data, error))
     {
         return false;
@@ -271,6 +287,7 @@ bool PrefabImporter::write(const std::filesystem::path& destination,
 
 bool PrefabImporter::validate(const schema::PrefabDataT& data, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!PrefabResourceCodec::validate(data))
     {
         error = "Prefab must contain one rooted tree with unique nodes and components";
@@ -291,6 +308,7 @@ bool PrefabImporter::apply_component_override(schema::ComponentDataT& in_out,
                                               const schema::PrefabComponentOverrideT& override_data,
                                               std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!override_data.component || override_data.removed ||
         override_data.component->payload.type != in_out.payload.type)
     {
@@ -332,6 +350,7 @@ bool PrefabImporter::from_model(const schema::ModelDataT& model,
                                 std::string_view default_material_guid, schema::PrefabDataT& in_out,
                                 std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!ModelResourceCodec::validate(model))
     {
         error = "Invalid prefab Model source";
@@ -444,6 +463,7 @@ bool PrefabImporter::expand_instance(const schema::PrefabDataT& prefab,
                                      schema::PrefabInstanceDataT& instance,
                                      std::uint64_t first_free_id, Nodes& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     if (!validate(prefab, error) || instance.root_id == 0)
     {
@@ -529,7 +549,10 @@ bool PrefabImporter::expand_instance(const schema::PrefabDataT& prefab,
         return false;
     }
     if (std::none_of(expanded.begin(), expanded.end(), [&](const auto& node)
-                     { return node->info->properties->id == candidate.root_id; }))
+                     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return node->info->properties->id == candidate.root_id;
+    }))
     {
         error = "Prefab instance root cannot be removed by an override";
         return false;
@@ -539,13 +562,20 @@ bool PrefabImporter::expand_instance(const schema::PrefabDataT& prefab,
     for (const auto& pair : candidate.node_mappings)
     {
         if (pair->retired || std::any_of(expanded.begin(), expanded.end(), [&](const auto& node)
-                                         { return node->info->properties->id == pair->target_id; }))
+                                         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return node->info->properties->id == pair->target_id;
+        }))
         {
             continue;
         }
         auto found =
             std::find_if(candidate.overrides.begin(), candidate.overrides.end(),
-                         [&](const auto& item) { return item->node_id == pair->source_id; });
+                         [&](const auto& item)
+                         {
+                             ENGINE_PROFILE_FUNCTION_PROBE();
+                             return item->node_id == pair->source_id;
+                         });
         if (found == candidate.overrides.end())
         {
             auto removed = std::make_unique<schema::PrefabNodeOverrideT>();

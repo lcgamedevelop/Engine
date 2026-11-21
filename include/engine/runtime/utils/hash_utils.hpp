@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -13,6 +15,7 @@ inline constexpr std::uint64_t offset = 14695981039346656037ULL;
 [[nodiscard]] inline std::uint64_t fnv1a(std::span<const std::byte> bytes,
                                          std::uint64_t seed = offset) noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     for (const auto byte : bytes)
     {
         seed = (seed ^ std::to_integer<std::uint8_t>(byte)) * 1099511628211ULL;
@@ -23,11 +26,13 @@ inline constexpr std::uint64_t offset = 14695981039346656037ULL;
 [[nodiscard]] inline std::uint64_t fnv1a(std::string_view bytes,
                                          std::uint64_t seed = offset) noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return fnv1a(std::as_bytes(std::span(bytes.data(), bytes.size())), seed);
 }
 
 [[nodiscard]] inline std::string hex(std::uint64_t value)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     constexpr char digits[] = "0123456789abcdef";
     std::string output(16, '0');
     for (std::size_t index = output.size(); index != 0; --index)

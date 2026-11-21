@@ -1,4 +1,5 @@
 #include "plugins/runtime/script/bindings/app_binding.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "plugins/runtime/script/bindings/binding_context.hpp"
 #include "runtime/app/app.hpp"
@@ -24,6 +25,7 @@ Object.freeze(App);
 
 void request_quit(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto* context = BindingContext::current(arguments);
     auto* window = context != nullptr ? context->window() : nullptr;
@@ -37,16 +39,19 @@ void request_quit(const Arguments& arguments)
 
 std::string_view AppBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "App";
 }
 
 std::string_view AppBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 
 bool AppBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.string("assetsPath", PathUtils::to_utf8(App::assets_path())) &&
            vm.string("persistentDataPath", PathUtils::to_utf8(App::persistent_data_path())) &&
            vm.string("cachePath", PathUtils::to_utf8(App::cache_path())) &&

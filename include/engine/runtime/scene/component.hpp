@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/scene/node.hpp"
 
 #include <span>
@@ -21,6 +23,7 @@ public:
     [[nodiscard]] bool valid() const noexcept;
     explicit operator bool() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return valid();
     }
     [[nodiscard]] bool operator==(const Component&) const noexcept = default;
@@ -43,6 +46,7 @@ public:
                                              std::span<const schema::NodeIdMappingT> mapping) const;
     [[nodiscard]] bool initialize()
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return true;
     }
 
@@ -50,14 +54,17 @@ protected:
     Component(Component value, ComponentType expected) noexcept;
     template <class Data> [[nodiscard]] const Data* read_data() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return static_cast<const Data*>(read_value());
     }
     template <class Data> [[nodiscard]] Data* write_data() noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return static_cast<Data*>(write_value());
     }
     template <class Runtime> [[nodiscard]] Runtime* runtime_state() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return static_cast<Runtime*>(runtime_value());
     }
     void modified() noexcept;

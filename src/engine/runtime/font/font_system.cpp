@@ -1,4 +1,6 @@
 #include "runtime/font/font_system.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/render/frame_counters.hpp"
 #include "runtime/scene/ecs_scene.hpp"
 #include "runtime/scene/ecs_storage.hpp"
@@ -26,6 +28,7 @@ namespace
 
 std::uint32_t next_codepoint(std::string_view text, std::size_t& offset) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto first = static_cast<unsigned char>(text[offset++]);
     if (first < 0x80)
     {
@@ -58,6 +61,7 @@ std::uint32_t next_codepoint(std::string_view text, std::size_t& offset) noexcep
 
 bool finite_vertex(const FontVertex& vertex) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     for (float value : vertex.position)
     {
         if (!std::isfinite(value))
@@ -66,7 +70,11 @@ bool finite_vertex(const FontVertex& vertex) noexcept
         }
     }
     return std::all_of(std::begin(vertex.dilation), std::end(vertex.dilation),
-                       [](float value) { return std::isfinite(value); }) &&
+                       [](float value)
+                       {
+                           ENGINE_PROFILE_FUNCTION_PROBE();
+                           return std::isfinite(value);
+                       }) &&
            std::isfinite(vertex.curve_coordinate[0]) && std::isfinite(vertex.curve_coordinate[1]) &&
            std::isfinite(vertex.curve_range[0]) && std::isfinite(vertex.curve_range[1]);
 }
@@ -77,10 +85,12 @@ struct FontSystem::GpuState
 {
     explicit GpuState(ResourceLoader& loader) : loader(loader)
     {
+        ENGINE_PROFILE_FUNCTION();
     }
     ResourceLoader& loader;
     const Resource* get(ResourceHandle handle) const noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         const Resource* resource = nullptr;
         (void)loader.get(handle, resource);
         return resource;
@@ -94,6 +104,7 @@ struct FontSystem::GpuState
 
         ~Texture() noexcept
         {
+            ENGINE_PROFILE_FUNCTION();
             if (bgfx::isValid(handle))
             {
                 bgfx::destroy(handle);
@@ -108,6 +119,7 @@ struct FontSystem::GpuState
 
         ~Program() noexcept
         {
+            ENGINE_PROFILE_FUNCTION();
             if (bgfx::isValid(handle))
             {
                 bgfx::destroy(handle);
@@ -123,6 +135,7 @@ struct FontSystem::GpuState
 
     ~GpuState() noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         textures.clear();
         programs.clear();
         if (bgfx::isValid(sampler))
@@ -137,6 +150,7 @@ struct FontSystem::GpuState
 
     bool initialize()
     {
+        ENGINE_PROFILE_FUNCTION();
         layout.begin()
             .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
             .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true)
@@ -152,7 +166,12 @@ struct FontSystem::GpuState
 
     Texture* get_texture(ResourceHandle handle, const FontResource* resource)
     {
-        std::erase_if(textures, [this](const auto& texture) { return !get(texture->resource); });
+        ENGINE_PROFILE_FUNCTION();
+        std::erase_if(textures, [this](const auto& texture)
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return !get(texture->resource);
+        });
         for (const auto& texture : textures)
         {
             const auto existing = get(texture->resource);
@@ -217,7 +236,12 @@ struct FontSystem::GpuState
 
     Program* get_program(ResourceHandle handle, const ShaderResource* resource)
     {
-        std::erase_if(programs, [this](const auto& program) { return !get(program->resource); });
+        ENGINE_PROFILE_FUNCTION();
+        std::erase_if(programs, [this](const auto& program)
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return !get(program->resource);
+        });
         for (const auto& program : programs)
         {
             const auto existing = get(program->resource);
@@ -305,27 +329,39 @@ struct FontSystem::GpuState
 
 FontSystem::FontSystem(ResourceLoader* resources) : resources_(resources)
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 FontSystem::~FontSystem() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
 }
 
 bool FontSystem::on_initialize(const EngineConfig&)
 {
+    ENGINE_PROFILE_FUNCTION();
     last_error_.clear();
     return true;
 }
 
 bool FontSystem::on_tick(double)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (gpu_)
     {
         std::erase_if(gpu_->textures,
-                      [this](const auto& item) { return !gpu_->get(item->resource); });
+                      [this](const auto& item)
+                      {
+                          ENGINE_PROFILE_FUNCTION_PROBE();
+                          return !gpu_->get(item->resource);
+                      });
         std::erase_if(gpu_->programs,
-                      [this](const auto& item) { return !gpu_->get(item->resource); });
+                      [this](const auto& item)
+                      {
+                          ENGINE_PROFILE_FUNCTION_PROBE();
+                          return !gpu_->get(item->resource);
+                      });
         if (gpu_->textures.empty() && gpu_->programs.empty())
         {
             gpu_.reset();
@@ -336,15 +372,20 @@ bool FontSystem::on_tick(double)
 
 void FontSystem::on_shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     release_scene();
 }
 
 const schema::FontGlyphT* FontSystem::glyph(const schema::FontDataT& data,
                                             std::uint32_t codepoint) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto item = std::lower_bound(data.glyphs.begin(), data.glyphs.end(), codepoint,
                                        [](const auto& glyph, std::uint32_t value)
-                                       { return glyph->codepoint < value; });
+                                       {
+                                           ENGINE_PROFILE_FUNCTION_PROBE();
+                                           return glyph->codepoint < value;
+                                       });
     if (item != data.glyphs.end() && (*item)->codepoint == codepoint)
     {
         return item->get();
@@ -355,10 +396,14 @@ const schema::FontGlyphT* FontSystem::glyph(const schema::FontDataT& data,
 float FontSystem::kerning(const schema::FontDataT& data, std::uint32_t left,
                           std::uint32_t right) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto key = std::pair{left, right};
     const auto item = std::lower_bound(data.kerning.begin(), data.kerning.end(), key,
                                        [](const auto& value, const auto& target)
-                                       { return std::pair{value.left(), value.right()} < target; });
+                                       {
+                                           ENGINE_PROFILE_FUNCTION_PROBE();
+                                           return std::pair{value.left(), value.right()} < target;
+                                       });
     return item != data.kerning.end() && item->left() == left && item->right() == right
                ? item->advance()
                : 0.0F;
@@ -367,6 +412,7 @@ float FontSystem::kerning(const schema::FontDataT& data, std::uint32_t left,
 float FontSystem::measure(const schema::FontDataT& data, std::string_view text, float size,
                           float letter_spacing) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!std::isfinite(size) || size <= 0.0F || !std::isfinite(letter_spacing))
     {
         return 0.0F;
@@ -410,6 +456,7 @@ bool FontSystem::append_glyph(const schema::FontDataT& data, const schema::FontG
                               float x, float y, float size, std::uint32_t color, bool y_down,
                               FontGeometry& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(size) || size <= 0.0F ||
         glyph.curve_offset > data.curves.size() ||
         glyph.curve_count > data.curves.size() - glyph.curve_offset ||
@@ -456,6 +503,7 @@ bool FontSystem::append_glyph(const schema::FontDataT& data, const schema::FontG
 bool FontSystem::layout(const FontResource& font, std::string_view text, const FontLayout& settings,
                         FontGeometry& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     const auto* data = &font.data();
     if (data == nullptr || !std::isfinite(settings.size) || settings.size <= 0.0F ||
@@ -515,6 +563,7 @@ SceneWorkState FontSystem::prepare_font(const ResourceHandle& handle,
                                         const ResourceHandle& shader_handle,
                                         const SceneWorkBudget& budget, SceneWorkProgress& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     output.domain = "font";
     output.stage = "gpu_resources";
@@ -565,6 +614,7 @@ SceneWorkState FontSystem::prepare_font(const ResourceHandle& handle,
 bool FontSystem::draw(const ResourceHandle& handle, const FontGeometry& geometry,
                       const FontDraw& settings)
 {
+    ENGINE_PROFILE_FUNCTION();
     const FontResource* font = nullptr;
     if (!is_initialized() || !resources_ || resources_->get(handle, font) != ResourceError::none ||
         bgfx::getCaps() == nullptr)
@@ -582,6 +632,7 @@ bool FontSystem::draw(const ResourceHandle& handle, const FontGeometry& geometry
         !std::all_of(geometry.vertices.begin(), geometry.vertices.end(),
                      [&font](const FontVertex& vertex)
                      {
+                         ENGINE_PROFILE_FUNCTION_PROBE();
                          const double first = vertex.curve_range[0];
                          const double count = vertex.curve_range[1];
                          return finite_vertex(vertex) && first >= 0.0 && count >= 0.0 &&
@@ -589,9 +640,17 @@ bool FontSystem::draw(const ResourceHandle& handle, const FontGeometry& geometry
                                 first + count <= static_cast<double>(font->data().curves.size());
                      }) ||
         !std::all_of(settings.transform.begin(), settings.transform.end(),
-                     [](float value) { return std::isfinite(value); }) ||
+                     [](float value)
+                     {
+                         ENGINE_PROFILE_FUNCTION_PROBE();
+                         return std::isfinite(value);
+                     }) ||
         std::any_of(geometry.indices.begin(), geometry.indices.end(),
-                    [&geometry](auto index) { return index >= geometry.vertices.size(); }))
+                    [&geometry](auto index)
+                    {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
+                        return index >= geometry.vertices.size();
+                    }))
     {
         last_error_ = "Invalid font draw geometry or transform";
         return false;
@@ -660,6 +719,7 @@ bool FontSystem::draw(const ResourceHandle& handle, const FontGeometry& geometry
 bool FontSystem::render_scene(const Scene& scene, const Vec3& origin, std::uint16_t view_id,
                               bool linear_output)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto& world = scene.world();
     if (!world.refresh_scene_state())
     {
@@ -668,6 +728,7 @@ bool FontSystem::render_scene(const Scene& scene, const Vec3& origin, std::uint1
     const auto process =
         [&](Node node, const ecs_detail::ComponentStorage<TextComponent::Data>& stored) -> bool
     {
+            ENGINE_PROFILE_FUNCTION_PROBE();
         const auto text = node.get_component<TextComponent>();
         if (!text || !text.active() || !text.visible_in_hierarchy() || stored.data.text.empty())
         {
@@ -688,7 +749,10 @@ bool FontSystem::render_scene(const Scene& scene, const Vec3& origin, std::uint1
         transform_math::relative(absolute, origin, draw_settings.transform.data());
         const auto& color = stored.data.color;
         const auto channel = [](float value)
-        { return static_cast<std::uint32_t>(std::clamp(value, 0.0F, 1.0F) * 255.0F + 0.5F); };
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return static_cast<std::uint32_t>(std::clamp(value, 0.0F, 1.0F) * 255.0F + 0.5F);
+        };
         FontLayout layout_settings;
         layout_settings.size = stored.data.size;
         layout_settings.letter_spacing = stored.data.letter_spacing;
@@ -720,6 +784,7 @@ bool FontSystem::render_scene(const Scene& scene, const Vec3& origin, std::uint1
     query.each(
         [&](flecs::entity entity, const auto& stored, const ecs_detail::NodeRuntime& state)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             if (success && state.scene == &scene)
             {
                 success = process(world.find_node(entity.id()), stored);
@@ -730,16 +795,19 @@ bool FontSystem::render_scene(const Scene& scene, const Vec3& origin, std::uint1
 
 void FontSystem::release_scene() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     gpu_.reset();
 }
 
 std::uint32_t FontSystem::gpu_resource_count() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return gpu_ ? static_cast<std::uint32_t>(gpu_->textures.size() + gpu_->programs.size() + 2) : 0;
 }
 
 const std::string& FontSystem::last_error() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return last_error_;
 }
 

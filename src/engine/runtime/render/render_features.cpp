@@ -1,5 +1,6 @@
 #include "runtime/render/render_system.hpp"
 
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 
 #include "runtime/render/passes/debug_draw_pass.hpp"
@@ -24,11 +25,13 @@ constexpr std::size_t maximum_debug_lines = 65536;
 
 bool finite(const Vec3& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::isfinite(value.x()) && std::isfinite(value.y()) && std::isfinite(value.z());
 }
 
 bool supported(RenderFeature feature)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* caps = bgfx::getCaps();
     if (caps == nullptr)
     {
@@ -56,6 +59,7 @@ bool supported(RenderFeature feature)
 
 bool RenderSystem::set_debug_feature(RenderFeature feature, bool enabled)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto index = static_cast<std::size_t>(feature);
     if (index < static_cast<std::size_t>(RenderFeature::wireframe) || index >= feature_count ||
         (enabled &&
@@ -87,6 +91,7 @@ bool RenderSystem::set_debug_feature(RenderFeature feature, bool enabled)
 
 RenderFeatureState RenderSystem::feature_state(RenderFeature feature) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     RenderFeatureState result;
     const auto index = static_cast<std::size_t>(feature);
     if (index >= feature_count)
@@ -112,6 +117,7 @@ RenderFeatureState RenderSystem::feature_state(RenderFeature feature) const noex
             query.each(
                 [&](const auto& stored, const ecs_detail::NodeRuntime& node)
                 {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
                     if (node.active && node.visible_in_hierarchy && stored.state.flags.enabled &&
                         stored.state.flags.visible)
                     {
@@ -167,9 +173,14 @@ RenderFeatureState RenderSystem::feature_state(RenderFeature feature) const noex
 
 std::vector<RenderViewStats> RenderSystem::submission_stats() const
 {
+    ENGINE_PROFILE_FUNCTION();
     if (scene_resources_ == nullptr ||
         std::any_of(scene_resources_->view_stats.begin(), scene_resources_->view_stats.end(),
-                    [](const auto& row) { return row.frame_number == 0; }))
+                    [](const auto& row)
+                    {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
+                        return row.frame_number == 0;
+                    }))
     {
         // A failed or still-being-assembled frame is not a published statistics snapshot.
         return {};
@@ -179,13 +190,18 @@ std::vector<RenderViewStats> RenderSystem::submission_stats() const
 
 bool RenderSystem::draw_debug_lines(std::span<const DebugLine> lines, std::uint16_t lifetime_frames)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!is_initialized() || !renderer_initialized_ || world_ == nullptr ||
         world_->scene() == nullptr ||
         !debug_requests_[static_cast<std::size_t>(RenderFeature::debug_draw)] ||
         lifetime_frames == 0 || lifetime_frames > 600 || lines.empty() ||
         lines.size() > maximum_debug_lines ||
         std::any_of(lines.begin(), lines.end(),
-                    [](const auto& line) { return !finite(line.start) || !finite(line.end); }))
+                    [](const auto& line)
+                    {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
+                        return !finite(line.start) || !finite(line.end);
+                    }))
     {
         return false;
     }
@@ -204,6 +220,7 @@ bool RenderSystem::draw_debug_lines(std::span<const DebugLine> lines, std::uint1
 
 void RenderSystem::clear_debug_lines() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     debug_lines_.clear();
 }
 
@@ -245,10 +262,17 @@ void RenderSystem::publish_features() noexcept
     feature_applied_[static_cast<std::size_t>(RenderFeature::static_instancing)] = std::any_of(
         scene_resources_->view_stats.begin(), scene_resources_->view_stats.end(),
         [](const auto& row)
-        { return row.direct_instance_batches > 0 || row.meshlet_instanced_batches > 0; });
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return row.direct_instance_batches > 0 || row.meshlet_instanced_batches > 0;
+        });
     feature_applied_[static_cast<std::size_t>(RenderFeature::meshlet_culling)] =
         std::any_of(scene_resources_->view_stats.begin(), scene_resources_->view_stats.end(),
-                    [](const auto& row) { return row.indirect_batches > 0; });
+                    [](const auto& row)
+                    {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
+                        return row.indirect_batches > 0;
+                    });
     feature_applied_[static_cast<std::size_t>(RenderFeature::meshlet_statistics)] =
         meshlet_culling_ &&
         debug_requests_[static_cast<std::size_t>(RenderFeature::meshlet_statistics)] &&
@@ -271,11 +295,16 @@ void RenderSystem::publish_features() noexcept
             }
         }
     }
-    std::erase_if(debug_lines_, [](const auto& batch) { return batch.frames == 0; });
+    std::erase_if(debug_lines_, [](const auto& batch)
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return batch.frames == 0;
+    });
 }
 
 bool RenderSystem::draw_debug_overlay(Camera camera, const float* view, const float* projection)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!scene_resources_ || !world_ || !world_->scene())
     {
         return true;
@@ -283,7 +312,11 @@ bool RenderSystem::draw_debug_overlay(Camera camera, const float* view, const fl
     std::vector<DebugLine> lines;
     const auto scene_id = world_->scene()->id();
     std::erase_if(debug_lines_,
-                  [scene_id](const auto& batch) { return batch.scene_id != scene_id; });
+                  [scene_id](const auto& batch)
+                  {
+                      ENGINE_PROFILE_FUNCTION_PROBE();
+                      return batch.scene_id != scene_id;
+                  });
     for (const auto& batch : debug_lines_)
     {
         lines.insert(lines.end(), batch.lines.begin(), batch.lines.end());
@@ -317,6 +350,7 @@ bool RenderSystem::draw_debug_overlay(Camera camera, const float* view, const fl
                 const auto found = std::find_if(ranges.begin(), ranges.end(),
                                                 [&](const auto& range)
                                                 {
+                                                    ENGINE_PROFILE_FUNCTION_PROBE();
                                                     return range.first_index() == item.first &&
                                                            range.index_count() == item.count;
                                                 });
@@ -348,6 +382,7 @@ bool RenderSystem::draw_debug_overlay(Camera camera, const float* view, const fl
                 {
                     const auto point = [&](std::uint32_t step)
                     {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
                         const auto angle = static_cast<float>(step) * 6.28318530718F / segments;
                         std::array<float, 3> local{static_cast<float>(cluster.center().x()),
                                                    static_cast<float>(cluster.center().y()),

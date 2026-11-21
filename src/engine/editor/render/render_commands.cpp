@@ -1,4 +1,6 @@
 #include "editor/render/render_commands.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/render/atmosphere_edit_helpers.hpp"
 #include "editor/render/render_component_commands.hpp"
 #include "editor/render/render_feature_commands.hpp"
@@ -40,6 +42,7 @@ namespace fs = std::filesystem;
 
 const char* fog_mode_name(FogMode mode)
 {
+    ENGINE_PROFILE_FUNCTION();
     switch (mode)
     {
     case FogMode::linear:
@@ -55,6 +58,7 @@ const char* fog_mode_name(FogMode mode)
 
 Json settings_json(const RenderSettings& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::array<double, 4> clear{};
     for (std::size_t index = 0; index < 4; ++index)
     {
@@ -109,6 +113,7 @@ Json settings_json(const RenderSettings& value)
 
 Json settings_reply(const RenderSettings& settings, const WorldSystem& world)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto result = settings_json(settings);
     const auto local = settings.atmosphere.atmosphere_sun_node_id;
     result["atmosphereSunLocalId"] = std::to_string(local);
@@ -126,6 +131,7 @@ Json settings_reply(const RenderSettings& settings, const WorldSystem& world)
 
 bool resolve_sun_identity(Json& values, const WorldSystem& world, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto value = values.find("atmosphereSunNodeId");
     if (value == values.end())
     {
@@ -165,6 +171,7 @@ bool resolve_sun_identity(Json& values, const WorldSystem& world, std::string& e
 
 bool read_settings(const Json& arguments, RenderSettings& settings, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!arguments.is_object())
     {
         error = "Render settings must be an object";
@@ -358,6 +365,7 @@ public:
         : renderer_(renderer), world_(world), scenes_(scenes), before_(before), after_(after),
           scene_id_(world.scene() == nullptr ? 0 : world.scene()->id())
     {
+        ENGINE_PROFILE_FUNCTION();
         for (const auto& item : arguments.items())
         {
             if (item.key() == "exposure" || item.key() == "filmicTonemap" ||
@@ -389,11 +397,13 @@ public:
 
     bool affects_scene() const noexcept override
     {
+        ENGINE_PROFILE_FUNCTION();
         return scene_id_ != 0;
     }
 
     bool apply(std::string& error) override
     {
+        ENGINE_PROFILE_FUNCTION();
         auto* scene = world_.scene();
         if ((scene == nullptr ? 0 : scene->id()) != scene_id_ ||
             settings_json(renderer_.settings()) != settings_json(before_))
@@ -433,6 +443,7 @@ public:
 
     bool revert(std::string& error) override
     {
+        ENGINE_PROFILE_FUNCTION();
         auto* scene = world_.scene();
         if ((scene == nullptr ? 0 : scene->id()) != scene_id_)
         {
@@ -486,6 +497,7 @@ private:
 
     static bool can_remove_environment(const Scene& scene, const Node& node)
     {
+        ENGINE_PROFILE_FUNCTION();
         std::vector<Component> components;
         if (!node.collect_components(components) || node.parent() || components.size() != 2 ||
             !node.enabled() || !node.visible())
@@ -516,6 +528,7 @@ private:
 
     bool record(Component component, bool created_component, bool created_node, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         Record value;
         value.node_id = scenes_.node_identity(component.node().id());
         if (!value.node_id)
@@ -540,6 +553,7 @@ private:
 
     bool apply_components(Scene& scene, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         std::vector<Node> nodes;
         if (!scene.collect_nodes(nodes))
         {
@@ -589,7 +603,10 @@ private:
             }
             auto settings = after_.atmosphere;
             const auto color = [](const std::array<float, 3>& value, const Color& previous)
-            { return Color{value[0], value[1], value[2], previous.a()}; };
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return Color{value[0], value[1], value[2], previous.a()};
+            };
             settings.ambient_color = color(after_.ambient_color, settings.ambient_color);
             settings.ambient_intensity = after_.ambient_intensity;
             settings.ambient_tricolor = after_.ambient_tricolor;
@@ -743,6 +760,7 @@ private:
 
     bool restore_records(Scene& scene)
     {
+        ENGINE_PROFILE_FUNCTION();
         bool restored = true;
         for (auto item = records_.rbegin(); item != records_.rend(); ++item)
         {
@@ -785,16 +803,19 @@ private:
 RenderCommands::RenderCommands(RenderSystem& renderer, WorldSystem& world, fs::path capture_root)
     : renderer_(renderer), world_(world), capture_root_(std::move(capture_root))
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 bool RenderCommands::register_commands(EditorCommands& commands, SceneCommands& scenes)
 {
+    ENGINE_PROFILE_FUNCTION();
     return register_render_feature_commands(renderer_, world_, commands, scenes) &&
            register_render_component_commands(world_, scenes, commands) &&
            commands.register_command("get_render_settings", false,
                                      [this](const Json& arguments, Json& result,
                                             std::unique_ptr<EditorEdit>&, std::string& error)
                                      {
+                                         ENGINE_PROFILE_FUNCTION_PROBE();
                                          if (!arguments.empty())
                                          {
                                              error = "get_render_settings has no arguments";
@@ -808,6 +829,7 @@ bool RenderCommands::register_commands(EditorCommands& commands, SceneCommands& 
                [this, &scenes](const Json& arguments, Json& result,
                                std::unique_ptr<EditorEdit>& edit, std::string& error)
                {
+                   ENGINE_PROFILE_FUNCTION_PROBE();
                    if (world_.scene() == nullptr &&
                        (!arguments.is_object() || arguments.size() != 1 ||
                         !arguments.contains("clearColor")))
@@ -889,6 +911,7 @@ bool RenderCommands::register_commands(EditorCommands& commands, SceneCommands& 
                [this](const Json& arguments, Json& result, std::unique_ptr<EditorEdit>&,
                       std::string& error)
                {
+                   ENGINE_PROFILE_FUNCTION_PROBE();
                    if (!arguments.is_object() || arguments.size() != 1 ||
                        !arguments.contains("enabled") || !arguments["enabled"].is_boolean())
                    {

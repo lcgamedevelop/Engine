@@ -1,4 +1,5 @@
 #include "plugins/runtime/camera/modules/collision_camera_module.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/camera/camera_math.hpp"
 #include "runtime/physics/physics_system.hpp"
 namespace engine::plugins::camera
@@ -7,6 +8,7 @@ namespace
 {
 PhysicsQueryFilter filter(const schema::CameraCollisionDataT& d, const CameraEvaluationContext& c)
 {
+    ENGINE_PROFILE_FUNCTION();
     PhysicsQueryFilter f;
     CameraTargetPose t;
     if (c.target(d.subject_slot, t))
@@ -22,6 +24,7 @@ PhysicsQueryFilter filter(const schema::CameraCollisionDataT& d, const CameraEva
 bool sweep(const schema::CameraCollisionDataT& d, const CameraEvaluationContext& c, Vec3 origin,
            Vec3 end, float& fraction)
 {
+    ENGINE_PROFILE_FUNCTION();
     fraction = 1;
     auto displacement = detail::sub(end, origin);
     if (detail::length(displacement) < 1e-7)
@@ -43,6 +46,7 @@ bool sweep(const schema::CameraCollisionDataT& d, const CameraEvaluationContext&
 bool CollisionCameraModule::validate(const Data& d, const schema::CameraControllerDataT& def,
                                      std::string& e)
 {
+    ENGINE_PROFILE_FUNCTION();
     return (detail::slot(def, d.subject_slot, !d.sight_enabled) &&
             detail::finite(d.subject_offset) &&
             (!d.height_offset || detail::valid_input(d.height_offset.get(), def)) &&
@@ -56,6 +60,7 @@ bool CollisionCameraModule::validate(const Data& d, const schema::CameraControll
 bool CollisionCameraModule::evaluate(const Data& d, const Runtime& current, Runtime& next,
                                      const CameraEvaluationContext& c, CameraPose& p)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!d.motion_enabled && !d.sight_enabled)
     {
         return true;
@@ -131,6 +136,7 @@ bool CollisionCameraModule::evaluate(const Data& d, const Runtime& current, Runt
 bool CollisionCameraModule::check(const Data& d, const CameraEvaluationContext& c,
                                   const CameraPose& p, bool& accepted)
 {
+    ENGINE_PROFILE_FUNCTION();
     accepted = false;
     if (!d.motion_enabled && !d.sight_enabled)
     {

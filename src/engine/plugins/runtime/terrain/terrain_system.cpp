@@ -7,6 +7,7 @@
 #include "plugins/runtime/terrain/terrain_samples.hpp"
 #include "runtime/app/app.hpp"
 #include "runtime/core/guid_map.hpp"
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/physics/physics_system.hpp"
 #include "runtime/render/render_system.hpp"
@@ -36,6 +37,7 @@ using Runtime = TerrainComponentRuntime;
 
 bool pose_of(TerrainComponent component, TransformSettings& pose)
 {
+    ENGINE_PROFILE_FUNCTION();
     return !component.node().parent() &&
            component.node().get_component<Transform>().get_settings(pose) &&
            finite(pose.position) && pose.rotation == Vec3{} && finite(pose.scale) &&
@@ -44,22 +46,26 @@ bool pose_of(TerrainComponent component, TransformSettings& pose)
 }
 Vec3 local_point(Vec3 value, const TransformSettings& pose)
 {
+    ENGINE_PROFILE_FUNCTION();
     return {(value.x() - pose.position.x()) / pose.scale.x(),
             (value.y() - pose.position.y()) / pose.scale.x(),
             (value.z() - pose.position.z()) / pose.scale.x()};
 }
 Bounds3 local_bounds(const Bounds3& value, const TransformSettings& pose)
 {
+    ENGINE_PROFILE_FUNCTION();
     return {local_point(value.minimum(), pose), local_point(value.maximum(), pose)};
 }
 Vec3 global_point(Vec3 value, const TransformSettings& pose)
 {
+    ENGINE_PROFILE_FUNCTION();
     return {value.x() * pose.scale.x() + pose.position.x(),
             value.y() * pose.scale.x() + pose.position.y(),
             value.z() * pose.scale.x() + pose.position.z()};
 }
 void fail(TerrainOperation& operation, std::string code, std::string error)
 {
+    ENGINE_PROFILE_FUNCTION();
     operation.snapshot.state = TerrainOperationState::failed;
     operation.snapshot.error_code = std::move(code);
     operation.snapshot.error = std::move(error);
@@ -83,6 +89,7 @@ void fail(TerrainOperation& operation, std::string code, std::string error)
 void progress(TerrainOperation& operation, std::string stage, std::uint64_t done,
               std::uint64_t total, SceneWorkState state)
 {
+    ENGINE_PROFILE_FUNCTION();
     SceneWorkProgress value;
     value.domain = "terrain";
     value.stage = std::move(stage);
@@ -98,6 +105,7 @@ SceneWorkState load(ResourceLoader& loader, std::string_view guid,
                     std::unique_ptr<ResourceLoad>& pending, ResourceReference& resource,
                     std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (resource)
     {
         return SceneWorkState::ready;
@@ -139,6 +147,7 @@ SceneWorkState load(ResourceLoader& loader, std::string_view guid,
 bool insert_halo(const schema::TerrainAssetDataT& source, TerrainRegionKey key, Keys& keys,
                  std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (int z = -1; z <= 1; ++z)
     {
         for (int y = -1; y <= 1; ++y)
@@ -175,13 +184,17 @@ bool insert_halo(const schema::TerrainAssetDataT& source, TerrainRegionKey key, 
 bool add_ancestors(const schema::TerrainAssetDataT& source, std::span<const TerrainRegionKey> fine,
                    Keys& required, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (auto key : fine)
     {
         for (std::uint8_t lod = 1; lod <= 15; ++lod)
         {
             const std::int64_t scale = std::int64_t{1} << lod;
             auto parent = [scale](std::int32_t v)
-            { return static_cast<std::int32_t>(v / scale - (v % scale < 0 ? 1 : 0)); };
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return static_cast<std::int32_t>(v / scale - (v % scale < 0 ? 1 : 0));
+            };
             TerrainRegionKey ancestor{parent(key.x()), parent(key.y()), parent(key.z()), lod};
             if (const auto* region = entry(source, ancestor))
             {
@@ -200,6 +213,7 @@ bool add_ancestors(const schema::TerrainAssetDataT& source, std::span<const Terr
 bool collision_required(const schema::TerrainAssetDataT& source, TerrainRegionKey key,
                         const Runtime& runtime, const TransformSettings& pose)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (key.lod() != 0)
     {
         return false;
@@ -235,6 +249,7 @@ bool collision_required(const schema::TerrainAssetDataT& source, TerrainRegionKe
 std::uint8_t transition_mask(const schema::TerrainAssetDataT& source, TerrainRegionKey key,
                              std::span<const TerrainRegionKey> keys)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto a = region_bounds(source, key);
     const double low[3]{a.minimum().x(), a.minimum().y(), a.minimum().z()};
     const double high[3]{a.maximum().x(), a.maximum().y(), a.maximum().z()};
@@ -273,6 +288,7 @@ bool create_output(Scene& scene, TerrainComponent owner, const TransformSettings
                    const schema::TerrainAssetDataT& source, ResourceLoader& resources, Node& output,
                    std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     if (!mesh.mesh || mesh.mesh->indices.empty())
     {
@@ -348,6 +364,7 @@ bool create_output(Scene& scene, TerrainComponent owner, const TransformSettings
 
 bool build_meshes(TerrainWork& work, const TerrainMesher& mesher)
 {
+    ENGINE_PROFILE_FUNCTION();
     TerrainReadSnapshot samples = work.input;
     samples.blocks = work.delta.blocks;
     samples.source_revision = work.delta.base_revision + 1;
@@ -377,6 +394,7 @@ bool build_meshes(TerrainWork& work, const TerrainMesher& mesher)
 bool compute(TerrainWork& work, const TerrainRequest& request, bool streaming,
              const TerrainMesher& mesher)
 {
+    ENGINE_PROFILE_FUNCTION();
     // Saved regions are streamed with the same candidate as base resources; all disk work stays
     // here.
     if (!std::holds_alternative<TerrainLoadSpec>(request) || streaming)
@@ -404,6 +422,7 @@ bool compute(TerrainWork& work, const TerrainRequest& request, bool streaming,
         const bool success = std::visit(
             [&](const auto& spec) -> bool
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 using T = std::decay_t<decltype(spec)>;
                 if constexpr (std::is_same_v<T, TerrainEditSpec>)
                 {
@@ -529,6 +548,7 @@ bool compute(TerrainWork& work, const TerrainRequest& request, bool streaming,
 
 TerrainOperation::~TerrainOperation() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (work)
     {
         work->cancelled->store(true, std::memory_order_relaxed);
@@ -547,13 +567,16 @@ TerrainSystem::TerrainSystem(WorldSystem& world, ResourceLoader& resources, Task
     : world_(world), resources_(resources), tasks_(tasks), renderer_(renderer), physics_(physics),
       planner_(std::move(planner)), mesher_(std::move(mesher))
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 TerrainSystem::~TerrainSystem() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
 }
 bool TerrainSystem::on_initialize(const EngineConfig&)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!planner_ || !mesher_ || !tasks_.is_initialized() || !world_.native_world())
     {
         return false;
@@ -570,6 +593,7 @@ bool TerrainSystem::on_initialize(const EngineConfig&)
 bool TerrainSystem::request(TerrainComponent component, TerrainRequest request,
                             TerrainOperationId& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     auto* state = component.runtime();
     TerrainComponent::Data settings;
@@ -592,6 +616,7 @@ bool TerrainSystem::request(TerrainComponent component, TerrainRequest request,
     const bool valid = std::visit(
         [&](auto& spec) -> bool
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             using T = std::decay_t<decltype(spec)>;
             if constexpr (std::is_same_v<T, TerrainEditSpec>)
             {
@@ -658,6 +683,7 @@ bool TerrainSystem::request(TerrainComponent component, TerrainRequest request,
 bool TerrainSystem::update(TerrainComponent component, SceneScopeId scope,
                            const SceneWorkBudget& frame_budget)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* state = component.runtime();
     state->system_ = this;
     TerrainComponent::Data settings;
@@ -731,6 +757,7 @@ bool TerrainSystem::update(TerrainComponent component, SceneScopeId scope,
     std::erase_if(state->operations_,
                   [](const auto& item)
                   {
+                      ENGINE_PROFILE_FUNCTION_PROBE();
                       return item.second->discard_when_terminal &&
                              terminal(item.second->snapshot.state) && !item.second->future.valid();
                   });
@@ -887,6 +914,7 @@ bool TerrainSystem::update(TerrainComponent component, SceneScopeId scope,
         std::uint64_t expected = std::visit(
             [](const auto& spec) -> std::uint64_t
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 if constexpr (requires { spec.expected_revision; })
                 {
                     return spec.expected_revision;
@@ -1124,7 +1152,11 @@ bool TerrainSystem::update(TerrainComponent component, SceneScopeId scope,
                              work.input.regions.end())
             {
                 if (std::none_of(work.original_blocks.begin(), work.original_blocks.end(),
-                                 [&](const auto& value) { return value.key == key; }))
+                                 [&](const auto& value)
+                                 {
+                                     ENGINE_PROFILE_FUNCTION_PROBE();
+                                     return value.key == key;
+                                 }))
                 {
                     work.original_blocks.push_back(*block);
                 }
@@ -1193,6 +1225,7 @@ bool TerrainSystem::update(TerrainComponent component, SceneScopeId scope,
                     fragment.source_regions.begin(), fragment.source_regions.end(),
                     [&](auto key)
                     {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
                         return std::find(work.input.regions.begin(), work.input.regions.end(),
                                          key) != work.input.regions.end();
                     });
@@ -1251,7 +1284,10 @@ bool TerrainSystem::update(TerrainComponent component, SceneScopeId scope,
         auto mesher = mesher_;
         const bool streaming = op.residency_only;
         op.future = tasks_.submit("Terrain.prepare", [shared, request, mesher, streaming]()
-                                  { return compute(*shared, request, streaming, *mesher); });
+                                  {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return compute(*shared, request, streaming, *mesher);
+        });
         if (!op.future.valid())
         {
             return true;
@@ -1281,7 +1317,11 @@ bool TerrainSystem::update(TerrainComponent component, SceneScopeId scope,
         {
             auto shared = op.work;
             op.future = tasks_.submit("Terrain.save_manifest",
-                                      [shared]() { return shared->store->publish(shared->error); });
+                                      [shared]()
+                                      {
+                                          ENGINE_PROFILE_FUNCTION_PROBE();
+                                          return shared->store->publish(shared->error);
+                                      });
             if (!op.future.valid())
             {
                 fail(op, "task_budget", "Cannot submit terrain manifest publication");
@@ -1405,6 +1445,7 @@ bool TerrainSystem::update(TerrainComponent component, SceneScopeId scope,
             Node created;
             const auto create = [&](Scene& scene)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 return create_output(scene, component, pose, settings, mesh, *work.input.source,
                                      resources_, created, work.error);
             };
@@ -1428,6 +1469,7 @@ bool TerrainSystem::update(TerrainComponent component, SceneScopeId scope,
         {
             const auto create = [&](Scene& scene)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 return create_fragments(scene, component, pose, settings, work.fragments,
                                         op.prepared_fragments, work.error);
             };
@@ -1544,7 +1586,11 @@ bool TerrainSystem::update(TerrainComponent component, SceneScopeId scope,
         Keys keep(op.required.begin(), op.required.end());
         keep.insert(dirty.begin(), dirty.end());
         std::erase_if(work.delta.blocks,
-                      [&](const auto& item) { return !keep.contains(item.first); });
+                      [&](const auto& item)
+                      {
+                          ENGINE_PROFILE_FUNCTION_PROBE();
+                          return !keep.contains(item.first);
+                      });
         auto fragments = op.replace_source ? std::vector<Runtime::Fragment>{} : state->fragments_;
         auto retired_ids = loaded              ? work.checkpoint.retired_ids
                            : op.replace_source ? std::vector<std::uint64_t>{}
@@ -1552,6 +1598,7 @@ bool TerrainSystem::update(TerrainComponent component, SceneScopeId scope,
         std::erase_if(fragments,
                       [&](const auto& fragment)
                       {
+                          ENGINE_PROFILE_FUNCTION_PROBE();
                           return std::find(op.retire_fragments.begin(), op.retire_fragments.end(),
                                            fragment.stable_id) != op.retire_fragments.end();
                       });
@@ -1674,12 +1721,14 @@ bool TerrainSystem::update(TerrainComponent component, SceneScopeId scope,
 
 SceneWorkState TerrainSystem::prepare_scope(SceneScopeId scope, const SceneWorkBudget& budget)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* scene = scope == SceneScopeId{} ? world_.scene() : world_.scope_candidate(scope);
     auto& status = scopes_[scope];
     status.scope = scope;
     status.stages.clear();
     const auto invalid = [&](std::string message)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         status.state = SceneWorkState::failed;
         SceneWorkProgress progress;
         progress.domain = "terrain";
@@ -1739,6 +1788,7 @@ SceneWorkState TerrainSystem::prepare_scope(SceneScopeId scope, const SceneWorkB
 }
 bool TerrainSystem::scope_status(SceneScopeId scope, ScenePreparationSnapshot& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     const auto found = scopes_.find(scope);
     if (found == scopes_.end())
@@ -1750,10 +1800,12 @@ bool TerrainSystem::scope_status(SceneScopeId scope, ScenePreparationSnapshot& o
 }
 void TerrainSystem::release_scope(SceneScopeId scope) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     scopes_.erase(scope);
 }
 bool TerrainSystem::on_tick(double seconds)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!world_.paused())
     {
         simulation_time_ += std::max(seconds, 0.0);
@@ -1772,6 +1824,7 @@ bool TerrainSystem::synchronize()
     ecs.each<const ecs_detail::ComponentStorage<TerrainComponent::Data>>(
         [&](flecs::entity entity, const auto&)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             if (entity.has<ecs_detail::Published>())
             {
                 owners.push_back(entity.id());
@@ -1780,6 +1833,7 @@ bool TerrainSystem::synchronize()
     ecs.each<const TerrainGenerated>(
         [&](flecs::entity entity, const TerrainGenerated& generated)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             if (!entity.has<ecs_detail::Published>())
             {
                 return;
@@ -1811,6 +1865,7 @@ bool TerrainSystem::synchronize()
 }
 void TerrainSystem::on_shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!world_.native_world())
     {
         return;
@@ -1818,9 +1873,16 @@ void TerrainSystem::on_shutdown() noexcept
     std::vector<std::uint64_t> owners, generated;
     flecs::world ecs(world_.native_world());
     ecs.each<const ecs_detail::ComponentStorage<TerrainComponent::Data>>(
-        [&](flecs::entity entity, const auto&) { owners.push_back(entity.id()); });
+        [&](flecs::entity entity, const auto&)
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            owners.push_back(entity.id());
+        });
     ecs.each<const TerrainGenerated>([&](flecs::entity entity, const auto&)
-                                     { generated.push_back(entity.id()); });
+                                     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        generated.push_back(entity.id());
+    });
     for (auto id : owners)
     {
         auto component = world_.find_node(id).get_component<TerrainComponent>();

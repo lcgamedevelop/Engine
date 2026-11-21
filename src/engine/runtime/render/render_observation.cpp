@@ -1,4 +1,7 @@
 #include "runtime/render/frame_counters.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
+#include "runtime/render/gpu_memory_tracker.hpp"
 #include "runtime/render/passes/frame_output.hpp"
 #include "runtime/render/render_extension.hpp"
 #include "runtime/render/render_system.hpp"
@@ -25,13 +28,42 @@ namespace
 {
 std::uint64_t render_time()
 {
+    ENGINE_PROFILE_FUNCTION();
     return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
                                           std::chrono::steady_clock::now().time_since_epoch())
                                           .count());
 }
 } // namespace
+bool RenderSystem::memory_snapshot(std::string_view guid, std::uint32_t limit,
+                                    GpuMemorySnapshot& output) const
+{
+    ENGINE_PROFILE_FUNCTION();
+    output = {};
+    if (!gpu_memory_ || !gpu_memory_->snapshot(guid, limit, output))
+    {
+        return false;
+    }
+    if (renderer_initialized_)
+    {
+        if (const auto* stats = bgfx::getStats(); stats && stats->gpuMemoryUsed >= 0)
+        {
+            output.driver_bytes = static_cast<std::uint64_t>(stats->gpuMemoryUsed);
+        }
+    }
+    if (preparation_)
+    {
+        output.texture_staging_reserved_bytes = preparation_->staging_bytes;
+        for (const auto& work : preparation_->retired_work)
+        {
+            output.retired_texture_staging_reserved_bytes += work->reserved_bytes;
+        }
+    }
+    return true;
+}
+
 bool RenderSystem::can_publish_geometry(MeshRenderer prepared, MeshRenderer target) const
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!gpu_ready() || !scene_resources_ || !world_ || !prepared || !target ||
         prepared.node().world() != world_ || target.node().world() != world_)
     {
@@ -52,6 +84,7 @@ bool RenderSystem::can_publish_geometry(MeshRenderer prepared, MeshRenderer targ
 
 void RenderSystem::publish_geometry(MeshRenderer prepared, MeshRenderer target) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (prepared == target || !prepared.active() || !prepared.visible_in_hierarchy())
     {
         return;
@@ -82,6 +115,7 @@ void RenderSystem::publish_geometry(MeshRenderer prepared, MeshRenderer target) 
 SceneWorkState RenderSystem::prepare_scope(SceneScopeId id, const SceneWorkBudget& budget,
                                            Camera camera)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!is_initialized() || !std::isfinite(budget.seconds) || budget.seconds <= 0 ||
         budget.items == 0 || budget.upload_bytes == 0)
     {
@@ -89,6 +123,13 @@ SceneWorkState RenderSystem::prepare_scope(SceneScopeId id, const SceneWorkBudge
     }
     const bool current = id == SceneScopeId{};
     auto* candidate = world_ ? (current ? world_->scene() : world_->scope_candidate(id)) : nullptr;
+    const auto extension_scope =
+        current && candidate ? SceneScopeId{world_->epoch(), candidate->id()} : id;
+    if (current && published_extension_scope_ != SceneScopeId{} &&
+        published_extension_scope_ != extension_scope)
+    {
+        release_scope({});
+    }
     if (current && !candidate)
     {
         auto& snapshot = scope_preparations_[id].snapshot;
@@ -159,6 +200,7 @@ SceneWorkState RenderSystem::prepare_scope(SceneScopeId id, const SceneWorkBudge
         auto add = [&](std::string stage, std::uint64_t completed, std::uint64_t total, bool known,
                        SceneWorkState state, std::uint32_t flight = 0)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             SceneWorkProgress value;
             value.domain = "render";
             value.stage = std::move(stage);
@@ -169,7 +211,10 @@ SceneWorkState RenderSystem::prepare_scope(SceneScopeId id, const SceneWorkBudge
             value.in_flight = flight;
             value.elapsed_ns = render_time() - record.started_ns;
             const auto old = std::find_if(previous.begin(), previous.end(), [&](const auto& item)
-                                          { return item.stage == value.stage; });
+                                          {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return item.stage == value.stage;
+            });
             const bool changed = old == previous.end() || old->completed != value.completed ||
                                  old->total != value.total ||
                                  old->total_known != value.total_known ||
@@ -202,14 +247,16 @@ SceneWorkState RenderSystem::prepare_scope(SceneScopeId id, const SceneWorkBudge
     }
     if (record.snapshot.state == SceneWorkState::ready)
     {
+        if (current)
+        {
+            published_extension_scope_ = extension_scope;
+        }
         invoking_extensions_ = true;
         for (auto* extension : extensions_)
         {
-            const auto state = extension->prepare_scope(
-                current ? SceneScopeId{world_->epoch(), candidate->id()} : id, budget);
+            const auto state = extension->prepare_scope(extension_scope, budget);
             ScenePreparationSnapshot value;
-            if (extension->scope_status(
-                    current ? SceneScopeId{world_->epoch(), candidate->id()} : id, value))
+            if (extension->scope_status(extension_scope, value))
             {
                 record.snapshot.stages.insert(record.snapshot.stages.end(), value.stages.begin(),
                                               value.stages.end());
@@ -226,6 +273,7 @@ SceneWorkState RenderSystem::prepare_scope(SceneScopeId id, const SceneWorkBudge
 
 bool RenderSystem::scope_status(SceneScopeId id, ScenePreparationSnapshot& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     const auto found = scope_preparations_.find(id);
     if (found == scope_preparations_.end() ||
@@ -239,9 +287,28 @@ bool RenderSystem::scope_status(SceneScopeId id, ScenePreparationSnapshot& outpu
 
 void RenderSystem::release_scope(SceneScopeId id) noexcept
 {
-    for (auto* extension : extensions_)
+    ENGINE_PROFILE_FUNCTION();
+    auto extension_scope = id;
+    if (id == SceneScopeId{})
     {
-        extension->release_scope(id);
+        const auto previous = std::exchange(published_extension_scope_, {});
+        if (!scope_preparations_.contains(previous))
+        {
+            extension_scope = previous;
+        }
+    }
+    else if (published_extension_scope_ == id)
+    {
+        published_extension_scope_ = {};
+    }
+    if (extension_scope != SceneScopeId{})
+    {
+        const bool was_invoking = std::exchange(invoking_extensions_, true);
+        for (auto* extension : extensions_)
+        {
+            extension->release_scope(extension_scope);
+        }
+        invoking_extensions_ = was_invoking;
     }
     if (preparation_ && world_)
     {
@@ -263,6 +330,7 @@ void RenderSystem::release_scope(SceneScopeId id) noexcept
 
 RenderFrameSnapshot RenderSystem::submitted_frame(RenderFrameKind kind) const
 {
+    ENGINE_PROFILE_FUNCTION();
     RenderFrameSnapshot frame;
     frame.device_generation = device_generation_;
     frame.submission_id = submission_sequence_ + 1;
@@ -276,6 +344,7 @@ RenderFrameSnapshot RenderSystem::submitted_frame(RenderFrameKind kind) const
         query.each(
             [&](const ecs_detail::ScopeState& state)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 if (state.scope == frame.scene_id)
                 {
                     frame.content_revision = state.content_revision;
@@ -308,6 +377,7 @@ RenderFrameSnapshot RenderSystem::submitted_frame(RenderFrameKind kind) const
 
 void RenderSystem::record_frame(RenderFrameKind kind)
 {
+    ENGINE_PROFILE_FUNCTION();
     last_frame_ = submitted_frame(kind);
     ++submission_sequence_;
     if (world_ && world_->native_world() && kind == RenderFrameKind::scene && scene_collected_)
@@ -316,6 +386,7 @@ void RenderSystem::record_frame(RenderFrameKind kind)
         query.each(
             [&](flecs::entity entity, const ecs_detail::ScopeState& state)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 const SceneScopeId scope{world_->epoch(), state.scope};
                 if (state.published && entity.has<ecs_detail::Published>() &&
                     world_->scope_candidate(scope) == world_->scene() &&
@@ -325,13 +396,17 @@ void RenderSystem::record_frame(RenderFrameKind kind)
                 }
             });
         std::erase_if(scope_frames_, [&](const auto& entry)
-                      { return world_->scope_candidate(entry.first) != world_->scene(); });
+                      {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return world_->scope_candidate(entry.first) != world_->scene();
+        });
     }
     advance_screenshots();
 }
 
 bool RenderSystem::frame_status(SceneScopeId scope, RenderFrameSnapshot& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     if (!renderer_initialized_ || last_frame_.submission_id == 0 ||
         last_frame_.device_generation != device_generation_)
@@ -356,6 +431,7 @@ bool RenderSystem::frame_status(SceneScopeId scope, RenderFrameSnapshot& output)
 
 bool RenderSystem::request_screenshot(const ScreenshotRequest& request, ScreenshotId& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     const auto path = PathUtils::from_utf8(request.path);
     std::error_code error;
@@ -416,6 +492,7 @@ bool RenderSystem::request_screenshot(const ScreenshotRequest& request, Screensh
 
 bool RenderSystem::screenshot_status(ScreenshotId id, ScreenshotSnapshot& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     const auto found = screenshots_.find(id.value);
     if (id.owner != screenshot_owner_ || found == screenshots_.end() ||
@@ -429,6 +506,7 @@ bool RenderSystem::screenshot_status(ScreenshotId id, ScreenshotSnapshot& output
 
 bool RenderSystem::cancel_screenshot(ScreenshotId id)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto found = screenshots_.find(id.value);
     if (id.owner != screenshot_owner_ || found == screenshots_.end())
     {
@@ -440,11 +518,16 @@ bool RenderSystem::cancel_screenshot(ScreenshotId id)
         return false;
     }
     state = ScreenshotState::cancelled;
+    if (active_screenshot_ == id.value && frame_output_)
+    {
+        frame_output_->retire_capture();
+    }
     return true;
 }
 
 bool RenderSystem::release_screenshot(ScreenshotId id)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto found = screenshots_.find(id.value);
     if (id.owner != screenshot_owner_ || found == screenshots_.end())
     {
@@ -469,6 +552,7 @@ bool RenderSystem::release_screenshot(ScreenshotId id)
 
 void RenderSystem::submit_screenshot(RenderFrameKind kind)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (active_screenshot_ || !frame_output_)
     {
         return;
@@ -506,14 +590,15 @@ void RenderSystem::submit_screenshot(RenderFrameKind kind)
                 continue;
             }
         }
-        if (!frame_output_->capture())
+        const auto frame = submitted_frame(kind);
+        if (!frame_output_->capture(operation.request.scope, frame.scene_id))
         {
             operation.snapshot.state = ScreenshotState::failed;
             operation.snapshot.error_code = "readback_unavailable";
             operation.snapshot.error = "Final display texture cannot be read back";
             continue;
         }
-        operation.snapshot.frame = submitted_frame(kind);
+        operation.snapshot.frame = frame;
         operation.snapshot.state = ScreenshotState::reading_back;
         active_screenshot_ = key;
         {
@@ -528,13 +613,21 @@ void RenderSystem::submit_screenshot(RenderFrameKind kind)
 
 void RenderSystem::advance_screenshots()
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto found = screenshots_.find(active_screenshot_);
     if (!active_screenshot_ || found == screenshots_.end() || !frame_output_ || !callbacks_)
     {
         return;
     }
     auto& operation = found->second;
-    if (frame_output_->collect(frame_number_))
+    const auto readback = frame_output_->collect(frame_number_);
+    const bool read_failed = readback == render_detail::GpuReadbackStatus::failed;
+    if (read_failed || (readback == render_detail::GpuReadbackStatus::complete &&
+                        operation.snapshot.state == ScreenshotState::cancelled))
+    {
+        callbacks_->status.store(ScreenshotStatus::failed);
+    }
+    else if (readback == render_detail::GpuReadbackStatus::complete)
     {
         const auto& pixels = frame_output_->pixels();
         callbacks_->screenShot(operation.temporary_path.c_str(), frame_output_->capture_width(),
@@ -543,10 +636,7 @@ void RenderSystem::advance_screenshots()
                                static_cast<std::uint32_t>(pixels.size()),
                                bgfx::getCaps()->originBottomLeft);
         callbacks_->process(tasks_);
-        if (operation.snapshot.state != ScreenshotState::cancelled)
-        {
-            operation.snapshot.state = ScreenshotState::writing;
-        }
+        operation.snapshot.state = ScreenshotState::writing;
     }
     const auto status = callbacks_->status.load();
     if (status != ScreenshotStatus::complete && status != ScreenshotStatus::failed)
@@ -561,8 +651,9 @@ void RenderSystem::advance_screenshots()
         if (operation.snapshot.state != ScreenshotState::cancelled)
         {
             operation.snapshot.state = ScreenshotState::failed;
-            operation.snapshot.error_code = "write_failed";
-            operation.snapshot.error = "Cannot encode or write capture";
+            operation.snapshot.error_code = read_failed ? "readback_failed" : "write_failed";
+            operation.snapshot.error =
+                read_failed ? "Cannot read the display image" : "Cannot encode or write capture";
         }
     }
     else if (!std::filesystem::exists(PathUtils::from_utf8(operation.request.path), error) &&

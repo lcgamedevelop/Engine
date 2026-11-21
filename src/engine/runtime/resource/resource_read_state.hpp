@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/resource/resource.hpp"
 #include "runtime/resource/resource_read.hpp"
 
@@ -19,6 +21,7 @@ struct ResourceRead::State
 
     bool cancel() noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (status == ResourceReadStatus::delivered || status == ResourceReadStatus::failed)
         {
             return false;

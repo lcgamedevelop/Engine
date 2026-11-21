@@ -1,4 +1,6 @@
 #include "plugins/editor/ui/ui_editor_commands.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/resource_access.hpp"
 #include "runtime/resource/types/ui_resource.hpp"
 
@@ -22,6 +24,7 @@ namespace engine::plugins::ui
 {
 bool fields(const Json& args, std::initializer_list<std::string_view> names, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!args.is_object())
     {
         error = "Arguments must be an object";
@@ -39,6 +42,7 @@ bool fields(const Json& args, std::initializer_list<std::string_view> names, std
 }
 bool identity(const Json& value, std::uint64_t& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = 0;
     if (!value.is_string())
     {
@@ -51,6 +55,7 @@ bool identity(const Json& value, std::uint64_t& output)
 }
 bool handle(const Json& value, UiElementHandle& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     return value.is_object() && value.size() == 2 && value.contains("documentId") &&
            value.contains("elementId") && identity(value["documentId"], output.document_id) &&
@@ -58,6 +63,7 @@ bool handle(const Json& value, UiElementHandle& output)
 }
 bool number(const Json& value, float& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!value.is_number())
     {
         return false;
@@ -72,6 +78,7 @@ bool number(const Json& value, float& output)
 }
 bool bounded_text(const Json& value, std::string& output, std::size_t limit)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!value.is_string() || value.get_ref<const std::string&>().size() > limit)
     {
         return false;
@@ -81,12 +88,14 @@ bool bounded_text(const Json& value, std::string& output, std::size_t limit)
 }
 Json handle_json(UiElementHandle h)
 {
+    ENGINE_PROFILE_FUNCTION();
     return h.document_id == 0 ? Json(nullptr)
                               : Json{{"documentId", std::to_string(h.document_id)},
                                      {"elementId", std::to_string(h.element_id)}};
 }
 Json element_json(const UiElementInfo& info)
 {
+    ENGINE_PROFILE_FUNCTION();
     constexpr std::size_t max_text = 8192;
     return {{"handle", handle_json(info.handle)},
             {"parent", handle_json(info.parent)},
@@ -107,15 +116,18 @@ UiEditorCommands::State::State(WorldSystem& w, UiSystem& u, WindowSystem& win,
                                editor::ScenePreview& p, TaskSystem& t, std::filesystem::path root)
     : world(w), ui(u), window(win), preview(p), tasks(t), project(std::move(root))
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 UiEditorCommands::UiEditorCommands(WorldSystem& w, UiSystem& u, WindowSystem& win,
                                    editor::ScenePreview& p, TaskSystem& t,
                                    std::filesystem::path root)
     : state_(std::make_unique<State>(w, u, win, p, t, std::move(root)))
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 UiEditorCommands::~UiEditorCommands() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     cancel_pending_input();
     for (auto& [id, job] : state_->sources)
     {
@@ -125,6 +137,7 @@ UiEditorCommands::~UiEditorCommands() noexcept
 bool UiEditorCommands::register_commands(editor::EditorCommands& commands,
                                          editor::SceneCommands& scene_commands)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (const auto* name :
          {"get_ui_documents", "get_ui_tree", "get_ui_element", "set_ui_element", "get_ui_source",
           "save_ui_source", "ui_input", "get_ui_input", "cancel_ui_input", "click_ui"})
@@ -134,6 +147,7 @@ bool UiEditorCommands::register_commands(editor::EditorCommands& commands,
                 [this, name](const Json& args, Json& result, std::unique_ptr<editor::EditorEdit>&,
                              std::string& error)
                 {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
                     const std::string_view command(name);
                     if (command == "get_ui_source" || command == "save_ui_source")
                     {
@@ -154,18 +168,24 @@ bool UiEditorCommands::register_commands(editor::EditorCommands& commands,
         "set_ui_document", true,
         [this, &scene_commands](const Json& args, Json& result,
                                 std::unique_ptr<editor::EditorEdit>& edit, std::string& error)
-        { return state_->edit_document(scene_commands, args, result, edit, error); });
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return state_->edit_document(scene_commands, args, result, edit, error);
+        });
 }
 void UiEditorCommands::tick(double)
 {
+    ENGINE_PROFILE_FUNCTION();
     state_->tick_input();
 }
 void UiEditorCommands::cancel_pending_input() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     state_->cancel_input("Host canceled UI input");
 }
 void UiEditorCommands::observe_event(const SDL_Event& event) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     switch (event.type)
     {
     case SDL_EVENT_MOUSE_MOTION:
@@ -192,6 +212,7 @@ void UiEditorCommands::observe_event(const SDL_Event& event) noexcept
 }
 bool UiEditorCommands::State::document(std::uint64_t id, std::uint64_t& node, UiElementHandle& root)
 {
+    ENGINE_PROFILE_FUNCTION();
     node = 0;
     root = {};
     if (!ui.synchronize())
@@ -218,6 +239,7 @@ bool UiEditorCommands::State::document(std::uint64_t id, std::uint64_t& node, Ui
 }
 bool UiEditorCommands::State::focused(std::uint64_t doc, UiElementHandle& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     std::uint64_t node = 0;
     UiElementHandle root;
@@ -260,6 +282,7 @@ bool UiEditorCommands::State::focused(std::uint64_t doc, UiElementHandle& output
 bool UiEditorCommands::State::query(std::string_view name, const Json& args, Json& result,
                                     std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (name == "get_ui_documents")
     {
         if (!fields(args, {}, error))
@@ -523,6 +546,7 @@ bool UiEditorCommands::State::edit_document(editor::SceneCommands& scene_command
                                             Json& result, std::unique_ptr<editor::EditorEdit>& edit,
                                             std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!preview.active())
     {
         error = "UI document binding requires an editable scene preview";

@@ -1,4 +1,5 @@
 #include "editor/project/project_system.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/log/log_system.hpp"
 #include "runtime/utils/path_utils.hpp"
@@ -17,6 +18,7 @@ namespace
 [[nodiscard]] bool check_directory(const std::filesystem::path& path,
                                    const std::string& display_path)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::error_code error;
     const bool is_directory = std::filesystem::is_directory(path, error);
     if (error)
@@ -38,15 +40,18 @@ namespace
 
 ProjectSystem::ProjectSystem(std::string project_root) : project_root_(std::move(project_root))
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 ProjectSystem::~ProjectSystem() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
 }
 
 bool ProjectSystem::on_initialize(const EngineConfig&)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (project_root_.empty())
     {
         LogSystem::write(LogLevel::error, "Project root directory must not be empty");
@@ -71,6 +76,7 @@ bool ProjectSystem::on_initialize(const EngineConfig&)
 
 void ProjectSystem::on_shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 } // namespace engine::editor

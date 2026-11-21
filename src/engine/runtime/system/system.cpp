@@ -1,4 +1,5 @@
 #include "runtime/system/system.hpp"
+#include "runtime/performance/function_profile.hpp"
 
 #include <cmath>
 #include <utility>
@@ -13,6 +14,7 @@ System::~System() noexcept = default;
 
 bool System::add_subsystem(std::unique_ptr<System>& subsystem)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     if (subsystem == nullptr || subsystem->parent_ != nullptr)
     {
         return false;
@@ -39,31 +41,37 @@ bool System::add_subsystem(std::unique_ptr<System>& subsystem)
 
 System* System::subsystem(std::size_t index) noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return index < subsystems_.size() ? subsystems_[index].get() : nullptr;
 }
 
 const System* System::subsystem(std::size_t index) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return index < subsystems_.size() ? subsystems_[index].get() : nullptr;
 }
 
 std::size_t System::subsystem_count() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return subsystems_.size();
 }
 
 const System* System::parent() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return parent_;
 }
 
 bool System::is_initialized() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return initialized_;
 }
 
 bool System::initialize(const EngineConfig& config)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     if (parent_ != nullptr || initialized_ || executing_)
     {
         return false;
@@ -74,6 +82,7 @@ bool System::initialize(const EngineConfig& config)
 
 bool System::tick(double delta_time)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     if (parent_ != nullptr || !std::isfinite(delta_time) || delta_time < 0.0)
     {
         return false;
@@ -84,6 +93,7 @@ bool System::tick(double delta_time)
 
 void System::shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     if (parent_ != nullptr || executing_)
     {
         return;
@@ -94,11 +104,13 @@ void System::shutdown() noexcept
 
 bool System::on_tick(double)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return true;
 }
 
 bool System::can_attach_to(const System& owner) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     if (this == &owner || initialized_ || executing_)
     {
         return false;
@@ -117,6 +129,7 @@ bool System::can_attach_to(const System& owner) const noexcept
 
 bool System::initialize_tree(const EngineConfig& config)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     if (initialized_ || executing_)
     {
         return false;
@@ -152,6 +165,7 @@ bool System::initialize_tree(const EngineConfig& config)
 
 bool System::tick_tree(double delta_time)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     if (!initialized_ || executing_)
     {
         return false;
@@ -179,6 +193,7 @@ bool System::tick_tree(double delta_time)
 
 void System::shutdown_tree() noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     if (!initialized_)
     {
         return;

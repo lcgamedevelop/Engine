@@ -1,6 +1,8 @@
 #include "runtime/scene/scene.hpp"
 
 #include "runtime/log/log_system.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/resource/resource_loader.hpp"
 #include "runtime/scene/camera.hpp"
 #include "runtime/scene/ecs_storage.hpp"
@@ -15,10 +17,12 @@ namespace engine
 {
 Scene::Scene(WorldSystem& world, std::uint64_t id) noexcept : world_(world), id_(id)
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 bool Scene::initialize(std::string_view name)
 {
+    ENGINE_PROFILE_ZONE("Scene.initialize");
     if (!world_.can_modify() || metadata_entity_ != 0)
     {
         return false;
@@ -33,6 +37,7 @@ bool Scene::initialize(std::string_view name)
 }
 Scene::~Scene() noexcept
 {
+    ENGINE_PROFILE_ZONE("Scene.destroy");
     if (world_.native_world() && metadata_entity_ != 0 &&
         ecs_is_alive(world_.native_world(), metadata_entity_))
     {
@@ -45,18 +50,22 @@ Scene::~Scene() noexcept
 }
 std::uint64_t Scene::id() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return id_;
 }
 WorldSystem& Scene::world() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return world_;
 }
 bool Scene::empty() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return local_node_index_.empty();
 }
 schema::SceneInfoT* Scene::mutable_info() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!world_.native_world() || metadata_entity_ == 0 ||
         !ecs_is_alive(world_.native_world(), metadata_entity_))
     {
@@ -67,11 +76,13 @@ schema::SceneInfoT* Scene::mutable_info() const noexcept
 }
 std::string Scene::name() const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* info = mutable_info();
     return info ? info->name : std::string{};
 }
 Node Scene::create_node(std::string_view name)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (allocation_target_)
     {
         node_sequence_ = std::max(node_sequence_, allocation_target_->node_sequence_);
@@ -84,6 +95,7 @@ Node Scene::create_node(std::string_view name)
 }
 Node Scene::create_node(std::string_view name, std::uint64_t local_id)
 {
+    ENGINE_PROFILE_ZONE("Scene.createNode");
     flecs::world current(world_.native_world());
     const auto* scope = current.entity(metadata_entity_).try_get<ecs_detail::ScopeState>();
     const bool leased = scope && !scope->sealed && ecs_detail::preparing_epoch == world_.epoch() &&
@@ -126,6 +138,7 @@ Node Scene::create_node(std::string_view name, std::uint64_t local_id)
 }
 Node Scene::find_node(std::uint64_t id) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     Node node(world_, world_.epoch(), id);
     if (!node || (node.scene() != this && node.scene() != allocation_target_))
     {
@@ -141,11 +154,13 @@ Node Scene::find_node(std::uint64_t id) const noexcept
 }
 Node Scene::find_local_node(std::uint64_t local_id) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto item = local_node_index_.find(local_id);
     return item == local_node_index_.end() ? Node{} : find_node(item->second);
 }
 Node Scene::find_node(std::string_view name) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!world_.native_world())
     {
         return {};
@@ -175,6 +190,7 @@ Node Scene::find_node(std::string_view name) const noexcept
 }
 bool Scene::destroy_node(std::uint64_t id)
 {
+    ENGINE_PROFILE_ZONE("Scene.destroyNode");
     if (!world_.can_modify() || !ecs_detail::scope_writable(find_node(id)))
     {
         return false;
@@ -185,6 +201,7 @@ bool Scene::destroy_node(std::uint64_t id)
 }
 void Scene::unregister_entity(std::uint64_t entity, std::uint64_t local_id) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto found = local_node_index_.find(local_id);
     if (found != local_node_index_.end() && found->second == entity)
     {
@@ -199,6 +216,7 @@ void Scene::unregister_entity(std::uint64_t entity, std::uint64_t local_id) noex
 }
 bool Scene::collect_nodes(std::vector<Node>& output) const
 {
+    ENGINE_PROFILE_ZONE("Scene.collectNodes");
     output.clear();
     if (!mutable_info())
     {
@@ -226,7 +244,11 @@ bool Scene::collect_nodes(std::vector<Node>& output) const
         ordered.emplace_back(state->order, node);
     }
     std::sort(ordered.begin(), ordered.end(),
-              [](const auto& left, const auto& right) { return left.first < right.first; });
+              [](const auto& left, const auto& right)
+              {
+                  ENGINE_PROFILE_FUNCTION_PROBE();
+                  return left.first < right.first;
+              });
     output.reserve(ordered.size());
     for (const auto& entry : ordered)
     {
@@ -236,6 +258,7 @@ bool Scene::collect_nodes(std::vector<Node>& output) const
 }
 bool Scene::collect_created(std::uint64_t first_order, std::vector<Node>& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!collect_nodes(output))
     {
         return false;
@@ -244,6 +267,7 @@ bool Scene::collect_created(std::uint64_t first_order, std::vector<Node>& output
     std::erase_if(output,
                   [&](Node node)
                   {
+                      ENGINE_PROFILE_FUNCTION_PROBE();
                       return current.entity(node.id()).try_get<ecs_detail::NodeRuntime>()->order <
                              first_order;
                   });
@@ -251,6 +275,7 @@ bool Scene::collect_created(std::uint64_t first_order, std::vector<Node>& output
 }
 void Scene::rollback_created(std::uint64_t first_order) noexcept
 {
+    ENGINE_PROFILE_ZONE("Scene.rollbackCreated");
     std::vector<Node> created;
     if (!collect_created(first_order, created))
     {
@@ -266,6 +291,7 @@ void Scene::rollback_created(std::uint64_t first_order) noexcept
 }
 bool Scene::publish()
 {
+    ENGINE_PROFILE_ZONE("Scene.publish");
     if (!world_.can_modify())
     {
         return false;
@@ -282,6 +308,7 @@ bool Scene::publish()
 }
 void Scene::retain_persistent()
 {
+    ENGINE_PROFILE_FUNCTION();
     std::vector<Node> nodes;
     if (!collect_nodes(nodes))
     {
@@ -307,6 +334,7 @@ void Scene::retain_persistent()
 }
 Camera Scene::active_camera() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (allocation_target_)
     {
         return allocation_target_->active_camera();
@@ -316,6 +344,7 @@ Camera Scene::active_camera() const noexcept
 }
 bool Scene::set_active_camera(Camera camera) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* info = mutable_info();
     flecs::world current(world_.native_world());
     const auto* scope = current.entity(metadata_entity_).try_get<ecs_detail::ScopeState>();
@@ -332,6 +361,7 @@ bool Scene::set_active_camera(Camera camera) noexcept
 }
 bool Scene::build_data(schema::SceneDataT& output) const
 {
+    ENGINE_PROFILE_ZONE("Scene.buildData");
     output = {};
     const auto* info = mutable_info();
     if (!info)
@@ -416,6 +446,7 @@ bool Scene::build_data(schema::SceneDataT& output) const
 }
 bool Scene::restore_data(const schema::SceneDataT& data)
 {
+    ENGINE_PROFILE_ZONE("Scene.restoreData");
     if (!empty() || data.schema_version != 6 || !data.info)
     {
         return false;
@@ -440,6 +471,7 @@ bool Scene::restore_data(const schema::SceneDataT& data)
 bool Scene::restore_node(const schema::NodeDataT& source,
                          std::span<const schema::NodeIdMappingT> mapping)
 {
+    ENGINE_PROFILE_ZONE("Scene.restoreNode");
     if (!source.info || !source.info->properties || source.info->properties->id == 0 ||
         find_local_node(source.info->properties->id))
     {
@@ -488,6 +520,7 @@ bool Scene::restore_node(const schema::NodeDataT& source,
 }
 bool Scene::restore_parent(const schema::NodeDataT& source)
 {
+    ENGINE_PROFILE_ZONE("Scene.restoreParent");
     if (!source.info || !source.info->properties)
     {
         return false;
@@ -498,6 +531,7 @@ bool Scene::restore_parent(const schema::NodeDataT& source)
 }
 bool Scene::finish_restore(const schema::SceneDataT& data)
 {
+    ENGINE_PROFILE_ZONE("Scene.finishRestore");
     std::unordered_set<std::uint64_t> roots;
     for (const auto& instance : data.prefab_instances)
     {

@@ -1,4 +1,6 @@
 #include "runtime/scene/text_component.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/resource/types/font_resource.hpp"
 #include "runtime/resource/types/shader_resource.hpp"
@@ -17,16 +19,19 @@ namespace engine
 
 bool TextComponent::register_type(ComponentRegistry& registry)
 {
+    ENGINE_PROFILE_FUNCTION();
     return register_component_storage<TextComponent, Data, Runtime>(registry);
 }
 
 TextComponent::Runtime* TextComponent::runtime() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return runtime_state<Runtime>();
 }
 
 bool TextComponent::initialize()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -43,9 +48,13 @@ bool TextComponent::initialize()
 
 bool TextComponent::valid_settings(const schema::TextDataT& settings) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto& color = settings.color;
     const auto valid_color = [](float value)
-    { return std::isfinite(value) && value >= 0.0F && value <= 1.0F; };
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return std::isfinite(value) && value >= 0.0F && value <= 1.0F;
+    };
     return (settings.font_guid.empty() || GuidMap::valid_guid(settings.font_guid)) &&
            std::isfinite(settings.size) && settings.size > 0.0F &&
            std::isfinite(settings.letter_spacing) && valid_color(color.r()) &&
@@ -54,6 +63,7 @@ bool TextComponent::valid_settings(const schema::TextDataT& settings) noexcept
 
 bool TextComponent::get_settings(Data& output) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* value = read_data<Data>();
     output = value ? *value : Data{};
     return value != nullptr;
@@ -61,11 +71,13 @@ bool TextComponent::get_settings(Data& output) const noexcept
 
 bool TextComponent::set_settings(const schema::TextDataT& settings)
 {
+    ENGINE_PROFILE_FUNCTION();
     return apply_settings(settings, {});
 }
 
 bool TextComponent::apply_settings(const Data& settings, ResourceReference prepared)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -120,6 +132,7 @@ bool TextComponent::apply_settings(const Data& settings, ResourceReference prepa
 
 bool TextComponent::set_font(std::string_view path)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -147,6 +160,7 @@ bool TextComponent::set_font(std::string_view path)
 
 ResourceHandle TextComponent::font() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return {};
@@ -156,6 +170,7 @@ ResourceHandle TextComponent::font() const noexcept
 
 ResourceHandle TextComponent::shader() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return {};
@@ -165,6 +180,7 @@ ResourceHandle TextComponent::shader() const noexcept
 
 bool TextComponent::restore_data(const schema::ComponentDataT& data)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!data.flags)
     {
         return false;

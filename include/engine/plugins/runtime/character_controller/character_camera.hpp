@@ -1,4 +1,6 @@
 #pragma once
+
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/scene/component.hpp"
 namespace engine::plugins::character_controller
 {
@@ -10,6 +12,7 @@ public:
     CharacterCamera() noexcept = default;
     explicit CharacterCamera(Component c) noexcept : Component(c, component_type)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
     }
     [[nodiscard]] static bool register_type(ComponentRegistry& registry);
     [[nodiscard]] static bool valid_settings(const Data& data) noexcept;

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/scene/scene_types.hpp"
 
 #include <algorithm>
@@ -12,6 +14,7 @@ namespace engine::transform_math
 // Column-major affine matrices. Subtract in double before conversion to GPU coordinates.
 inline void relative(const double* world, const Vec3& origin, float* output) noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     for (std::size_t i = 0; i < 16; ++i)
     {
         if (i < 12 || i == 15)
@@ -26,6 +29,7 @@ inline void relative(const double* world, const Vec3& origin, float* output) noe
 
 inline void multiply(const double* a, const double* b, double* output) noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     std::array<double, 16> result{};
     for (std::size_t c = 0; c < 4; ++c)
     {
@@ -42,6 +46,7 @@ inline void multiply(const double* a, const double* b, double* output) noexcept
 
 [[nodiscard]] inline bool inverse(const double* m, double* output) noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     std::array<double, 16> r{};
     const double d = m[0] * (m[5] * m[10] - m[9] * m[6]) - m[4] * (m[1] * m[10] - m[9] * m[2]) +
                      m[8] * (m[1] * m[6] - m[5] * m[2]);
@@ -64,7 +69,11 @@ inline void multiply(const double* a, const double* b, double* output) noexcept
         r[12 + i] = -(r[i] * m[12] + r[4 + i] * m[13] + r[8 + i] * m[14]);
     }
     r[15] = 1;
-    if (!std::all_of(r.begin(), r.end(), [](double v) { return std::isfinite(v); }))
+    if (!std::all_of(r.begin(), r.end(), [](double v)
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return std::isfinite(v);
+    }))
     {
         return false;
     }
@@ -74,6 +83,7 @@ inline void multiply(const double* a, const double* b, double* output) noexcept
 
 [[nodiscard]] inline Vec3 point(const double* m, const Vec3& value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return {m[0] * value.x() + m[4] * value.y() + m[8] * value.z() + m[12],
             m[1] * value.x() + m[5] * value.y() + m[9] * value.z() + m[13],
             m[2] * value.x() + m[6] * value.y() + m[10] * value.z() + m[14]};

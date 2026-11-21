@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/scene/component.hpp"
 
 namespace engine
@@ -16,6 +18,7 @@ public:
     RigidBody() noexcept = default;
     explicit RigidBody(Component component) noexcept : Component(component, component_type)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
     }
     [[nodiscard]] static bool register_type(ComponentRegistry& registry);
     using Runtime = RigidBodyRuntime;

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "plugins/runtime/script/vm/script_vm.hpp"
 #include "runtime/animation/animation_events.hpp"
 #include "runtime/movie/movie_player.hpp"
@@ -67,6 +69,7 @@ public:
     void forget_movie(MoviePlaybackHandle handle) noexcept;
     [[nodiscard]] ResourceLoader* resources() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return resources_;
     }
     [[nodiscard]] std::uint64_t load_resource(std::string_view path);
@@ -79,18 +82,22 @@ public:
     [[nodiscard]] bool cancel_resource_load(std::uint64_t token);
     [[nodiscard]] std::string_view resource_error() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return resource_error_;
     }
     void set_resource_error(std::string_view error)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         resource_error_.assign(error);
     }
     void set_file_error(std::string_view error)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         file_error_.assign(error);
     }
     [[nodiscard]] const std::string& file_error() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return file_error_;
     }
     [[nodiscard]] WorldSystem* world() const noexcept;

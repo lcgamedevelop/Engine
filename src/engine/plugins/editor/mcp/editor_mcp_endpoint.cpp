@@ -1,4 +1,6 @@
 #include "plugins/editor/mcp/editor_mcp_endpoint.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/commands/editor_commands.hpp"
 #include "editor/editor_system.hpp"
 #include "plugins/runtime/mcp/mcp_command_channel.hpp"
@@ -31,17 +33,20 @@ struct EditorMcpEndpoint::State
     Json last_status;
     State(editor::EditorSystem& value, RuntimeHost& runtime) : editor(value), host(runtime)
     {
+        ENGINE_PROFILE_FUNCTION();
     }
 };
 EditorMcpEndpoint::EditorMcpEndpoint() noexcept = default;
 EditorMcpEndpoint::~EditorMcpEndpoint() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
 }
 
 bool EditorMcpEndpoint::initialize(editor::EditorSystem& editor, RuntimeHost& host,
                                    const McpEndpointConfig& config)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (state_ || !editor.commands())
     {
         return false;
@@ -64,8 +69,10 @@ bool EditorMcpEndpoint::initialize(editor::EditorSystem& editor, RuntimeHost& ho
         config.channel_directory, state->config.session,
         [value](std::string_view command, const Json& args, Json& result, std::string& error)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             if (command == "capture_frame" || command == "get_frame_capture" ||
-                command == "get_scene_load" || command == "get_gameplay_prepare" ||
+                command == "get_scene_load" || command == "get_resource_memory" ||
+                command == "get_gameplay_prepare" ||
                 command == "release_gameplay_prepare")
             {
                 return observation_command(value->host, value->config.cache_root, command, args,
@@ -97,6 +104,7 @@ bool EditorMcpEndpoint::initialize(editor::EditorSystem& editor, RuntimeHost& ho
 
 bool EditorMcpEndpoint::poll()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!state_ || !state_->channel->poll())
     {
         if (state_)
@@ -131,6 +139,7 @@ bool EditorMcpEndpoint::poll()
 
 bool EditorMcpEndpoint::publish_status()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!state_)
     {
         return false;
@@ -211,6 +220,7 @@ bool EditorMcpEndpoint::publish_status()
 }
 void EditorMcpEndpoint::shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!state_)
     {
         return;
@@ -244,6 +254,7 @@ void EditorMcpEndpoint::shutdown() noexcept
 
 std::string_view EditorMcpEndpoint::last_error() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return error_;
 }
 } // namespace engine::plugins::mcp

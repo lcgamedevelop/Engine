@@ -3,6 +3,7 @@
 #include "cs_vsm_clear.bin.h"
 #include "cs_vsm_depth_ranges.bin.h"
 #include "cs_vsm_feedback.bin.h"
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/render/passes/shadow_pass.hpp"
 #include "runtime/render/render_system.hpp"
@@ -21,6 +22,7 @@ constexpr std::uint32_t local_range_row_bits = 12;
 
 bool vsm_supported(const schema::VsmSettingsT& settings, std::uint32_t physical_pages) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* caps = bgfx::getCaps();
     const auto side = vsm_atlas_columns(physical_pages) * vsm_tile_size;
     return caps && (caps->supported & BGFX_CAPS_COMPUTE) && caps->limits.maxComputeBindings >= 6 &&
@@ -31,11 +33,13 @@ bool vsm_supported(const schema::VsmSettingsT& settings, std::uint32_t physical_
 }
 VirtualShadowPass::~VirtualShadowPass() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     release_gpu();
 }
 bool VirtualShadowPass::prepare(const schema::VsmSettingsT& settings, const RenderConfig& config,
                                 std::uint64_t generation)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!generation || !vsm_supported(settings, config.vsm_physical_pages))
     {
         return false;
@@ -66,6 +70,7 @@ bool VirtualShadowPass::prepare(const schema::VsmSettingsT& settings, const Rend
                                               BGFX_BUFFER_INDEX32 | BGFX_BUFFER_COMPUTE_READ_WRITE);
     const auto make_program = [](const std::uint8_t* data, std::uint32_t size)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const auto shader = bgfx::createShader(bgfx::copy(data, size));
         return bgfx::isValid(shader) ? bgfx::createProgram(shader, true)
                                      : bgfx::ProgramHandle{bgfx::kInvalidHandle};
@@ -143,12 +148,18 @@ void VirtualShadowPass::poll(std::uint32_t frame_number)
     ENGINE_PROFILE_ZONE("Render.vsmResolveFeedback");
     for (auto& slot : readbacks_)
     {
-        if (!slot.pending || static_cast<std::int32_t>(frame_number - slot.ready_frame) < 0)
+        if (!slot.pending)
+        {
+            continue;
+        }
+        const auto result_status = slot.completion.status(frame_number);
+        if (result_status == GpuReadbackStatus::pending)
         {
             continue;
         }
         slot.pending = false;
-        if (slot.view.generation != generation_)
+        slot.completion.reset();
+        if (result_status != GpuReadbackStatus::complete || slot.view.generation != generation_)
         {
             slot.bits.clear();
             continue;
@@ -179,6 +190,7 @@ void VirtualShadowPass::poll(std::uint32_t frame_number)
 }
 bool VirtualShadowPass::take_demand(VsmPageDemand& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     if (completed_.empty())
     {
@@ -213,6 +225,7 @@ bool VirtualShadowPass::submit_feedback(const VsmView& view, bgfx::TextureHandle
                      std::any_of(readbacks_.begin(), readbacks_.end(),
                                  [&](const auto& slot)
                                  {
+                                     ENGINE_PROFILE_FUNCTION_PROBE();
                                      return slot.pending &&
                                             slot.view.generation == view.generation &&
                                             slot.receiver_revision == receiver_revision_;
@@ -224,7 +237,11 @@ bool VirtualShadowPass::submit_feedback(const VsmView& view, bgfx::TextureHandle
         return true;
     }
     auto found = std::find_if(readbacks_.begin(), readbacks_.end(),
-                              [](const auto& slot) { return !slot.pending; });
+                              [](const auto& slot)
+                              {
+                                  ENGINE_PROFILE_FUNCTION_PROBE();
+                                  return !slot.pending;
+                              });
     if (found == readbacks_.end())
     {
         ENGINE_PROFILE_PLOT("Vsm.feedbackSkipped", std::int64_t{1});
@@ -256,16 +273,12 @@ bool VirtualShadowPass::submit_feedback(const VsmView& view, bgfx::TextureHandle
     slot.bits.assign(word_count_, 0);
     bgfx::BufferRegion region;
     region.init(demands_, 0, word_count_ * sizeof(std::uint32_t));
-    slot.ready_frame = bgfx::read(region, slot.bits.data());
-    if (slot.ready_frame == UINT32_MAX)
-    {
-        return false;
-    }
-    slot.pending = true;
-    return true;
+    slot.pending = slot.completion.submit(region, slot.bits.data());
+    return slot.pending;
 }
 void VirtualShadowPass::accept_feedback(std::uint64_t receiver_revision) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     accepted_receiver_revision_ = receiver_revision;
 }
 bool VirtualShadowPass::draw_pages(const RenderFrameData& frame, const VsmPageBatch& batch,
@@ -376,6 +389,7 @@ float VirtualShadowPass::submit_local_depth_ranges(bgfx::TextureHandle atlas,
 
 bool VirtualShadowPass::binding(VsmGpuBinding& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     if (!generation_ || !bgfx::isValid(framebuffer_))
     {
@@ -391,10 +405,12 @@ bool VirtualShadowPass::binding(VsmGpuBinding& output) const
 }
 void VirtualShadowPass::reset_scene() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     release_gpu();
 }
 void VirtualShadowPass::release_depth_ranges() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (bgfx::isValid(depth_ranges_))
     {
         bgfx::destroy(depth_ranges_);
@@ -422,6 +438,7 @@ void VirtualShadowPass::release_depth_ranges() noexcept
 }
 void VirtualShadowPass::release_gpu() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     generation_ = 0;
     receiver_revision_ = accepted_receiver_revision_ = 0;
     feedback_view_ = {};
@@ -437,6 +454,7 @@ void VirtualShadowPass::release_gpu() noexcept
     }
     const auto destroy = [](auto& handle)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (bgfx::isValid(handle))
         {
             bgfx::destroy(handle);
@@ -458,6 +476,7 @@ void VirtualShadowPass::release_gpu() noexcept
 }
 std::uint32_t VirtualShadowPass::resource_count() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return bgfx::isValid(atlas_) + bgfx::isValid(fallback_) + bgfx::isValid(framebuffer_) +
            bgfx::isValid(demands_) + bgfx::isValid(clear_) + bgfx::isValid(feedback_) +
            bgfx::isValid(sampler_) + bgfx::isValid(depth_sampler_) + bgfx::isValid(inverse_) +

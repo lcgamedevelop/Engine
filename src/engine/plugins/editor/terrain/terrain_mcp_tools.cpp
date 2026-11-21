@@ -1,4 +1,6 @@
 #include "plugins/editor/terrain/terrain_mcp_tools.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/editor/mcp/editor_mcp_tools.hpp"
 #include "plugins/editor/mcp/editor_tool_registration.hpp"
 #include "plugins/runtime/mcp/mcp_system.hpp"
@@ -8,6 +10,7 @@ namespace engine::plugins::terrain
 {
 bool register_terrain_mcp_tools(mcp::McpSystem& system, mcp::EditorMcpTools& editor)
 {
+    ENGINE_PROFILE_FUNCTION();
     using Json = nlohmann::json;
     if (!system.register_tool(
             {"create_terrain_asset",
@@ -22,7 +25,10 @@ bool register_terrain_mcp_tools(mcp::McpSystem& system, mcp::EditorMcpTools& edi
               {"required", Json::array({"path", "source"})},
               {"additionalProperties", false}},
              [&editor](const Json& args, Json& result)
-             { return editor.call_command("create_terrain_asset", args, result); }}) ||
+             {
+                 ENGINE_PROFILE_FUNCTION_PROBE();
+                 return editor.call_command("create_terrain_asset", args, result);
+             }}) ||
         !mcp::tools::component_tool(
             system, editor, "set_terrain",
             "Set terrain component settings. Streaming and collision must be explicitly enabled. "
@@ -80,6 +86,7 @@ bool register_terrain_mcp_tools(mcp::McpSystem& system, mcp::EditorMcpTools& edi
     }
     const auto add = [&](const char* name, const char* description, Json properties, Json required)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return mcp::register_editor_command_tool(
             system, editor, name, description,
             mcp::object_schema(std::move(properties), std::move(required)), name);

@@ -1,4 +1,5 @@
 #include "editor/asset_pipeline/importers/audio_importer.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "editor/asset_pipeline/asset_io.hpp"
 #include "editor/asset_pipeline/importer_utils.hpp"
@@ -45,6 +46,7 @@ struct WavInfo
 
 std::uint32_t little_u32(ByteView bytes, std::size_t offset) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     std::uint32_t value = 0;
     for (unsigned int index = 0; index < 4; ++index)
     {
@@ -55,17 +57,20 @@ std::uint32_t little_u32(ByteView bytes, std::size_t offset) noexcept
 
 std::uint16_t little_u16(ByteView bytes, std::size_t offset) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return static_cast<std::uint16_t>(std::to_integer<unsigned int>(bytes[offset]) |
                                       (std::to_integer<unsigned int>(bytes[offset + 1]) << 8));
 }
 
 bool fourcc(ByteView bytes, std::size_t offset, const char* value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::memcmp(bytes.data() + offset, value, 4) == 0;
 }
 
 bool inspect_wav(ByteView bytes, WavInfo& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     if (bytes.size() < 44 || bytes.size() > maximum_read_size || !fourcc(bytes, 0, "RIFF") ||
         !fourcc(bytes, 8, "WAVE") || little_u32(bytes, 4) != bytes.size() - 8)
@@ -171,6 +176,7 @@ bool inspect_wav(ByteView bytes, WavInfo& output, std::string& error)
 
 bool read_settings(const std::filesystem::path& source, AudioSettings& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto meta = source;
     meta += ".meta";
     toml::table root;
@@ -230,22 +236,26 @@ bool read_settings(const std::filesystem::path& source, AudioSettings& output, s
 
 schema::AssetKind AudioImporter::kind() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::audio;
 }
 
 bool AudioImporter::matches(const std::filesystem::path& source) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return source_extension(source) == ".wav";
 }
 
 std::string_view AudioImporter::default_meta() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "\n[audio]\nsample_rate = 48000\nchannels = 2\ngain = 1.0\n";
 }
 
 bool AudioImporter::inspect_batch(const ImportContext&, std::string& fingerprint,
                                   std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!schema_fingerprint({"runtime/audio.fbs"}, fingerprint, error))
     {
         return false;
@@ -258,6 +268,7 @@ bool AudioImporter::inspect_batch(const ImportContext&, std::string& fingerprint
 bool AudioImporter::convert(const ImportAsset& asset, const ImportContext& context,
                             std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     AudioSettings settings;
     ByteBuffer source;
     WavInfo info;

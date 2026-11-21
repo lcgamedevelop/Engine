@@ -1,4 +1,5 @@
 #include "runtime/app/runtime_settings.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/resource/virtual_file_system.hpp"
 
@@ -21,6 +22,7 @@ constexpr std::uint64_t maximum_bytes = 4ULL * 1024 * 1024 * 1024;
 
 bool keys(const Json& value, std::initializer_list<std::string_view> allowed, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!value.is_object())
     {
         error = "Runtime configuration sections must be objects";
@@ -49,6 +51,7 @@ template <typename T>
 bool integer(const Json& value, const char* key, T& output, std::uint64_t minimum,
              std::uint64_t maximum, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto& number = value[key];
     if (!number.is_number_unsigned() || number.get<std::uint64_t>() < minimum ||
         number.get<std::uint64_t>() > maximum)
@@ -62,6 +65,7 @@ bool integer(const Json& value, const char* key, T& output, std::uint64_t minimu
 
 bool seconds(const Json& value, const char* key, double& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto& field = value[key];
     if (!field.is_number())
     {
@@ -81,6 +85,7 @@ bool seconds(const Json& value, const char* key, double& output, std::string& er
 template <typename T>
 bool priority(const Json& value, const char* key, T& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto& field = value[key];
     if (field.is_string())
     {
@@ -107,6 +112,7 @@ bool priority(const Json& value, const char* key, T& output, std::string& error)
 
 bool domain(const Json& value, TaskConfig& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     return keys(value, {"max_concurrency", "priority", "max_pending"}, error) &&
            integer(value, "max_concurrency", output.max_concurrency, 0, 64, error) &&
            priority(value, "priority", output.priority, error) &&
@@ -115,6 +121,7 @@ bool domain(const Json& value, TaskConfig& output, std::string& error)
 
 bool apply_parallel(const Json& value, RuntimeParallelConfig& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!keys(value,
               {"threads", "runtime", "background", "file", "resource_read", "resource_graph",
                "movie", "physics", "animation", "navigation", "resources", "animation_sampling",
@@ -244,6 +251,7 @@ bool apply_parallel(const Json& value, RuntimeParallelConfig& output, std::strin
 
 bool apply_engine(const Json& value, EngineConfig& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!keys(value, {"window_title", "width", "height", "target_frame_rate"}, error) ||
         !integer(value, "width", output.width, 1, std::numeric_limits<int>::max(), error) ||
         !integer(value, "height", output.height, 1, std::numeric_limits<int>::max(), error))
@@ -284,6 +292,7 @@ bool apply_engine(const Json& value, EngineConfig& output, std::string& error)
 
 bool apply(const Json& value, RuntimeSettings& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!keys(value, {"game", "engine", "parallel"}, error))
     {
         return false;
@@ -324,6 +333,7 @@ bool apply(const Json& value, RuntimeSettings& output, std::string& error)
 
 bool decode_runtime_settings(std::string_view text, RuntimeSettings& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     if (text.size() > 65536)
     {
@@ -343,6 +353,7 @@ bool decode_runtime_settings(std::string_view text, RuntimeSettings& output, std
 bool load_runtime_settings(const std::filesystem::path& path, RuntimeSettings& output,
                            std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     ByteBuffer bytes;
     if (!VirtualFileSystem::read_file(path, bytes) || bytes.size() > 65536)
     {

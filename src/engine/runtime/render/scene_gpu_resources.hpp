@@ -1,5 +1,8 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
+#include "runtime/render/gpu_readback.hpp"
 #include "runtime/render/passes/ambient_occlusion_pass.hpp"
 #include "runtime/render/passes/atmosphere_pass.hpp"
 #include "runtime/render/passes/clustered_lighting_pass.hpp"
@@ -146,14 +149,14 @@ struct RenderSystem::SceneGpuResources
     std::vector<bgfx::TextureHandle> capture_lightmaps;
     std::vector<std::unique_ptr<render_detail::GpuGeometry>> capture_meshes;
     std::vector<float> capture_pixels;
-    std::uint32_t capture_ready_frame = 0;
+    render_detail::GpuReadback capture_completion;
     std::uint16_t capture_width = 0, capture_height = 0;
     bool capture_pending = false;
     bool capture_prepared = false;
     bool capture_cancelled = false;
     bgfx::TextureHandle hdr_capture_readback = BGFX_INVALID_HANDLE;
     std::vector<std::uint16_t> hdr_capture_pixels;
-    std::uint32_t hdr_capture_ready_frame = 0;
+    render_detail::GpuReadback hdr_capture_completion;
     std::uint16_t hdr_capture_width = 0, hdr_capture_height = 0;
     bool hdr_capture_pending = false;
     bgfx::UniformHandle ao_settings = BGFX_INVALID_HANDLE;
@@ -181,14 +184,17 @@ struct RenderSystem::SceneGpuResources
     PassTargets* selected_targets = nullptr;
     PassTargets& targets()
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return *selected_targets;
     }
     const PassTargets& targets() const
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return *selected_targets;
     }
     void select_targets(std::uint64_t scene)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         auto& value = pass_targets[scene];
         if (!value)
         {
@@ -256,6 +262,8 @@ struct RenderSystem::RenderPreparation
     std::vector<std::unique_ptr<SceneGpuResources>> retired_scenes;
 
     [[nodiscard]] bool request_texture(ResourceLoader* loader, ResourceHandle source);
+    void retain_texture(SceneGpuResources& resources, const Resource* source);
+    void release_texture(SceneGpuResources& resources, const Resource* source);
     void detach_observers() noexcept;
 };
 

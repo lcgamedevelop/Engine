@@ -1,9 +1,12 @@
 #include "plugins/editor/mcp/component_mcp_tools.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 namespace engine::plugins::mcp
 {
 bool register_model_tools(McpSystem& system, EditorMcpTools& editor)
 {
+    ENGINE_PROFILE_FUNCTION();
     using Json = nlohmann::json;
     const Json schema = {{"type", "object"},
                          {"properties",
@@ -17,6 +20,9 @@ bool register_model_tools(McpSystem& system, EditorMcpTools& editor)
          "Instantiate a model package by resource path into ordinary scene nodes. Undoable; "
          "failure leaves existing nodes intact. Use get_scene to inspect created node IDs.",
          schema, [&editor](const Json& arguments, Json& reply)
-         { return editor.call_command("instantiate_model", arguments, reply); }});
+         {
+             ENGINE_PROFILE_FUNCTION_PROBE();
+             return editor.call_command("instantiate_model", arguments, reply);
+         }});
 }
 } // namespace engine::plugins::mcp

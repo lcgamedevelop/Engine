@@ -1,4 +1,6 @@
 #include "plugins/editor/scene_bake/ibl_bake_job.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/resource/codecs/texture_resource_codec.hpp"
 
@@ -32,6 +34,7 @@ constexpr std::uint64_t clamp_sampler =
 
 std::uint8_t mip_count(std::uint16_t size)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::uint8_t count = 1;
     while (size > 1)
     {
@@ -43,6 +46,7 @@ std::uint8_t mip_count(std::uint16_t size)
 
 template <typename T> void destroy_handle(T& handle)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (bgfx::isValid(handle))
     {
         bgfx::destroy(handle);
@@ -52,6 +56,7 @@ template <typename T> void destroy_handle(T& handle)
 
 bgfx::ProgramHandle program(std::span<const std::uint8_t> bytes)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto shader = bgfx::createShader(bgfx::copy(bytes.data(), bytes.size()));
     return bgfx::isValid(shader) ? bgfx::createProgram(shader, true)
                                  : bgfx::ProgramHandle{bgfx::kInvalidHandle};
@@ -60,6 +65,7 @@ bgfx::ProgramHandle program(std::span<const std::uint8_t> bytes)
 bool source_texture(const schema::TextureDataT& data, bgfx::TextureHandle& output,
                     std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto flags = (data.cube_map ? clamp_sampler : BGFX_SAMPLER_V_CLAMP) |
                        (data.srgb ? BGFX_TEXTURE_SRGB : 0);
     if (!TextureResourceCodec::validate(data))
@@ -183,6 +189,7 @@ bool source_texture(const schema::TextureDataT& data, bgfx::TextureHandle& outpu
 bool ktx(std::span<const std::uint8_t> pixels, std::uint16_t size, bool cube, bool mips,
          bimg::TextureFormat::Enum format, std::vector<std::uint8_t>& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     bx::DefaultAllocator allocator;
     bx::MemoryBlock memory(&allocator);
     bx::MemoryWriter writer(&memory);
@@ -248,6 +255,7 @@ struct IblBakeJob::State
 
     void release() noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         for (auto& value : programs)
         {
             destroy_handle(value);
@@ -265,15 +273,18 @@ struct IblBakeJob::State
 
 IblBakeJob::IblBakeJob() : state_(std::make_unique<State>())
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 IblBakeJob::~IblBakeJob() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
 }
 
 bool IblBakeJob::start(const schema::TextureDataT& source, std::uint16_t resolution,
                        std::uint16_t samples, std::uint16_t lut_size, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto& s = *state_;
     const auto* caps = bgfx::getCaps();
     const auto required = BGFX_CAPS_COMPUTE;
@@ -292,6 +303,7 @@ bool IblBakeJob::start(const schema::TextureDataT& source, std::uint16_t resolut
                   static_cast<unsigned>(caps->limits.maxTextureSize));
     const auto reject = [&error, &diagnostics](const char* reason)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         error = std::string(reason) + diagnostics;
         return false;
     };
@@ -346,7 +358,11 @@ bool IblBakeJob::start(const schema::TextureDataT& source, std::uint16_t resolut
     s.parameters = bgfx::createUniform("u_build_ibl_param", bgfx::UniformType::Vec4);
     s.face_uniform = bgfx::createUniform("u_bake_face", bgfx::UniformType::Vec4);
     if (std::any_of(s.programs.begin(), s.programs.end(),
-                    [](auto handle) { return !bgfx::isValid(handle); }) ||
+                    [](auto handle)
+                    {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
+                        return !bgfx::isValid(handle);
+                    }) ||
         !bgfx::isValid(s.cube_mip_program) || !bgfx::isValid(s.sampler) ||
         !bgfx::isValid(s.parameters) || !bgfx::isValid(s.face_uniform) ||
         !source_texture(source, s.input, error))
@@ -371,6 +387,7 @@ bool IblBakeJob::start(const schema::TextureDataT& source, std::uint16_t resolut
     }
     const auto add = [&s](State::Pass pass, std::uint16_t size, bool mips)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const auto levels = mips ? mip_count(size) : 1;
         for (std::uint8_t mip = 0; mip < levels; ++mip)
         {
@@ -397,6 +414,7 @@ bool IblBakeJob::start(const schema::TextureDataT& source, std::uint16_t resolut
 
 BakeProgress IblBakeJob::tick(std::uint32_t frame, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto& s = *state_;
     if (s.reading)
     {
@@ -543,23 +561,28 @@ BakeProgress IblBakeJob::tick(std::uint32_t frame, std::string& error)
 
 void IblBakeJob::cancel() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     state_->cancelled = true;
 }
 void IblBakeJob::shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     state_->cancelled = true;
     state_->release();
 }
 std::uint32_t IblBakeJob::completed() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return static_cast<std::uint32_t>(state_->index);
 }
 std::uint32_t IblBakeJob::total() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return static_cast<std::uint32_t>(state_->work.size());
 }
 const std::array<std::vector<std::uint8_t>, 3>& IblBakeJob::outputs() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return state_->encoded;
 }
 } // namespace engine::plugins::scene_bake

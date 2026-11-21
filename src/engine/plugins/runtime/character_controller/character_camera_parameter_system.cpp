@@ -1,4 +1,6 @@
 #include "plugins/runtime/character_controller/character_camera_parameter_system.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/character_controller/character_camera.hpp"
 #include "plugins/runtime/character_controller/character_controller.hpp"
 #include "runtime/scene/ecs_storage.hpp"
@@ -10,6 +12,7 @@ namespace
 {
 bool defaults(camera::CameraController solver, const std::vector<std::string>& names)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!solver)
     {
         return true;
@@ -39,17 +42,21 @@ bool defaults(camera::CameraController solver, const std::vector<std::string>& n
 } // namespace
 CharacterCameraParameterSystem::CharacterCameraParameterSystem(WorldSystem& w) noexcept : world_(w)
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 CharacterCameraParameterSystem::~CharacterCameraParameterSystem() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
 }
 bool CharacterCameraParameterSystem::on_initialize(const EngineConfig&)
 {
+    ENGINE_PROFILE_FUNCTION();
     return world_.native_world() != nullptr;
 }
 bool CharacterCameraParameterSystem::on_tick(double)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!world_.refresh_scene_state())
     {
         return false;
@@ -67,6 +74,7 @@ bool CharacterCameraParameterSystem::on_tick(double)
     query.each(
         [&](flecs::entity e, const auto& stored)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             auto n = world_.find_node(e.id());
             auto adapter = n.get_component<CharacterCamera>();
             auto solver = n.get_component<camera::CameraController>();
@@ -98,7 +106,11 @@ bool CharacterCameraParameterSystem::on_tick(double)
             {
                 const auto p =
                     std::find_if(definition.parameters.begin(), definition.parameters.end(),
-                                 [&](const auto& v) { return v.name == binding.parameter; });
+                                 [&](const auto& v)
+                                 {
+                                     ENGINE_PROFILE_FUNCTION_PROBE();
+                                     return v.name == binding.parameter;
+                                 });
                 if (p == definition.parameters.end() || !p->default_value)
                 {
                     return;
@@ -200,7 +212,11 @@ bool CharacterCameraParameterSystem::on_tick(double)
     for (const auto& old : written_)
     {
         if (std::none_of(next.begin(), next.end(),
-                         [&](const auto& item) { return item.first == old.first; }))
+                         [&](const auto& item)
+                         {
+                             ENGINE_PROFILE_FUNCTION_PROBE();
+                             return item.first == old.first;
+                         }))
         {
             if (!defaults(old.first, old.second))
             {
@@ -213,6 +229,7 @@ bool CharacterCameraParameterSystem::on_tick(double)
 }
 void CharacterCameraParameterSystem::on_shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     for (const auto& record : written_)
     {
         static_cast<void>(defaults(record.first, record.second));

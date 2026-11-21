@@ -1,4 +1,5 @@
 #include "plugins/runtime/navigation_crowd/navigation_agent.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "plugins/runtime/navigation_crowd/navigation_agent_runtime.hpp"
 
@@ -14,6 +15,7 @@ namespace
 
 bool bounded(float value, float minimum, float maximum) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::isfinite(value) && value >= minimum && value <= maximum;
 }
 
@@ -21,16 +23,19 @@ bool bounded(float value, float minimum, float maximum) noexcept
 
 bool NavigationAgent::register_type(ComponentRegistry& registry)
 {
+    ENGINE_PROFILE_FUNCTION();
     return register_component_storage<NavigationAgent, Data, Runtime>(registry);
 }
 
 NavigationAgent::Runtime* NavigationAgent::runtime() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return runtime_state<Runtime>();
 }
 
 bool NavigationAgent::valid_settings(const schema::NavigationAgentDataT& value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return bounded(value.radius, 0.01F, 10.0F) && bounded(value.height, 0.01F, 100.0F) &&
            bounded(value.max_speed, 0.01F, 1000.0F) &&
            bounded(value.max_acceleration, 0.01F, 1000.0F) &&
@@ -40,6 +45,7 @@ bool NavigationAgent::valid_settings(const schema::NavigationAgentDataT& value) 
 
 bool NavigationAgent::get_settings(Data& output) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* value = read_data<Data>();
     output = value ? *value : Data{};
     return value != nullptr;
@@ -47,6 +53,7 @@ bool NavigationAgent::get_settings(Data& output) const noexcept
 
 bool NavigationAgent::set_settings(const schema::NavigationAgentDataT& value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -64,6 +71,7 @@ bool NavigationAgent::set_settings(const schema::NavigationAgentDataT& value) no
 
 bool NavigationAgent::move_to(const Vec3& target) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -84,6 +92,7 @@ bool NavigationAgent::move_to(const Vec3& target) noexcept
 
 void NavigationAgent::stop() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return;
@@ -101,6 +110,7 @@ void NavigationAgent::stop() noexcept
 
 NavigationAgentStatus NavigationAgent::state() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return {};
@@ -110,6 +120,7 @@ NavigationAgentStatus NavigationAgent::state() const noexcept
 
 Vec3 NavigationAgent::velocity() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid())
     {
         return {};
@@ -119,6 +130,7 @@ Vec3 NavigationAgent::velocity() const noexcept
 
 bool NavigationAgent::restore_data(const schema::ComponentDataT& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!value.flags)
     {
         return false;

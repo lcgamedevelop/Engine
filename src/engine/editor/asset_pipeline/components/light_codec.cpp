@@ -1,4 +1,5 @@
 #include "editor/asset_pipeline/components/light_codec.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/asset_pipeline/control_toml.hpp"
 #include "runtime/schema/control_json_generated.hpp"
 
@@ -15,16 +16,19 @@ namespace engine::editor::asset_pipeline
 
 schema::ComponentPayload LightCodec::type() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::ComponentPayload::LightData;
 }
 
 std::string_view LightCodec::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "light";
 }
 
 bool LightCodec::validate(const schema::ComponentDataT& component, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
 
     const auto* value = component.payload.AsLightData();
     if (value == nullptr || !scene_detail::valid_light(*value))
@@ -39,6 +43,7 @@ bool LightCodec::validate(const schema::ComponentDataT& component, std::string& 
 bool LightCodec::read(const toml::table& table, schema::ComponentDataT& component,
                       std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
 
     schema::LightDataT value;
     if (const auto* source = table.get("shadow_method"))
@@ -141,6 +146,7 @@ bool LightCodec::read(const toml::table& table, schema::ComponentDataT& componen
 
 void LightCodec::write(const schema::ComponentDataT& component, toml::table& value) const
 {
+    ENGINE_PROFILE_FUNCTION();
 
     const auto* light = component.payload.AsLightData();
     value.insert("type", "light");

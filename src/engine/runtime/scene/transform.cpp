@@ -1,4 +1,5 @@
 #include "runtime/scene/transform.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/scene/ecs_storage.hpp"
 
@@ -17,6 +18,7 @@ constexpr std::array<double, 16> identity = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0,
 
 bool finite_vector(const Vec3& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::isfinite(value.x()) && std::isfinite(value.y()) && std::isfinite(value.z());
 }
 
@@ -24,11 +26,13 @@ bool finite_vector(const Vec3& value)
 
 bool Transform::register_type(ComponentRegistry& registry)
 {
+    ENGINE_PROFILE_FUNCTION();
     return register_component_storage<Transform, Data>(registry);
 }
 
 bool Transform::get_settings(Data& output) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* value = read_data<Data>();
     output = value ? *value : Data{};
     return value != nullptr;
@@ -36,6 +40,7 @@ bool Transform::get_settings(Data& output) const noexcept
 
 bool Transform::set_settings(const TransformSettings& transform) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -53,6 +58,7 @@ bool Transform::set_settings(const TransformSettings& transform) noexcept
 
 bool Transform::world_matrix(double* output) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (output == nullptr)
     {
         return false;
@@ -75,6 +81,7 @@ bool Transform::world_matrix(double* output) const noexcept
 
 bool Transform::restore_data(const schema::ComponentDataT& data)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!data.flags)
     {
         return false;

@@ -1,4 +1,6 @@
 #include "runtime/input/input_system.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/input/input_state.hpp"
 #include "runtime/window/window_system.hpp"
@@ -12,14 +14,17 @@ using namespace input_detail;
 
 InputSystem::InputSystem(WindowSystem& window) noexcept : window_(window)
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 InputSystem::~InputSystem() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
 }
 
 bool InputSystem::on_initialize(const EngineConfig&)
 {
+    ENGINE_PROFILE_FUNCTION();
     last_error_.clear();
     if (!window_.is_initialized() || window_.native_window() == nullptr)
     {
@@ -51,6 +56,7 @@ bool InputSystem::on_initialize(const EngineConfig&)
 
 void InputSystem::on_shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (state_)
     {
         next_connection_ = state_->next_connection;
@@ -67,6 +73,7 @@ void InputSystem::on_shutdown() noexcept
 
 bool InputSystem::begin_frame()
 {
+    ENGINE_PROFILE_FUNCTION();
     last_error_.clear();
     if (!is_initialized() || !state_ || state_->frame_open)
     {
@@ -112,7 +119,11 @@ bool InputSystem::begin_frame()
             const auto previous = channel.actions;
             const bool had_contribution =
                 std::any_of(previous.begin(), previous.end(),
-                            [](const auto& item) { return item.second.state.held(); });
+                            [](const auto& item)
+                            {
+                                ENGINE_PROFILE_FUNCTION_PROBE();
+                                return item.second.state.held();
+                            });
             cancel_pointers(state, index);
             channel.data = std::move(*channel.pending);
             channel.pending.reset();
@@ -194,13 +205,18 @@ bool InputSystem::begin_frame()
 
 bool InputSystem::set_routing_state(const schema::InputRoutingDataT& routing)
 {
+    ENGINE_PROFILE_FUNCTION();
     last_error_.clear();
     const double fields[] = {routing.viewport_x,      routing.viewport_y, routing.viewport_width,
                              routing.viewport_height, routing.safe_left,  routing.safe_top,
                              routing.safe_right,      routing.safe_bottom};
     if (!state_ || !state_->frame_open ||
         !std::all_of(std::begin(fields), std::end(fields),
-                     [](double v) { return std::isfinite(v); }) ||
+                     [](double v)
+                     {
+                         ENGINE_PROFILE_FUNCTION_PROBE();
+                         return std::isfinite(v);
+                     }) ||
         routing.viewport_width < 0 || routing.viewport_height < 0 || routing.safe_left < 0 ||
         routing.safe_top < 0 || routing.safe_right < 0 || routing.safe_bottom < 0)
     {
@@ -227,6 +243,7 @@ bool InputSystem::set_routing_state(const schema::InputRoutingDataT& routing)
 
 bool InputSystem::owns_pointer(const SDL_Event& event_value) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!state_)
     {
         return false;
@@ -254,6 +271,7 @@ bool InputSystem::owns_pointer(const SDL_Event& event_value) const noexcept
 
 bool InputSystem::process_event(const SDL_Event& value, bool claimed)
 {
+    ENGINE_PROFILE_FUNCTION();
     last_error_.clear();
     if (!state_ || !state_->frame_open)
     {
@@ -265,6 +283,7 @@ bool InputSystem::process_event(const SDL_Event& value, bool claimed)
 
 bool InputSystem::on_tick(double delta_time)
 {
+    ENGINE_PROFILE_FUNCTION();
     last_error_.clear();
     if (!state_ || !state_->frame_open || !std::isfinite(delta_time) || delta_time < 0)
     {
@@ -280,10 +299,12 @@ bool InputSystem::on_tick(double delta_time)
 
 const schema::InputFrameState& InputSystem::frame_state() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return frame_;
 }
 std::span<const schema::InputDeviceDataT> InputSystem::devices() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return state_ ? std::span<const schema::InputDeviceDataT>(state_->published_devices)
                   : std::span<const schema::InputDeviceDataT>();
 }
@@ -291,11 +312,16 @@ std::span<const schema::InputDeviceDataT> InputSystem::devices() const noexcept
 bool InputSystem::controls(std::uint64_t device,
                            std::vector<schema::InputControlInfoT>& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     last_error_.clear();
     if (!state_ ||
         !std::any_of(state_->published_devices.begin(), state_->published_devices.end(),
-                     [device](const auto& data) { return data.connection_id == device; }))
+                     [device](const auto& data)
+                     {
+                         ENGINE_PROFILE_FUNCTION_PROBE();
+                         return data.connection_id == device;
+                     }))
     {
         last_error_ = "Unknown input device";
         return false;
@@ -314,6 +340,7 @@ bool InputSystem::controls(std::uint64_t device,
 bool InputSystem::read_control(const schema::InputControlRef& control,
                                schema::InputControlState& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     last_error_.clear();
     if (state_)
@@ -331,6 +358,7 @@ bool InputSystem::read_control(const schema::InputControlRef& control,
 
 bool InputSystem::read_contacts(std::vector<schema::InputContactStateT>& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     last_error_.clear();
     if (!state_)
@@ -344,6 +372,7 @@ bool InputSystem::read_contacts(std::vector<schema::InputContactStateT>& output)
 
 bool InputSystem::create_channel(schema::InputChannelHandle& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     last_error_.clear();
     if (!state_)
@@ -379,6 +408,7 @@ namespace
 {
 Channel* find_channel(State* state, schema::InputChannelHandle handle)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (state && handle.slot() < state->channels.size())
     {
         auto& channel = state->channels[handle.slot()];
@@ -392,6 +422,7 @@ Channel* find_channel(State* state, schema::InputChannelHandle handle)
 
 Capture* find_capture(State* state, schema::InputCaptureHandle handle)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (state && handle.slot() < state->captures.size())
     {
         auto& capture = state->captures[handle.slot()];
@@ -407,6 +438,7 @@ Capture* find_capture(State* state, schema::InputCaptureHandle handle)
 bool InputSystem::configure_channel(schema::InputChannelHandle handle,
                                     const schema::InputChannelDataT& data)
 {
+    ENGINE_PROFILE_FUNCTION();
     last_error_.clear();
     auto* channel = find_channel(state_.get(), handle);
     if (!channel)
@@ -420,9 +452,13 @@ bool InputSystem::configure_channel(schema::InputChannelHandle handle,
     }
     const auto valid_device_kind = [this](const schema::InputControlRef& ref)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const auto device =
             std::find_if(state_->devices.begin(), state_->devices.end(), [&ref](const Device& d)
-                         { return d.data.connection_id == ref.connection_id(); });
+                         {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return d.data.connection_id == ref.connection_id();
+            });
         if (device == state_->devices.end())
         {
             return true;
@@ -481,6 +517,7 @@ bool InputSystem::configure_channel(schema::InputChannelHandle handle,
 bool InputSystem::set_channel_enabled(schema::InputChannelHandle handle, bool enabled,
                                       schema::InputActivation activation)
 {
+    ENGINE_PROFILE_FUNCTION();
     last_error_.clear();
     auto* channel = find_channel(state_.get(), handle);
     if (!channel || activation < schema::InputActivation::MIN ||
@@ -500,6 +537,7 @@ bool InputSystem::set_channel_enabled(schema::InputChannelHandle handle, bool en
 
 bool InputSystem::destroy_channel(schema::InputChannelHandle handle)
 {
+    ENGINE_PROFILE_FUNCTION();
     last_error_.clear();
     auto* channel = find_channel(state_.get(), handle);
     if (!channel)
@@ -523,6 +561,7 @@ bool InputSystem::destroy_channel(schema::InputChannelHandle handle)
 bool InputSystem::read_action(schema::InputChannelHandle handle, std::string_view name,
                               schema::InputActionState& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     last_error_.clear();
     auto* channel = find_channel(state_.get(), handle);
@@ -543,6 +582,7 @@ bool InputSystem::begin_capture(schema::InputChannelHandle handle,
                                 const schema::InputCaptureOptionsT& options,
                                 schema::InputCaptureHandle& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     last_error_.clear();
     if (!find_channel(state_.get(), handle) || state_->next_generation == 0 ||
@@ -551,10 +591,18 @@ bool InputSystem::begin_capture(schema::InputChannelHandle handle,
         options.threshold <= 0 || options.neutral_threshold < 0 ||
         options.neutral_threshold >= options.threshold ||
         std::any_of(
-            options.devices.begin(), options.devices.end(), [](auto v) { return v == 0; }) ||
+            options.devices.begin(), options.devices.end(), [](auto v)
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return v == 0;
+            }) ||
         std::any_of(
             options.kinds.begin(), options.kinds.end(),
-            [](auto v) { return v < Kind::MIN || v > Kind::MAX; }))
+            [](auto v)
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return v < Kind::MIN || v > Kind::MAX;
+            }))
     {
         last_error_ = "Invalid input capture options or channel";
         return false;
@@ -576,7 +624,11 @@ bool InputSystem::begin_capture(schema::InputChannelHandle handle,
     if (index == state_->captures.size())
     {
         const auto available = std::find_if(state_->captures.begin(), state_->captures.end(),
-                                            [](const Capture& capture) { return !capture.alive; });
+                                            [](const Capture& capture)
+                                            {
+                                                ENGINE_PROFILE_FUNCTION_PROBE();
+                                                return !capture.alive;
+                                            });
         index = static_cast<std::uint32_t>(available - state_->captures.begin());
     }
     if (index == state_->captures.size())
@@ -597,6 +649,7 @@ bool InputSystem::begin_capture(schema::InputChannelHandle handle,
 bool InputSystem::read_capture(schema::InputCaptureHandle handle,
                                schema::InputCaptureStateT& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     last_error_.clear();
     auto* capture = find_capture(state_.get(), handle);
@@ -611,6 +664,7 @@ bool InputSystem::read_capture(schema::InputCaptureHandle handle,
 
 bool InputSystem::cancel_capture(schema::InputCaptureHandle handle)
 {
+    ENGINE_PROFILE_FUNCTION();
     last_error_.clear();
     auto* capture = find_capture(state_.get(), handle);
     if (!capture || capture->state.status == schema::InputCaptureStatus::completed)
@@ -626,6 +680,7 @@ bool InputSystem::cancel_capture(schema::InputCaptureHandle handle)
 
 const std::string& InputSystem::last_error() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return last_error_;
 }
 } // namespace engine

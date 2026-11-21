@@ -1,13 +1,20 @@
 #pragma once
+
+#include "runtime/performance/function_profile.hpp"
 #include "plugins/runtime/character_controller/character_types.hpp"
 #include "runtime/schema/control_json_generated.hpp"
 namespace engine::plugins::character_controller::detail
 {
 inline nlohmann::json motor_status_json(const CharacterMotorStatus& s, bool script = true)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     static constexpr const char* ground[] = {"supported", "steep", "unsupported", "airborne"};
     static constexpr const char* shape[] = {"unchanged", "applied", "blocked"};
-    const auto v = [](const Vec3& value) { return schema::control_json::write(value, true); };
+    const auto v = [](const Vec3& value)
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return schema::control_json::write(value, true);
+    };
     return {{"step", schema::control_json::write(s.step, script)},
             {"simulationTime", s.simulation_time},
             {"hasSimulated", s.has_simulated},
@@ -31,6 +38,7 @@ inline nlohmann::json motor_status_json(const CharacterMotorStatus& s, bool scri
 }
 inline nlohmann::json status_json(const CharacterStatus& s, bool script = true)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     static constexpr const char* motion[] = {"unknown", "grounded", "rising", "falling"};
     static constexpr const char* stance[] = {"unknown", "standing", "crouched"};
     static constexpr const char* selection[] = {"inactive", "selected", "denied", "failed"};

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "editor/asset_pipeline/components/scene_component_codec.hpp"
 #include "editor/commands/editor_commands.hpp"
 #include "editor/commands/editor_edit.hpp"
@@ -44,12 +46,14 @@ template <typename T, typename Data, typename Read, typename Write>
                                       EditorCommands& commands, std::string_view name, Read read,
                                       Write write)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return commands.register_command(
                std::string("set_") + std::string(name), true,
                [&world, &scene_commands, read, write](const Json& arguments, Json& result,
                                                       std::unique_ptr<EditorEdit>& edit,
                                                       std::string& error)
                {
+                   ENGINE_PROFILE_FUNCTION_PROBE();
                    auto node = target(world, arguments, error);
                    if (!node)
                    {
@@ -75,6 +79,7 @@ template <typename T, typename Data, typename Read, typename Write>
                    std::vector<ResourceReference> prepared;
                    const auto valid = [&]()
                    {
+                       ENGINE_PROFILE_FUNCTION_PROBE();
                        if constexpr (requires { T::valid_settings(data); })
                        {
                            return T::valid_settings(data);
@@ -127,6 +132,7 @@ template <typename T, typename Data, typename Read, typename Write>
                [&world, write](const Json& arguments, Json& result, std::unique_ptr<EditorEdit>&,
                                std::string& error)
                {
+                   ENGINE_PROFILE_FUNCTION_PROBE();
                    if (!fields(arguments, {}, error))
                    {
                        return false;

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "plugins/editor/modeling/editable_mesh.hpp"
 
 #include <algorithm>
@@ -18,58 +20,69 @@ constexpr double epsilon = 1.0e-9;
 
 inline Vector add(const Vector& a, const Vector& b)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return {a[0] + b[0], a[1] + b[1], a[2] + b[2]};
 }
 
 inline Vector sub(const Vector& a, const Vector& b)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return {a[0] - b[0], a[1] - b[1], a[2] - b[2]};
 }
 
 inline Vector mul(const Vector& a, double value)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return {a[0] * value, a[1] * value, a[2] * value};
 }
 
 inline double dot(const Vector& a, const Vector& b)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 }
 
 inline Vector cross(const Vector& a, const Vector& b)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return {a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
 }
 
 inline double length(const Vector& value)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return std::hypot(value[0], value[1], value[2]);
 }
 
 inline Vector normalized(const Vector& value)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     const auto size = length(value);
     return size > epsilon ? mul(value, 1.0 / size) : Vector{};
 }
 
 inline bool finite(const Vector& value)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return std::isfinite(value[0]) && std::isfinite(value[1]) && std::isfinite(value[2]);
 }
 
 inline Vector position(const schema::ModelingVertex& vertex)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return {vertex.x(), vertex.y(), vertex.z()};
 }
 
 inline Vector position(const schema::EditableMeshDataT& data, std::uint64_t id)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     const auto* value = mesh::find_vertex(data, id);
     return value ? position(*value) : Vector{};
 }
 
 inline Vector face_normal(const schema::EditableMeshDataT& data, const schema::ModelingFaceT& face)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     Vector normal{};
     for (std::size_t i = 0; i < face.vertices.size(); ++i)
     {
@@ -84,6 +97,7 @@ inline Vector face_normal(const schema::EditableMeshDataT& data, const schema::M
 
 inline int projection_axis(const Vector& normal)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     const auto x = std::abs(normal[0]);
     const auto y = std::abs(normal[1]);
     const auto z = std::abs(normal[2]);
@@ -92,6 +106,7 @@ inline int projection_axis(const Vector& normal)
 
 inline ProjectedPoint project(const Vector& value, int axis)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return axis == 0 ? ProjectedPoint{value[1], value[2]}
                      : (axis == 1 ? ProjectedPoint{value[2], value[0]}
                                   : ProjectedPoint{value[0], value[1]});
@@ -99,6 +114,7 @@ inline ProjectedPoint project(const Vector& value, int axis)
 
 inline std::uint64_t add_vertex(schema::EditableMeshDataT& data, const Vector& value)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     const auto id = data.next_id++;
     data.vertices.emplace_back(id, value[0], value[1], value[2]);
     return id;
@@ -108,6 +124,7 @@ inline schema::ModelingFaceT& add_face(schema::EditableMeshDataT& data,
                                        std::vector<std::uint64_t> vertices,
                                        std::uint32_t material = 0, std::uint32_t smoothing = 0)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     auto face = std::make_unique<schema::ModelingFaceT>();
     face->id = data.next_id++;
     face->vertices = std::move(vertices);
@@ -119,6 +136,7 @@ inline schema::ModelingFaceT& add_face(schema::EditableMeshDataT& data,
 
 inline void set_position(schema::EditableMeshDataT& data, std::uint64_t id, const Vector& value)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     for (auto& vertex : data.vertices)
     {
         if (vertex.id() == id)
@@ -131,16 +149,19 @@ inline void set_position(schema::EditableMeshDataT& data, std::uint64_t id, cons
 
 inline schema::Vec2 corner_uv(const schema::ModelingFaceT& face, std::size_t index)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return face.texcoords.empty() ? schema::Vec2(0.0, 0.0) : face.texcoords[index];
 }
 
 inline schema::Color corner_color(const schema::ModelingFaceT& face, std::size_t index)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return face.colors.empty() ? schema::Color(1.0F, 1.0F, 1.0F, 1.0F) : face.colors[index];
 }
 
 inline void reverse_face(schema::ModelingFaceT& face)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     std::reverse(face.vertices.begin(), face.vertices.end());
     std::reverse(face.texcoords.begin(), face.texcoords.end());
     std::reverse(face.colors.begin(), face.colors.end());

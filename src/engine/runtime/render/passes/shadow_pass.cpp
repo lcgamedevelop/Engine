@@ -1,6 +1,7 @@
 #include "runtime/render/passes/shadow_pass.hpp"
 #include "runtime/render/vsm/vsm_types.hpp"
 
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/render/render_math.hpp"
 #include "runtime/render/render_submission.hpp"
@@ -35,6 +36,7 @@ bool shadow_caster_signature(const RenderFrameData& frame, const VsmPageTarget& 
     values.clear();
     const auto append_floats = [&](const auto& source)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         for (const float value : source)
         {
             values.push_back(std::bit_cast<std::uint32_t>(value));
@@ -42,6 +44,7 @@ bool shadow_caster_signature(const RenderFrameData& frame, const VsmPageTarget& 
     };
     const auto append_resource = [&](ResourceHandle handle)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         values.push_back(handle.owner);
         values.push_back(handle.id);
         values.push_back(handle.generation);
@@ -116,27 +119,32 @@ bool shadow_caster_signature(const RenderFrameData& frame, const VsmPageTarget& 
 
 bool overlaps(const auto& a, const auto& b)
 {
+    ENGINE_PROFILE_FUNCTION();
     return a.x < b.x + b.size && b.x < a.x + a.size && a.y < b.y + b.size && b.y < a.y + a.size;
 }
 } // namespace
 
 ShadowPass::~ShadowPass() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     release();
 }
 
 bgfx::TextureHandle ShadowPass::texture() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return depth_;
 }
 
 std::uint64_t ShadowPass::local_depth_revision() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return local_depth_revision_;
 }
 
 void ShadowPass::release() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     ++local_depth_revision_;
     release_solid_batches();
     if (bgfx::isValid(framebuffer_))
@@ -195,6 +203,7 @@ void ShadowPass::release() noexcept
 
 bool ShadowPass::prepare(std::uint16_t size)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (resolution_ == size && bgfx::isValid(framebuffer_) && bgfx::isValid(program_))
     {
         return true;
@@ -261,6 +270,7 @@ bool ShadowPass::prepare(std::uint16_t size)
 
 std::uint32_t ShadowPass::resource_count() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return static_cast<std::uint32_t>(bgfx::isValid(depth_)) +
            static_cast<std::uint32_t>(bgfx::isValid(framebuffer_)) +
            static_cast<std::uint32_t>(bgfx::isValid(instanced_vertex_)) +
@@ -280,6 +290,7 @@ std::uint32_t ShadowPass::resource_count() const noexcept
 
 bool ShadowPass::bind_material(const MaterialBinding& material, bgfx::TextureHandle fallback)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!material.shadow_valid)
     {
         return false;
@@ -351,11 +362,13 @@ bool ShadowPass::draw(const RenderFrameData& frame_data, const RenderSettings& s
         std::ranges::all_of(frame_data.meshes,
                             [](const auto& source)
                             {
+                                ENGINE_PROFILE_FUNCTION_PROBE();
                                 return !source.gpu ||
                                        std::ranges::all_of(
                                            source.gpu->materials,
                                            [](const auto& material)
                                            {
+                                               ENGINE_PROFILE_FUNCTION_PROBE();
                                                if (!material.program)
                                                {
                                                    return false;
@@ -401,6 +414,7 @@ bool ShadowPass::draw(const RenderFrameData& frame_data, const RenderSettings& s
     const auto* caps = bgfx::getCaps();
     const auto atlas_rectangle = [this, caps](std::uint16_t x, std::uint16_t y, std::uint16_t size)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const float scale = static_cast<float>(size) / resolution_;
         const float left = static_cast<float>(x) / resolution_;
         const float top = static_cast<float>(y) / resolution_;
@@ -495,6 +509,7 @@ bool ShadowPass::draw(const RenderFrameData& frame_data, const RenderSettings& s
     }
     const auto distance_squared = [camera_world](const LocalShadowLight& light)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         double distance = 0.0;
         for (std::size_t axis = 0; axis < 3; ++axis)
         {
@@ -507,6 +522,7 @@ bool ShadowPass::draw(const RenderFrameData& frame_data, const RenderSettings& s
     std::sort(candidates.begin(), candidates.end(),
               [&](const auto* left, const auto* right)
               {
+                  ENGINE_PROFILE_FUNCTION_PROBE();
                   const auto a = distance_squared(*left);
                   const auto b = distance_squared(*right);
                   return a != b ? a < b : left->node_id < right->node_id;
@@ -665,6 +681,7 @@ bool ShadowPass::draw(const RenderFrameData& frame_data, const RenderSettings& s
         }
         const auto same_projection = [&](const CachedPage& prior)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             constexpr auto matrix_bytes = 16 * sizeof(float);
             // Local light coverage is independent of the camera-relative translation.
             const auto view_bytes = local_projection ? 12 * sizeof(float) : matrix_bytes;
@@ -681,7 +698,10 @@ bool ShadowPass::draw(const RenderFrameData& frame_data, const RenderSettings& s
         };
         const auto cached = std::find_if(
             cached_pages_.begin(), cached_pages_.end(), [&](const CachedPage& prior)
-            { return prior.x == page.x && prior.y == page.y && same_projection(prior); });
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return prior.x == page.x && prior.y == page.y && same_projection(prior);
+            });
         if (cached == cached_pages_.end())
         {
             dirty_pages.push_back(page);
@@ -732,6 +752,7 @@ bool ShadowPass::draw(const RenderFrameData& frame_data, const RenderSettings& s
 
 void ShadowPass::release_solid_batches() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     for (const auto& batch : solid_batches_)
     {
         bgfx::destroy(batch.indices);
@@ -778,6 +799,7 @@ void ShadowPass::prepare_solid_batches(const RenderFrameData& frame)
         const auto cull = materials[first_slot].cull;
         const auto compatible = [&](std::size_t slot)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             return slot < materials.size() && materials[slot].shadow_valid &&
                    materials[slot].blend == schema::BlendMode::opaque &&
                    materials[slot].shadow_alpha[0] <= 0 && materials[slot].cull == cull;
@@ -789,6 +811,7 @@ void ShadowPass::prepare_solid_batches(const RenderFrameData& frame)
         std::size_t total_indices = 0;
         const bool complete = std::ranges::all_of(data.submeshes, [&](const auto& range)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             if (range.first_index() != total_indices || range.index_count() % 3 != 0 ||
                 range.index_count() > data.indices.size() - total_indices ||
                 !compatible(range.material_slot()))
@@ -800,7 +823,11 @@ void ShadowPass::prepare_solid_batches(const RenderFrameData& frame)
         });
         if (!complete || (!data.submeshes.empty() && total_indices != data.indices.size()) ||
             !std::ranges::all_of(data.indices,
-                                [&](auto value) { return value < data.vertices.size(); }))
+                                [&](auto value)
+                                {
+                                    ENGINE_PROFILE_FUNCTION_PROBE();
+                                    return value < data.vertices.size();
+                                }))
         {
             continue;
         }
@@ -816,6 +843,7 @@ void ShadowPass::prepare_solid_batches(const RenderFrameData& frame)
     std::vector<SolidRange> ranges;
     const auto upload = [&](std::uint64_t state)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (ranges.size() > 1)
         {
             const auto vertex_bytes = positions.size() * sizeof(Position);
@@ -851,7 +879,11 @@ void ShadowPass::prepare_solid_batches(const RenderFrameData& frame)
         {
             continue;
         }
-        std::ranges::sort(group, {}, [&](std::size_t index) { return frame.meshes[index].center; });
+        std::ranges::sort(group, {}, [&](std::size_t index)
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return frame.meshes[index].center;
+        });
         for (const auto source : group)
         {
             const auto& data = *frame.meshes[source].data;
@@ -886,13 +918,18 @@ void ShadowPass::prepare_solid_batches(const RenderFrameData& frame)
 bool ShadowPass::draw_pages(const RenderFrameData& frame_data, std::span<const VsmPageDraw> pages,
                             const VsmPageTarget& target)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (target.framebuffer.idx == framebuffer_.idx)
     {
         std::erase_if(cached_pages_,
                       [&](const CachedPage& cached)
                       {
+                          ENGINE_PROFILE_FUNCTION_PROBE();
                           return std::any_of(pages.begin(), pages.end(), [&](const auto& page)
-                                             { return overlaps(page, cached); });
+                                             {
+                              ENGINE_PROFILE_FUNCTION_PROBE();
+                              return overlaps(page, cached);
+                          });
                       });
     }
     if (!bgfx::isValid(target.framebuffer) || !bgfx::isValid(program_) ||
@@ -943,10 +980,12 @@ bool ShadowPass::draw_pages(const RenderFrameData& frame_data, std::span<const V
     std::map<DrawBatchKey, std::size_t> batch_index;
     const auto collect_caster = [&](const Caster& caster)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const auto& mesh = *caster.mesh;
         const auto* data = caster.source->data;
         const auto collect = [&](std::uint32_t first, std::uint32_t count, std::size_t slot)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             if (slot >= mesh.materials.size())
             {
                 return false;
@@ -1010,6 +1049,7 @@ bool ShadowPass::draw_pages(const RenderFrameData& frame_data, std::span<const V
     [[maybe_unused]] std::int64_t packed_original_draws = 0;
     const auto submit_packed = [&](bgfx::ViewId view)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         for (const auto& batch : solid_batches_)
         {
             std::size_t begin = 0;
@@ -1041,6 +1081,7 @@ bool ShadowPass::draw_pages(const RenderFrameData& frame_data, std::span<const V
     };
     const auto submit_batches = [&](bgfx::ViewId view)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         for (auto& batch : batches)
         {
             while (batch.cursor < batch.items.size())

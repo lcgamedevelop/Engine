@@ -1,3 +1,5 @@
+#include "runtime/performance/profiling.hpp"
+
 #if ENGINE_HAS_CHARACTER_CONTROLLER_PLUGIN
 #include "plugins/runtime/script/bindings/character_controller_binding.hpp"
 #include "plugins/runtime/character_controller/character_controller.hpp"
@@ -23,6 +25,7 @@ Object.freeze(CharacterController.prototype);Object.freeze(CharacterController);
 )js";
 void input(const Arguments& a)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto c = binding_detail::component<Controller>(a, 3);
     control_detail::Json j;
     character_controller::CharacterInput value;
@@ -36,11 +39,13 @@ void input(const Arguments& a)
 }
 void clear(const Arguments& a)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto c = binding_detail::component<Controller>(a, 2);
     a.set_return(c && c.clear_input());
 }
 void status(const Arguments& a)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto c = binding_detail::component<Controller>(a, 2);
     a.set_return({});
     character_controller::CharacterStatus value;
@@ -52,14 +57,17 @@ void status(const Arguments& a)
 } // namespace
 std::string_view CharacterControllerBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "CharacterController";
 }
 std::string_view CharacterControllerBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 bool CharacterControllerBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.integer("CharacterControllerKind", static_cast<int>(Controller::component_type)) &&
            vm.function("CharacterControllerAdd", binding_detail::add_component<Controller>) &&
            vm.function("CharacterControllerInput", input) &&

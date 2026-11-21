@@ -1,4 +1,6 @@
 #include "plugins/runtime/character_controller/character_controller.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/character_controller/abilities/ability_validation.hpp"
 #include "plugins/runtime/character_controller/character_controller_runtime.hpp"
 #include <numeric>
@@ -7,14 +9,17 @@ namespace engine::plugins::character_controller
 {
 bool CharacterController::register_type(ComponentRegistry& r)
 {
+    ENGINE_PROFILE_FUNCTION();
     return register_component_storage<CharacterController, Data, Runtime>(r);
 }
 CharacterController::Runtime* CharacterController::runtime() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return runtime_state<Runtime>();
 }
 bool CharacterController::initialize()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -28,6 +33,7 @@ bool CharacterController::initialize()
 bool CharacterController::valid_settings(const Data& d, const CharacterAbilityRegistry& types,
                                          std::string& e)
 {
+    ENGINE_PROFILE_FUNCTION();
     e.clear();
     if (!types.frozen() || !d.movement || !d.facing || !d.ability_data)
     {
@@ -63,6 +69,7 @@ bool CharacterController::valid_settings(const Data& d, const CharacterAbilityRe
     }
     const auto check = [&](const auto& entries, std::string_view type)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         for (const auto& v : entries)
         {
             if (v.id.empty() || !data_ids.insert(v.id).second)
@@ -70,7 +77,11 @@ bool CharacterController::valid_settings(const Data& d, const CharacterAbilityRe
                 return false;
             }
             if (std::none_of(d.abilities.begin(), d.abilities.end(),
-                             [&](const auto& ref) { return ref.id == v.id && ref.type == type; }))
+                             [&](const auto& ref)
+                             {
+                                 ENGINE_PROFILE_FUNCTION_PROBE();
+                                 return ref.id == v.id && ref.type == type;
+                             }))
             {
                 return false;
             }
@@ -102,12 +113,14 @@ bool CharacterController::valid_settings(const Data& d, const CharacterAbilityRe
 }
 bool CharacterController::get_settings(Data& out) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* d = read_data<Data>();
     out = d ? *d : Data{};
     return d;
 }
 bool CharacterController::set_settings(const Data& d, std::string& e)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return detail::invalid(e, "invalid character controller");
@@ -134,6 +147,7 @@ bool CharacterController::set_settings(const Data& d, std::string& e)
     // Action bindings belong to the generated concrete type; compare their declaration only.
     const auto changed = [](const auto& a, const auto& b)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (a.size() != b.size())
         {
             return true;
@@ -177,7 +191,10 @@ bool CharacterController::set_settings(const Data& d, std::string& e)
     r.ordered_abilities.resize(d.abilities.size());
     std::iota(r.ordered_abilities.begin(), r.ordered_abilities.end(), 0);
     std::stable_sort(r.ordered_abilities.begin(), r.ordered_abilities.end(), [&](auto a, auto b)
-                     { return d.abilities[a].priority > d.abilities[b].priority; });
+                     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return d.abilities[a].priority > d.abilities[b].priority;
+    });
     for (const auto& ops : types->operations())
     {
         ops.prune(*node().world());
@@ -186,11 +203,16 @@ bool CharacterController::set_settings(const Data& d, std::string& e)
 }
 bool CharacterController::set_input(const CharacterInput& input)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable() || !active() || node().world()->paused())
     {
         return false;
     }
-    const auto finite = [](const Vec2& v) { return std::isfinite(v.x()) && std::isfinite(v.y()); };
+    const auto finite = [](const Vec2& v)
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return std::isfinite(v.x()) && std::isfinite(v.y());
+    };
     if (!finite(input.move) || !finite(input.look_delta) || !finite(input.look_rate) ||
         std::abs(input.move.x()) > 1 || std::abs(input.move.y()) > 1)
     {
@@ -217,6 +239,7 @@ bool CharacterController::set_input(const CharacterInput& input)
 }
 bool CharacterController::clear_input() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!writable())
     {
         return false;
@@ -240,11 +263,13 @@ bool CharacterController::clear_input() noexcept
 }
 bool CharacterController::get_status(CharacterStatus& out) const
 {
+    ENGINE_PROFILE_FUNCTION();
     out = valid() ? runtime()->status : CharacterStatus{};
     return valid();
 }
 bool CharacterController::restore_data(const schema::ComponentDataT& d)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* data = d.payload.AsCharacterControllerData();
     std::string e;
     if (!d.flags || !data || !set_settings(*data, e))
@@ -270,6 +295,7 @@ bool CharacterController::restore_data(const schema::ComponentDataT& d)
 bool CharacterController::remap_node_references(
     schema::ComponentDataT& d, std::span<const schema::NodeIdMappingT> mapping) const
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* value = d.payload.AsCharacterControllerData();
     if (!value)
     {

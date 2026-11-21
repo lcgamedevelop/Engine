@@ -1,4 +1,5 @@
 #include "plugins/runtime/script/bindings/mesh_renderer_binding.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/script/bindings/binding_helpers.hpp"
 
 #include "plugins/runtime/script/bindings/binding_context.hpp"
@@ -69,6 +70,7 @@ Object.freeze(MeshRenderer);
 
 void mesh(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto node = BindingContext::node(arguments);
     auto mesh = !node ? MeshRenderer{} : node.get_component<MeshRenderer>();
     std::string path;
@@ -78,6 +80,7 @@ void mesh(const Arguments& arguments)
 
 void material_count(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto node = BindingContext::node(arguments);
     auto mesh = !node ? MeshRenderer{} : node.get_component<MeshRenderer>();
     const auto count = mesh.valid() && arguments.count() == 2 ? mesh.material_count() : 0;
@@ -86,6 +89,7 @@ void material_count(const Arguments& arguments)
 
 void static_feature(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto node = BindingContext::node(arguments);
     const auto mesh = node ? node.get_component<MeshRenderer>() : MeshRenderer{};
     arguments.set_return(
@@ -95,6 +99,7 @@ void static_feature(const Arguments& arguments)
 
 void set_static_feature(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto node = BindingContext::node(arguments);
     auto mesh = node ? node.get_component<MeshRenderer>() : MeshRenderer{};
     arguments.set_return(mesh && arguments.count() == 3 && arguments.is_boolean(2) &&
@@ -105,6 +110,7 @@ void set_static_feature(const Arguments& arguments)
 
 void get_rvt_role(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto mesh = binding_detail::component<MeshRenderer>(arguments, 2);
     arguments.set_return({});
     if (mesh)
@@ -114,6 +120,7 @@ void get_rvt_role(const Arguments& arguments)
 }
 void set_rvt_role(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto mesh = binding_detail::component<MeshRenderer>(arguments, 3);
     arguments.set_return(false);
     if (mesh && arguments.is_uint32(2) &&
@@ -125,6 +132,7 @@ void set_rvt_role(const Arguments& arguments)
 }
 void cast_shadows(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto node = BindingContext::node(arguments);
     auto mesh = node.valid() ? node.get_component<MeshRenderer>() : MeshRenderer{};
     arguments.set_return(mesh.valid() && arguments.count() == 2 && mesh.cast_shadows());
@@ -132,6 +140,7 @@ void cast_shadows(const Arguments& arguments)
 
 void set_cast_shadows(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto node = BindingContext::node(arguments);
     auto mesh = node.valid() ? node.get_component<MeshRenderer>() : MeshRenderer{};
@@ -144,6 +153,7 @@ void set_cast_shadows(const Arguments& arguments)
 
 void bake_static(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto node = BindingContext::node(arguments);
     auto mesh = node ? node.get_component<MeshRenderer>() : MeshRenderer{};
     arguments.set_return(mesh && arguments.count() == 2 && mesh.bake_static());
@@ -151,6 +161,7 @@ void bake_static(const Arguments& arguments)
 
 void set_bake_static(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto node = BindingContext::node(arguments);
     auto mesh = node ? node.get_component<MeshRenderer>() : MeshRenderer{};
     arguments.set_return(mesh && arguments.count() == 3 && arguments.is_boolean(2) &&
@@ -159,6 +170,7 @@ void set_bake_static(const Arguments& arguments)
 
 void lightmap_path(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     auto node = BindingContext::node(arguments);
     auto mesh = node ? node.get_component<MeshRenderer>() : MeshRenderer{};
@@ -170,6 +182,7 @@ void lightmap_path(const Arguments& arguments)
 
 void set_lightmap(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto node = BindingContext::node(arguments);
     auto mesh = node ? node.get_component<MeshRenderer>() : MeshRenderer{};
     std::string path;
@@ -179,6 +192,7 @@ void set_lightmap(const Arguments& arguments)
 
 void set_material_count(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto node = BindingContext::node(arguments);
     auto mesh = !node ? MeshRenderer{} : node.get_component<MeshRenderer>();
     arguments.set_return(mesh.valid() && arguments.count() == 3 && arguments.is_uint32(2) &&
@@ -188,16 +202,19 @@ void set_material_count(const Arguments& arguments)
 
 std::string_view MeshRendererBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "MeshRenderer";
 }
 
 std::string_view MeshRendererBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 
 bool MeshRendererBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.integer("MeshRendererKind", static_cast<int>(MeshRenderer::component_type)) &&
            vm.function("MeshRendererAdd", binding_detail::add_component<MeshRenderer>) &&
            vm.function("MeshRendererMesh", mesh) &&

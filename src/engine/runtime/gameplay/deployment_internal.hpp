@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/app/app.hpp"
 #include "runtime/resource/resource_system.hpp"
 #include "runtime/utils/path_utils.hpp"
@@ -24,6 +26,7 @@ constexpr std::size_t maximum_text_size = 4 * 1024 * 1024;
 
 [[nodiscard]] inline bool read_text(const fs::path& path, std::string& text)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     ByteBuffer bytes;
     if (VirtualFileSystem::read_file(path, bytes) && bytes.size() <= maximum_text_size)
     {
@@ -40,6 +43,7 @@ constexpr std::size_t maximum_text_size = 4 * 1024 * 1024;
 
 [[nodiscard]] inline bool relative_path(std::string_view input, std::string& normalized)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     normalized.clear();
     if (input.empty() || input.find_first_of("\\:") != std::string_view::npos ||
         input.find('\0') != std::string_view::npos)
@@ -65,6 +69,7 @@ constexpr std::size_t maximum_text_size = 4 * 1024 * 1024;
 
 [[nodiscard]] inline bool safe_revision(std::string_view value)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     if (value.empty() || value.size() > 128 || value == "." || value == ".." || value == "builtin")
     {
         return false;
@@ -84,6 +89,7 @@ constexpr std::size_t maximum_text_size = 4 * 1024 * 1024;
 [[nodiscard]] inline bool contained_file(const fs::path& root, std::string_view relative,
                                          fs::path& path, bool directory = false)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     std::error_code error;
     const auto canonical_root = fs::canonical(root, error);
     if (error || !fs::is_directory(canonical_root, error) || error)
@@ -117,6 +123,7 @@ constexpr std::size_t maximum_text_size = 4 * 1024 * 1024;
 [[nodiscard]] inline bool matches_file(const fs::path& path, std::uint64_t size,
                                        std::string_view hash)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     std::uint64_t value = 0;
     std::uint64_t actual_size = 0;
     if (hash.size() != 16 || !VirtualFileSystem::hash_file(path, value, actual_size) ||
@@ -136,6 +143,7 @@ constexpr std::size_t maximum_text_size = 4 * 1024 * 1024;
 
 [[nodiscard]] inline bool script_path(std::string_view path)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return path.ends_with(".js") || path.ends_with(".mjs");
 }
 
@@ -159,6 +167,7 @@ struct ControlRead
 
 inline ControlRead read_control(const fs::path& root)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     ControlRead output;
     const auto file = root / "script-control.json";
     std::error_code error;
@@ -192,6 +201,7 @@ inline ControlRead read_control(const fs::path& root)
 
 inline bool write_status(const fs::path& root, const std::string& text, std::string& message)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     const auto target = root / "script-status.json";
     const auto temporary = root / "script-status.json.tmp";
     std::error_code error;
@@ -227,6 +237,7 @@ struct DeploymentRead
 
     bool fail(std::string message)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         error = std::move(message);
         return false;
     }
@@ -234,6 +245,7 @@ struct DeploymentRead
     [[nodiscard]] bool read(const fs::path& persistent_root,
                             const std::atomic<bool>* cancelled = nullptr)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const fs::path root = persistent_root / "assets";
         const fs::path manifest = root / "available.json";
         std::error_code error;

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/resource/resource_reference.hpp"
 #include "runtime/scene/node.hpp"
 #include "runtime/world/world_system.hpp"
@@ -13,16 +15,19 @@ struct ResourceBindingScope
     ResourceBindingScope(WorldSystem& world, ResourceHandle owner) noexcept
         : world(world), previous(world.binding_owner_)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         world.binding_owner_ = owner;
     }
     ~ResourceBindingScope() noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         world.binding_owner_ = previous;
     }
     ResourceBindingScope(const ResourceBindingScope&) = delete;
     ResourceBindingScope& operator=(const ResourceBindingScope&) = delete;
     static ResourceHandle owner(const WorldSystem& world) noexcept
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return world.binding_owner_;
     }
     WorldSystem& world;
@@ -33,6 +38,7 @@ struct ResourceBindingScope
 inline bool acquire_dependency(ResourceLoader* loader, ResourceHandle owner, std::string_view input,
                                ResourceReference& output)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     if (!loader)
     {
         return false;
@@ -51,6 +57,7 @@ inline bool acquire_dependency(ResourceLoader* loader, ResourceHandle owner, std
 
 inline bool acquire_resource(Node node, std::string_view input, ResourceReference& output)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     auto* world = node.world();
     if (!node || !world)
     {
@@ -63,6 +70,7 @@ inline bool acquire_resource(Node node, std::string_view input, ResourceReferenc
 
 inline bool resource_guid(Node node, std::string_view path, std::string& output)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     output.clear();
     ResourceReference value;
     if (!acquire_resource(node, path, value))
@@ -74,6 +82,7 @@ inline bool resource_guid(Node node, std::string_view path, std::string& output)
 }
 inline bool resource_path(Node node, std::string_view guid, std::string& output)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     output.clear();
     ResourceReference value;
     if (!acquire_resource(node, guid, value))

@@ -1,4 +1,6 @@
 #include "plugins/editor/modeling/primitive_options.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include <array>
 #include <cmath>
@@ -11,6 +13,7 @@ using P = schema::ModelingPrimitive;
 using D = schema::ModelingPrimitiveDataT;
 constexpr std::uint32_t bit(P type)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return 1U << static_cast<std::uint32_t>(type);
 }
 constexpr auto cube = bit(P::cube), plane = bit(P::plane), cylinder = bit(P::cylinder),
@@ -43,6 +46,7 @@ constexpr PrimitiveParameter parameters[] = {
 
 bool in_range(double value, const PrimitiveParameter& parameter)
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::isfinite(value) && value <= parameter.maximum &&
            (parameter.exclusive_minimum ? value > parameter.minimum : value >= parameter.minimum);
 }
@@ -50,16 +54,19 @@ bool in_range(double value, const PrimitiveParameter& parameter)
 
 std::span<const PrimitiveParameter> primitive_parameters()
 {
+    ENGINE_PROFILE_FUNCTION();
     return parameters;
 }
 
 bool supports(const PrimitiveParameter& parameter, P type)
 {
+    ENGINE_PROFILE_FUNCTION();
     return type >= P::cube && type <= P::icosphere && (parameter.shapes & bit(type)) != 0;
 }
 
 bool validate_primitive(const D& options, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     if (options.type < P::cube || options.type > P::icosphere)
     {

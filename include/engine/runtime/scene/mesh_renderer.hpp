@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/resource/resource_handle.hpp"
 
 #include "runtime/scene/component.hpp"
@@ -29,6 +31,7 @@ public:
     MeshRenderer() noexcept = default;
     explicit MeshRenderer(Component component) noexcept : Component(component, component_type)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
     }
     [[nodiscard]] static bool register_type(ComponentRegistry& registry);
     [[nodiscard]] bool initialize();

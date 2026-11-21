@@ -1,4 +1,6 @@
 #include "editor/commands/components/component_edit.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/asset_pipeline/components/scene_component_codec.hpp"
 #include "editor/commands/scene_commands.hpp"
 #include "runtime/resource/resource_system.hpp"
@@ -13,6 +15,7 @@ bool prepare_component_edit(WorldSystem& world, SceneCommands& scene_commands, N
                             schema::ComponentDataT after, std::vector<ResourceReference> prepared,
                             std::unique_ptr<EditorEdit>& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     output.reset();
     if (!node || node.scene() != world.scene() || after.payload.type == ComponentType::NONE ||
         (before && before->payload.type != after.payload.type))
@@ -40,6 +43,7 @@ bool prepare_component_edit(WorldSystem& world, SceneCommands& scene_commands, N
 
 bool fields(const Json& arguments, std::initializer_list<std::string_view> allowed)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!arguments.is_object())
     {
         return false;
@@ -56,6 +60,7 @@ bool fields(const Json& arguments, std::initializer_list<std::string_view> allow
 
 bool identifier(const Json& arguments, const char* name, std::uint64_t& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!arguments.contains(name) || !arguments[name].is_string())
     {
         return false;
@@ -68,6 +73,7 @@ bool identifier(const Json& arguments, const char* name, std::uint64_t& value)
 
 bool scalar(const Json& input, double& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!input.is_number())
     {
         return false;
@@ -78,6 +84,7 @@ bool scalar(const Json& input, double& output)
 
 bool vector(const Json& input, std::size_t count, std::array<double, 4>& values)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!input.is_array() || input.size() != count)
     {
         return false;
@@ -94,22 +101,26 @@ bool vector(const Json& input, std::size_t count, std::array<double, 4>& values)
 
 bool same(const Vec3& first, const Vec3& second)
 {
+    ENGINE_PROFILE_FUNCTION();
     return first.x() == second.x() && first.y() == second.y() && first.z() == second.z();
 }
 
 bool same(const Color& first, const Color& second)
 {
+    ENGINE_PROFILE_FUNCTION();
     return first.r() == second.r() && first.g() == second.g() && first.b() == second.b() &&
            first.a() == second.a();
 }
 
 Json json_vector(const Vec3& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     return Json::array({value.x(), value.y(), value.z()});
 }
 
 Node target(WorldSystem& world, const Json& arguments, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* scene = world.scene();
     std::uint64_t node_id = 0;
     if (!scene || !arguments.is_object() || !arguments.contains("sceneId") ||
@@ -137,6 +148,7 @@ Node target(WorldSystem& world, const Json& arguments, std::string& error)
 bool fields(const Json& arguments, std::initializer_list<std::string_view> names,
             std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!arguments.is_object())
     {
         error = "Arguments must be an object";
@@ -155,6 +167,7 @@ bool fields(const Json& arguments, std::initializer_list<std::string_view> names
 }
 bool number(const Json& input, float& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!input.is_number())
     {
         return false;
@@ -169,6 +182,7 @@ bool number(const Json& input, float& value)
 }
 bool vector(const Json& input, Vec3& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!input.is_array() || input.size() != 3)
     {
         return false;
@@ -200,22 +214,26 @@ ComponentEdit::ComponentEdit(WorldSystem& world, std::uint64_t scene,
       after_(std::move(after)), versions_(std::move(versions)),
       required_component_(required_component), prepared_(std::move(prepared))
 {
+    ENGINE_PROFILE_FUNCTION();
     target_.scene_id = scene;
     target_.identity = std::move(node);
 }
 bool ComponentEdit::apply(std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     // 首次应用完成后不再由编辑历史保活载荷；重做按版本元数据重新获取。
     auto prepared = std::move(prepared_);
     return replace(before_, after_, error);
 }
 bool ComponentEdit::revert(std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     return replace(after_, before_, error);
 }
 bool ComponentEdit::replace(const std::optional<schema::ComponentDataT>& expected,
                             const std::optional<schema::ComponentDataT>& value, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto node = target_.node(error);
     if (!node)
     {
@@ -266,6 +284,7 @@ bool resource_versions(WorldSystem& world, const schema::ComponentDataT& data,
                        std::vector<schema::AssetEntryT>& versions,
                        std::vector<ResourceReference>& prepared, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* codec = asset_pipeline::find_scene_component_codec(data.payload.type);
     if (!codec)
     {
@@ -276,6 +295,7 @@ bool resource_versions(WorldSystem& world, const schema::ComponentDataT& data,
     codec->write(data, fields);
     const auto capture = [&](std::string_view path)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (path.empty())
         {
             return true;

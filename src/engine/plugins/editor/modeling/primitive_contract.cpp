@@ -1,4 +1,6 @@
 #include "plugins/editor/modeling/primitive_contract.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "plugins/editor/modeling/primitive_options.hpp"
 
@@ -16,6 +18,7 @@ using Json = nlohmann::json;
 
 Json value(const schema::ModelingPrimitiveDataT& options, const PrimitiveParameter& parameter)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (parameter.scalar)
     {
         return options.*parameter.scalar;
@@ -30,6 +33,7 @@ Json value(const schema::ModelingPrimitiveDataT& options, const PrimitiveParamet
 
 Json parameter_schema(const PrimitiveParameter& parameter)
 {
+    ENGINE_PROFILE_FUNCTION();
     Json numeric = {
         {"type", parameter.count ? "integer" : "number"},
         {parameter.exclusive_minimum ? "exclusiveMinimum" : "minimum", parameter.minimum},
@@ -49,6 +53,7 @@ Json parameter_schema(const PrimitiveParameter& parameter)
 
 Json object(Json properties, Json required = Json::array())
 {
+    ENGINE_PROFILE_FUNCTION();
     return {{"type", "object"},
             {"properties", std::move(properties)},
             {"required", std::move(required)},
@@ -57,6 +62,7 @@ Json object(Json properties, Json required = Json::array())
 
 Json points(std::size_t dimensions, std::size_t minimum)
 {
+    ENGINE_PROFILE_FUNCTION();
     return {{"type", "array"},
             {"minItems", minimum},
             {"maxItems", 65536},
@@ -71,10 +77,14 @@ Json points(std::size_t dimensions, std::size_t minimum)
 bool patch_primitive(std::string_view shape, const Json& parameters,
                      schema::ModelingPrimitiveDataT& options, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     const auto& types = schema::EnumValuesModelingPrimitive();
     const auto type = std::find_if(std::begin(types), std::end(types), [&](auto item)
-                                   { return shape == schema::EnumNameModelingPrimitive(item); });
+                                   {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return shape == schema::EnumNameModelingPrimitive(item);
+    });
     if (type == std::end(types) || !parameters.is_object())
     {
         error = "Unknown primitive shape or non-object parameters";
@@ -88,7 +98,10 @@ bool patch_primitive(std::string_view shape, const Json& parameters,
         const auto definitions = primitive_parameters();
         const auto field =
             std::find_if(definitions.begin(), definitions.end(), [&](const auto& item)
-                         { return item.name == name && supports(item, *type); });
+                         {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return item.name == name && supports(item, *type);
+            });
         if (field == definitions.end())
         {
             error = "Parameter is not supported by " + std::string(shape) + ": " + name;
@@ -145,6 +158,7 @@ bool patch_primitive(std::string_view shape, const Json& parameters,
 
 Json primitive_json(const schema::ModelingPrimitiveDataT& options)
 {
+    ENGINE_PROFILE_FUNCTION();
     Json parameters = Json::object();
     for (const auto& parameter : primitive_parameters())
     {
@@ -159,6 +173,7 @@ Json primitive_json(const schema::ModelingPrimitiveDataT& options)
 
 Json shape_contracts(bool primitives_only)
 {
+    ENGINE_PROFILE_FUNCTION();
     Json contracts = Json::object();
     for (auto type : schema::EnumValuesModelingPrimitive())
     {

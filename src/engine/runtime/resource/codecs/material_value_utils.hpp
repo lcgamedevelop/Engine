@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/schema/material_generated.h"
 #include "runtime/schema/shader_generated.h"
 
@@ -16,12 +18,14 @@ namespace engine::resource_codec_detail
 inline bool valid_builtin_pbr_options(const schema::MaterialDataT& material,
                                       const schema::ShaderDataT& shader)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     if (shader.path != "builtin://shaders/pbr")
     {
         return true;
     }
     const auto scalar = [&](std::string_view name, float fallback)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         for (const auto& item : material.parameters)
         {
             if (item && item->name == name)
@@ -53,6 +57,7 @@ inline bool valid_builtin_pbr_options(const schema::MaterialDataT& material,
 inline bool parameter_values(const schema::MaterialValueUnion& value, std::array<double, 4>& output,
                              std::uint8_t& size)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     output = {};
     size = 0;
     if (value.value == nullptr)
@@ -92,6 +97,7 @@ inline bool parameter_values(const schema::MaterialValueUnion& value, std::array
     return std::all_of(output.begin(), output.begin() + size,
                        [](double item)
                        {
+                           ENGINE_PROFILE_FUNCTION_PROBE();
                            constexpr double maximum = std::numeric_limits<float>::max();
                            return std::isfinite(item) && item >= -maximum && item <= maximum;
                        });
@@ -100,12 +106,16 @@ inline bool parameter_values(const schema::MaterialValueUnion& value, std::array
 inline bool valid_parameter_value(const schema::ShaderParameterT& definition,
                                   const schema::MaterialValueUnion& value)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     std::array<double, 4> values{};
     std::uint8_t count = 0;
     return value.type == definition.default_value.type && parameter_values(value, values, count) &&
            (!definition.bounded ||
             std::all_of(values.begin(), values.begin() + count, [&definition](double item)
-                        { return item >= definition.minimum && item <= definition.maximum; }));
+                        {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return item >= definition.minimum && item <= definition.maximum;
+            }));
 }
 
 } // namespace engine::resource_codec_detail

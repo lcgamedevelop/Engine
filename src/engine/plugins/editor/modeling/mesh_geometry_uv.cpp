@@ -1,4 +1,6 @@
 #include "plugins/editor/modeling/mesh_geometry.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "plugins/editor/modeling/mesh_geometry_internal.hpp"
 
@@ -15,6 +17,7 @@ using math::Point;
 
 template <typename Function> void map_loops(schema::ModelingFaceT& face, Function&& function)
 {
+    ENGINE_PROFILE_FUNCTION();
     function(face.vertices, face.texcoords);
     for (auto& hole : face.holes)
     {
@@ -24,6 +27,7 @@ template <typename Function> void map_loops(schema::ModelingFaceT& face, Functio
 
 bool finite_uv(const schema::Vec2& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::isfinite(value.x()) && std::isfinite(value.y());
 }
 
@@ -38,6 +42,7 @@ struct UvBounds
 bool face_projection(schema::EditableMeshDataT& data, schema::ModelingFaceT& face, UvBounds& bounds,
                      std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     Point normal;
     if (!math::face_normal(data, face, normal))
     {
@@ -51,6 +56,7 @@ bool face_projection(schema::EditableMeshDataT& data, schema::ModelingFaceT& fac
     map_loops(face,
               [&](const auto& vertices, auto& texcoords)
               {
+                  ENGINE_PROFILE_FUNCTION_PROBE();
                   texcoords.clear();
                   for (const auto id : vertices)
                   {
@@ -72,6 +78,7 @@ bool face_projection(schema::EditableMeshDataT& data, schema::ModelingFaceT& fac
 bool mesh::project_uv(schema::EditableMeshDataT& data, std::span<const std::uint64_t> face_ids,
                       const MeshUvProjectionOptions& options, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (options.projection != MeshUvProjection::planar &&
         options.projection != MeshUvProjection::box &&
         options.projection != MeshUvProjection::cylindrical &&
@@ -129,6 +136,7 @@ bool mesh::project_uv(schema::EditableMeshDataT& data, std::span<const std::uint
         map_loops(*face,
                   [&](const auto& vertices, auto& texcoords)
                   {
+                      ENGINE_PROFILE_FUNCTION_PROBE();
                       texcoords.clear();
                       for (const auto id : vertices)
                       {
@@ -193,6 +201,7 @@ bool mesh::project_uv(schema::EditableMeshDataT& data, std::span<const std::uint
 bool mesh::transform_uv(schema::EditableMeshDataT& data, std::span<const std::uint64_t> face_ids,
                         const MeshUvTransformOptions& options, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!finite_uv(options.scale) || !finite_uv(options.offset) || !finite_uv(options.pivot) ||
         !std::isfinite(options.rotation_degrees))
     {
@@ -212,6 +221,7 @@ bool mesh::transform_uv(schema::EditableMeshDataT& data, std::span<const std::ui
         map_loops(*face,
                   [&](const auto& vertices, auto& texcoords)
                   {
+                      ENGINE_PROFILE_FUNCTION_PROBE();
                       if (texcoords.size() != vertices.size())
                       {
                           valid = false;
@@ -239,6 +249,7 @@ bool mesh::transform_uv(schema::EditableMeshDataT& data, std::span<const std::ui
 bool mesh::unwrap_face_uv(schema::EditableMeshDataT& data, std::span<const std::uint64_t> face_ids,
                           const MeshUvUnwrapOptions& options, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!std::isfinite(options.padding) || options.padding < 0.0 || options.padding >= 0.5)
     {
         error = "UV padding must be finite and within [0, 0.5)";
@@ -280,6 +291,7 @@ bool mesh::unwrap_face_uv(schema::EditableMeshDataT& data, std::span<const std::
         map_loops(*faces[i],
                   [&](const auto&, auto& texcoords)
                   {
+                      ENGINE_PROFILE_FUNCTION_PROBE();
                       for (auto& uv : texcoords)
                       {
                           uv = schema::Vec2(x + (uv.x() - bounds.min_u) * scale,
@@ -293,6 +305,7 @@ bool mesh::unwrap_face_uv(schema::EditableMeshDataT& data, std::span<const std::
 bool mesh::hotspot_uv(schema::EditableMeshDataT& data, std::span<const std::uint64_t> face_ids,
                       const MeshHotspotOptions& options, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (options.rectangles.empty() || options.rectangles.size() > 65536 ||
         !std::isfinite(options.padding) || options.padding < 0.0)
     {
@@ -355,6 +368,7 @@ bool mesh::hotspot_uv(schema::EditableMeshDataT& data, std::span<const std::uint
         map_loops(*face,
                   [&](const auto&, auto& texcoords)
                   {
+                      ENGINE_PROFILE_FUNCTION_PROBE();
                       for (auto& uv : texcoords)
                       {
                           double x = (uv.x() - bounds.min_u) / width;
@@ -378,6 +392,7 @@ bool mesh::hotspot_uv(schema::EditableMeshDataT& data, std::span<const std::uint
 bool mesh::set_smoothing(schema::EditableMeshDataT& data, std::span<const std::uint64_t> face_ids,
                          std::uint32_t group, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     schema::EditableMeshDataT candidate = data;
     std::vector<schema::ModelingFaceT*> faces;
     if (!math::selected_faces(candidate, face_ids, faces, error))
@@ -393,6 +408,7 @@ bool mesh::set_smoothing(schema::EditableMeshDataT& data, std::span<const std::u
 
 bool mesh::auto_smooth(schema::EditableMeshDataT& data, double angle_degrees, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     if (!std::isfinite(angle_degrees) || angle_degrees < 0.0 || angle_degrees > 180.0 ||
         !mesh::validate(data, error))
@@ -418,6 +434,7 @@ bool mesh::auto_smooth(schema::EditableMeshDataT& data, double angle_degrees, st
         map_loops(face,
                   [&](const auto& vertices, auto&)
                   {
+                      ENGINE_PROFILE_FUNCTION_PROBE();
                       for (std::size_t j = 0; j < vertices.size(); ++j)
                       {
                           edges[math::edge_key(vertices[j], vertices[(j + 1) % vertices.size()])]

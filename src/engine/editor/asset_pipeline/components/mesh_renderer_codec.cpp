@@ -1,4 +1,6 @@
 #include "editor/asset_pipeline/components/mesh_renderer_codec.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/core/guid_map.hpp"
 #include "runtime/schema/control_json_generated.hpp"
@@ -14,16 +16,19 @@ namespace engine::editor::asset_pipeline
 
 schema::ComponentPayload MeshRendererCodec::type() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::ComponentPayload::MeshRendererData;
 }
 
 std::string_view MeshRendererCodec::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "mesh_renderer";
 }
 
 bool MeshRendererCodec::validate(const schema::ComponentDataT& component, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
 
     const auto* value = component.payload.AsMeshRendererData();
     if (value == nullptr || value->rvt_role > schema::RvtRole::writer_reader ||
@@ -31,7 +36,11 @@ bool MeshRendererCodec::validate(const schema::ComponentDataT& component, std::s
         value->additional_material_guids.size() > 15 ||
         std::any_of(value->additional_material_guids.begin(),
                     value->additional_material_guids.end(),
-                    [](const auto& guid) { return !GuidMap::valid_guid(guid); }))
+                    [](const auto& guid)
+                    {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
+                        return !GuidMap::valid_guid(guid);
+                    }))
     {
         error = "mesh renderer requires mesh and material GUIDs";
         return false;
@@ -42,7 +51,11 @@ bool MeshRendererCodec::validate(const schema::ComponentDataT& component, std::s
             : (!GuidMap::valid_guid(value->lightmap_guid) || value->lightmap_mesh_hash.empty() ||
                value->lightmap_transform.size() != 16 ||
                !std::all_of(value->lightmap_transform.begin(), value->lightmap_transform.end(),
-                            [](float element) { return std::isfinite(element); })))
+                            [](float element)
+                            {
+                                ENGINE_PROFILE_FUNCTION_PROBE();
+                                return std::isfinite(element);
+                            })))
     {
         error = "mesh renderer lightmap requires GUID, mesh content hash and baked world transform";
         return false;
@@ -53,6 +66,7 @@ bool MeshRendererCodec::validate(const schema::ComponentDataT& component, std::s
 bool MeshRendererCodec::read(const toml::table& table, schema::ComponentDataT& component,
                              std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
 
     schema::MeshRendererDataT value;
     if (table.contains("rvt_role"))
@@ -145,6 +159,7 @@ bool MeshRendererCodec::read(const toml::table& table, schema::ComponentDataT& c
 
 std::span<const std::string_view> MeshRendererCodec::resource_fields() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     static constexpr std::string_view fields[]{"mesh", "material", "additional_materials",
                                                "lightmap"};
     return fields;
@@ -152,6 +167,7 @@ std::span<const std::string_view> MeshRendererCodec::resource_fields() const noe
 
 void MeshRendererCodec::write(const schema::ComponentDataT& component, toml::table& value) const
 {
+    ENGINE_PROFILE_FUNCTION();
 
     const auto* mesh = component.payload.AsMeshRendererData();
     value.insert("type", "mesh_renderer");

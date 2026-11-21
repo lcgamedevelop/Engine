@@ -1,4 +1,6 @@
 #pragma once
+
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/render/vsm.hpp"
 #include "runtime/resource/resource_reference.hpp"
 #include <bgfx/bgfx.h>
@@ -15,6 +17,7 @@ class VsmDebugView final
 public:
     explicit VsmDebugView(FontSystem& fonts) noexcept : fonts_(fonts)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
     }
     ~VsmDebugView() noexcept;
     [[nodiscard]] bool prepare_font(ResourceLoader& resources);

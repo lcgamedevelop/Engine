@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "editor/commands/components/component_edit.hpp"
 
 #include <array>
@@ -42,6 +44,7 @@ inline constexpr std::array atmosphere_vectors{
 
 inline void append_atmosphere(const EnvironmentSettings& settings, nlohmann::json& result)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     result["atmosphereEnabled"] = settings.atmosphere_enabled;
     result["atmosphereSunNodeId"] = std::to_string(settings.atmosphere_sun_node_id);
     for (const auto& field : atmosphere_floats)
@@ -58,6 +61,7 @@ inline void append_atmosphere(const EnvironmentSettings& settings, nlohmann::jso
 inline bool read_atmosphere(std::string_view name, const nlohmann::json& value,
                             EnvironmentSettings& settings)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     if (name == "atmosphereEnabled")
     {
         if (!value.is_boolean())

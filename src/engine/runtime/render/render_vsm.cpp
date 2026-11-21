@@ -1,5 +1,6 @@
 #include "runtime/render/render_system.hpp"
 
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 
 #include "runtime/render/scene_gpu_resources.hpp"
@@ -18,6 +19,7 @@ namespace engine
 {
 bool RenderSystem::vsm_status(VsmStatus& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = vsm_status_;
     if (!renderer_initialized_)
     {
@@ -29,6 +31,7 @@ bool RenderSystem::vsm_status(VsmStatus& output) const
 }
 bool RenderSystem::set_vsm_debug_options(const VsmDebugOptions& options)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (options.mode > VsmDebugMode::invalidated || options.clipmap_level < -1 ||
         options.clipmap_level >= static_cast<int>(render_detail::vsm_max_levels) ||
         (options.clipmap_level >= 0 && vsm_level_count_ &&
@@ -45,12 +48,14 @@ bool RenderSystem::set_vsm_debug_options(const VsmDebugOptions& options)
 }
 bool RenderSystem::vsm_debug_options(VsmDebugOptions& output, std::uint64_t& revision) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = vsm_options_;
     revision = vsm_debug_revision_;
     return true;
 }
 void RenderSystem::release_vsm() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (vsm_cache_)
     {
         vsm_cache_->reset_scene();
@@ -95,6 +100,7 @@ bool RenderSystem::prepare_vsm(const render_detail::RenderFrameData& frame,
         light->settings.virtual_shadow ? *light->settings.virtual_shadow : defaults;
     const auto fail = [&](VsmState state, const char* code, const char* error)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         if (vsm_cache_)
         {
             vsm_cache_->cancel_batch();
@@ -194,6 +200,7 @@ bool RenderSystem::prepare_vsm(const render_detail::RenderFrameData& frame,
 }
 void RenderSystem::draw_vsm_viewer()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!debug_requests_[std::size_t(RenderFeature::vsm_viewer)])
     {
         vsm_viewer_.reset();

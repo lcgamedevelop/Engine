@@ -1,4 +1,6 @@
 #include "runtime/resource/builtin_font.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include <font8x8_basic.h>
 
@@ -6,8 +8,10 @@ namespace engine::resource_detail
 {
 const schema::FontDataT& diagnostic_font()
 {
+    ENGINE_PROFILE_FUNCTION();
     static const schema::FontDataT data = []
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         schema::FontDataT font;
         font.family = "Engine Diagnostic";
         font.style = "Regular";
@@ -17,7 +21,10 @@ const schema::FontDataT& diagnostic_font()
         font.underline_position = -0.0625F;
         font.underline_thickness = 0.0625F;
         const auto line = [&](float x0, float y0, float x1, float y1)
-        { font.curves.emplace_back(x0, y0, (x0 + x1) * 0.5F, (y0 + y1) * 0.5F, x1, y1); };
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            font.curves.emplace_back(x0, y0, (x0 + x1) * 0.5F, (y0 + y1) * 0.5F, x1, y1);
+        };
         for (std::uint32_t code = 0; code < 127; ++code)
         {
             if (code != 0 && code < 32)

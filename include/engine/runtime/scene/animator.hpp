@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/animation/animation_events.hpp"
 #include "runtime/animation/animation_types.hpp"
 #include "runtime/scene/component.hpp"
@@ -37,6 +39,7 @@ public:
     Animator() noexcept = default;
     explicit Animator(Component component) noexcept : Component(component, component_type)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
     }
     [[nodiscard]] static bool register_type(ComponentRegistry& registry);
     using Runtime = AnimatorRuntime;

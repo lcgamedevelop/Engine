@@ -1,4 +1,7 @@
 #include "runtime/gameplay/gameplay_session.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
+
 #include "runtime/gameplay/scene_load_operation.hpp"
 
 #include "runtime/animation/animation_system.hpp"
@@ -21,12 +24,14 @@ namespace
 {
 std::uint64_t load_time()
 {
+    ENGINE_PROFILE_FUNCTION();
     return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
                                           std::chrono::steady_clock::now().time_since_epoch())
                                           .count());
 }
 bool terminal(SceneLoadState state)
 {
+    ENGINE_PROFILE_FUNCTION();
     return state == SceneLoadState::active || state == SceneLoadState::failed ||
            state == SceneLoadState::cancelled;
 }
@@ -34,8 +39,13 @@ bool terminal(SceneLoadState state)
 
 bool GameplaySession::add_preparation(ScenePreparation& preparation)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (std::any_of(scene_loads_.begin(), scene_loads_.end(),
-                    [](const auto& entry) { return !entry.second->domains_released; }) ||
+                    [](const auto& entry)
+                    {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
+                        return !entry.second->domains_released;
+                    }) ||
         std::find(scene_preparations_.begin(), scene_preparations_.end(), &preparation) !=
             scene_preparations_.end())
     {
@@ -47,8 +57,13 @@ bool GameplaySession::add_preparation(ScenePreparation& preparation)
 
 bool GameplaySession::remove_preparation(ScenePreparation& preparation)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (std::any_of(scene_loads_.begin(), scene_loads_.end(),
-                    [](const auto& entry) { return !entry.second->domains_released; }))
+                    [](const auto& entry)
+                    {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
+                        return !entry.second->domains_released;
+                    }))
     {
         return false;
     }
@@ -57,6 +72,7 @@ bool GameplaySession::remove_preparation(ScenePreparation& preparation)
 
 void GameplaySession::release_domain_preparations(SceneLoadOperation& operation) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!operation.domains_released)
     {
         for (auto* preparation : scene_preparations_)
@@ -69,6 +85,7 @@ void GameplaySession::release_domain_preparations(SceneLoadOperation& operation)
 
 bool GameplaySession::begin_scene_load(const SceneLoadSpec& spec, SceneLoadId& output)
 {
+    ENGINE_PROFILE_ZONE("SceneLoad.begin");
     output = {};
     auto* loader = world_.resource_loader();
     if (!loader || !world_.is_initialized() || scene_loads_.size() >= 64 ||
@@ -107,6 +124,7 @@ bool GameplaySession::begin_scene_load(const SceneLoadSpec& spec, SceneLoadId& o
     auto operation = std::make_unique<SceneLoadOperation>();
     operation->spec = spec;
     operation->started_ns = load_time();
+    operation->snapshot.id = {scene_load_owner_, scene_load_sequence_ + 1};
     if (!world_.begin_scope(spec.kind, spec.destination_scene_id, operation->snapshot.scope))
     {
         last_error_ = "Cannot create scene candidate scope";
@@ -120,7 +138,9 @@ bool GameplaySession::begin_scene_load(const SceneLoadSpec& spec, SceneLoadId& o
     for (const auto& path : roots)
     {
         std::unique_ptr<ResourceLoad> request;
-        if (!loader->begin_load(path, request))
+        if (!loader->begin_load(path, request,
+                                {ResourceMemoryOwnerKind::scene_load, operation->snapshot.id.owner,
+                                 operation->snapshot.id.request}))
         {
             last_error_ = loader->last_error();
             (void)world_.cancel_scope(operation->snapshot.scope);
@@ -130,7 +150,7 @@ bool GameplaySession::begin_scene_load(const SceneLoadSpec& spec, SceneLoadId& o
         operation->resources.push_back(std::move(request));
     }
     operation->retained.resize(roots.size());
-    operation->snapshot.id = {scene_load_owner_, ++scene_load_sequence_};
+    ++scene_load_sequence_;
     operation->snapshot.scene_id = spec.kind == SceneLoadKind::replace_scene
                                        ? operation->snapshot.scope.value
                                        : spec.destination_scene_id;
@@ -143,6 +163,7 @@ bool GameplaySession::begin_scene_load(const SceneLoadSpec& spec, SceneLoadId& o
 
 Scene* GameplaySession::scene_load_scene(SceneLoadId id) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto found = scene_loads_.find(id.request);
     if (id.owner != scene_load_owner_ || found == scene_loads_.end())
     {
@@ -161,6 +182,7 @@ Scene* GameplaySession::scene_load_scene(SceneLoadId id) noexcept
 
 bool GameplaySession::prepare_scene_load(SceneLoadId id)
 {
+    ENGINE_PROFILE_ZONE("SceneLoad.prepare");
     const auto found = scene_loads_.find(id.request);
     if (id.owner != scene_load_owner_ || found == scene_loads_.end())
     {
@@ -183,6 +205,7 @@ bool GameplaySession::prepare_scene_load(SceneLoadId id)
 
 bool GameplaySession::scene_load_status(SceneLoadId id, SceneLoadSnapshot& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     const auto found = scene_loads_.find(id.request);
     if (id.owner != scene_load_owner_ || found == scene_loads_.end())
@@ -198,6 +221,7 @@ bool GameplaySession::scene_load_status(SceneLoadId id, SceneLoadSnapshot& outpu
 
 bool GameplaySession::activate_scene_load(SceneLoadId id)
 {
+    ENGINE_PROFILE_ZONE("SceneLoad.activate");
     const auto found = scene_loads_.find(id.request);
     if (id.owner != scene_load_owner_ || found == scene_loads_.end())
     {
@@ -243,6 +267,7 @@ bool GameplaySession::activate_scene_load(SceneLoadId id)
 
 bool GameplaySession::cancel_scene_load(SceneLoadId id)
 {
+    ENGINE_PROFILE_ZONE("SceneLoad.cancel");
     const auto found = scene_loads_.find(id.request);
     if (id.owner != scene_load_owner_ || found == scene_loads_.end())
     {
@@ -288,6 +313,7 @@ bool GameplaySession::cancel_scene_load(SceneLoadId id)
 
 bool GameplaySession::release_scene_load(SceneLoadId id)
 {
+    ENGINE_PROFILE_ZONE("SceneLoad.release");
     const auto found = scene_loads_.find(id.request);
     if (id.owner != scene_load_owner_ || found == scene_loads_.end() ||
         !terminal(found->second->snapshot.state))
@@ -302,6 +328,7 @@ bool GameplaySession::release_scene_load(SceneLoadId id)
 
 bool GameplaySession::collect_scene_loads(std::vector<SceneLoadId>& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output.clear();
     for (const auto& [key, operation] : scene_loads_)
     {
@@ -313,6 +340,7 @@ bool GameplaySession::collect_scene_loads(std::vector<SceneLoadId>& output) cons
 
 void GameplaySession::finish_scene_loads(GameplayStopCause cause, std::string_view reason) noexcept
 {
+    ENGINE_PROFILE_ZONE("SceneLoad.finishAll");
     for (auto& [key, operation] : scene_loads_)
     {
         (void)key;
@@ -352,6 +380,7 @@ void GameplaySession::finish_scene_loads(GameplayStopCause cause, std::string_vi
 
 void GameplaySession::step_scene_loads(const SceneWorkBudget& budget)
 {
+    ENGINE_PROFILE_ZONE("SceneLoad.step");
     const auto started = load_time();
     for (auto& [key, operation] : scene_loads_)
     {
@@ -369,6 +398,7 @@ void GameplaySession::step_scene_loads(const SceneWorkBudget& budget)
         const auto old_stages = snapshot.stages;
         const auto fail = [&](std::string code, std::string error)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             release_domain_preparations(op);
             snapshot.state = SceneLoadState::failed;
             snapshot.error_code = std::move(code);
@@ -400,7 +430,10 @@ void GameplaySession::step_scene_loads(const SceneWorkBudget& budget)
         }
         if (op.spec.kind == SceneLoadKind::append_batch &&
             std::none_of(world_.scenes().begin(), world_.scenes().end(), [&](const auto& scene)
-                         { return scene->id() == op.spec.destination_scene_id; }))
+                         {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return scene->id() == op.spec.destination_scene_id;
+            }))
         {
             fail("target_unloaded", "The scene loading target was unloaded");
             continue;
@@ -520,6 +553,7 @@ void GameplaySession::step_scene_loads(const SceneWorkBudget& budget)
             bool ready = true;
             const auto collect = [&](SceneWorkState state, const ScenePreparationSnapshot& value)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 snapshot.stages.insert(snapshot.stages.end(), value.stages.begin(),
                                        value.stages.end());
                 ready = ready &&
@@ -604,6 +638,7 @@ void GameplaySession::step_scene_loads(const SceneWorkBudget& budget)
             }
             const auto prepare_domain = [&](auto* system)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 if (!ready || !system || snapshot.state == SceneLoadState::failed)
                 {
                     return;
@@ -657,6 +692,7 @@ void GameplaySession::step_scene_loads(const SceneWorkBudget& budget)
                     std::any_of(scene_loads_.begin(), scene_loads_.end(),
                                 [&](const auto& entry)
                                 {
+                                    ENGINE_PROFILE_FUNCTION_PROBE();
                                     const auto& earlier = *entry.second;
                                     const auto earlier_target =
                                         earlier.spec.kind == SceneLoadKind::replace_scene

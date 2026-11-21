@@ -1,4 +1,5 @@
 #include "editor/asset_pipeline/components/audio_listener_codec.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/scene/audio_listener.hpp"
 #include <array>
 #include <utility>
@@ -6,14 +7,17 @@ namespace engine::editor::asset_pipeline
 {
 schema::ComponentPayload AudioListenerCodec::type() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::ComponentPayload::AudioListenerData;
 }
 std::string_view AudioListenerCodec::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "audio_listener";
 }
 bool AudioListenerCodec::validate(const schema::ComponentDataT& component, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* value = component.payload.AsAudioListenerData();
     if (value == nullptr || !engine::AudioListener::valid_settings(*value))
     {
@@ -25,6 +29,7 @@ bool AudioListenerCodec::validate(const schema::ComponentDataT& component, std::
 bool AudioListenerCodec::read(const toml::table& table, schema::ComponentDataT& component,
                               std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     schema::AudioListenerDataT value;
     if (table.contains("volume"))
     {
@@ -39,6 +44,7 @@ bool AudioListenerCodec::read(const toml::table& table, schema::ComponentDataT& 
 }
 void AudioListenerCodec::write(const schema::ComponentDataT& component, toml::table& table) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* value = component.payload.AsAudioListenerData();
     table.insert("type", "audio_listener");
     table.insert("volume", value->volume);

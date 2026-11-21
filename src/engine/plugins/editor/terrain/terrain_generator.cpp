@@ -1,4 +1,6 @@
 #include "plugins/editor/terrain/terrain_generator.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/terrain/terrain_samples.hpp"
 #include <FastNoise/FastNoise.h>
 #include <algorithm>
@@ -15,6 +17,7 @@ namespace
 double base_height(const schema::TerrainGenerationSpecT& spec, const FastNoise::Generator& noise,
                    double x, double z)
 {
+    ENGINE_PROFILE_FUNCTION();
     double height = spec.height;
     if (spec.heightmap)
     {
@@ -28,7 +31,10 @@ double base_height(const schema::TerrainGenerationSpecT& spec, const FastNoise::
         const auto ix = std::min(std::uint32_t(u), map.width - 2);
         const auto iz = std::min(std::uint32_t(v), map.height - 2);
         const auto sample = [&](unsigned dx, unsigned dz)
-        { return double(map.samples[(iz + dz) * map.width + ix + dx]); };
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return double(map.samples[(iz + dz) * map.width + ix + dx]);
+        };
         const auto a = std::lerp(sample(0, 0), sample(1, 0), u - ix);
         const auto b = std::lerp(sample(0, 1), sample(1, 1), u - ix);
         height += map.height_offset + std::lerp(a, b, v - iz) * map.height_scale;
@@ -39,6 +45,7 @@ double base_height(const schema::TerrainGenerationSpecT& spec, const FastNoise::
 }
 double stamp_distance(const schema::TerrainBrushDataT& stamp, Vec3 p)
 {
+    ENGINE_PROFILE_FUNCTION();
     const double x = std::abs(p.x() - stamp.center.x()), y = std::abs(p.y() - stamp.center.y()),
                  z = std::abs(p.z() - stamp.center.z());
     if (stamp.shape == schema::TerrainBrushShape::sphere)
@@ -54,6 +61,7 @@ double evaluate(const schema::TerrainGenerationSpecT& spec, const FastNoise::Gen
                 Vec3 p, schema::TerrainLayerSample& layer, std::size_t count, DensityCache& cache,
                 double base = std::numeric_limits<double>::quiet_NaN(), std::uint32_t depth = 0)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (depth > 32)
     {
         return std::numeric_limits<double>::quiet_NaN();
@@ -156,12 +164,14 @@ class NoiseTerrainGenerator final : public TerrainGenerator
 public:
     std::string_view fingerprint() const noexcept override
     {
+        ENGINE_PROFILE_FUNCTION();
         return "fastnoise2-" FASTNOISE2_VERSION ":terrain-7";
     }
 
     bool generate(const TerrainGenerationInput& input, schema::TerrainBlockDataT& output,
                   std::string& error) const override
     {
+        ENGINE_PROFILE_FUNCTION();
         output = {};
         error.clear();
         const auto& spec = input.recipe;
@@ -181,7 +191,11 @@ public:
               !std::isfinite(spec.heightmap->height_scale) ||
               !std::isfinite(spec.heightmap->height_offset) ||
               !std::all_of(spec.heightmap->samples.begin(), spec.heightmap->samples.end(),
-                           [](float v) { return std::isfinite(v) && v >= 0 && v <= 1; }))))
+                           [](float v)
+                           {
+                               ENGINE_PROFILE_FUNCTION_PROBE();
+                               return std::isfinite(v) && v >= 0 && v <= 1;
+                           }))))
         {
             error = "Invalid heightmap or noise graph";
             return false;
@@ -306,9 +320,17 @@ public:
             }
         }
         if (std::all_of(block.density.begin(), block.density.end(),
-                        [&](float v) { return v == block.density.front(); }) &&
+                        [&](float v)
+                        {
+                            ENGINE_PROFILE_FUNCTION_PROBE();
+                            return v == block.density.front();
+                        }) &&
             std::all_of(block.layers.begin(), block.layers.end(),
-                        [&](const auto& v) { return v == block.layers.front(); }))
+                        [&](const auto& v)
+                        {
+                            ENGINE_PROFILE_FUNCTION_PROBE();
+                            return v == block.layers.front();
+                        }))
         {
             block.uniform = true;
             block.density.resize(1);
@@ -321,6 +343,7 @@ public:
 } // namespace
 std::unique_ptr<TerrainGenerator> create_terrain_generator(std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     return std::make_unique<NoiseTerrainGenerator>();
 }

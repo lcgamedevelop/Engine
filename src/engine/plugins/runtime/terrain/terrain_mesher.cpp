@@ -1,6 +1,7 @@
 #include "plugins/runtime/terrain/terrain_mesher.hpp"
 
 #include "plugins/runtime/terrain/terrain_samples.hpp"
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 
 // Eric Lengyel's fixed Transvoxel tables; see third_party/transvoxel and its notice.
@@ -29,6 +30,7 @@ struct Corner
 void append_vertex(schema::MeshDataT& mesh, std::vector<std::map<std::uint32_t, double>>& layers,
                    const Corner& a, const Corner& b, double spacing)
 {
+    ENGINE_PROFILE_FUNCTION();
     const double divisor = static_cast<double>(a.density) - b.density;
     const double t = divisor != 0 ? std::clamp(a.density / divisor, 0.0, 1.0) : 0.5;
     Point position{}, normal{};
@@ -69,6 +71,7 @@ void append_vertex(schema::MeshDataT& mesh, std::vector<std::map<std::uint32_t, 
 
 void append_triangle(schema::MeshDataT& mesh, std::uint32_t a, std::uint32_t b, std::uint32_t c)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto& av = mesh.vertices[a];
     const auto& bv = mesh.vertices[b];
     const auto& cv = mesh.vertices[c];
@@ -107,6 +110,7 @@ public:
         }
         const auto cancelled = [&]()
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             if (input.cancel_requested && input.cancel_requested->load(std::memory_order_relaxed))
             {
                 error = "Terrain meshing cancelled";
@@ -121,7 +125,10 @@ public:
         std::vector<schema::TerrainLayerSample> layer_grid(grid.size());
         std::vector<std::map<std::uint32_t, double>> vertex_layers;
         const auto index = [axis](int x, int y, int z)
-        { return (static_cast<std::size_t>(z + 1) * axis + y + 1) * axis + x + 1; };
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return (static_cast<std::size_t>(z + 1) * axis + y + 1) * axis + x + 1;
+        };
         for (int z = -1; z <= cells + 1; ++z)
         {
             if (cancelled())
@@ -146,6 +153,7 @@ public:
         }
         const auto corner = [&](int x, int y, int z)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             Corner result;
             result.position = {static_cast<double>(x), static_cast<double>(y),
                                static_cast<double>(z)};
@@ -289,7 +297,10 @@ public:
                 std::vector<std::pair<std::uint32_t, double>> palette(total.begin(), total.end());
                 std::sort(
                     palette.begin(), palette.end(), [](const auto& a, const auto& b)
-                    { return a.second != b.second ? a.second > b.second : a.first < b.first; });
+                    {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
+                        return a.second != b.second ? a.second > b.second : a.first < b.first;
+                    });
                 palette.resize(4);
                 for (unsigned corner = 0; corner < 3; ++corner)
                 {
@@ -338,6 +349,7 @@ public:
 } // namespace
 std::unique_ptr<TerrainMesher> create_terrain_mesher(std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     return std::make_unique<TransvoxelMesher>();
 }

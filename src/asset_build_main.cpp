@@ -1,3 +1,5 @@
+#include "runtime/performance/profiling.hpp"
+
 #if ENGINE_HAS_CAMERA_EDITOR
 #include "plugins/editor/camera/camera_commands.hpp"
 #include "plugins/editor/camera/camera_controller_codec.hpp"
@@ -60,6 +62,7 @@ namespace
 {
 void usage()
 {
+    ENGINE_PROFILE_FUNCTION();
     std::puts("Usage: asset_build_app --project <project-directory> "
               "[--target macos|ios|windows|android|linux|web]\n"
               "       asset_build_app --project <project-directory> "
@@ -70,6 +73,7 @@ void usage()
 
 int main(int argc, char** argv)
 {
+    ENGINE_PROFILE_FUNCTION();
 #if ENGINE_HAS_CAMERA_EDITOR
     static engine::plugins::camera::CameraTypeRegistry camera_types;
     if (!camera_types.frozen() &&

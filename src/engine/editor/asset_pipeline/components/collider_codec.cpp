@@ -1,4 +1,5 @@
 #include "editor/asset_pipeline/components/collider_codec.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/scene/collider.hpp"
 #include <array>
 #include <memory>
@@ -7,14 +8,17 @@ namespace engine::editor::asset_pipeline
 {
 schema::ComponentPayload ColliderCodec::type() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::ComponentPayload::ColliderData;
 }
 std::string_view ColliderCodec::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "collider";
 }
 bool ColliderCodec::validate(const schema::ComponentDataT& component, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* value = component.payload.AsColliderData();
     if (value == nullptr || !engine::Collider::valid_settings(*value))
     {
@@ -26,6 +30,7 @@ bool ColliderCodec::validate(const schema::ComponentDataT& component, std::strin
 bool ColliderCodec::read(const toml::table& table, schema::ComponentDataT& component,
                          std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     schema::ColliderDataT value;
     if (table.contains("shape"))
     {
@@ -168,12 +173,14 @@ bool ColliderCodec::read(const toml::table& table, schema::ComponentDataT& compo
 }
 std::span<const std::string_view> ColliderCodec::resource_fields() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     static constexpr std::string_view fields[]{"mesh"};
     return fields;
 }
 
 void ColliderCodec::write(const schema::ComponentDataT& component, toml::table& table) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* value = component.payload.AsColliderData();
     table.insert("type", "collider");
     table.insert("shape", schema::EnumNameColliderShape(value->shape));

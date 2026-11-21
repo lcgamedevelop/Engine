@@ -1,4 +1,6 @@
 #pragma once
+
+#include "runtime/performance/function_profile.hpp"
 #include "plugins/runtime/character_controller/character_types.hpp"
 namespace engine::plugins::character_controller
 {
@@ -13,10 +15,12 @@ public:
     };
     static constexpr std::string_view type()
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return "crouch";
     }
     static constexpr CharacterControlChannels channels()
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return CharacterControlChannels::stance | CharacterControlChannels::speed_policy;
     }
     static const Data* find(const schema::CharacterControllerDataT& definition,
@@ -25,6 +29,7 @@ public:
                                        std::string& error);
     static void reset(Runtime& output)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         output = {};
     }
     [[nodiscard]] static bool query(const Data&, const Runtime&, const CharacterAbilityContext&,

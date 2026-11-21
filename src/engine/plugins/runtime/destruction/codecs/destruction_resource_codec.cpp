@@ -1,4 +1,5 @@
 #include "plugins/runtime/destruction/codecs/destruction_resource_codec.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/destruction/destruction_graph.hpp"
 
 #include <flatbuffers/verifier.h>
@@ -7,11 +8,13 @@ namespace engine::plugins::destruction
 {
 schema::AssetKind DestructionResourceCodec::kind() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::destruction;
 }
 bool DestructionResourceCodec::decode(const schema::AssetEntryT& entry, ByteView payload,
                                       std::unique_ptr<Resource>& output, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     if (output || entry.kind != kind() || payload.empty() || payload.size() > 64U * 1024U * 1024U)
     {
@@ -31,6 +34,7 @@ bool DestructionResourceCodec::decode(const schema::AssetEntryT& entry, ByteView
 }
 bool DestructionResourceCodec::validate_data(const Resource& resource, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     const auto* data = resource_detail::data<ResourceType>(&resource);
     if (!data || !resource.info().dependencies.empty())
@@ -44,6 +48,7 @@ bool DestructionResourceCodec::validate_dependencies(const Resource& resource,
                                                      ResourceView dependencies,
                                                      std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     return resource.info().dependencies.empty() && dependencies.empty();
 }

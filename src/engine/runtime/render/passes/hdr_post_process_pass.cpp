@@ -1,5 +1,6 @@
 #include "runtime/render/passes/hdr_post_process_pass.hpp"
 
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/render/render_color.hpp"
 #include "runtime/render/render_constants.hpp"
@@ -29,6 +30,7 @@ constexpr std::uint64_t color_flags = BGFX_TEXTURE_RT | linear_clamp;
 bool supports_hdr(const bgfx::Caps& caps, std::uint16_t width, std::uint16_t height,
                   std::uint8_t samples)
 {
+    ENGINE_PROFILE_FUNCTION();
     constexpr auto color_capabilities =
         BGFX_CAPS_FORMAT_TEXTURE_2D | BGFX_CAPS_FORMAT_TEXTURE_FRAMEBUFFER;
     if (!valid_msaa_samples(samples) || width == 0 || height == 0 ||
@@ -58,6 +60,7 @@ bool supports_hdr(const bgfx::Caps& caps, std::uint16_t width, std::uint16_t hei
 
 bool valid_settings(const RenderSettings& settings)
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::isfinite(settings.exposure) && settings.exposure > 0.0F &&
            settings.exposure <= 100.0F && std::isfinite(settings.bloom_threshold) &&
            settings.bloom_threshold >= 0.0F && settings.bloom_threshold <= 100.0F &&
@@ -69,6 +72,7 @@ bool valid_settings(const RenderSettings& settings)
 void set_post_view(bgfx::ViewId view, const char* name, bgfx::FrameBufferHandle framebuffer,
                    std::uint16_t width, std::uint16_t height)
 {
+    ENGINE_PROFILE_FUNCTION();
     bgfx::setViewName(view, name);
     bgfx::setViewFrameBuffer(view, framebuffer);
     bgfx::setViewRect(view, 0, 0, width, height);
@@ -81,13 +85,19 @@ void set_post_view(bgfx::ViewId view, const char* name, bgfx::FrameBufferHandle 
 
 HdrPostProcessPass::~HdrPostProcessPass() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     release();
 }
 
 bool HdrPostProcessPass::initialize_resources()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (std::all_of(programs_.begin(), programs_.end(),
-                    [](auto handle) { return bgfx::isValid(handle); }) &&
+                    [](auto handle)
+                    {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
+                        return bgfx::isValid(handle);
+                    }) &&
         bgfx::isValid(fullscreen_) && bgfx::isValid(black_) && bgfx::isValid(parameters_) &&
         bgfx::isValid(texel_) && bgfx::isValid(output_))
     {
@@ -265,7 +275,11 @@ bool HdrPostProcessPass::prepare(std::uint16_t width, std::uint16_t height, bool
         return true;
     }
     if (std::all_of(bloom_framebuffers_.begin(), bloom_framebuffers_.end(),
-                    [](auto handle) { return bgfx::isValid(handle); }))
+                    [](auto handle)
+                    {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
+                        return bgfx::isValid(handle);
+                    }))
     {
         return true;
     }
@@ -296,6 +310,7 @@ bool HdrPostProcessPass::prepare(std::uint16_t width, std::uint16_t height, bool
 
 bool HdrPostProcessPass::begin_opaque_depth(const float* view, const float* projection)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!bgfx::isValid(depth_framebuffer_))
     {
         return false;
@@ -311,6 +326,7 @@ bool HdrPostProcessPass::begin_opaque_depth(const float* view, const float* proj
 
 void HdrPostProcessPass::begin_scene(std::uint32_t clear_color, bool depth_prepared)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::array<float, 4> clear{};
     for (std::size_t index = 0; index < 4; ++index)
     {
@@ -335,6 +351,7 @@ void HdrPostProcessPass::begin_scene(std::uint32_t clear_color, bool depth_prepa
 
 bgfx::FrameBufferHandle HdrPostProcessPass::scene_framebuffer() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return final_framebuffer_;
 }
 
@@ -380,7 +397,11 @@ bool HdrPostProcessPass::resolve(const RenderSettings& settings)
     if (!valid_settings(settings) || width_ == 0 || height_ == 0 || !bgfx::isValid(framebuffer_) ||
         (settings.bloom_enabled &&
          !std::all_of(bloom_framebuffers_.begin(), bloom_framebuffers_.end(),
-                      [](auto handle) { return bgfx::isValid(handle); })))
+                      [](auto handle)
+                      {
+                          ENGINE_PROFILE_FUNCTION_PROBE();
+                          return bgfx::isValid(handle);
+                      })))
     {
         SDL_LogError(SDL_LOG_CATEGORY_RENDER,
                      "HDR resolve requires prepared targets and valid settings");
@@ -392,6 +413,7 @@ bool HdrPostProcessPass::resolve(const RenderSettings& settings)
     const auto submit = [&](bgfx::ViewId view, std::size_t program, bgfx::TextureHandle source,
                             const std::array<float, 4>& texel)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const float output[]{settings.hdr_enabled ? 1.0F : 0.0F, 0, 0, 0};
         bgfx::setUniform(output_, output);
         bgfx::setUniform(parameters_, parameters);
@@ -426,6 +448,7 @@ bool HdrPostProcessPass::resolve(const RenderSettings& settings)
 
 std::uint32_t HdrPostProcessPass::resource_count() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     std::uint32_t count = static_cast<std::uint32_t>(bgfx::isValid(parameters_)) +
                           static_cast<std::uint32_t>(bgfx::isValid(texel_)) +
                           static_cast<std::uint32_t>(bgfx::isValid(output_)) +
@@ -459,6 +482,7 @@ std::uint32_t HdrPostProcessPass::resource_count() const noexcept
 
 void HdrPostProcessPass::release_bloom() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     for (std::size_t index = 0; index < bloom_framebuffers_.size(); ++index)
     {
         if (bgfx::isValid(bloom_framebuffers_[index]))
@@ -480,6 +504,7 @@ void HdrPostProcessPass::release_bloom() noexcept
 
 void HdrPostProcessPass::release_targets() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     release_bloom();
     if (bgfx::isValid(depth_framebuffer_))
     {
@@ -519,6 +544,7 @@ void HdrPostProcessPass::release_targets() noexcept
 
 void HdrPostProcessPass::release() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     release_targets();
     for (auto& handle : programs_)
     {

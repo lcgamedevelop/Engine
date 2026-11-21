@@ -1,3 +1,5 @@
+#include "runtime/performance/profiling.hpp"
+
 #if ENGINE_HAS_CAMERA_EDITOR
 #include "plugins/editor/camera/camera_commands.hpp"
 #include "plugins/editor/camera/camera_controller_codec.hpp"
@@ -85,6 +87,7 @@
 
 int main(int argc, char** argv)
 {
+    ENGINE_PROFILE_FUNCTION();
 #if ENGINE_HAS_CAMERA_EDITOR
     static engine::plugins::camera::CameraTypeRegistry camera_types;
     if (!camera_types.frozen() &&

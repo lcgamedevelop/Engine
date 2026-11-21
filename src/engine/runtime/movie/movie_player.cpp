@@ -1,4 +1,6 @@
 #include "runtime/movie/movie_player.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/audio/audio_system.hpp"
 #include "runtime/resource/resource_reference.hpp"
@@ -27,6 +29,7 @@ std::atomic<std::uint64_t> next_generation{1};
 
 std::uint32_t read32(const std::uint8_t* p) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::uint32_t{p[0]} | (std::uint32_t{p[1]} << 8) | (std::uint32_t{p[2]} << 16) |
            (std::uint32_t{p[3]} << 24);
 }
@@ -43,9 +46,11 @@ struct Decoder
 {
     explicit Decoder(const schema::MovieDataT& source) : resource(source)
     {
+        ENGINE_PROFILE_FUNCTION();
     }
     ~Decoder() noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         if (initialized)
         {
             (void)vpx_codec_destroy(&codec);
@@ -56,6 +61,7 @@ struct Decoder
 
     bool decode(bool publish)
     {
+        ENGINE_PROFILE_FUNCTION();
         const auto* video = resource.video.get();
         const auto* payload = &video->payload;
         if (!initialized)
@@ -133,6 +139,7 @@ struct Decoder
 
     bool decode_until(std::uint32_t target)
     {
+        ENGINE_PROFILE_FUNCTION();
         while (index <= target)
         {
             if (cancelled.load(std::memory_order_relaxed) || !decode(index == target))
@@ -160,18 +167,22 @@ struct MoviePlayer::Impl
         : resources(resource_system), tasks(task_system), audio(audio_system),
           generation(next_generation.fetch_add(1, std::memory_order_relaxed))
     {
+        ENGINE_PROFILE_FUNCTION();
     }
     bool valid(MoviePlaybackHandle handle) const noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         return active.id != 0 && handle.id == active.id && handle.generation == active.generation;
     }
     bool terminal() const noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         return state.state == MovieState::completed || state.state == MovieState::cancelled ||
                state.state == MovieState::failed;
     }
     void close_audio() noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         if (!voice.id)
         {
             return;
@@ -187,6 +198,7 @@ struct MoviePlayer::Impl
     }
     void cancel_decode() noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         if (decoder)
         {
             decoder->cancelled.store(true, std::memory_order_relaxed);
@@ -205,6 +217,7 @@ struct MoviePlayer::Impl
     }
     void fail(std::string message)
     {
+        ENGINE_PROFILE_FUNCTION();
         close_audio();
         state.error = std::move(message);
         state.state = MovieState::failed;
@@ -216,9 +229,14 @@ struct MoviePlayer::Impl
     }
     bool schedule(std::uint32_t target)
     {
+        ENGINE_PROFILE_FUNCTION();
         auto job = decoder;
         pending =
-            tasks.submit("decode movie frame", [job, target] { return job->decode_until(target); });
+            tasks.submit("decode movie frame", [job, target]
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return job->decode_until(target);
+            });
         if (!pending.valid())
         {
             fail("cannot submit movie decode task");
@@ -245,9 +263,13 @@ struct MoviePlayer::Impl
     std::vector<Retired> retired;
     void collect() noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         std::erase_if(
             retired, [](auto& job)
-            { return job.pending.wait_for(std::chrono::seconds(0)) == std::future_status::ready; });
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return job.pending.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
+            });
     }
     std::shared_ptr<Decoder> decoder;
     std::future<bool> pending;
@@ -261,9 +283,11 @@ struct MoviePlayer::Impl
 MoviePlayer::MoviePlayer(ResourceLoader& resources, TaskSystem& tasks, AudioSystem& audio) noexcept
     : impl_(std::make_unique<Impl>(resources, tasks, audio))
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 MoviePlayer::~MoviePlayer() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     impl_->close_audio();
     impl_->cancel_decode();
     for (auto& job : impl_->retired)
@@ -275,6 +299,7 @@ MoviePlayer::~MoviePlayer() noexcept
 
 bool MoviePlayer::play(const ResourceHandle& handle, MoviePlaybackHandle& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     auto& p = *impl_;
     p.collect();
@@ -312,6 +337,7 @@ bool MoviePlayer::play(const ResourceHandle& handle, MoviePlaybackHandle& output
 
 bool MoviePlayer::set_paused(MoviePlaybackHandle handle, bool paused)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto& p = *impl_;
     if (!p.valid(handle) ||
         (p.state.state != MovieState::playing && p.state.state != MovieState::paused))
@@ -351,6 +377,7 @@ bool MoviePlayer::set_paused(MoviePlaybackHandle handle, bool paused)
 
 bool MoviePlayer::stop(MoviePlaybackHandle handle, MovieStopReason reason)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto& p = *impl_;
     if (!p.valid(handle) || p.terminal() ||
         (reason != MovieStopReason::stopped && reason != MovieStopReason::skipped))
@@ -368,6 +395,7 @@ bool MoviePlayer::stop(MoviePlaybackHandle handle, MovieStopReason reason)
 
 bool MoviePlayer::status(MoviePlaybackHandle handle, MoviePlaybackStatus& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     if (!impl_->valid(handle))
     {
@@ -379,12 +407,14 @@ bool MoviePlayer::status(MoviePlaybackHandle handle, MoviePlaybackStatus& output
 
 bool MoviePlayer::current_handle(MoviePlaybackHandle& output) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     output = impl_->active;
     return output.id != 0;
 }
 
 bool MoviePlayer::release(MoviePlaybackHandle handle)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto& p = *impl_;
     if (!p.valid(handle) || !p.terminal())
     {
@@ -402,6 +432,7 @@ bool MoviePlayer::release(MoviePlaybackHandle handle)
 
 bool MoviePlayer::update(double delta_time)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto& p = *impl_;
     p.collect();
     if (!std::isfinite(delta_time) || delta_time < 0 || !p.tasks.is_initialized() ||
@@ -511,6 +542,7 @@ bool MoviePlayer::update(double delta_time)
 
 bool MoviePlayer::frame(MoviePlaybackHandle handle, MovieFrame& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     const auto& p = *impl_;
     if (!p.valid(handle) || !p.has_current || !p.movie ||
@@ -536,6 +568,7 @@ bool MoviePlayer::frame(MoviePlaybackHandle handle, MovieFrame& output) const
 }
 std::string_view MoviePlayer::last_error() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return impl_->error;
 }
 } // namespace engine

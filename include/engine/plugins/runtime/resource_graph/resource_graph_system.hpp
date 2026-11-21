@@ -31,7 +31,8 @@ public:
     using ResourceLoader::get;
     [[nodiscard]] bool load(std::string_view path_or_guid, ResourceHandle& output) override;
     [[nodiscard]] bool begin_load(std::string_view path_or_guid,
-                                  std::unique_ptr<ResourceLoad>& output) override;
+                                  std::unique_ptr<ResourceLoad>& output,
+                                  ResourceMemoryOwner owner = {}) override;
     [[nodiscard]] bool load_memory(std::unique_ptr<Resource>& candidate,
                                    std::span<const ResourceHandle> dependencies,
                                    ResourceHandle& output) override;
@@ -48,6 +49,9 @@ public:
                                     const Resource*& output) const noexcept override;
     [[nodiscard]] ResourceError error() const noexcept override;
     [[nodiscard]] std::string_view last_error() const noexcept override;
+    void set_memory_owner(const ResourceHandle& handle, ResourceMemoryOwner owner) noexcept override;
+    [[nodiscard]] bool memory_snapshot(const ResourceMemoryQuery& query,
+                                       ResourceMemorySnapshot& output) const override;
 
 protected:
     [[nodiscard]] bool on_initialize(const EngineConfig& config) override;

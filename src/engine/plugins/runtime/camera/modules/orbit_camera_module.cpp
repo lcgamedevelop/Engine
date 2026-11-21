@@ -1,10 +1,12 @@
 #include "plugins/runtime/camera/modules/orbit_camera_module.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/camera/camera_math.hpp"
 namespace engine::plugins::camera
 {
 bool OrbitCameraModule::validate(const Data& d, const schema::CameraControllerDataT& def,
                                  std::string& e)
 {
+    ENGINE_PROFILE_FUNCTION();
     return (detail::slot(def, d.follow_slot) &&
             (!d.height_offset || detail::valid_input(d.height_offset.get(), def)) &&
             detail::finite(d.pivot_offset) && detail::nonnegative(d.position_damping) &&
@@ -19,6 +21,7 @@ bool OrbitCameraModule::validate(const Data& d, const schema::CameraControllerDa
 bool OrbitCameraModule::evaluate(const Data& d, const Runtime& current, Runtime& next,
                                  const CameraEvaluationContext& c, CameraPose& p)
 {
+    ENGINE_PROFILE_FUNCTION();
     CameraTargetPose t;
     float distance, yaw, pitch, shoulder, height = 0;
     if ((d.height_offset && !detail::input(d.height_offset.get(), c, height)) ||

@@ -1,4 +1,5 @@
 #include "plugins/runtime/script/bindings/post_process_component_binding.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/script/bindings/binding_helpers.hpp"
 
 #include "plugins/runtime/script/bindings/binding_context.hpp"
@@ -46,6 +47,7 @@ Object.freeze(PostProcessComponent);
 
 void exposure(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto node = BindingContext::node(arguments);
     auto target = !node ? PostProcessComponent{} : node.get_component<PostProcessComponent>();
@@ -67,6 +69,7 @@ void exposure(const Arguments& arguments)
 
 void filmic_tonemap(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto node = BindingContext::node(arguments);
     auto target = !node ? PostProcessComponent{} : node.get_component<PostProcessComponent>();
@@ -86,6 +89,7 @@ void filmic_tonemap(const Arguments& arguments)
 
 void hdr(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto node = BindingContext::node(arguments);
     auto target = !node ? PostProcessComponent{} : node.get_component<PostProcessComponent>();
@@ -105,6 +109,7 @@ void hdr(const Arguments& arguments)
 
 void bloom(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto node = BindingContext::node(arguments);
     auto target = !node ? PostProcessComponent{} : node.get_component<PostProcessComponent>();
@@ -129,6 +134,7 @@ void bloom(const Arguments& arguments)
 
 void screen_space_reflections(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto node = BindingContext::node(arguments);
     auto target = !node ? PostProcessComponent{} : node.get_component<PostProcessComponent>();
@@ -156,6 +162,7 @@ void screen_space_reflections(const Arguments& arguments)
 
 void ambient_occlusion(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     auto node = BindingContext::node(arguments);
     auto target = !node ? PostProcessComponent{} : node.get_component<PostProcessComponent>();
@@ -183,16 +190,19 @@ void ambient_occlusion(const Arguments& arguments)
 
 std::string_view PostProcessComponentBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "PostProcessComponent";
 }
 
 std::string_view PostProcessComponentBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 
 bool PostProcessComponentBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.integer("PostProcessKind", static_cast<int>(PostProcessComponent::component_type)) &&
            vm.function("PostProcessAdd", binding_detail::add_component<PostProcessComponent>) &&
            vm.function("PostProcessExposure", exposure) &&

@@ -1,4 +1,6 @@
 #include "plugins/editor/character_controller/character_visual_commands.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "editor/commands/component_commands.hpp"
 #include "plugins/runtime/character_controller/character_visual.hpp"
@@ -14,6 +16,7 @@ using Json = nlohmann::json;
 bool read(WorldSystem&, Node&, const Json& arguments, schema::CharacterVisualDataT& value,
           std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!editor::components::fields(arguments, {"enabled", "kind"}, error))
     {
         return false;
@@ -43,6 +46,7 @@ bool read(WorldSystem&, Node&, const Json& arguments, schema::CharacterVisualDat
 
 Json write(const WorldSystem&, const schema::CharacterVisualDataT& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     return {{"kind", schema::EnumNameCharacterVisualKind(value.kind)}};
 }
 
@@ -51,11 +55,19 @@ Json write(const WorldSystem&, const schema::CharacterVisualDataT& value)
 bool register_character_visual_commands(WorldSystem& world, editor::SceneCommands& scene_commands,
                                         editor::EditorCommands& commands)
 {
+    ENGINE_PROFILE_FUNCTION();
     return editor::components::register_component<CharacterVisual, schema::CharacterVisualDataT>(
         world, scene_commands, commands, "character_visual",
         [&world](Node node, const auto& args, auto& data, auto&, auto& error)
-        { return read(world, node, args, data, error); },
-        [&world](auto, const auto& data) { return write(world, data); });
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return read(world, node, args, data, error);
+        },
+        [&world](auto, const auto& data)
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return write(world, data);
+        });
 }
 
 } // namespace engine::plugins::character_controller

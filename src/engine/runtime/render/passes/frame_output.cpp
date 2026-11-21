@@ -1,4 +1,5 @@
 #include "runtime/render/passes/frame_output.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/render/render_constants.hpp"
 
 #include "fs_hdr_copy.bin.h"
@@ -10,10 +11,12 @@ namespace engine::render_detail
 {
 FrameOutput::~FrameOutput() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     release();
 }
 bool FrameOutput::prepare(std::uint16_t width, std::uint16_t height)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (width == 0 || height == 0)
     {
         return false;
@@ -62,10 +65,7 @@ bool FrameOutput::prepare(std::uint16_t width, std::uint16_t height)
     }
     if (width != width_ || height != height_ || !bgfx::isValid(target_))
     {
-        if (bgfx::isValid(target_))
-        {
-            bgfx::destroy(target_);
-        }
+        release_target();
         color_ =
             bgfx::createTexture2D(width, height, false, 1, bgfx::TextureFormat::BGRA8,
                                   BGFX_TEXTURE_RT | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP);
@@ -74,7 +74,19 @@ bool FrameOutput::prepare(std::uint16_t width, std::uint16_t height)
             target_ = BGFX_INVALID_HANDLE;
             return false;
         }
-        target_ = bgfx::createFrameBuffer(1, &color_, true);
+        if (memory_)
+        {
+            GpuMemoryEntry entry;
+            entry.kind = GpuMemoryKind::frame_output;
+            entry.logical_bytes = std::uint64_t{width} * height * 4;
+            color_memory_.track(memory_, std::move(entry));
+        }
+        target_ = bgfx::createFrameBuffer(1, &color_, false);
+        if (!bgfx::isValid(target_))
+        {
+            release_target();
+            return false;
+        }
         width_ = width;
         height_ = height;
     }
@@ -83,6 +95,7 @@ bool FrameOutput::prepare(std::uint16_t width, std::uint16_t height)
 
 void FrameOutput::present(std::uint32_t clear_color, bool movie)
 {
+    ENGINE_PROFILE_FUNCTION();
     bgfx::setViewName(output_clear_view, "Display output clear");
     bgfx::setViewFrameBuffer(output_clear_view, target_);
     bgfx::setViewRect(output_clear_view, 0, 0, width_, height_);
@@ -107,18 +120,16 @@ void FrameOutput::present(std::uint32_t clear_color, bool movie)
     bgfx::submit(output_present_view, program_);
 }
 
-bool FrameOutput::capture()
+bool FrameOutput::capture(SceneScopeId scope, std::uint64_t scene)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (pending_ || !bgfx::isValid(color_) ||
         !bgfx::isTextureValid(0, false, 1, bgfx::TextureFormat::BGRA8,
                               BGFX_TEXTURE_READ_BACK | BGFX_TEXTURE_BLIT_DST))
     {
         return false;
     }
-    if (bgfx::isValid(readback_))
-    {
-        bgfx::destroy(readback_);
-    }
+    release_readback();
     readback_ = bgfx::createTexture2D(width_, height_, false, 1, bgfx::TextureFormat::BGRA8,
                                       BGFX_TEXTURE_READ_BACK | BGFX_TEXTURE_BLIT_DST);
     if (!bgfx::isValid(readback_))
@@ -127,39 +138,106 @@ bool FrameOutput::capture()
     }
     capture_width_ = width_;
     capture_height_ = height_;
-    pixels_.resize(static_cast<std::size_t>(width_) * height_ * 4);
+    const auto capture_bytes = static_cast<std::size_t>(width_) * height_ * 4;
+    if (memory_)
+    {
+        GpuMemoryEntry entry;
+        entry.kind = GpuMemoryKind::frame_readback;
+        entry.creation_scope = scope;
+        entry.creation_scene = scene;
+        entry.logical_bytes = capture_bytes;
+        readback_memory_.track(memory_, std::move(entry));
+    }
+    const bool reallocates = capture_bytes > pixels_.capacity();
+    if (reallocates)
+    {
+        pixels_allocation_.reset();
+    }
+    pixels_.resize(capture_bytes);
+    if (reallocates)
+    {
+        pixels_allocation_.track(memory_profile::Pool::frame_readback, pixels_.data(),
+                                 pixels_.capacity());
+    }
     bgfx::blit(output_capture_view, bgfx::TextureRegion{.handle = readback_},
                bgfx::TextureRegion{.handle = color_});
-    ready_frame_ = bgfx::read(bgfx::TextureRegion{.handle = readback_}, pixels_.data());
-    pending_ = ready_frame_ != UINT32_MAX;
+    pending_ = readback_completion_.submit(bgfx::TextureRegion{.handle = readback_}, pixels_.data());
+    if (pending_)
+    {
+        readback_memory_.wait_for_readback();
+    }
+    else
+    {
+        release_readback();
+    }
     return pending_;
 }
 
-bool FrameOutput::collect(std::uint32_t frame)
+void FrameOutput::retire_capture() noexcept
 {
-    if (!pending_ || static_cast<std::int32_t>(frame - ready_frame_) < 0)
+    ENGINE_PROFILE_FUNCTION();
+    readback_memory_.release_requested();
+}
+
+GpuReadbackStatus FrameOutput::collect(std::uint32_t frame)
+{
+    ENGINE_PROFILE_FUNCTION();
+    if (!pending_)
     {
-        return false;
+        return GpuReadbackStatus::pending;
+    }
+    const auto result = readback_completion_.status(frame);
+    if (result == GpuReadbackStatus::pending)
+    {
+        return result;
     }
     pending_ = false;
+    readback_completion_.reset();
+    if (result == GpuReadbackStatus::complete)
+    {
+        readback_memory_.readback_ready();
+    }
+    release_readback();
+    return result;
+}
+
+void FrameOutput::release_target() noexcept
+{
+    ENGINE_PROFILE_FUNCTION();
+    if (bgfx::isValid(target_))
+    {
+        bgfx::destroy(target_);
+        target_ = BGFX_INVALID_HANDLE;
+    }
+    if (bgfx::isValid(color_))
+    {
+        bgfx::destroy(color_);
+        color_ = BGFX_INVALID_HANDLE;
+    }
+    color_memory_.reset();
+}
+
+void FrameOutput::release_readback() noexcept
+{
+    ENGINE_PROFILE_FUNCTION();
     if (bgfx::isValid(readback_))
     {
         bgfx::destroy(readback_);
+        readback_ = BGFX_INVALID_HANDLE;
     }
-    readback_ = BGFX_INVALID_HANDLE;
-    return true;
+    readback_memory_.reset();
 }
 
 void FrameOutput::release() noexcept
 {
-    if (bgfx::isValid(target_))
+    ENGINE_PROFILE_FUNCTION();
+    if constexpr (web_readbacks)
     {
-        bgfx::destroy(target_);
+        readback_completion_.reset();
+        pending_ = false;
     }
-    if (bgfx::isValid(readback_))
-    {
-        bgfx::destroy(readback_);
-    }
+    release_target();
+    release_readback();
     if (bgfx::isValid(program_))
     {
         bgfx::destroy(program_);
@@ -172,12 +250,10 @@ void FrameOutput::release() noexcept
     {
         bgfx::destroy(vertices_);
     }
-    target_ = BGFX_INVALID_HANDLE;
-    color_ = readback_ = BGFX_INVALID_HANDLE;
     program_ = BGFX_INVALID_HANDLE;
     sampler_ = BGFX_INVALID_HANDLE;
     vertices_ = BGFX_INVALID_HANDLE;
     width_ = height_ = 0;
-    // GPU readback memory is retained until bgfx shutdown has drained outstanding work.
+    // On native platforms pixels_ remains alive through bgfx shutdown.
 }
 } // namespace engine::render_detail

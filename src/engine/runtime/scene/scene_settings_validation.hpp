@@ -1,4 +1,6 @@
 #pragma once
+
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/render/rvt.hpp"
 
 #include "runtime/core/guid_map.hpp"
@@ -11,17 +13,26 @@ namespace engine::scene_detail
 
 [[nodiscard]] inline bool valid_color(const Color& color) noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     const auto channel = [](float value)
-    { return std::isfinite(value) && value >= 0.0F && value <= 1.0F; };
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return std::isfinite(value) && value >= 0.0F && value <= 1.0F;
+    };
     return channel(color.r()) && channel(color.g()) && channel(color.b()) && channel(color.a());
 }
 
 [[nodiscard]] inline bool valid_environment(const EnvironmentSettings& settings) noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     const auto bounded = [](double value, double low, double high)
-    { return std::isfinite(value) && value >= low && value <= high; };
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return std::isfinite(value) && value >= low && value <= high;
+    };
     const auto vector = [&](const Vec3& value, double high)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return bounded(value.x(), 0, high) && bounded(value.y(), 0, high) &&
                bounded(value.z(), 0, high);
     };
@@ -72,6 +83,7 @@ namespace engine::scene_detail
 
 [[nodiscard]] inline bool valid_post_process(const PostProcessSettings& settings) noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return std::isfinite(settings.exposure) && settings.exposure > 0.0F &&
            settings.exposure <= 100.0F && std::isfinite(settings.ao_radius) &&
            settings.ao_radius > 0.0F && settings.ao_radius <= 100.0F &&
@@ -97,6 +109,7 @@ namespace engine::scene_detail
 
 [[nodiscard]] inline bool valid_planar_reflection(const PlanarReflectionSettings& settings) noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return std::isfinite(settings.resolution_scale) && settings.resolution_scale >= 0.25F &&
            settings.resolution_scale <= 1.0F && std::isfinite(settings.clip_bias) &&
            settings.clip_bias >= 0.0F && settings.clip_bias <= 1.0F;
@@ -104,6 +117,7 @@ namespace engine::scene_detail
 
 [[nodiscard]] inline bool valid_light(const LightSettings& settings) noexcept
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     const schema::VsmSettingsT defaults;
     const auto& vsm = settings.virtual_shadow ? *settings.virtual_shadow : defaults;
     if (settings.shadow_method < schema::ShadowMethod::MIN ||

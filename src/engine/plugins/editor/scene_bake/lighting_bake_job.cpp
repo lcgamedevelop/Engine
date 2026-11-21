@@ -1,4 +1,6 @@
 #include "plugins/editor/scene_bake/lighting_bake_job.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/resource_access.hpp"
 #include "runtime/resource/types/material_resource.hpp"
 #include "runtime/resource/types/mesh_resource.hpp"
@@ -39,6 +41,7 @@ namespace
 using Matrix = std::array<double, 16>;
 bool fixed_node(const schema::SceneDataT& scene, std::uint64_t id)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::set<std::uint64_t> visited;
     while (id != 0)
     {
@@ -47,7 +50,10 @@ bool fixed_node(const schema::SceneDataT& scene, std::uint64_t id)
             return false;
         }
         const auto node = std::find_if(scene.nodes.begin(), scene.nodes.end(), [id](const auto& n)
-                                       { return n && n->info && n->info->properties->id == id; });
+                                       {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return n && n->info && n->info->properties->id == id;
+        });
         if (node == scene.nodes.end())
         {
             return false;
@@ -89,6 +95,7 @@ bool fixed_node(const schema::SceneDataT& scene, std::uint64_t id)
 
 bool texture(std::span<const float> rgba, std::uint16_t size, schema::TextureDataT& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (rgba.size() != std::size_t{size} * size * 4)
     {
         return false;
@@ -118,6 +125,7 @@ bool texture(std::span<const float> rgba, std::uint16_t size, schema::TextureDat
 
 bool unwrap(schema::MeshDataT& mesh, std::uint16_t resolution, const std::atomic_bool& cancel)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::unique_ptr<xatlas::Atlas, decltype(&xatlas::Destroy)> atlas(xatlas::Create(),
                                                                      xatlas::Destroy);
     if (!atlas)
@@ -126,7 +134,10 @@ bool unwrap(schema::MeshDataT& mesh, std::uint16_t resolution, const std::atomic
     }
     xatlas::SetProgressCallback(
         atlas.get(), [](xatlas::ProgressCategory, int, void* data)
-        { return !static_cast<const std::atomic_bool*>(data)->load(); },
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return !static_cast<const std::atomic_bool*>(data)->load();
+        },
         const_cast<std::atomic_bool*>(&cancel));
     xatlas::MeshDecl decl;
     decl.vertexPositionData = mesh.vertices.data();
@@ -188,6 +199,7 @@ bool unwrap(schema::MeshDataT& mesh, std::uint16_t resolution, const std::atomic
 // Real orthonormal SH matching the runtime PBR basis: [1,y,z,x,xy,yz,3z²−1,xz,x²−y²].
 std::array<double, 9> sh(double x, double y, double z)
 {
+    ENGINE_PROFILE_FUNCTION();
     return {0.28209479177387814,
             0.4886025119029199 * y,
             0.4886025119029199 * z,
@@ -201,8 +213,12 @@ std::array<double, 9> sh(double x, double y, double z)
 
 double solid_angle(double x, double y, double step)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto area = [](double u, double v)
-    { return std::atan2(u * v, std::sqrt(u * u + v * v + 1)); };
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return std::atan2(u * v, std::sqrt(u * u + v * v + 1));
+    };
     return area(x + step, y + step) - area(x - step, y + step) - area(x + step, y - step) +
            area(x - step, y - step);
 }
@@ -248,15 +264,18 @@ LightingBakeJob::LightingBakeJob(RenderSystem& renderer, ResourceSystem& resourc
                                  TaskSystem& tasks)
     : state_(std::make_unique<State>(renderer, resources, tasks))
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 LightingBakeJob::~LightingBakeJob() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
 }
 
 bool LightingBakeJob::start(const schema::SceneDataT& scene, const Scene& active_scene,
                             const LightingBakeSettings& settings, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto& s = *state_;
     if (s.started || settings.lightmap_resolution < 16 || settings.lightmap_resolution > 512 ||
         (settings.lightmap_resolution & (settings.lightmap_resolution - 1)) ||
@@ -294,6 +313,7 @@ bool LightingBakeJob::start(const schema::SceneDataT& scene, const Scene& active
     }
     const auto world_matrix = [&](std::uint64_t id, Matrix& transform)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const auto found = s.runtime_ids.find(id);
         const auto node =
             found == s.runtime_ids.end() ? Node{} : active_scene.find_node(found->second);
@@ -394,10 +414,17 @@ bool LightingBakeJob::start(const schema::SceneDataT& scene, const Scene& active
     {
         const auto node =
             std::find_if(scene.nodes.begin(), scene.nodes.end(), [&](const auto& n)
-                         { return n && n->info && n->info->properties->id == target.node_id; });
+                         {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                return n && n->info && n->info->properties->id == target.node_id;
+            });
         if (node == scene.nodes.end() ||
             !std::any_of((*node)->components.begin(), (*node)->components.end(),
-                         [](const auto& c) { return c && c->payload.AsLightProbeVolumeData(); }))
+                         [](const auto& c)
+                         {
+                             ENGINE_PROFILE_FUNCTION_PROBE();
+                             return c && c->payload.AsLightProbeVolumeData();
+                         }))
         {
             error = "Probe target requires an existing LightProbeVolume component";
             return false;
@@ -446,6 +473,7 @@ bool LightingBakeJob::start(const schema::SceneDataT& scene, const Scene& active
         "Bake.prepareUv2",
         [preparation, resolution = settings.lightmap_resolution]
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             std::vector<float> black(std::size_t{resolution} * resolution * 4, 0);
             for (std::size_t i = 3; i < black.size(); i += 4)
             {
@@ -479,6 +507,7 @@ bool LightingBakeJob::start(const schema::SceneDataT& scene, const Scene& active
 
 BakeProgress LightingBakeJob::tick(std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto& s = *state_;
     if (!s.started)
     {
@@ -734,6 +763,7 @@ BakeProgress LightingBakeJob::tick(std::string& error)
 }
 void LightingBakeJob::cancel() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     auto& s = *state_;
     s.cancelled = true;
     if (s.preparation)
@@ -747,18 +777,22 @@ void LightingBakeJob::cancel() noexcept
 }
 void LightingBakeJob::shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     cancel();
 }
 std::uint32_t LightingBakeJob::completed() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return state_->done;
 }
 std::uint32_t LightingBakeJob::total() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return state_->count;
 }
 const LightingBakeOutputs& LightingBakeJob::outputs() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return state_->output;
 }
 } // namespace engine::plugins::scene_bake

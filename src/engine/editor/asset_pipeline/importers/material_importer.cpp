@@ -1,4 +1,6 @@
 #include "editor/asset_pipeline/importers/material_importer.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "editor/asset_pipeline/importer_utils.hpp"
 #include "editor/asset_pipeline/material_parameters.hpp"
 
@@ -37,6 +39,7 @@ namespace
 bool load_shader(const Guid& guid, const ImportContext& context,
                  std::unique_ptr<schema::ShaderDataT>& shader, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::string path;
     if (!context.identities.guid_to_path(guid, path))
     {
@@ -71,20 +74,24 @@ bool load_shader(const Guid& guid, const ImportContext& context,
 
 schema::AssetKind MaterialImporter::kind() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::material;
 }
 bool MaterialImporter::matches(const std::filesystem::path& source) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return source_extension(source) == ".material";
 }
 bool MaterialImporter::inspect_batch(const ImportContext&, std::string& fingerprint,
                                      std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema_fingerprint({"runtime/material.fbs"}, fingerprint, error);
 }
 bool MaterialImporter::convert(const ImportAsset& asset, const ImportContext& context,
                                std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     toml::table table;
     if (!read_table(asset.source, table, error))
     {
@@ -148,7 +155,11 @@ bool MaterialImporter::convert(const ImportAsset& asset, const ImportContext& co
             parameter->name = (*parameter_table)["name"].value_or(std::string{});
             const auto definition =
                 std::find_if(shader->parameters.begin(), shader->parameters.end(),
-                             [&](const auto& value) { return value->name == parameter->name; });
+                             [&](const auto& value)
+                             {
+                                 ENGINE_PROFILE_FUNCTION_PROBE();
+                                 return value->name == parameter->name;
+                             });
             if (!names.insert(parameter->name).second || definition == shader->parameters.end() ||
                 !(*definition)->exposed ||
                 !value_union(*parameter_table, parameter->value, error) ||
@@ -185,7 +196,11 @@ bool MaterialImporter::convert(const ImportAsset& asset, const ImportContext& co
             texture->texture_guid = (*texture_table)["texture"].value_or(std::string{});
             const auto definition =
                 std::find_if(shader->samplers.begin(), shader->samplers.end(),
-                             [&](const auto& value) { return value->name == texture->name; });
+                             [&](const auto& value)
+                             {
+                                 ENGINE_PROFILE_FUNCTION_PROBE();
+                                 return value->name == texture->name;
+                             });
             std::vector<Guid> dependencies;
             if (!names.insert(texture->name).second || definition == shader->samplers.end() ||
                 !(*definition)->exposed ||
@@ -214,6 +229,7 @@ bool MaterialImporter::convert(const ImportAsset& asset, const ImportContext& co
 bool MaterialImporter::scan_dependencies(ImportAsset& asset, const ImportContext& context,
                                          std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     asset.build_dependencies.clear();
     asset.runtime_dependencies.clear();
     toml::table table;

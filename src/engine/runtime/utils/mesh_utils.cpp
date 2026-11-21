@@ -1,4 +1,5 @@
 #include "runtime/utils/mesh_utils.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include <algorithm>
 #include <array>
@@ -15,26 +16,31 @@ using Vector = std::array<double, 3>;
 
 bool float_value(double value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::isfinite(value) && std::abs(value) <= std::numeric_limits<float>::max();
 }
 
 bool unit_value(double value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::isfinite(value) && value >= 0.0F && value <= 1.0F;
 }
 
 double dot(const Vector& a, const Vector& b) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 }
 
 Vector cross(const Vector& a, const Vector& b) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return {a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
 }
 
 bool normalize(Vector& value) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const double length = std::hypot(value[0], value[1], value[2]);
     if (!std::isfinite(length) || length <= 0.0)
     {
@@ -49,6 +55,7 @@ bool normalize(Vector& value) noexcept
 
 Vector orthogonal(const Vector& normal) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const Vector axis = std::abs(normal[2]) < 0.9 ? Vector{0.0, 0.0, 1.0} : Vector{0.0, 1.0, 0.0};
     Vector tangent = cross(axis, normal);
     const bool normalized = normalize(tangent);
@@ -61,6 +68,7 @@ bool validate_meshlets(const schema::MeshletDataT* data,
                        const std::vector<std::uint32_t>& indices,
                        const std::vector<schema::MeshSubmesh>& submeshes)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (data == nullptr)
     {
         return true;
@@ -166,6 +174,7 @@ bool validate_meshlets(const schema::MeshletDataT* data,
 
 bool MeshUtils::validate(const schema::MeshDataT& data) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto count = data.vertices.size();
     if (data.schema_version != 2 || count == 0 ||
         count > std::numeric_limits<std::uint32_t>::max() / (16 * sizeof(float)) ||
@@ -296,6 +305,7 @@ bool MeshUtils::validate(const schema::MeshDataT& data) noexcept
 
 bool MeshUtils::build_tangents(const schema::MeshDataT& data, std::vector<schema::Vec4>& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!validate(data))
     {
         output.clear();

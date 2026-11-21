@@ -1,4 +1,6 @@
 #include "plugins/editor/modeling/modeling_commands.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "editor/commands/editor_commands.hpp"
 #include "editor/commands/editor_edit.hpp"
@@ -36,6 +38,7 @@ namespace fs = std::filesystem;
 
 bool fields(const Json& input, std::initializer_list<std::string_view> names)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!input.is_object())
     {
         return false;
@@ -52,6 +55,7 @@ bool fields(const Json& input, std::initializer_list<std::string_view> names)
 
 bool id(const Json& input, std::uint64_t& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!input.is_string())
     {
         return false;
@@ -64,11 +68,13 @@ bool id(const Json& input, std::uint64_t& output)
 
 bool id_field(const Json& input, const char* name, std::uint64_t& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     return input.contains(name) && id(input[name], output);
 }
 
 bool number(const Json& input, double& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!input.is_number())
     {
         return false;
@@ -79,11 +85,13 @@ bool number(const Json& input, double& output)
 
 bool number_field(const Json& input, const char* name, double& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     return !input.contains(name) || number(input[name], output);
 }
 
 bool boolean_field(const Json& input, const char* name, bool& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!input.contains(name))
     {
         return true;
@@ -98,6 +106,7 @@ bool boolean_field(const Json& input, const char* name, bool& output)
 
 bool uint_field(const Json& input, const char* name, std::uint32_t& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!input.contains(name))
     {
         return true;
@@ -114,6 +123,7 @@ bool uint_field(const Json& input, const char* name, std::uint32_t& output)
 
 template <std::size_t Count> bool vector(const Json& input, std::array<double, Count>& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!input.is_array() || input.size() != Count)
     {
         return false;
@@ -130,6 +140,7 @@ template <std::size_t Count> bool vector(const Json& input, std::array<double, C
 
 bool vec3_field(const Json& input, const char* name, Vec3& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!input.contains(name))
     {
         return true;
@@ -145,6 +156,7 @@ bool vec3_field(const Json& input, const char* name, Vec3& output)
 
 bool vec2_field(const Json& input, const char* name, Vec2& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!input.contains(name))
     {
         return true;
@@ -160,6 +172,7 @@ bool vec2_field(const Json& input, const char* name, Vec2& output)
 
 bool ids(const Json& input, std::vector<std::uint64_t>& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!input.is_array() || input.size() > 100000)
     {
         return false;
@@ -181,6 +194,7 @@ bool ids(const Json& input, std::vector<std::uint64_t>& output)
 bool read_selection(const Json& input, const schema::EditableMeshDataT& data, MeshSelection& output,
                     std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!fields(input, {"vertices", "faces", "edges", "all"}) ||
         !boolean_field(input, "all", output.all) ||
         (input.contains("vertices") && !ids(input["vertices"], output.vertices)) ||
@@ -228,6 +242,7 @@ bool read_selection(const Json& input, const schema::EditableMeshDataT& data, Me
 
 Json selection_json(const MeshSelection& selection)
 {
+    ENGINE_PROFILE_FUNCTION();
     Json vertices = Json::array();
     Json faces = Json::array();
     Json edges = Json::array();
@@ -252,6 +267,7 @@ Json selection_json(const MeshSelection& selection)
 std::vector<std::uint64_t> face_selection(const schema::EditableMeshDataT& data,
                                           const MeshSelection& selection)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto output = selection.faces;
     if (selection.all)
     {
@@ -266,6 +282,7 @@ std::vector<std::uint64_t> face_selection(const schema::EditableMeshDataT& data,
 
 bool points2(const Json& input, std::vector<Vec2>& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!input.is_array() || input.size() > 10000)
     {
         return false;
@@ -284,6 +301,7 @@ bool points2(const Json& input, std::vector<Vec2>& output)
 
 bool points3(const Json& input, std::vector<Vec3>& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!input.is_array() || input.size() > 10000)
     {
         return false;
@@ -303,6 +321,7 @@ bool points3(const Json& input, std::vector<Vec3>& output)
 bool create_mesh(std::string_view shape, const Json& params, schema::EditableMeshDataT& data,
                  std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (shape == "polygon")
     {
         std::vector<Vec3> points;
@@ -368,6 +387,7 @@ bool create_mesh(std::string_view shape, const Json& params, schema::EditableMes
 bool operate(std::string_view operation, const Json& params, const MeshSelection& selection,
              schema::EditableMeshDataT& data, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto faces = face_selection(data, selection);
     const auto face_operations = {"extrude",     "inset",        "erase_faces", "reverse",
                                   "triangulate", "subdivide",    "detach",      "duplicate_faces",
@@ -671,7 +691,11 @@ bool operate(std::string_view operation, const Json& params, const MeshSelection
             (operation == "color" &&
              (!fields(params, {"value"}) || !params.contains("value") ||
               !vector(params["value"], color) ||
-              std::any_of(color.begin(), color.end(), [](double v) { return v < 0 || v > 1; }))) ||
+              std::any_of(color.begin(), color.end(), [](double v)
+              {
+                  ENGINE_PROFILE_FUNCTION_PROBE();
+                  return v < 0 || v > 1;
+              }))) ||
             faces.empty())
         {
             error = "Material/color requires selected faces and valid values";
@@ -691,6 +715,7 @@ bool operate(std::string_view operation, const Json& params, const MeshSelection
 
 Json capture_material(const Material& material)
 {
+    ENGINE_PROFILE_FUNCTION();
     Json values = Json::array();
     const auto* shader = material.shader_data();
     if (shader)
@@ -756,6 +781,7 @@ Json capture_material(const Material& material)
 
 bool restore_material(Material material, const Json& snapshot)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!material.set_type(snapshot["type"].get<std::string>()) ||
         !material.set_shader(snapshot["shader"].get<std::string>()))
     {
@@ -798,6 +824,7 @@ bool restore_material(Material material, const Json& snapshot)
 
 Json visual_snapshot(const Node& node)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto transform = node.get_component<Transform>();
     const auto renderer = node.get_component<MeshRenderer>();
     if (!transform || !renderer)
@@ -824,6 +851,7 @@ Json visual_snapshot(const Node& node)
 
 bool restore_visual(Node node, const Json& snapshot)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (snapshot.is_null())
     {
         return true;
@@ -851,6 +879,7 @@ bool restore_visual(Node node, const Json& snapshot)
 
 bool relative_matrix(const Node& destination, const Node& source, std::array<double, 16>& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::array<double, 16> a{};
     std::array<double, 16> b{};
     const auto first = destination.get_component<Transform>();
@@ -894,11 +923,16 @@ bool relative_matrix(const Node& destination, const Node& source, std::array<dou
         }
     }
     return std::all_of(output.begin(), output.end(),
-                       [](double value) { return std::isfinite(value); });
+                       [](double value)
+                       {
+                           ENGINE_PROFILE_FUNCTION_PROBE();
+                           return std::isfinite(value);
+                       });
 }
 
 bool modeling_help(const Json& arguments, Json& result, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!fields(arguments, {"operation", "shape"}) ||
         (arguments.contains("operation") && !arguments["operation"].is_string()) ||
         (arguments.contains("shape") &&
@@ -1103,6 +1137,7 @@ struct ModelChange
 
 bool name_field(const Json& input, std::string& name)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!input.contains("name"))
     {
         return true;
@@ -1117,6 +1152,7 @@ bool name_field(const Json& input, std::string& name)
 
 Json mirror_json(const ModelRecord& record)
 {
+    ENGINE_PROFILE_FUNCTION();
     return {
         {"enabled", record.mirror_enabled},
         {"halfSpaceOnly", record.mirror.require_half_space},
@@ -1128,6 +1164,7 @@ Json mirror_json(const ModelRecord& record)
 
 bool prepare_record(ModelRecord& record, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto render_source = record.source;
     return mesh::serialize(record.source, record.bytes, error) &&
            (!record.mirror_enabled || mesh::mirror(render_source, record.mirror, error)) &&
@@ -1146,10 +1183,12 @@ struct ModelingCommands::State
 
     State(WorldSystem& value, fs::path root) : world(value), project_root(std::move(root))
     {
+        ENGINE_PROFILE_FUNCTION();
     }
 
     Scene* scene(std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         auto* active = world.scene();
         if (!active || active->id() != scene_id)
         {
@@ -1161,6 +1200,7 @@ struct ModelingCommands::State
 
     void synchronize_scene() noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         const auto* active = world.scene();
         const auto generation = active ? active->id() : 0;
         if (scene_id != generation)
@@ -1205,6 +1245,7 @@ struct ModelingCommands::State
 
     bool enter(const Json& arguments, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         synchronize_scene();
         const auto* active = world.scene();
         std::uint64_t requested = 0;
@@ -1218,6 +1259,7 @@ struct ModelingCommands::State
 
     Node node(ModelRecord& record, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         auto* active = scene(error);
         auto value = active ? active->find_node(record.node_id) : Node{};
         auto renderer = value ? value.get_component<MeshRenderer>() : MeshRenderer{};
@@ -1231,6 +1273,7 @@ struct ModelingCommands::State
 
     ModelRecord* target(const Json& arguments, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         std::uint64_t model_id = 0;
         if (!id_field(arguments, "modelId", model_id))
         {
@@ -1257,6 +1300,7 @@ struct ModelingCommands::State
 
     std::unique_ptr<ModelRecord> snapshot(ModelRecord& record, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         auto value = node(record, error);
         if (!value)
         {
@@ -1269,6 +1313,7 @@ struct ModelingCommands::State
 
     bool removable(ModelRecord& record, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         auto value = node(record, error);
         if (!value)
         {
@@ -1300,6 +1345,7 @@ struct ModelingCommands::State
     bool matches(const ModelRecord* expected, std::uint64_t model_id, bool removing,
                  std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         const auto found = records.find(model_id);
         if (!expected)
         {
@@ -1332,6 +1378,7 @@ struct ModelingCommands::State
 
     bool replace(std::uint64_t model_id, const ModelRecord* replacement, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         auto* active = scene(error);
         if (!active)
         {
@@ -1438,21 +1485,25 @@ struct ModelingCommands::State
 
         explicit Edit(State& state) : owner(state), scene_id(state.scene_id)
         {
+            ENGINE_PROFILE_FUNCTION();
         }
 
         bool apply(std::string& error) override
         {
+            ENGINE_PROFILE_FUNCTION();
             return change(true, error);
         }
 
         bool revert(std::string& error) override
         {
+            ENGINE_PROFILE_FUNCTION();
             return change(false, error);
         }
 
     private:
         bool change(bool forward, std::string& error)
         {
+            ENGINE_PROFILE_FUNCTION();
             if (owner.scene_id != scene_id || !owner.scene(error))
             {
                 error = "Model edit belongs to an inactive scene";
@@ -1503,12 +1554,17 @@ struct ModelingCommands::State
 
     bool summary(ModelRecord& record, Json& output, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         output = nullptr;
         auto value = node(record, error);
         std::array<double, 16> matrix{};
         if (!value || !value.get_component<Transform>().world_matrix(matrix.data()) ||
             !std::all_of(matrix.begin(), matrix.end(),
-                         [](float item) { return std::isfinite(item); }))
+                         [](float item)
+                         {
+                             ENGINE_PROFILE_FUNCTION_PROBE();
+                             return std::isfinite(item);
+                         }))
         {
             error = "Cannot calculate model world bounds";
             return false;
@@ -1542,6 +1598,7 @@ struct ModelingCommands::State
             }
             const auto box = [](const auto& minimum, const auto& maximum)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 return Json{
                     {"min", minimum},
                     {"max", maximum},
@@ -1567,6 +1624,7 @@ struct ModelingCommands::State
 
     bool query(const Json& arguments, Json& result, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (!fields(arguments, {"sceneId", "modelId", "nodeId", "offset", "limit"}))
         {
             error = "Unknown modeling_get field";
@@ -1630,6 +1688,7 @@ struct ModelingCommands::State
         }
         const auto loop_json = [](const auto& face)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             Json vertices = Json::array();
             Json texcoords = Json::array();
             Json colors = Json::array();
@@ -1678,6 +1737,7 @@ struct ModelingCommands::State
                 std::unique_ptr<engine::editor::EditorEdit>& output, std::string& error,
                 bool loading)
     {
+        ENGINE_PROFILE_FUNCTION();
         if ((loading && !fields(arguments, {"sceneId", "path", "name"})) ||
             (!loading && !fields(arguments, {"sceneId", "shape", "parameters", "name"})))
         {
@@ -1729,6 +1789,7 @@ struct ModelingCommands::State
     bool rebuild(const Json& arguments, Json& result,
                  std::unique_ptr<engine::editor::EditorEdit>& output, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (!fields(arguments, {"sceneId", "modelId", "nodeId", "parameters"}) ||
             !arguments.contains("parameters") || !arguments["parameters"].is_object())
         {
@@ -1806,6 +1867,7 @@ struct ModelingCommands::State
                       std::unique_ptr<engine::editor::EditorEdit>& output, std::string& error,
                       bool selecting)
     {
+        ENGINE_PROFILE_FUNCTION();
         if ((selecting &&
              !fields(arguments, {"sceneId", "modelId", "nodeId", "selection", "mode"})) ||
             (!selecting && !fields(arguments, {"sceneId", "modelId", "nodeId", "selection",
@@ -2019,6 +2081,7 @@ struct ModelingCommands::State
     bool remove(const Json& arguments, Json& result,
                 std::unique_ptr<engine::editor::EditorEdit>& output, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (!fields(arguments, {"sceneId", "modelId", "nodeId"}))
         {
             return false;
@@ -2045,6 +2108,7 @@ struct ModelingCommands::State
                    std::unique_ptr<engine::editor::EditorEdit>& output, std::string& error,
                    bool separate)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (!fields(arguments, {"sceneId", "modelId", "nodeId", "name", "selection"}) ||
             (!separate && arguments.contains("selection")))
         {
@@ -2154,6 +2218,7 @@ struct ModelingCommands::State
     bool combine(const Json& arguments, Json& result,
                  std::unique_ptr<engine::editor::EditorEdit>& output, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         std::vector<std::uint64_t> model_ids;
         if (!fields(arguments, {"sceneId", "modelIds", "name"}) ||
             !arguments.contains("modelIds") || !ids(arguments["modelIds"], model_ids) ||
@@ -2233,6 +2298,7 @@ struct ModelingCommands::State
 
     bool save(const Json& arguments, Json& result, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         fs::path path;
         if (!fields(arguments, {"sceneId", "modelId", "nodeId", "path"}) ||
             !arguments.contains("path") || !arguments["path"].is_string() ||
@@ -2263,6 +2329,7 @@ struct ModelingCommands::State
     bool execute(std::string_view command, const Json& arguments, Json& result,
                  std::unique_ptr<engine::editor::EditorEdit>& edit, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (command == "modeling_help")
         {
             return modeling_help(arguments, result, error);
@@ -2311,17 +2378,20 @@ struct ModelingCommands::State
 ModelingCommands::ModelingCommands(WorldSystem& world, fs::path project_root)
     : state_(std::make_unique<State>(world, std::move(project_root)))
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 ModelingCommands::~ModelingCommands() noexcept = default;
 
 void ModelingCommands::synchronize_scene() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     state_->synchronize_scene();
 }
 
 bool ModelingCommands::export_mesh(const Node& node, const fs::path& path, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     state_->synchronize_scene();
     if (!state_->world.scene() || node.scene() != state_->world.scene())
     {
@@ -2364,6 +2434,7 @@ bool ModelingCommands::export_mesh(const Node& node, const fs::path& path, std::
 
 bool ModelingCommands::register_commands(engine::editor::EditorCommands& commands)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (const char* name :
          {"modeling_create", "modeling_rebuild", "modeling_get", "modeling_select", "modeling_edit",
           "modeling_delete", "modeling_duplicate", "modeling_combine", "modeling_separate",
@@ -2377,7 +2448,10 @@ bool ModelingCommands::register_commands(engine::editor::EditorCommands& command
                 [this, command](const Json& arguments, Json& result,
                                 std::unique_ptr<engine::editor::EditorEdit>& edit,
                                 std::string& error)
-                { return state_->execute(command, arguments, result, edit, error); }))
+                {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
+                    return state_->execute(command, arguments, result, edit, error);
+                }))
         {
             return false;
         }

@@ -1,4 +1,6 @@
 #include "plugins/runtime/mcp/runtime_mcp_endpoint.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/mcp/mcp_command_channel.hpp"
 #include "plugins/runtime/mcp/mcp_system.hpp"
 #include "plugins/runtime/mcp/runtime_values.hpp"
@@ -26,6 +28,7 @@ namespace fs = std::filesystem;
 using Json = nlohmann::json;
 bool plain_path(const fs::path& path)
 {
+    ENGINE_PROFILE_FUNCTION();
     fs::path current;
     for (const auto& part : path)
     {
@@ -61,10 +64,12 @@ struct RuntimeMcpEndpoint::State
     bool closed = false;
     explicit State(RuntimeHost& value) : host(value)
     {
+        ENGINE_PROFILE_FUNCTION();
     }
 
     Json status_value()
     {
+        ENGINE_PROFILE_FUNCTION();
         auto* gameplay = closed ? nullptr : host.gameplay();
         const auto* script = gameplay ? gameplay->script_status() : nullptr;
         RuntimeHostStatus status;
@@ -136,6 +141,7 @@ struct RuntimeMcpEndpoint::State
 
     bool publish(bool force)
     {
+        ENGINE_PROFILE_FUNCTION();
         auto status = status_value();
         const auto now = std::chrono::steady_clock::now();
         if (!force && now - last_write < std::chrono::milliseconds(100))
@@ -159,6 +165,7 @@ struct RuntimeMcpEndpoint::State
     }
     bool execute_script(const Json& arguments, Json& result, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (closed || !arguments.is_object() || arguments.size() != 5 ||
             arguments.value("session", Json()) != session || !arguments.contains("runId") ||
             !arguments["runId"].is_string() || !arguments.contains("modulePath") ||
@@ -204,11 +211,13 @@ struct RuntimeMcpEndpoint::State
 RuntimeMcpEndpoint::RuntimeMcpEndpoint() noexcept = default;
 RuntimeMcpEndpoint::~RuntimeMcpEndpoint() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
 }
 
 bool RuntimeMcpEndpoint::initialize(RuntimeHost& host, const McpEndpointConfig& config)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (state_ || config.cache_root.empty() || config.channel_directory.empty() ||
         !plain_path(config.cache_root) || !plain_path(config.channel_directory))
     {
@@ -245,6 +254,7 @@ bool RuntimeMcpEndpoint::initialize(RuntimeHost& host, const McpEndpointConfig& 
     auto* value = state.get();
     const auto register_command = [&](std::string name, auto handler)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         McpTool tool;
         tool.name = std::move(name);
         tool.description = "Runtime test operation";
@@ -254,6 +264,7 @@ bool RuntimeMcpEndpoint::initialize(RuntimeHost& host, const McpEndpointConfig& 
                              {"additionalProperties", true}};
         tool.execute = [handler](const Json& args, Json& result)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             std::string error;
             if (handler(args, result, error))
             {
@@ -268,6 +279,7 @@ bool RuntimeMcpEndpoint::initialize(RuntimeHost& host, const McpEndpointConfig& 
             "set_render_feature",
             [value](const Json& args, Json& result, std::string&)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 if (!value->host.renderer() || !args.is_object() || args.size() != 2 ||
                     !args.contains("feature") || !args["feature"].is_string() ||
                     !args.contains("enabled") || !args["enabled"].is_boolean())
@@ -288,6 +300,7 @@ bool RuntimeMcpEndpoint::initialize(RuntimeHost& host, const McpEndpointConfig& 
             "get_vsm_status",
             [value](const Json& args, Json& result, std::string&)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 if (!value->host.renderer())
                 {
                     return false;
@@ -338,6 +351,7 @@ bool RuntimeMcpEndpoint::initialize(RuntimeHost& host, const McpEndpointConfig& 
             "get_vsm_debug_options",
             [value](const Json& args, Json& result, std::string&)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 if (!value->host.renderer())
                 {
                     return false;
@@ -371,6 +385,7 @@ bool RuntimeMcpEndpoint::initialize(RuntimeHost& host, const McpEndpointConfig& 
             "set_vsm_debug_options",
             [value](const Json& args, Json& result, std::string&)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 if (!value->host.renderer())
                 {
                     return false;
@@ -405,6 +420,7 @@ bool RuntimeMcpEndpoint::initialize(RuntimeHost& host, const McpEndpointConfig& 
         !register_command("get_rvt_status",
                           [value](const Json& args, Json& result, std::string&)
                           {
+                              ENGINE_PROFILE_FUNCTION_PROBE();
                               RvtStatus status;
                               if (!args.empty() || !value->host.renderer() ||
                                   !value->host.renderer()->rvt_status(status))
@@ -427,6 +443,7 @@ bool RuntimeMcpEndpoint::initialize(RuntimeHost& host, const McpEndpointConfig& 
         !register_command("get_rvt_debug_options",
                           [value](const Json& args, Json& result, std::string&)
                           {
+                              ENGINE_PROFILE_FUNCTION_PROBE();
                               RvtDebugOptions options;
                               std::uint64_t revision = 0;
                               if (!args.empty() || !value->host.renderer() ||
@@ -448,6 +465,7 @@ bool RuntimeMcpEndpoint::initialize(RuntimeHost& host, const McpEndpointConfig& 
             "set_rvt_debug_options",
             [value](const Json& args, Json& result, std::string&)
             {
+                ENGINE_PROFILE_FUNCTION_PROBE();
                 RvtDebugOptions options;
                 std::uint64_t revision = 0;
                 if (!args.is_object() || args.empty() || !value->host.renderer() ||
@@ -499,28 +517,43 @@ bool RuntimeMcpEndpoint::initialize(RuntimeHost& host, const McpEndpointConfig& 
             }) ||
         !register_command("execute_project_script",
                           [value](const Json& args, Json& result, std::string& error)
-                          { return value->execute_script(args, result, error); }) ||
+                          {
+                              ENGINE_PROFILE_FUNCTION_PROBE();
+                              return value->execute_script(args, result, error);
+                          }) ||
         !register_command("capture_frame",
                           [value](const Json& args, Json& result, std::string& error)
                           {
+                              ENGINE_PROFILE_FUNCTION_PROBE();
                               return observation_command(value->host, value->cache, "capture_frame",
                                                          args, result, error);
                           }) ||
         !register_command("get_frame_capture",
                           [value](const Json& args, Json& result, std::string& error)
                           {
+                              ENGINE_PROFILE_FUNCTION_PROBE();
                               return observation_command(value->host, value->cache,
                                                          "get_frame_capture", args, result, error);
                           }) ||
         !register_command("get_scene_load",
                           [value](const Json& args, Json& result, std::string& error)
                           {
+                              ENGINE_PROFILE_FUNCTION_PROBE();
                               return observation_command(value->host, value->cache,
                                                          "get_scene_load", args, result, error);
+                          }) ||
+        !register_command("get_resource_memory",
+                          [value](const Json& args, Json& result, std::string& error)
+                          {
+                              ENGINE_PROFILE_FUNCTION_PROBE();
+                              return observation_command(value->host, value->cache,
+                                                         "get_resource_memory", args, result,
+                                                         error);
                           }) ||
         !register_command("get_gameplay_prepare",
                           [value](const Json& args, Json& result, std::string& error)
                           {
+                              ENGINE_PROFILE_FUNCTION_PROBE();
                               return observation_command(value->host, value->cache,
                                                          "get_gameplay_prepare", args, result,
                                                          error);
@@ -528,6 +561,7 @@ bool RuntimeMcpEndpoint::initialize(RuntimeHost& host, const McpEndpointConfig& 
         !register_command("release_gameplay_prepare",
                           [value](const Json& args, Json& result, std::string& error)
                           {
+                              ENGINE_PROFILE_FUNCTION_PROBE();
                               return observation_command(value->host, value->cache,
                                                          "release_gameplay_prepare", args, result,
                                                          error);
@@ -540,6 +574,7 @@ bool RuntimeMcpEndpoint::initialize(RuntimeHost& host, const McpEndpointConfig& 
         state->directory, state->session,
         [value](std::string_view name, const Json& args, Json& result, std::string& error)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             const auto status = value->system.call_tool(name, args, result);
             if (status == McpCallStatus::success)
             {
@@ -559,6 +594,7 @@ bool RuntimeMcpEndpoint::initialize(RuntimeHost& host, const McpEndpointConfig& 
 
 bool RuntimeMcpEndpoint::poll()
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!state_ || state_->closed)
     {
         return false;
@@ -572,10 +608,12 @@ bool RuntimeMcpEndpoint::poll()
 }
 bool RuntimeMcpEndpoint::publish_status()
 {
+    ENGINE_PROFILE_FUNCTION();
     return state_ && state_->publish(false);
 }
 void RuntimeMcpEndpoint::shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (state_)
     {
         state_->closed = true;
@@ -585,6 +623,7 @@ void RuntimeMcpEndpoint::shutdown() noexcept
 }
 std::string_view RuntimeMcpEndpoint::last_error() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return error_;
 }
 } // namespace engine::plugins::mcp

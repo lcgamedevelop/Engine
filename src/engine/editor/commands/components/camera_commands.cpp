@@ -1,4 +1,5 @@
 #include "editor/commands/components/component_edit.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/scene/camera.hpp"
 
@@ -17,6 +18,7 @@ constexpr std::uint64_t frustum_culling_field = std::uint64_t{1} << 5;
                                  const CameraSettings& replacement, std::uint64_t selected,
                                  std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto node = target.node(error);
     auto camera = node ? node.get_component<Camera>() : Camera{};
     if (!camera)
@@ -78,6 +80,7 @@ constexpr std::uint64_t frustum_culling_field = std::uint64_t{1} << 5;
 bool prepare_camera(WorldSystem& world, NodeAliases& aliases, const Json& arguments, Json& result,
                     std::unique_ptr<EditorEdit>& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     Target target(world, &aliases);
     if (!fields(arguments, {"sceneId", "nodeId", "projection", "fovDegrees", "nearClip", "farClip",
                             "orthographicSize", "frustumCullingEnabled"}) ||

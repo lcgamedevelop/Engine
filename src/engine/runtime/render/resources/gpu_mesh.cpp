@@ -1,4 +1,5 @@
 #include "runtime/render/resources/gpu_mesh.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/render/passes/skinning_pass.hpp"
 #include "runtime/resource/types/mesh_resource.hpp"
@@ -14,16 +15,19 @@ namespace engine::render_detail
 
 GpuMesh::~GpuMesh() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     release();
 }
 
 GpuMesh::GpuMesh(GpuMesh&& other) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     *this = std::move(other);
 }
 
 GpuMesh& GpuMesh::operator=(GpuMesh&& other) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (this != &other)
     {
         release();
@@ -49,6 +53,7 @@ GpuMesh& GpuMesh::operator=(GpuMesh&& other) noexcept
 
 bool GpuMesh::create(const MeshRenderer& renderer, std::shared_ptr<GpuGeometry> source)
 {
+    ENGINE_PROFILE_FUNCTION();
     release();
     if (source == nullptr || !source->vertices_ready() || !bgfx::isValid(source->index_buffer()))
     {
@@ -65,6 +70,7 @@ bool GpuMesh::create(const MeshRenderer& renderer, std::shared_ptr<GpuGeometry> 
 
 bool GpuMesh::update_deformation(const MeshRendererRuntime& runtime, SkinningPass& skinning)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (geometry == nullptr)
     {
         return false;
@@ -163,6 +169,7 @@ bool GpuMesh::update_deformation(const MeshRendererRuntime& runtime, SkinningPas
 
 void GpuMesh::bind_vertices(bool positions_only) const
 {
+    ENGINE_PROFILE_FUNCTION();
     if (bgfx::isValid(deformed_vertices))
     {
         bgfx::setVertexBuffer(0, deformed_vertices);
@@ -175,6 +182,7 @@ void GpuMesh::bind_vertices(bool positions_only) const
 
 void GpuMesh::release_deformation() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     for (auto* handle : {&deformed_vertices, &palette})
     {
         if (bgfx::isValid(*handle))
@@ -190,6 +198,7 @@ void GpuMesh::release_deformation() noexcept
 
 void GpuMesh::release() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     release_deformation();
     geometry.reset();
     textures.clear();

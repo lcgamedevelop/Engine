@@ -20,10 +20,11 @@ public:
         ++loads_;
         return observe(loader_.load(path, output), output);
     }
-    bool begin_load(std::string_view path, std::unique_ptr<engine::ResourceLoad>& output) override
+    bool begin_load(std::string_view path, std::unique_ptr<engine::ResourceLoad>& output,
+                    engine::ResourceMemoryOwner owner = {}) override
     {
         ++loads_;
-        return loader_.begin_load(path, output);
+        return loader_.begin_load(path, output, owner);
     }
     bool load_memory(std::unique_ptr<engine::Resource>& candidate,
                      std::span<const engine::ResourceHandle> dependencies,
@@ -67,6 +68,16 @@ public:
     std::string_view last_error() const noexcept override
     {
         return loader_.last_error();
+    }
+    void set_memory_owner(const engine::ResourceHandle& handle,
+                          engine::ResourceMemoryOwner owner) noexcept override
+    {
+        loader_.set_memory_owner(handle, owner);
+    }
+    bool memory_snapshot(const engine::ResourceMemoryQuery& query,
+                         engine::ResourceMemorySnapshot& output) const override
+    {
+        return loader_.memory_snapshot(query, output);
     }
     std::size_t loads() const noexcept
     {

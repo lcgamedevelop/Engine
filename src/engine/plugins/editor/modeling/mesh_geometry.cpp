@@ -1,4 +1,6 @@
 #include "plugins/editor/modeling/mesh_geometry.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "plugins/editor/modeling/mesh_geometry_internal.hpp"
 
@@ -14,6 +16,7 @@ using math::Point;
 
 bool valid_profile(const std::vector<schema::Vec2>& profile, bool closed, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (profile.size() < (closed ? 3U : 2U) || profile.size() > 16384)
     {
         error = "Profile must contain a bounded number of points";
@@ -42,6 +45,7 @@ bool valid_profile(const std::vector<schema::Vec2>& profile, bool closed, std::s
 
 void reverse_face(schema::ModelingFaceT& face)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::reverse(face.vertices.begin(), face.vertices.end());
     std::reverse(face.texcoords.begin(), face.texcoords.end());
     std::reverse(face.colors.begin(), face.colors.end());
@@ -58,6 +62,7 @@ void reverse_face(schema::ModelingFaceT& face)
 bool mesh::sweep(const MeshSweepOptions& options, schema::EditableMeshDataT& output,
                  std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid_profile(options.profile, options.closed_profile, error))
     {
         return false;
@@ -193,6 +198,7 @@ bool mesh::sweep(const MeshSweepOptions& options, schema::EditableMeshDataT& out
 bool mesh::lathe(const MeshLatheOptions& options, schema::EditableMeshDataT& output,
                  std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid_profile(options.profile, false, error))
     {
         return false;
@@ -320,6 +326,7 @@ bool mesh::lathe(const MeshLatheOptions& options, schema::EditableMeshDataT& out
 bool mesh::mirror(schema::EditableMeshDataT& data, const MeshMirrorOptions& options,
                   std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     Point normal = math::point(options.normal);
     const double normal_length = math::length(normal);
@@ -388,12 +395,21 @@ bool mesh::mirror(schema::EditableMeshDataT& data, const MeshMirrorOptions& opti
     }
     const auto on_plane = [&](const schema::ModelingFaceT& face)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return std::all_of(face.vertices.begin(), face.vertices.end(),
-                           [&](const auto id) { return remap[id] == id; });
+                           [&](const auto id)
+                           {
+                               ENGINE_PROFILE_FUNCTION_PROBE();
+                               return remap[id] == id;
+                           });
     };
     if (options.weld && has_off_plane_vertex)
     {
-        std::erase_if(candidate.faces, [&](const auto& face) { return on_plane(*face); });
+        std::erase_if(candidate.faces, [&](const auto& face)
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return on_plane(*face);
+        });
     }
     for (const auto& source : data.faces)
     {

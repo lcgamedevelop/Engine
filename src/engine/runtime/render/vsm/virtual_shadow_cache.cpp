@@ -1,4 +1,5 @@
 #include "runtime/render/vsm/virtual_shadow_cache.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/render/render_submission.hpp"
 #include "runtime/render/render_system.hpp"
@@ -17,10 +18,12 @@ namespace
 {
 double dot(const std::array<double, 3>& a, const std::array<double, 3>& b)
 {
+    ENGINE_PROFILE_FUNCTION();
     return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 }
 bool inside(const VsmPageKey& key, const VsmView& view)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (key.level >= view.level_count)
     {
         return false;
@@ -33,11 +36,13 @@ bool inside(const VsmPageKey& key, const VsmView& view)
 
 std::uint32_t vsm_atlas_columns(std::uint32_t pages) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return static_cast<std::uint32_t>(std::ceil(std::sqrt(static_cast<double>(pages))));
 }
 
 VsmViewUniforms vsm_pack_view(const VsmView& view, std::uint32_t dominant_level) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     VsmViewUniforms output{};
     for (unsigned i = 0; i < 3; ++i)
     {
@@ -69,6 +74,7 @@ VsmViewUniforms vsm_pack_view(const VsmView& view, std::uint32_t dominant_level)
 bool VirtualShadowCache::configure(const schema::VsmSettingsT& settings, const RenderConfig& config,
                                    std::uint64_t generation)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (generation == 0 || config.vsm_physical_pages == 0 ||
         config.vsm_physical_pages > vsm_max_physical_pages ||
         settings.virtual_resolution < 4096 || settings.virtual_resolution > 32768 ||
@@ -93,6 +99,7 @@ bool VirtualShadowCache::configure(const schema::VsmSettingsT& settings, const R
 
 void VirtualShadowCache::invalidate_all()
 {
+    ENGINE_PROFILE_FUNCTION();
     for (auto& [key, page] : pages_)
     {
         page.valid = false;
@@ -105,6 +112,7 @@ void VirtualShadowCache::invalidate_all()
 
 void VirtualShadowCache::invalidate(const std::array<double, 6>& bounds)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (auto& [key, page] : pages_)
     {
         const auto size =
@@ -122,6 +130,7 @@ void VirtualShadowCache::invalidate(const std::array<double, 6>& bounds)
 
 bool VirtualShadowCache::begin_frame(const VsmView& view, const RenderFrameData& frame)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (generation_ == 0 || view.generation != generation_ || pending_batch_ ||
         view.shadow_distance <= 0 || view.width == 0 || view.height == 0)
     {
@@ -270,6 +279,7 @@ bool VirtualShadowCache::begin_frame(const VsmView& view, const RenderFrameData&
 
 bool VirtualShadowCache::request(const VsmPageDemand& demand)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto& v = demand.view;
     if (v.generation != generation_ || v.scope != view_.scope || v.observer != view_.observer ||
         v.device_generation != view_.device_generation ||
@@ -312,6 +322,7 @@ bool VirtualShadowCache::request(const VsmPageDemand& demand)
 
 bool VirtualShadowCache::plan(std::uint32_t budget, VsmPageBatch& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     if (!generation_ || pending_batch_ || !view_.level_count || budget == 0 || budget > 16)
     {
@@ -432,6 +443,7 @@ bool VirtualShadowCache::plan(std::uint32_t budget, VsmPageBatch& output)
 
 bool VirtualShadowCache::publish(const VsmPageBatch& batch, std::uint64_t submission_id)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!pending_batch_ || batch.batch_id != pending_batch_ || batch.generation != generation_)
     {
         return false;
@@ -462,6 +474,7 @@ bool VirtualShadowCache::publish(const VsmPageBatch& batch, std::uint64_t submis
 }
 void VirtualShadowCache::cancel_batch() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     for (auto& [key, page] : pages_)
     {
         page.planned = false;
@@ -470,6 +483,7 @@ void VirtualShadowCache::cancel_batch() noexcept
 }
 bool VirtualShadowCache::status(VsmStatus& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = status_;
     output.resident_pages = output.ready_pages = output.dirty_pages = 0;
     output.demanded_pages = static_cast<std::uint32_t>(demand_.size());
@@ -494,6 +508,7 @@ bool VirtualShadowCache::status(VsmStatus& output) const
 }
 void VirtualShadowCache::reset_scene() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     pages_.clear();
     sources_.clear();
     demand_.clear();

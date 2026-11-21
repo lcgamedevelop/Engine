@@ -1,4 +1,6 @@
 #pragma once
+
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/animation/animation_binding.hpp"
 #include <ozz/animation/offline/animation_builder.h>
 #include <ozz/animation/offline/raw_animation.h>
@@ -14,12 +16,14 @@ namespace engine::animation_detail
 {
 inline ozz::math::Float3 vector(const schema::Vec3& value)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return {static_cast<float>(value.x()), static_cast<float>(value.y()),
             static_cast<float>(value.z())};
 }
 
 inline ozz::math::Quaternion quaternion(const schema::Vec4& value)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     return {static_cast<float>(value.x()), static_cast<float>(value.y()),
             static_cast<float>(value.z()), static_cast<float>(value.w())};
 }
@@ -29,6 +33,7 @@ inline void build_joint(const schema::SkeletonDataT& data, std::size_t index,
                         ozz::animation::offline::RawSkeleton::Joint& output,
                         std::vector<std::size_t>& order)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     const auto& joint = *data.joints[index];
     order.push_back(index);
     output.name = joint.name.c_str();
@@ -46,6 +51,7 @@ inline bool build_skeleton(const schema::SkeletonDataT& data,
                            ozz::unique_ptr<ozz::animation::Skeleton>& output,
                            std::vector<std::size_t>& order)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     const auto count = data.joints.size();
     std::vector<std::vector<std::size_t>> children(count);
     std::vector<std::size_t> roots;
@@ -77,6 +83,7 @@ inline bool build_animation(const schema::AnimationDataT& data,
                             const std::vector<std::size_t>& order,
                             ozz::unique_ptr<ozz::animation::Animation>& output)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     std::vector<const schema::AnimationTrackDataT*> tracks(skeleton.joints.size());
     for (const auto& track : data.tracks)
     {
@@ -138,6 +145,7 @@ inline bool build_animation(const schema::AnimationDataT& data,
 // 仅接受已经由资源 codec 验证的当前版本归档。
 template <class T> bool read_sampling(const std::vector<std::uint8_t>& bytes, T& output)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     ozz::io::MemoryStream stream;
     if (stream.Write(bytes.data(), bytes.size()) != bytes.size() ||
         stream.Seek(0, ozz::io::Stream::kSet) != 0)

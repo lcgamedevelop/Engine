@@ -1,4 +1,6 @@
 #include "runtime/resource/codecs/material_resource_codec.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "runtime/resource/codecs/resource_decode.hpp"
 
 #include "runtime/core/guid_map.hpp"
@@ -14,6 +16,7 @@ namespace engine
 
 bool MaterialResourceCodec::valid_shape(const schema::MaterialDataT& data)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid_path(data.type_path) || !valid_path(data.shader_path) || data.schema_version != 1 ||
         (data.cull_mode != schema::CullMode::back && data.cull_mode != schema::CullMode::front &&
          data.cull_mode != schema::CullMode::none) ||
@@ -34,6 +37,7 @@ bool MaterialResourceCodec::valid_shape(const schema::MaterialDataT& data)
             !std::all_of(values.begin(), values.begin() + count,
                          [](double value)
                          {
+                             ENGINE_PROFILE_FUNCTION_PROBE();
                              return std::isfinite(value) &&
                                     std::abs(value) <= std::numeric_limits<float>::max();
                          }))
@@ -57,6 +61,7 @@ bool MaterialResourceCodec::valid_shape(const schema::MaterialDataT& data)
 bool MaterialResourceCodec::validate(const schema::MaterialDataT& data,
                                      const schema::ShaderDataT* shader)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!valid_shape(data) || shader == nullptr ||
         !resource_codec_detail::valid_builtin_pbr_options(data, *shader))
     {
@@ -66,7 +71,10 @@ bool MaterialResourceCodec::validate(const schema::MaterialDataT& data,
     {
         const auto definition = std::find_if(shader->parameters.begin(), shader->parameters.end(),
                                              [&parameter](const auto& item)
-                                             { return item && item->name == parameter->name; });
+                                             {
+                                                 ENGINE_PROFILE_FUNCTION_PROBE();
+                                                 return item && item->name == parameter->name;
+                                             });
         if (definition == shader->parameters.end() || !(*definition)->exposed ||
             !resource_codec_detail::valid_parameter_value(**definition, parameter->value))
         {
@@ -79,6 +87,7 @@ bool MaterialResourceCodec::validate(const schema::MaterialDataT& data,
             std::find_if(shader->samplers.begin(), shader->samplers.end(),
                          [&texture](const auto& item)
                          {
+                             ENGINE_PROFILE_FUNCTION_PROBE();
                              return item && item->name == texture->name && item->exposed &&
                                     item->source == schema::ShaderTextureSource::resource;
                          });
@@ -92,24 +101,32 @@ bool MaterialResourceCodec::validate(const schema::MaterialDataT& data,
 
 schema::AssetKind MaterialResourceCodec::kind() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::material;
 }
 
 bool MaterialResourceCodec::decode(const schema::AssetEntryT& entry, ByteView payload,
                                    std::unique_ptr<Resource>& output, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto validate = [](ByteView payload, std::string& error)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         return resource_decode_detail::verify_flatbuffer(payload, schema::VerifyMaterialDataBuffer,
                                                          "Invalid Material FlatBuffer", error);
     };
     return resource_decode_detail::decode_flatbuffer<ResourceType>(
         entry, payload, 64U * 1024U * 1024U, validate,
-        [](const std::uint8_t* bytes) { return schema::UnPackMaterialData(bytes); }, output, error);
+        [](const std::uint8_t* bytes)
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return schema::UnPackMaterialData(bytes);
+        }, output, error);
 }
 
 bool MaterialResourceCodec::validate_data(const Resource& resource, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     const auto* data = resource_detail::data<ResourceType>(&resource);
     if (!data || data->type_path != resource.info().path || !valid_shape(*data) ||
@@ -134,6 +151,7 @@ bool MaterialResourceCodec::validate_data(const Resource& resource, std::string&
 bool MaterialResourceCodec::validate_dependencies(const Resource& resource,
                                                   ResourceView dependencies, std::string&) const
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* material = resource_detail::data<MaterialResource>(&resource);
     if (!material)
     {

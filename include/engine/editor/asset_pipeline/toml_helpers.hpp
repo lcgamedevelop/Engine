@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/core/guid_map.hpp"
 #include "runtime/schema/common_generated.h"
 
@@ -21,6 +23,7 @@ namespace engine::editor::asset_pipeline
 
 [[nodiscard]] inline bool identifier(const toml::node* node, std::uint64_t& output)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     output = 0;
     if (node == nullptr)
     {
@@ -52,6 +55,7 @@ namespace engine::editor::asset_pipeline
 
 [[nodiscard]] inline bool number(const toml::node* node, double& output)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     output = 0;
     if (node == nullptr)
     {
@@ -69,6 +73,7 @@ namespace engine::editor::asset_pipeline
 template <std::size_t Count>
 [[nodiscard]] bool numbers(const toml::node* node, std::array<double, Count>& output)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     output = {};
     const auto* values = node != nullptr ? node->as_array() : nullptr;
     if (values == nullptr || values->size() != Count)
@@ -89,6 +94,7 @@ template <std::size_t Count>
 
 [[nodiscard]] inline bool float_number(const toml::node* node, float& output)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     output = 0;
     double value = 0;
     if (!number(node, value) || std::abs(value) > std::numeric_limits<float>::max())
@@ -102,6 +108,7 @@ template <std::size_t Count>
 [[nodiscard]] inline bool value_union(const toml::table& table, schema::MaterialValueUnion& output,
                                       std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     output.Reset();
     const auto type = table["type"].value<std::string_view>();
     if (type == "float")

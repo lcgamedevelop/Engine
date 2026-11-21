@@ -6,6 +6,7 @@
 #include "plugins/runtime/resource_graph/resource_graph_system.hpp"
 #include "runtime/engine_config.hpp"
 #include "runtime/performance/profiling.hpp"
+#include "runtime/render/gpu_memory.hpp"
 #include "runtime/render/render_constants.hpp"
 #include "runtime/render/render_system.hpp"
 #include "runtime/scene/camera.hpp"
@@ -625,6 +626,40 @@ bool cross_mesh_indices(WindowSystem& window, RenderSystem& renderer, WorldSyste
         {
             return false;
         }
+    }
+    GpuMemorySnapshot memory;
+    if (renderer.memory_snapshot({}, 64, memory))
+    {
+        std::uint64_t first_page = 0;
+        std::uint64_t second_page = 0;
+        std::uint64_t backing_bytes = 0;
+        for (const auto& entry : memory.live)
+        {
+            if (entry.kind == GpuMemoryKind::static_vertex_page)
+            {
+                backing_bytes += entry.shared_backing_bytes;
+            }
+            else if (entry.kind == GpuMemoryKind::mesh_geometry &&
+                     entry.creation_scene == scene->id())
+            {
+                if (first_page == 0)
+                {
+                    first_page = entry.shared_backing_id;
+                }
+                else
+                {
+                    second_page = entry.shared_backing_id;
+                }
+            }
+        }
+        if (!expect(first_page != 0 && first_page == second_page && backing_bytes != 0 &&
+                        backing_bytes == memory.totals.live_shared_backing_bytes,
+                    "each allocated vertex page is counted once for both meshes"))
+        {
+            return false;
+        }
+        std::printf("GPU memory counts %llu shared backing bytes for the vertex page.\n",
+                    static_cast<unsigned long long>(backing_bytes));
     }
     return expect(direct_stats.draw_calls == 2 && merged_stats.meshlet_candidate_pairs == 2,
                   "two distinct meshes and meshlet candidates share a submission");

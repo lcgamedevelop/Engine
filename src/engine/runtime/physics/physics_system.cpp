@@ -6,6 +6,8 @@
 #include "runtime/scene/collider_runtime.hpp"
 #include "runtime/scene/rigid_body_runtime.hpp"
 
+#include "runtime/performance/memory_profiling.hpp"
+#include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/physics/mesh_collision_data.hpp"
 #include "runtime/physics/physics_jobs.hpp"
@@ -25,6 +27,7 @@
 // clang-format off
 #include <Jolt/Jolt.h>
 #include <Jolt/Core/Factory.h>
+#include <Jolt/Core/Memory.h>
 #include <Jolt/Core/TempAllocator.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Body/BodyLock.h>
@@ -86,6 +89,7 @@ std::size_t factory_users = 0;
 
 bool acquire_jolt()
 {
+    ENGINE_PROFILE_FUNCTION();
     const std::lock_guard lock(registration_mutex);
     if (!JPH::VerifyJoltVersionID() ||
         (factory_users != 0 && JPH::Factory::sInstance != owned_factory) ||
@@ -99,7 +103,33 @@ bool acquire_jolt()
         if (JPH::Allocate == nullptr && JPH::Reallocate == nullptr && JPH::Free == nullptr &&
             JPH::AlignedAllocate == nullptr && JPH::AlignedFree == nullptr)
         {
+#if defined(ENGINE_ENABLE_MEMORY_PROFILING)
+            constexpr auto pool = memory_profile::Pool::jolt;
+            using memory_profile::BackingAllocation;
+            JPH::Allocate = [](std::size_t size) noexcept
+            {
+                ENGINE_PROFILE_FUNCTION();
+                return BackingAllocation::allocate_block(pool, size);
+            };
+            JPH::Reallocate = [](void* address, std::size_t, std::size_t new_size) noexcept
+            {
+                ENGINE_PROFILE_FUNCTION();
+                return BackingAllocation::reallocate_block(pool, address, new_size);
+            };
+            JPH::Free = [](void* address) noexcept
+            {
+                ENGINE_PROFILE_FUNCTION();
+                BackingAllocation::free_block(pool, address);
+            };
+            JPH::AlignedAllocate = [](std::size_t size, std::size_t alignment) noexcept
+            {
+                ENGINE_PROFILE_FUNCTION();
+                return BackingAllocation::allocate_aligned_block(pool, size, alignment);
+            };
+            JPH::AlignedFree = JPH::Free;
+#else
             JPH::RegisterDefaultAllocator();
+#endif
         }
         if (JPH::Allocate == nullptr || JPH::Reallocate == nullptr || JPH::Free == nullptr ||
             JPH::AlignedAllocate == nullptr || JPH::AlignedFree == nullptr)
@@ -121,6 +151,7 @@ bool acquire_jolt()
 
 void release_jolt() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     const std::lock_guard lock(registration_mutex);
     if (factory_users == 0 || --factory_users != 0)
     {
@@ -140,17 +171,20 @@ class BroadPhaseLayers final : public JPH::BroadPhaseLayerInterface
 public:
     JPH::uint GetNumBroadPhaseLayers() const override
     {
+        ENGINE_PROFILE_FUNCTION();
         return 2;
     }
 
     JPH::BroadPhaseLayer GetBroadPhaseLayer(JPH::ObjectLayer layer) const override
     {
+        ENGINE_PROFILE_FUNCTION();
         return JPH::BroadPhaseLayer(static_cast<JPH::uint8>(layer == static_layer ? 0 : 1));
     }
 
 #if defined(JPH_EXTERNAL_PROFILE) || defined(JPH_PROFILE_ENABLED)
     const char* GetBroadPhaseLayerName(JPH::BroadPhaseLayer layer) const override
     {
+        ENGINE_PROFILE_FUNCTION();
         return layer.GetValue() == static_layer ? "Static" : "Moving";
     }
 #endif
@@ -161,6 +195,7 @@ class BroadPhaseFilter final : public JPH::ObjectVsBroadPhaseLayerFilter
 public:
     bool ShouldCollide(JPH::ObjectLayer object, JPH::BroadPhaseLayer broad) const override
     {
+        ENGINE_PROFILE_FUNCTION();
         return object != static_layer || broad.GetValue() == moving_layer;
     }
 };
@@ -170,6 +205,7 @@ class ObjectFilter final : public JPH::ObjectLayerPairFilter
 public:
     bool ShouldCollide(JPH::ObjectLayer left, JPH::ObjectLayer right) const override
     {
+        ENGINE_PROFILE_FUNCTION();
         return (left != static_layer || right != static_layer) &&
                !(left == character_layer && right == character_layer);
     }
@@ -179,39 +215,46 @@ static_assert(sizeof(JPH::Real) == sizeof(double), "Jolt requires double precisi
 
 JPH::RVec3 position_value(const Vec3& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     return {value.x(), value.y(), value.z()};
 }
 
 JPH::Vec3 vector(const Vec3& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     return {static_cast<float>(value.x()), static_cast<float>(value.y()),
             static_cast<float>(value.z())};
 }
 
 template <typename T> Vec3 vector(const T& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     return {value.GetX(), value.GetY(), value.GetZ()};
 }
 
 template <typename T> bool finite(const T& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::isfinite(value.GetX()) && std::isfinite(value.GetY()) &&
            std::isfinite(value.GetZ());
 }
 
 template <typename T> double maximum_abs(const T& value)
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::max({std::abs(double(value.GetX())), std::abs(double(value.GetY())),
                      std::abs(double(value.GetZ()))});
 }
 
 bool close(float left, float right)
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::abs(left - right) <= 0.0001F * std::max(std::abs(left), std::abs(right));
 }
 
 Vec3 euler_angles(JPH::QuatArg rotation)
 {
+    ENGINE_PROFILE_FUNCTION();
     // 使用 double 重建正交矩阵，避免 float 在 pitch 接近 90 度时的相消误差。
     const double x = rotation.GetX();
     const double y = rotation.GetY();
@@ -242,6 +285,7 @@ Vec3 euler_angles(JPH::QuatArg rotation)
 bool decompose(const JPH::RMat44& matrix, JPH::RVec3& position, JPH::Quat& rotation,
                JPH::Vec3& scale)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto x = matrix.GetAxisX();
     const auto y = matrix.GetAxisY();
     const auto z = matrix.GetAxisZ();
@@ -270,6 +314,7 @@ bool decompose(const JPH::RMat44& matrix, JPH::RVec3& position, JPH::Quat& rotat
 
 bool world_matrix(const Transform& transform, JPH::RMat44& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::array<double, 16> values{};
     if (!transform.world_matrix(values.data()))
     {
@@ -500,6 +545,7 @@ bool make_shape(const schema::ColliderDataT& collider, const schema::MeshDataT* 
 
 JPH::EMotionType motion_type(schema::BodyMotion motion)
 {
+    ENGINE_PROFILE_FUNCTION();
     switch (motion)
     {
     case schema::BodyMotion::static_body:
@@ -519,6 +565,7 @@ class CharacterBodyFilter final : public JPH::BodyFilter
 public:
     bool ShouldCollideLocked(const JPH::Body& body) const override
     {
+        ENGINE_PROFILE_FUNCTION();
         return body.GetObjectLayer() != character_layer;
     }
 };
@@ -528,15 +575,18 @@ class TargetBodyFilter final : public JPH::BodyFilter
 public:
     explicit TargetBodyFilter(JPH::BodyID body) noexcept : body_(body)
     {
+        ENGINE_PROFILE_FUNCTION();
     }
 
     bool ShouldCollide(const JPH::BodyID& body) const override
     {
+        ENGINE_PROFILE_FUNCTION();
         return body == body_;
     }
 
     bool ShouldCollideLocked(const JPH::Body& body) const override
     {
+        ENGINE_PROFILE_FUNCTION();
         return body.GetID() == body_ && !body.IsSensor();
     }
 
@@ -557,6 +607,7 @@ struct CharacterSnapshot
 
 bool read_character(Node node, CharacterMotor motor, CharacterSnapshot& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto transform = node.get_component<Transform>();
     auto collider = node.get_component<Collider>();
     auto rigid = node.get_component<RigidBody>();
@@ -609,6 +660,7 @@ struct BodySnapshot
 bool read_snapshot(Node node, const schema::ColliderDataT& collider, const schema::MeshDataT* mesh,
                    RigidBody body, BodySnapshot& output, const BodySnapshot* previous = nullptr)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto component = node.get_component<Collider>();
     if (!component.valid())
     {
@@ -686,6 +738,7 @@ bool read_snapshot(Node node, const schema::ColliderDataT& collider, const schem
 bool make_mesh_compound(std::span<const JPH::RefConst<JPH::Shape>> shapes,
                         JPH::RefConst<JPH::Shape>& output)
 {
+    ENGINE_PROFILE_FUNCTION();
     JPH::StaticCompoundShapeSettings compound;
     std::size_t count = 0;
     output = nullptr;
@@ -788,6 +841,7 @@ bool prepare_mesh_parts(BodySnapshot& snapshot, const BodySnapshot* previous)
 
 JPH::AABox part_bounds(const BodySnapshot& snapshot, const JPH::Shape& shape)
 {
+    ENGINE_PROFILE_FUNCTION();
     // Shape 的包围盒以质心为原点；顶点缩放及 Collider.center 已烘入子形状。
     const auto transform = JPH::RMat44::sRotationTranslation(snapshot.rotation, snapshot.position)
                                .PreTranslated(shape.GetCenterOfMass());
@@ -796,6 +850,7 @@ JPH::AABox part_bounds(const BodySnapshot& snapshot, const JPH::Shape& shape)
 
 JPH::AABox changed_bounds(const BodySnapshot& before, const BodySnapshot& after)
 {
+    ENGINE_PROFILE_FUNCTION();
     JPH::AABox bounds;
     const auto size = std::max(before.part_shapes->size(), after.part_shapes->size());
     for (std::size_t slot = 0; slot < size; ++slot)
@@ -822,6 +877,7 @@ JPH::AABox changed_bounds(const BodySnapshot& before, const BodySnapshot& after)
 
 bool active_transform(Node node)
 {
+    ENGINE_PROFILE_FUNCTION();
     for (Node current = node; current; current = current.parent())
     {
         auto transform = current.get_component<Transform>();
@@ -835,6 +891,7 @@ bool active_transform(Node node)
 
 bool active_collision(Node node)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto collider = node.get_component<Collider>();
     auto body = node.get_component<RigidBody>();
     Collider::Data settings;
@@ -844,6 +901,7 @@ bool active_collision(Node node)
 
 bool active_query_collision(Node node, std::uint64_t collider_id)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto collider = node.get_component<Collider>();
     auto body = node.get_component<RigidBody>();
     return collider.valid() && collider.instance_id() == collider_id && collider.active() &&
@@ -852,6 +910,7 @@ bool active_query_collision(Node node, std::uint64_t collider_id)
 
 bool active_physics_object(const WorldSystem& world, const PhysicsObject& object)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (object.instance_id == 0)
     {
         return false;
@@ -879,12 +938,14 @@ bool active_physics_object(const WorldSystem& world, const PhysicsObject& object
 
 bool object_less(const PhysicsObject& left, const PhysicsObject& right)
 {
+    ENGINE_PROFILE_FUNCTION();
     return std::tie(left.scene_id, left.node_id, left.kind, left.instance_id) <
            std::tie(right.scene_id, right.node_id, right.kind, right.instance_id);
 }
 
 bool same_object(const PhysicsObject& left, const PhysicsObject& right)
 {
+    ENGINE_PROFILE_FUNCTION();
     return !object_less(left, right) && !object_less(right, left);
 }
 
@@ -895,6 +956,7 @@ struct ContactPair
 
     bool operator<(const ContactPair& other) const
     {
+        ENGINE_PROFILE_FUNCTION();
         return object_less(a, other.a) || (same_object(a, other.a) && object_less(b, other.b));
     }
 };
@@ -910,6 +972,7 @@ struct ContactSample
 ContactSample contact_sample(const PhysicsObject& a, const PhysicsObject& b, JPH::RVec3Arg point,
                              JPH::Vec3Arg normal, bool is_trigger)
 {
+    ENGINE_PROFILE_FUNCTION();
     const bool reverse = object_less(b, a);
     return {{reverse ? b : a, reverse ? a : b},
             vector(point),
@@ -919,6 +982,7 @@ ContactSample contact_sample(const PhysicsObject& a, const PhysicsObject& b, JPH
 
 bool valid_overlap(const WorldSystem* world, JPH::RVec3Arg center, const PhysicsQueryFilter& filter)
 {
+    ENGINE_PROFILE_FUNCTION();
     return world != nullptr && world->is_initialized() && finite(center) &&
            maximum_abs(center) <= 10000000.0F &&
            (filter.ignore_node_id == 0 || world->find_node(filter.ignore_node_id).valid());
@@ -927,6 +991,7 @@ bool valid_overlap(const WorldSystem* world, JPH::RVec3Arg center, const Physics
 bool valid_query(const WorldSystem* world, JPH::RVec3Arg position, JPH::Vec3Arg direction,
                  const PhysicsQueryFilter& filter)
 {
+    ENGINE_PROFILE_FUNCTION();
     return world != nullptr && world->is_initialized() && finite(position) && finite(direction) &&
            maximum_abs(position) <= 10000000.0F && direction.Abs().ReduceMax() <= 100000.0F &&
            direction.LengthSq() > 0.0F &&
@@ -935,6 +1000,7 @@ bool valid_query(const WorldSystem* world, JPH::RVec3Arg position, JPH::Vec3Arg 
 
 JPH::Vec3 query_normal(JPH::Vec3Arg normal, JPH::Vec3Arg direction)
 {
+    ENGINE_PROFILE_FUNCTION();
     return finite(normal) && normal.LengthSq() > 0.0F ? normal.Normalized()
                                                       : -direction.Normalized();
 }
@@ -942,6 +1008,7 @@ JPH::Vec3 query_normal(JPH::Vec3Arg normal, JPH::Vec3Arg direction)
 bool write_transform(Node node, JPH::RVec3Arg position, JPH::QuatArg rotation,
                      JPH::Vec3Arg world_scale)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto transform = node.get_component<Transform>();
     if (!transform.valid())
     {
@@ -992,6 +1059,7 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
 
     void release_queries() noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         if (query_world && query_world->native_world() && query_world->epoch() == query_epoch)
         {
             if (nodes)
@@ -1011,6 +1079,7 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
 
     void bind_queries(WorldSystem& world)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (!world.is_initialized() || (nodes && query_epoch == world.epoch()))
         {
             return;
@@ -1064,6 +1133,7 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
     bool in_callback = false;
     void callback(bool active)
     {
+        ENGINE_PROFILE_FUNCTION();
         in_callback = active;
         if (world && world->native_world())
         {
@@ -1077,6 +1147,7 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
     }
     void reset_owner(CharacterEntry& entry)
     {
+        ENGINE_PROFILE_FUNCTION();
         auto motor = world
                          ? world->find_node(entry.snapshot.node_id).get_component<CharacterMotor>()
                          : CharacterMotor{};
@@ -1101,6 +1172,7 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
     }
     CharacterMotorStatus status(const CharacterEntry& entry, bool simulated) const
     {
+        ENGINE_PROFILE_FUNCTION();
         CharacterMotorStatus out;
         const auto& c = *entry.character;
         out.step = step;
@@ -1174,6 +1246,7 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
 
     ~State() override
     {
+        ENGINE_PROFILE_FUNCTION();
         // Member destruction releases the Jolt world before its job allocator.
         jobs.wait_for_wrappers();
         release_queries();
@@ -1181,10 +1254,12 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
 
     bool can_query(const WorldSystem* world) const noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         return !in_callback && world != nullptr &&
                std::any_of(world->scenes().begin(), world->scenes().end(),
                            [&](const auto& scene)
                            {
+                               ENGINE_PROFILE_FUNCTION_PROBE();
                                return std::find(synchronized_scenes.begin(),
                                                 synchronized_scenes.end(),
                                                 scene->id()) != synchronized_scenes.end();
@@ -1193,6 +1268,7 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
 
     void mark_synchronized(std::uint64_t scene)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (std::find(synchronized_scenes.begin(), synchronized_scenes.end(), scene) ==
             synchronized_scenes.end())
         {
@@ -1207,10 +1283,12 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
                         const PhysicsQueryFilter& filter) noexcept
             : state_(state), world_(world), filter_(filter)
         {
+            ENGINE_PROFILE_FUNCTION();
         }
 
         bool ShouldCollideLocked(const JPH::Body& body) const override
         {
+            ENGINE_PROFILE_FUNCTION();
             const auto found = state_.body_objects.find(body.GetID());
             auto node = world_.find_node(body.GetUserData());
             if (found == state_.body_objects.end() || !node.valid() ||
@@ -1259,6 +1337,7 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
                    JPH::Vec3Arg direction, JPH::RVec3Arg point, JPH::Vec3Arg normal,
                    PhysicsQueryHit& output) const
     {
+        ENGINE_PROFILE_FUNCTION();
         const auto found = body_objects.find(body.GetID());
         if (found == body_objects.end() || !active_physics_object(world, found->second) ||
             !std::isfinite(fraction) || !finite(point))
@@ -1277,6 +1356,7 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
     bool overlap(const WorldSystem& world, const JPH::Shape& shape, JPH::RVec3Arg center,
                  const PhysicsQueryFilter& filter, std::vector<PhysicsObject>& objects) const
     {
+        ENGINE_PROFILE_FUNCTION();
         JPH::AllHitCollisionCollector<JPH::CollideShapeCollector> collector;
         JPH::CollideShapeSettings settings;
         settings.mBackFaceMode = JPH::EBackFaceMode::CollideWithBackFaces;
@@ -1383,6 +1463,7 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
                         const JPH::ContactManifold& manifold,
                         JPH::ContactSettings& settings) override
     {
+        ENGINE_PROFILE_FUNCTION();
         collect_contact(first, second, manifold, settings);
         collect_impact(first, second, manifold, settings);
     }
@@ -1391,6 +1472,7 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
                             const JPH::ContactManifold& manifold,
                             JPH::ContactSettings& settings) override
     {
+        ENGINE_PROFILE_FUNCTION();
         collect_contact(first, second, manifold, settings);
         collect_impact(first, second, manifold, settings);
     }
@@ -1398,6 +1480,7 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
     void collect_contact(const JPH::Body& first, const JPH::Body& second,
                          const JPH::ContactManifold& manifold, const JPH::ContactSettings& settings)
     {
+        ENGINE_PROFILE_FUNCTION();
         const auto a = body_objects.find(first.GetID());
         const auto b = body_objects.find(second.GetID());
         if (a == body_objects.end() || b == body_objects.end() ||
@@ -1420,6 +1503,7 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
 
     void OnContactRemoved(const JPH::SubShapeIDPair& pair) override
     {
+        ENGINE_PROFILE_FUNCTION();
         // Removed 回调时物体可能已经销毁；只处理此前缓存的数值与身份。
         const std::lock_guard lock(contact_mutex);
         body_contacts.erase(pair);
@@ -1429,6 +1513,7 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
                                    const JPH::SubShapeID& subshape, JPH::RVec3Arg point,
                                    JPH::Vec3Arg normal)
     {
+        ENGINE_PROFILE_FUNCTION();
         const auto a = character_objects.find(character->GetID());
         const auto b = body_objects.find(body);
         if (a == character_objects.end() || b == body_objects.end())
@@ -1450,6 +1535,7 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
                                    const JPH::SubShapeID& subshape, JPH::RVec3Arg point,
                                    JPH::Vec3Arg normal)
     {
+        ENGINE_PROFILE_FUNCTION();
         const auto a = character_objects.find(character->GetID());
         const auto b = character_objects.find(other->GetID());
         if (a == character_objects.end() || b == character_objects.end())
@@ -1468,6 +1554,7 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
                         const JPH::CharacterContact& contact,
                         JPH::CharacterContactSettings&) override
     {
+        ENGINE_PROFILE_FUNCTION();
         // Jolt 5.6 stores the normal towards the character; our event points to the other body.
         collect_character_contact(character, contact.mBodyB, contact.mSubShapeIDB,
                                   contact.mPosition, -contact.mContactNormal);
@@ -1477,6 +1564,7 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
                             const JPH::CharacterContact& contact,
                             JPH::CharacterContactSettings&) override
     {
+        ENGINE_PROFILE_FUNCTION();
         collect_character_contact(character, contact.mBodyB, contact.mSubShapeIDB,
                                   contact.mPosition, -contact.mContactNormal);
     }
@@ -1484,6 +1572,7 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
     void OnContactRemoved(const JPH::CharacterVirtual* character, const JPH::BodyID& body,
                           const JPH::SubShapeID& subshape) override
     {
+        ENGINE_PROFILE_FUNCTION();
         const std::lock_guard lock(contact_mutex);
         character_contacts.erase({character->GetID().GetValue(), false,
                                   body.GetIndexAndSequenceNumber(), subshape.GetValue()});
@@ -1493,6 +1582,7 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
                                  const JPH::CharacterContact& contact,
                                  JPH::CharacterContactSettings&) override
     {
+        ENGINE_PROFILE_FUNCTION();
         collect_character_contact(character, contact.mCharacterB, contact.mSubShapeIDB,
                                   contact.mPosition, -contact.mContactNormal);
     }
@@ -1501,6 +1591,7 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
                                      const JPH::CharacterContact& contact,
                                      JPH::CharacterContactSettings&) override
     {
+        ENGINE_PROFILE_FUNCTION();
         collect_character_contact(character, contact.mCharacterB, contact.mSubShapeIDB,
                                   contact.mPosition, -contact.mContactNormal);
     }
@@ -1509,6 +1600,7 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
                                    const JPH::CharacterID& other,
                                    const JPH::SubShapeID& subshape) override
     {
+        ENGINE_PROFILE_FUNCTION();
         const std::lock_guard lock(contact_mutex);
         character_contacts.erase(
             {character->GetID().GetValue(), true, other.GetValue(), subshape.GetValue()});
@@ -1516,6 +1608,7 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
 
     JPH::BodyID object_body(const PhysicsObject& object) const
     {
+        ENGINE_PROFILE_FUNCTION();
         if (object.kind == PhysicsObjectKind::collider)
         {
             const auto found = bodies.find(object.node_id);
@@ -1540,19 +1633,23 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
 
     void append_contact(const ContactSample& sample, PhysicsContactPhase phase)
     {
+        ENGINE_PROFILE_FUNCTION();
         contacts.push_back({frame, step, phase, sample.pair.a, sample.pair.b, sample.point,
                             sample.normal, sample.is_trigger});
     }
 
     void synchronize_contacts(const WorldSystem& world)
     {
+        ENGINE_PROFILE_FUNCTION();
         const auto removed = [&](const ContactSample& sample)
         {
+            ENGINE_PROFILE_FUNCTION_PROBE();
             return object_body(sample.pair.a).IsInvalid() || object_body(sample.pair.b).IsInvalid();
         };
         std::erase_if(body_contacts,
                       [&](const auto& item)
                       {
+                          ENGINE_PROFILE_FUNCTION_PROBE();
                           return !body_objects.contains(item.first.GetBody1ID()) ||
                                  !body_objects.contains(item.first.GetBody2ID()) ||
                                  removed(item.second);
@@ -1560,6 +1657,7 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
         std::erase_if(character_contacts,
                       [&](const auto& item)
                       {
+                          ENGINE_PROFILE_FUNCTION_PROBE();
                           const auto& [actor, other_character, target, subshape] = item.first;
                           return !character_objects.contains(JPH::CharacterID(actor)) ||
                                  (other_character
@@ -1567,7 +1665,11 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
                                       : !body_objects.contains(JPH::BodyID(target))) ||
                                  removed(item.second);
                       });
-        std::erase_if(touched_contacts, [&](const auto& item) { return removed(item.second); });
+        std::erase_if(touched_contacts, [&](const auto& item)
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return removed(item.second);
+        });
         for (auto iterator = previous_contacts.begin(); iterator != previous_contacts.end();)
         {
             if (removed(iterator->second))
@@ -1575,7 +1677,10 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
                 const auto& pair = iterator->second.pair;
                 const bool retained_scene = std::any_of(
                     world.scenes().begin(), world.scenes().end(), [&](const auto& scene)
-                    { return scene->id() == pair.a.scene_id || scene->id() == pair.b.scene_id; });
+                    {
+                        ENGINE_PROFILE_FUNCTION_PROBE();
+                        return scene->id() == pair.a.scene_id || scene->id() == pair.b.scene_id;
+                    });
                 if (retained_scene)
                 {
                     append_contact(iterator->second, PhysicsContactPhase::end);
@@ -1591,6 +1696,7 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
 
     bool sleeping_contact(const ContactSample& sample) const
     {
+        ENGINE_PROFILE_FUNCTION();
         const auto a = object_body(sample.pair.a);
         const auto b = object_body(sample.pair.b);
         if (a.IsInvalid() || b.IsInvalid())
@@ -1621,6 +1727,7 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
 
     void publish_contacts()
     {
+        ENGINE_PROFILE_FUNCTION();
         std::map<ContactPair, ContactSample> current;
         for (const auto& [key, sample] : body_contacts)
         {
@@ -1672,6 +1779,7 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
 
     void clear() noexcept
     {
+        ENGINE_PROFILE_FUNCTION();
         jobs.wait_for_wrappers();
         character_collisions.mCharacters.clear();
         for (auto& [id, entry] : characters)
@@ -1710,6 +1818,7 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
 
     void remove_body(std::uint64_t node_id)
     {
+        ENGINE_PROFILE_FUNCTION();
         const auto found = bodies.find(node_id);
         if (found == bodies.end())
         {
@@ -1733,6 +1842,7 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
     bool prepare_node(Node node, std::vector<BodySnapshot>& snapshots,
                       std::vector<CharacterSnapshot>& character_snapshots)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (auto motor = node.get_component<CharacterMotor>())
         {
             if (motor.active() && active_transform(node))
@@ -2008,6 +2118,7 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
 
     void activate_bounds(JPH::AABox bounds)
     {
+        ENGINE_PROFILE_FUNCTION();
         if (bounds.IsValid())
         {
             bounds.ExpandBy(JPH::Vec3::sReplicate(0.1F));
@@ -2019,6 +2130,7 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
 
     bool synchronize(const std::vector<BodySnapshot>& snapshots)
     {
+        ENGINE_PROFILE_FUNCTION();
         for (const auto& snapshot : snapshots)
         {
             if (auto found = bodies.find(snapshot.node_id); found != bodies.end())
@@ -2051,6 +2163,7 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
     bool synchronize_characters(const std::vector<CharacterSnapshot>& snapshots,
                                 bool enabled = true, bool retire = true)
     {
+        ENGINE_PROFILE_FUNCTION();
         for (const auto& snapshot : snapshots)
         {
             if (auto found = characters.find(snapshot.node_id); found != characters.end())
@@ -2183,15 +2296,18 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
 PhysicsSystem::PhysicsSystem(WorldSystem* world, TaskSystem* tasks) noexcept
     : world_(world), tasks_(tasks)
 {
+    ENGINE_PROFILE_FUNCTION();
 }
 
 PhysicsSystem::~PhysicsSystem() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     shutdown();
 }
 
 bool PhysicsSystem::set_character_motor_driver(CharacterMotorDriver* driver) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (state_ || is_initialized())
     {
         return false;
@@ -2202,6 +2318,7 @@ bool PhysicsSystem::set_character_motor_driver(CharacterMotorDriver* driver) noe
 
 bool PhysicsSystem::on_initialize(const EngineConfig&)
 {
+    ENGINE_PROFILE_FUNCTION();
     if ((world_ != nullptr && world_->native_world() == nullptr) ||
         (tasks_ != nullptr && !tasks_->is_initialized()))
     {
@@ -2237,6 +2354,7 @@ bool PhysicsSystem::on_initialize(const EngineConfig&)
 
 void PhysicsSystem::clear() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (state_)
     {
         for (auto& [id, entry] : state_->characters)
@@ -2262,6 +2380,7 @@ void PhysicsSystem::clear() noexcept
             .each(
                 [](CharacterMotorRuntime& motor)
                 {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
                     motor.desired_velocity_ = {};
                     motor.velocity_ = {};
                     motor.pending_velocity_ = {};
@@ -2280,17 +2399,20 @@ void PhysicsSystem::clear() noexcept
 
 std::size_t PhysicsSystem::body_count() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return state_ ? state_->bodies.size() : 0;
 }
 
 std::size_t PhysicsSystem::character_count() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return state_ ? state_->characters.size() : 0;
 }
 
 bool PhysicsSystem::cast_sphere(const Vec3& origin, const Vec3& displacement, float radius,
                                 float& fraction) const
 {
+    ENGINE_PROFILE_FUNCTION();
     fraction = 0.0F;
     const auto position = position_value(origin);
     const auto direction = vector(displacement);
@@ -2326,6 +2448,7 @@ bool PhysicsSystem::cast_sphere(const Vec3& origin, const Vec3& displacement, fl
 bool PhysicsSystem::cast_ray(Collider collider, const Vec3& origin, const Vec3& displacement,
                              float& fraction) const
 {
+    ENGINE_PROFILE_FUNCTION();
     fraction = 0.0F;
     if (!collider)
     {
@@ -2363,6 +2486,7 @@ bool PhysicsSystem::cast_ray(Collider collider, const Vec3& origin, const Vec3& 
 bool PhysicsSystem::query_ray(const Vec3& origin, const Vec3& displacement,
                               const PhysicsQueryFilter& filter, PhysicsQueryHit& hit) const
 {
+    ENGINE_PROFILE_FUNCTION();
     hit = {};
     const auto position = position_value(origin);
     const auto direction = vector(displacement);
@@ -2395,6 +2519,7 @@ bool PhysicsSystem::query_ray(const Vec3& origin, const Vec3& displacement,
 bool PhysicsSystem::query_sphere(const Vec3& origin, const Vec3& displacement, float radius,
                                  const PhysicsQueryFilter& filter, PhysicsQueryHit& hit) const
 {
+    ENGINE_PROFILE_FUNCTION();
     hit = {};
     const auto position = position_value(origin);
     const auto direction = vector(displacement);
@@ -2439,6 +2564,7 @@ bool PhysicsSystem::overlap_sphere(const Vec3& center, float radius,
                                    const PhysicsQueryFilter& filter,
                                    std::vector<PhysicsObject>& objects) const
 {
+    ENGINE_PROFILE_FUNCTION();
     objects.clear();
     const auto position = position_value(center);
     if (!state_ || !state_->can_query(world_) || !valid_overlap(world_, position, filter) ||
@@ -2455,6 +2581,7 @@ bool PhysicsSystem::overlap_box(const Vec3& center, const Vec3& half_extents,
                                 const PhysicsQueryFilter& filter,
                                 std::vector<PhysicsObject>& objects) const
 {
+    ENGINE_PROFILE_FUNCTION();
     objects.clear();
     const auto position = position_value(center);
     const auto extents = vector(half_extents);
@@ -2470,16 +2597,19 @@ bool PhysicsSystem::overlap_box(const Vec3& center, const Vec3& half_extents,
 
 bool PhysicsSystem::is_object_valid(const PhysicsObject& object) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return state_ != nullptr && world_ != nullptr && active_physics_object(*world_, object);
 }
 
 bool PhysicsSystem::is_hit_valid(const PhysicsQueryHit& hit) const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return hit.hit && is_object_valid(hit.object);
 }
 
 std::span<const PhysicsContactEvent> PhysicsSystem::contacts() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!state_ || !state_->can_query(world_))
     {
         return {};
@@ -2489,6 +2619,7 @@ std::span<const PhysicsContactEvent> PhysicsSystem::contacts() const noexcept
 
 std::span<const PhysicsImpact> PhysicsSystem::impacts() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!state_)
     {
         return {};
@@ -2496,6 +2627,7 @@ std::span<const PhysicsImpact> PhysicsSystem::impacts() const noexcept
     std::erase_if(state_->impacts,
                   [&](const auto& impact)
                   {
+                      ENGINE_PROFILE_FUNCTION_PROBE();
                       return !is_object_valid(impact.a) || !is_object_valid(impact.b) ||
                              state_->object_body(impact.a).IsInvalid() ||
                              state_->object_body(impact.b).IsInvalid();
@@ -2700,6 +2832,7 @@ bool PhysicsSystem::set_mesh_parts(Collider collider, const MeshCollisionData& p
 
 bool PhysicsSystem::can_publish_geometry(Collider prepared, Collider target) const
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!state_ || state_->in_callback || !world_ || !world_->can_modify() || !prepared ||
         !target || prepared.node().world() != world_ || target.node().world() != world_ ||
         target.node().get_component<CharacterMotor>())
@@ -2713,6 +2846,7 @@ bool PhysicsSystem::can_publish_geometry(Collider prepared, Collider target) con
 
 void PhysicsSystem::publish_geometry(Collider prepared, Collider target) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     auto& interface = state_->physics.GetBodyInterface();
     if (prepared == target)
     {
@@ -2759,12 +2893,17 @@ void PhysicsSystem::publish_geometry(Collider prepared, Collider target) noexcep
 
 SceneWorkState PhysicsSystem::prepare_scope(SceneScopeId scope, const SceneWorkBudget& budget)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!state_ || !world_ || !world_->refresh_scene_state())
     {
         return SceneWorkState::failed;
     }
     std::erase_if(state_->preparing,
-                  [&](const auto& entry) { return !world_->scope_candidate(entry.first); });
+                  [&](const auto& entry)
+                  {
+                      ENGINE_PROFILE_FUNCTION_PROBE();
+                      return !world_->scope_candidate(entry.first);
+                  });
     auto found = state_->preparing.find(scope);
     if (found == state_->preparing.end())
     {
@@ -2778,6 +2917,7 @@ SceneWorkState PhysicsSystem::prepare_scope(SceneScopeId scope, const SceneWorkB
     return scene_detail::step_work(found->second, budget,
                                    [&](Node node)
                                    {
+                                       ENGINE_PROFILE_FUNCTION_PROBE();
                                        std::vector<BodySnapshot> bodies;
                                        std::vector<CharacterSnapshot> characters;
                                        if (!state_->prepare_node(node, bodies, characters))
@@ -2797,6 +2937,7 @@ SceneWorkState PhysicsSystem::prepare_scope(SceneScopeId scope, const SceneWorkB
 }
 bool PhysicsSystem::scope_status(SceneScopeId scope, ScenePreparationSnapshot& output) const
 {
+    ENGINE_PROFILE_FUNCTION();
     output = {};
     const auto found =
         state_ ? state_->preparing.find(scope) : decltype(state_->preparing)::const_iterator{};
@@ -2809,6 +2950,7 @@ bool PhysicsSystem::scope_status(SceneScopeId scope, ScenePreparationSnapshot& o
 }
 void PhysicsSystem::release_scope(SceneScopeId scope) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!state_)
     {
         return;
@@ -2872,6 +3014,7 @@ bool PhysicsSystem::on_tick(double delta_time)
             .each(
                 [](CharacterMotorRuntime& motor)
                 {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
                     motor.desired_velocity_ = {};
                     motor.pending_jump_ = 0.0F;
                 });
@@ -2889,6 +3032,7 @@ bool PhysicsSystem::on_tick(double delta_time)
             .each(
                 [&](flecs::entity entity)
                 {
+                    ENGINE_PROFILE_FUNCTION_PROBE();
                     if (!prepared)
                     {
                         return;
@@ -3325,6 +3469,7 @@ bool PhysicsSystem::on_tick(double delta_time)
 
 void PhysicsSystem::on_shutdown() noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     if (state_)
     {
         clear();

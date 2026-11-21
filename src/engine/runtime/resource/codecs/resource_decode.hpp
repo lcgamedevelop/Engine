@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/performance/function_profile.hpp"
+
 #include "runtime/resource/resource.hpp"
 
 #include <flatbuffers/verifier.h>
@@ -17,6 +19,7 @@ namespace engine::resource_decode_detail
                                             bool (*verify)(flatbuffers::Verifier&),
                                             std::string_view invalid_message, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     const auto* bytes = reinterpret_cast<const std::uint8_t*>(payload.data());
     flatbuffers::Verifier verifier(bytes, payload.size());
     if (!verify(verifier))
@@ -32,6 +35,7 @@ template <class ResourceT, class ValidateEncoded, class Unpack>
                                      std::size_t max_bytes, ValidateEncoded validate, Unpack unpack,
                                      std::unique_ptr<Resource>& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION_PROBE();
     if (output)
     {
         error = "Resource output must be empty";

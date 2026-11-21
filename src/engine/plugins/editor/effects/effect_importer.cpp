@@ -1,4 +1,6 @@
 #include "plugins/editor/effects/effect_importer.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "editor/asset_pipeline/asset_io.hpp"
 #include "editor/asset_pipeline/importer_utils.hpp"
@@ -33,16 +35,21 @@ constexpr std::uintmax_t maximum_effect_bytes = 64U * 1024U * 1024U;
 
 bool inside(const std::filesystem::path& path, const std::filesystem::path& root)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto relative = path.lexically_relative(root);
     return !relative.empty() && !relative.is_absolute() && *relative.begin() != "..";
 }
 
 bool normalize_reference(std::string text, std::string& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::replace(text.begin(), text.end(), '\\', '/');
     if (text.empty() || text.size() > 131068 ||
         std::any_of(text.begin(), text.end(), [](unsigned char value)
-                    { return value < 0x20 || value == 0x7f || value == ':'; }))
+                    {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return value < 0x20 || value == 0x7f || value == ':';
+        }))
     {
         error = "effect dependency requires a relative file path without control characters";
         return false;
@@ -60,6 +67,7 @@ bool normalize_reference(std::string text, std::string& output, std::string& err
 
 bool dependency_name(const std::u16string& dependency, std::string& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (dependency.empty() || dependency.size() > 32767)
     {
         error = "effect dependency path is empty or too long";
@@ -90,6 +98,7 @@ bool dependency_name(const std::u16string& dependency, std::string& output, std:
 bool resource_remaps(const editor::asset_pipeline::ImportAsset& asset,
                      std::map<std::string, std::string>& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto meta = asset.source;
     meta += ".meta";
     toml::table root;
@@ -140,6 +149,7 @@ bool dependency_path(const editor::asset_pipeline::ImportAsset& asset,
                      const std::map<std::string, std::string>& remaps,
                      std::filesystem::path& source, std::string& logical, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto remap = remaps.find(dependency);
     const auto root = context.assets.lexically_normal();
     if (remap != remaps.end())
@@ -176,6 +186,7 @@ bool dependency_path(const editor::asset_pipeline::ImportAsset& asset,
 
 bool texture_colorspace(const std::filesystem::path& source, bool srgb, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto meta = source;
     meta += ".meta";
     toml::table root;
@@ -217,6 +228,7 @@ bool dependencies(const editor::asset_pipeline::ImportAsset& asset,
                   const Effekseer::EfkEfcProperty& properties, std::vector<Guid>& output,
                   schema::EffectAssetDataT& data, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!properties.GetMaterials().empty() || !properties.GetSounds().empty() ||
         !properties.GetCurves().empty())
     {
@@ -232,6 +244,7 @@ bool dependencies(const editor::asset_pipeline::ImportAsset& asset,
     const auto collect = [&](const std::vector<std::u16string>& paths, schema::AssetKind kind,
                              std::string_view extension, bool srgb)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         for (const auto& path : paths)
         {
             std::filesystem::path source;
@@ -294,6 +307,7 @@ bool load(const editor::asset_pipeline::ImportAsset& asset,
           const editor::asset_pipeline::ImportContext& context, schema::EffectAssetDataT& data,
           std::vector<Guid>& references, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     std::error_code filesystem_error;
     const auto size = std::filesystem::file_size(asset.source, filesystem_error);
     if (filesystem_error || size == 0 || size > maximum_effect_bytes)
@@ -340,22 +354,26 @@ bool load(const editor::asset_pipeline::ImportAsset& asset,
 
 std::string_view EffectImporter::id() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "effect";
 }
 
 schema::AssetKind EffectImporter::kind() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::effect;
 }
 
 bool EffectImporter::matches(const std::filesystem::path& source) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return editor::asset_pipeline::source_extension(source) == ".efkefc";
 }
 
 bool EffectImporter::inspect_batch(const editor::asset_pipeline::ImportContext&,
                                    std::string& fingerprint, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!editor::asset_pipeline::schema_fingerprint({"runtime/effect.fbs"}, fingerprint, error))
     {
         return false;
@@ -368,6 +386,7 @@ bool EffectImporter::scan_dependencies(editor::asset_pipeline::ImportAsset& asse
                                        const editor::asset_pipeline::ImportContext& context,
                                        std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     asset.build_dependencies.clear();
     asset.runtime_dependencies.clear();
     schema::EffectAssetDataT data;
@@ -385,6 +404,7 @@ bool EffectImporter::convert(const editor::asset_pipeline::ImportAsset& asset,
                              const editor::asset_pipeline::ImportContext& context,
                              std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     schema::EffectAssetDataT data;
     std::vector<Guid> references;
     if (!load(asset, context, data, references, error))

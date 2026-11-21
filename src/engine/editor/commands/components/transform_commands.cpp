@@ -1,4 +1,5 @@
 #include "editor/commands/components/component_edit.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "runtime/scene/transform.hpp"
 
@@ -14,6 +15,7 @@ constexpr std::uint64_t scale_field = std::uint64_t{1} << 2;
                                     const TransformSettings& replacement, std::uint64_t selected,
                                     std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto node = target.node(error);
     auto component = node.valid() ? node.get_component<Transform>() : Transform{};
     if (!component)
@@ -59,6 +61,7 @@ constexpr std::uint64_t scale_field = std::uint64_t{1} << 2;
 bool prepare_transform(WorldSystem& world, NodeAliases& aliases, const Json& arguments,
                        Json& result, std::unique_ptr<EditorEdit>& output, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     Target target(world, &aliases);
     if (!fields(arguments, {"sceneId", "nodeId", "position", "rotation", "scale"}) ||
         arguments.size() <= 2 || !target.read(arguments, error))

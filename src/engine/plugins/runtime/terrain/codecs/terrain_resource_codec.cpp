@@ -1,4 +1,5 @@
 #include "plugins/runtime/terrain/codecs/terrain_resource_codec.hpp"
+#include "runtime/performance/profiling.hpp"
 #include "plugins/runtime/terrain/terrain_volume.hpp"
 
 #include <flatbuffers/verifier.h>
@@ -9,11 +10,13 @@ namespace engine::plugins::terrain
 {
 schema::AssetKind TerrainResourceCodec::kind() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::terrain;
 }
 bool TerrainResourceCodec::decode(const schema::AssetEntryT& entry, ByteView payload,
                                   std::unique_ptr<Resource>& output, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     if (output || entry.kind != kind() || payload.empty() || payload.size() > 64U * 1024U * 1024U)
     {
@@ -33,6 +36,7 @@ bool TerrainResourceCodec::decode(const schema::AssetEntryT& entry, ByteView pay
 }
 bool TerrainResourceCodec::validate_data(const Resource& resource, std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     const auto* data = resource_detail::data<ResourceType>(&resource);
     if (!data || !TerrainVolume::validate(*data, error))
@@ -67,6 +71,7 @@ bool TerrainResourceCodec::validate_dependencies(const Resource& resource,
                                                  ResourceView dependencies,
                                                  std::string& error) const
 {
+    ENGINE_PROFILE_FUNCTION();
     error.clear();
     const auto* data = resource_detail::data<ResourceType>(&resource);
     if (!data)

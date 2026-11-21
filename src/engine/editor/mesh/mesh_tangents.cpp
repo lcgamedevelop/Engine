@@ -1,4 +1,6 @@
 #include "editor/mesh/mesh_tangents.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include <mikktspace.h>
 
@@ -16,6 +18,7 @@ namespace engine::editor
 // different frames must be split rather than overwriting one of those frames.
 bool generate_mesh_tangents(schema::MeshDataT& mesh, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (mesh.texcoords.empty() || !mesh.tangents.empty())
     {
         return true;
@@ -34,12 +37,18 @@ bool generate_mesh_tangents(schema::MeshDataT& mesh, std::string& error)
     SMikkTSpaceInterface api{};
     api.m_getNumFaces = [](const SMikkTSpaceContext* context) -> int
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const auto& d = *static_cast<Context*>(context->m_pUserData);
         return static_cast<int>(d.mesh->indices.size() / 3);
     };
-    api.m_getNumVerticesOfFace = [](const SMikkTSpaceContext*, int) -> int { return 3; };
+    api.m_getNumVerticesOfFace = [](const SMikkTSpaceContext*, int) -> int
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return 3;
+    };
     api.m_getPosition = [](const SMikkTSpaceContext* context, float out[], int face, int corner)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const auto& d = *static_cast<Context*>(context->m_pUserData);
         const auto& v =
             d.mesh->vertices[d.mesh->indices[static_cast<std::size_t>(face) * 3 + corner]];
@@ -49,6 +58,7 @@ bool generate_mesh_tangents(schema::MeshDataT& mesh, std::string& error)
     };
     api.m_getNormal = [](const SMikkTSpaceContext* context, float out[], int face, int corner)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const auto& d = *static_cast<Context*>(context->m_pUserData);
         const auto& v =
             d.mesh->vertices[d.mesh->indices[static_cast<std::size_t>(face) * 3 + corner]];
@@ -59,6 +69,7 @@ bool generate_mesh_tangents(schema::MeshDataT& mesh, std::string& error)
     };
     api.m_getTexCoord = [](const SMikkTSpaceContext* context, float out[], int face, int corner)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         const auto& d = *static_cast<Context*>(context->m_pUserData);
         const auto& uv =
             d.mesh->texcoords[d.mesh->indices[static_cast<std::size_t>(face) * 3 + corner]];
@@ -69,6 +80,7 @@ bool generate_mesh_tangents(schema::MeshDataT& mesh, std::string& error)
                          const float bitangent[], float, float, tbool preserving, int face,
                          int corner)
     {
+        ENGINE_PROFILE_FUNCTION_PROBE();
         auto& d = *static_cast<Context*>(context->m_pUserData);
         const auto index = static_cast<std::size_t>(face) * 3 + corner;
         const auto& vertex = d.mesh->vertices[d.mesh->indices[index]];

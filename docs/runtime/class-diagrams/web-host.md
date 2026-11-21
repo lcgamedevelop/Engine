@@ -185,10 +185,12 @@ RuntimeSettings、ResourceCatalog、MountList 均为现有类型。目录及挂�
 
 1. 平台异步申请 adapter／device，申请所选渲染能力需要且 adapter 支持的 features／limits；bgfx 按设备实际启用的能力报告 caps，不能将未启用功能报告为可用。
 2. bgfx 外部设备路径不得再次同步 requestAdapter／requestDevice。平台持有一个引用，bgfx 增加独立引用；先关闭 bgfx，再释放平台引用。
-3. Emscripten、Emdawnwebgpu、bgfx 补丁及桌面 shaderc／Tint 形成一组固定工具链。回读、编译完成等 API 仍须核对 Asyncify／JSPI 或非阻塞适配需求。实现第一步固定版本及必要选项，通过浏览器绘制／回读／退出门槛后再接入完整运行产物。
+3. Emscripten、Emdawnwebgpu、bgfx 补丁及桌面 shaderc／Tint 形成一组固定工具链。[GPU 回读](render-system.md#gpu-回读)由浏览器映射回调交付，等待读回期间应用 worker 继续执行。浏览器验证覆盖绘制、回读和退出。
 4. RenderSystem 同时补齐[通用暂缓传播](render-system.md#异步表面准备)：prepare_frame() 改用私有 FramePrepareStatus（ready／deferred／failed），准备就绪不等于已提交帧。影片呈现的返回值从 bool 收敛到既有 RenderSubmitStatus，场景、影片和空闲路径统一传播暂缓与故障，更新全部调用方；不新增 Web 参数，不通过修改窗口可见性掩盖等待。
 
 固定版本和补丁参与实际 Wasm 构建与浏览器验证；当前覆盖及限制统一见[测试文档](../../testing.md#webgpu-导出)。
+
+浏览器实时时钟和单调时钟继续使用 Emscripten 的时间源。Web 宿主在 Wasm 内将毫秒转换为 WASI 纳秒并写入调用方的时间戳地址，常用的读时钟路径只在 JavaScript 边界传递浮点数。WASI 时钟编号和状态契约与固定 SDK 一致，日期超出无符号纳秒范围时交还原入口处理。
 
 ## 异步 WebGPU 表面
 

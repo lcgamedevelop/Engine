@@ -3,6 +3,7 @@
 #include "scene_snapshot.hpp"
 
 #include "runtime/engine_config.hpp"
+#include "runtime/performance/memory_snapshot.hpp"
 #include "runtime/scene/ecs_storage.hpp"
 #include "runtime/scene/light.hpp"
 #include "runtime/scene/scene.hpp"
@@ -397,8 +398,21 @@ bool check()
 
 int main()
 {
+    ecs_os_set_api_defaults();
+    auto host_api = ecs_os_get_api();
+    ecs_os_set_api(&host_api);
     if (!check() || !scene_lifetime_phases() || !producer_transform_drive() ||
         !scene_cleanup_scope_queries())
+    {
+        return 1;
+    }
+    const auto final_api = ecs_os_get_api();
+    const auto memory = memory_profile::snapshot();
+    const auto& flecs = memory.pools[static_cast<std::size_t>(memory_profile::Pool::flecs)];
+    if (!expect(final_api.malloc_ == host_api.malloc_ && final_api.calloc_ == host_api.calloc_ &&
+                    final_api.realloc_ == host_api.realloc_ && final_api.free_ == host_api.free_ &&
+                    final_api.strdup_ == host_api.strdup_ && flecs.peak_bytes == 0,
+                "WorldSystem preserves the Flecs heap configured by the host"))
     {
         return 1;
     }

@@ -1,4 +1,6 @@
 #include "runtime/input/input_state.hpp"
+#include "runtime/performance/function_profile.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -10,20 +12,26 @@ namespace
 {
 std::string text(const char* value, const char* fallback)
 {
+    ENGINE_PROFILE_FUNCTION();
     return value && *value ? value : fallback;
 }
 
 Device* find_device(State& state, DeviceKind kind, std::uint64_t native_id)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto found =
         std::find_if(state.devices.begin(), state.devices.end(), [kind, native_id](const Device& d)
-                     { return d.data.kind == kind && d.native_id == native_id; });
+                     {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return d.data.kind == kind && d.native_id == native_id;
+        });
     return found == state.devices.end() ? nullptr : &*found;
 }
 
 void add_control(State& state, std::uint64_t device, Kind kind, std::uint32_t code,
                  std::string name, double minimum = 0, double maximum = 1, double value = 0)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto& control = state.controls[{device, kind, code}];
     control.info.source = {device, kind, code};
     control.info.name = std::move(name);
@@ -36,11 +44,13 @@ void add_control(State& state, std::uint64_t device, Kind kind, std::uint32_t co
 
 double axis(Sint16 value)
 {
+    ENGINE_PROFILE_FUNCTION();
     return value < 0 ? value / 32768.0 : value / 32767.0;
 }
 
 Device* add_device(State& state, DeviceKind kind, std::uint64_t native_id, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (auto* existing = find_device(state, kind, native_id))
     {
         return existing;
@@ -198,6 +208,7 @@ Device* add_device(State& state, DeviceKind kind, std::uint64_t native_id, std::
 void update(State& state, std::uint64_t connection, Kind kind, std::uint32_t code, double value,
             bool claimed = false, bool repeat = false)
 {
+    ENGINE_PROFILE_FUNCTION();
     if (!std::isfinite(value))
     {
         return;
@@ -245,6 +256,7 @@ void update(State& state, std::uint64_t connection, Kind kind, std::uint32_t cod
 
 void aggregate_button(State& state, DeviceKind kind, Kind control_kind, std::uint32_t code)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto* aggregate = find_device(state, kind, 0);
     if (!aggregate)
     {
@@ -265,9 +277,13 @@ void aggregate_button(State& state, DeviceKind kind, Kind control_kind, std::uin
 
 void remove_device(State& state, DeviceKind kind, std::uint64_t native_id)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto found = std::find_if(
         state.devices.begin(), state.devices.end(), [kind, native_id](const Device& device)
-        { return device.data.kind == kind && device.native_id == native_id; });
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return device.data.kind == kind && device.native_id == native_id;
+        });
     if (found == state.devices.end())
     {
         return;
@@ -350,6 +366,7 @@ void remove_device(State& state, DeviceKind kind, std::uint64_t native_id)
 
 Device* event_device(State& state, DeviceKind kind, std::uint64_t native_id, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     auto* device = find_device(state, kind, native_id);
     return device ? device : add_device(state, kind, native_id, error);
 }
@@ -357,6 +374,7 @@ Device* event_device(State& state, DeviceKind kind, std::uint64_t native_id, std
 
 bool enumerate(State& state, std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     // SDL's polling APIs aggregate keyboards and mice. Keep that fact explicit and also expose
     // reported individual event sources when the platform provides their identities.
     if (!add_device(state, DeviceKind::keyboard, 0, error) ||
@@ -438,6 +456,7 @@ bool enumerate(State& state, std::string& error)
 
 void close_devices(State& state) noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     for (auto& device : state.devices)
     {
         if (device.gamepad)
@@ -455,6 +474,7 @@ void close_devices(State& state) noexcept
 bool event(State& state, SDL_Window* window, const SDL_Event& value, bool claimed,
            std::string& error)
 {
+    ENGINE_PROFILE_FUNCTION();
     const auto own_window = SDL_GetWindowID(window);
     SDL_WindowID event_window = own_window;
     if (value.type >= SDL_EVENT_WINDOW_FIRST && value.type <= SDL_EVENT_WINDOW_LAST)
@@ -859,6 +879,7 @@ bool event(State& state, SDL_Window* window, const SDL_Event& value, bool claime
             std::any_of(state.contacts.begin(), state.contacts.end(),
                         [connection, &value](const auto& entry)
                         {
+                            ENGINE_PROFILE_FUNCTION_PROBE();
                             return entry.first.first == connection &&
                                    entry.second.data.source.code() ==
                                        static_cast<std::uint32_t>(value.gtouchpad.touchpad);
@@ -877,6 +898,7 @@ bool event(State& state, SDL_Window* window, const SDL_Event& value, bool claime
 
 void publish(State& state)
 {
+    ENGINE_PROFILE_FUNCTION();
     state.published_devices.clear();
     for (const auto& device : state.devices)
     {

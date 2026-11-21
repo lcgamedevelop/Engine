@@ -1,4 +1,5 @@
 #include "plugins/runtime/script/bindings/engine_binding.hpp"
+#include "runtime/performance/profiling.hpp"
 
 #include "plugins/runtime/script/bindings/binding_context.hpp"
 #include "runtime/engine.hpp"
@@ -19,6 +20,7 @@ Object.freeze(Engine);
 
 void set_target_frame_rate(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return(false);
     if (BindingContext::current(arguments) == nullptr || arguments.count() != 1 ||
         !arguments.is_int32(0))
@@ -30,6 +32,7 @@ void set_target_frame_rate(const Arguments& arguments)
 
 void get_target_frame_rate(const Arguments& arguments)
 {
+    ENGINE_PROFILE_FUNCTION();
     arguments.set_return({});
     if (BindingContext::current(arguments) == nullptr || arguments.count() != 0)
     {
@@ -41,16 +44,19 @@ void get_target_frame_rate(const Arguments& arguments)
 
 std::string_view EngineBinding::name() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return "Engine";
 }
 
 std::string_view EngineBinding::source() const noexcept
 {
+    ENGINE_PROFILE_FUNCTION();
     return javascript;
 }
 
 bool EngineBinding::register_functions(vm::ScriptVm& vm) const
 {
+    ENGINE_PROFILE_FUNCTION();
     return vm.function("EngineSetTargetFrameRate", set_target_frame_rate) &&
            vm.function("EngineGetTargetFrameRate", get_target_frame_rate);
 }
