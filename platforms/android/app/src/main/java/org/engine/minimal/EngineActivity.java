@@ -1,6 +1,8 @@
 package org.engine.minimal;
 
 import android.content.Context;
+import android.content.pm.ActivityInfo;
+import android.content.pm.PackageManager;
 import android.os.Trace;
 import android.util.Log;
 import java.io.File;
@@ -15,6 +17,27 @@ public final class EngineActivity extends SDLActivity
     private static native boolean nativePauseRendering();
     private static native void nativeResumeRendering();
     private static native boolean nativeRunV8Smoke(String icuDataFile);
+
+    @Override public void setOrientationBis(int width, int height, boolean resizable, String hint)
+    {
+        try
+        {
+            int declared = getPackageManager().getActivityInfo(getComponentName(), 0).screenOrientation;
+            if (declared != ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED)
+            {
+                if (getRequestedOrientation() != declared)
+                {
+                    setRequestedOrientation(declared);
+                }
+                return;
+            }
+        }
+        catch (PackageManager.NameNotFoundException error)
+        {
+            Log.w("Engine", "Cannot read the declared activity orientation", error);
+        }
+        super.setOrientationBis(width, height, resizable, hint);
+    }
 
     @Override protected String[] getLibraries()
     {
