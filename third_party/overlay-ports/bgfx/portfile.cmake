@@ -15,6 +15,7 @@ vcpkg_extract_source_archive(
   PATCHES
     fix-dependencies.patch
     android-link-libraries.patch
+    vulkan-shading-rate-properties.patch
     windows-tool-utf8.patch
     max-anisotropy-caps.patch
     metal-uniform-bounds.patch
