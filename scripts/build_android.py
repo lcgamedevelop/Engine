@@ -79,7 +79,7 @@ def main():
     ):
         parser.error("--asset-builder must point to an executable host asset_build_app; build the desktop asset tool first.")
     project = args.project or ROOT / "projects/showcase"
-    settings = read_settings(args.package_settings or project / "settings/editor-android.toml")
+    android = read_settings(args.package_settings or project / "settings/editor-android.toml")["android"]
     require_directory("ANDROID_HOME")
     ndk_root = require_directory("ANDROID_NDK_HOME")
     properties = (ndk_root / "source.properties").read_text(encoding="utf-8")
@@ -102,7 +102,7 @@ def main():
     if "Gradle 9.8.2" not in version:
         raise ValueError("Android requires Gradle 9.8.2; correct GRADLE_HOME or use the wrapper.")
     with exclusive_build(ROOT / "build/android-gradle/build.lock"):
-        return package(args, project, settings, asset_builder, gradle)
+        return package(args, project, android, asset_builder, gradle)
 
 
 def package(args, project, android, asset_builder, gradle):
@@ -141,8 +141,8 @@ def package(args, project, android, asset_builder, gradle):
     )
     options = [
         "-PengineApplicationId=" + android["package"],
-        "-PengineVersionName=" + (args.version_name or android["version_name"]),
-        "-PengineVersionCode=" + str(args.version_code or android["version_code"]),
+        "-PengineVersionName=" + (args.version_name or android["version"]["name"]),
+        "-PengineVersionCode=" + str(args.version_code or android["version"]["code"]),
         "-PengineMinSdk=" + str(android["min_sdk"]),
         "-PengineTargetSdk=" + str(android["target_sdk"]),
         "-PengineLabel=" + android["label"],

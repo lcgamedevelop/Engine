@@ -8,7 +8,7 @@
 
 ## Android 出包
 
-项目的包名、签名身份、版本、APK 与 AAB 输出和 Google Play 轨道统一填写在 `settings/editor-android.toml` 的 `[android]` 表。编辑器构建时使用当前项目的设置。[字段与出包操作](../plugins/editor/google-play.md)
+项目在同一个 `settings/editor-android.toml` 中填写四组设置。`[android]` 保存应用和 APK、AAB 打包参数，`[android.version]` 保存版本策略，`[android.signing]` 保存签名参数，`[google_play]` 保存商店发布参数。[字段与出包操作](../plugins/editor/google-play.md)
 
 ## 帧率上限
 

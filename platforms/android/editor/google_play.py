@@ -145,18 +145,12 @@ def signer_fingerprint(pem_output):
 
 
 def signed_packages(project, android, env, name, code, formats):
-    required = {"profile", "keystore", "alias", "certificate_sha256", "password_file"}
-    missing = required.difference(android)
-    if missing:
-        raise ValueError("Missing project Android signing settings: " + ", ".join(sorted(missing)))
+    if "signing" not in android:
+        raise ValueError("Configure [android.signing] to build signed Android packages.")
+    signing = android["signing"]
     package = android["package"]
-    fingerprint = android["certificate_sha256"].lower()
-    if not re.fullmatch(r"[a-f0-9]{64}", fingerprint):
-        raise ValueError("Invalid upload certificate fingerprint.")
-    keystore = private_file(project, android["profile"], android["keystore"])
-    passwords = json.loads(
-        private_file(project, android["profile"], android["password_file"]).read_text()
-    )
+    fingerprint = signing["certificate_sha256"].lower()
+    keystore = private_file(project, signing["keystore"])
     output = SDK / "output/android/arm64/release/runtime" / package / str(code)
     output.parent.mkdir(parents=True, exist_ok=True)
     logs = project / "cache/google-play"
@@ -168,12 +162,12 @@ def signed_packages(project, android, env, name, code, formats):
     jarsigner = str(jdk / ("jarsigner" + suffix))
     secret_env = {
         **env,
-        "ENGINE_UPLOAD_STORE_PASSWORD": passwords["store_password"],
-        "ENGINE_UPLOAD_KEY_PASSWORD": passwords["key_password"],
+        "ENGINE_UPLOAD_STORE_PASSWORD": signing["store_password"],
+        "ENGINE_UPLOAD_KEY_PASSWORD": signing["key_password"],
     }
     store = ["-keystore", str(keystore), "-storepass:env", "ENGINE_UPLOAD_STORE_PASSWORD"]
     cert = subprocess.run(
-        [keytool, "-exportcert", *store, "-alias", android["alias"]],
+        [keytool, "-exportcert", *store, "-alias", signing["alias"]],
         env=secret_env,
         capture_output=True,
         check=True,
@@ -222,7 +216,7 @@ def signed_packages(project, android, env, name, code, formats):
                 "-signedjar",
                 str(signed),
                 str(unsigned),
-                android["alias"],
+                signing["alias"],
             ],
             signing=True,
         )
@@ -272,13 +266,13 @@ def signed_packages(project, android, env, name, code, formats):
         if "apk" in formats:
             apk = stage / "signed.apk"
             apks = stage / "device.apks"
-            signing_args = ["--ks=" + str(keystore), "--ks-key-alias=" + android["alias"]]
+            signing_args = ["--ks=" + str(keystore), "--ks-key-alias=" + signing["alias"]]
             for field, option in (("store_password", "--ks-pass"), ("key_password", "--key-pass")):
                 password_file = stage / field
                 with os.fdopen(
                     os.open(password_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600), "w"
                 ) as f:
-                    f.write(passwords[field])
+                    f.write(signing[field])
                 signing_args.append(option + "=file:" + str(password_file))
             run(
                 bundletool
@@ -379,25 +373,28 @@ def release_body(track, previous, status, name, code):
 
 def release(project, action, output_format=None):
     project = project.resolve(strict=True)
-    android = read_settings(project / "settings/editor-android.toml")
+    settings = read_settings(project / "settings/editor-android.toml")
+    android = settings["android"]
+    version = android["version"]
+    play = settings.get("google_play")
     package = android["package"]
-    track = android.get("play_track")
     if output_format is not None and (action != "build" or output_format not in FORMATS):
         raise ValueError("Select apk or aab for a local build.")
     formats = [output_format] if output_format else android["formats"]
-    if action == "publish" and not track:
-        raise ValueError("Configure the Google Play track and service account in project settings.")
+    if action == "publish" and play is None:
+        raise ValueError("Configure [google_play] to publish to the store.")
     state_dir = plain_path(project / "settings/private/android/.releases" / package)
     summary = {"package": package}
-    if android.get("profile"):
-        summary["profile"] = android["profile"]
-    if track:
-        summary.update(track=track, releaseStatus=android["play_status"])
+    profile = android.get("signing", {}).get("profile")
+    if profile:
+        summary["profile"] = profile
+    if play is not None:
+        summary.update(track=play["track"], releaseStatus=play["status"])
     state_file, pending = state_dir / "last-release.json", state_dir / "pending-release.json"
     with exclusive_build(SDK / "build/android-gradle/publish-locks" / (package + ".lock")):
         last = json.loads(state_file.read_text())["versionCode"] if state_file.exists() else 0
-        base = max(android["version_code"], last)
-        name, code = next_version(android, base)
+        base = max(version["code"], last)
+        name, code = next_version(version, base)
         if action == "inspect":
             return {
                 **summary,
@@ -415,9 +412,8 @@ def release(project, action, output_format=None):
             artifacts = signed_packages(project, android, env, name, code, formats)
             return {**summary, "versionName": name, "versionCode": code, "artifacts": artifacts}
         state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-        edits = google_publisher(
-            private_file(project, android["profile"], android["service_account"]), env
-        ).edits()
+        track = play["track"]
+        edits = google_publisher(private_file(project, play["service_account"]), env).edits()
         edit = edits.insert(packageName=package, body={}).execute()["id"]
         params = {"packageName": package, "editId": edit}
         committing = False
@@ -453,8 +449,8 @@ def release(project, action, output_format=None):
                         "The pending version is present on Play with a different bundle, track or status."
                     )
                 pending.unlink()
-            name, code = next_version(android, max([base, *versions]))
-            body = release_body(track, tracks.get(track, []), android["play_status"], name, code)
+            name, code = next_version(version, max([base, *versions]))
+            body = release_body(track, tracks.get(track, []), play["status"], name, code)
             artifacts = signed_packages(project, android, env, name, code, ["aab"])
             bundle = Path(artifacts["aab"])
             with bundle.open("rb") as stream:

@@ -26,11 +26,24 @@ ORIENTATIONS = {
 }
 
 
+def check_table(table, name, required, optional=()):
+    if not isinstance(table, dict):
+        raise ValueError(f"Expected the [{name}] settings table.")
+    missing = required.difference(table)
+    if missing:
+        raise ValueError(f"Missing fields in [{name}]: " + ", ".join(sorted(missing)))
+    if table.keys() - required - set(optional):
+        raise ValueError(
+            f"Unknown field in [{name}]. Expected: " + ", ".join(sorted(required.union(optional)))
+        )
+
+
 def version_layout(version):
-    weights = version["version_weights"]
+    check_table(version, "android.version", {"name", "code", "weights", "increment_component"})
+    weights = version["weights"]
     base, code, increment = (
-        version["version_name"],
-        version["version_code"],
+        version["name"],
+        version["code"],
         version["increment_component"],
     )
     if (
@@ -53,12 +66,16 @@ def version_layout(version):
     digits = list(map(int, parts))
     if any(n >= high // low for n, high, low in zip(digits[1:], weights, weights[1:])):
         raise ValueError("A version component exceeds its configured range.")
-    return weights, code - sum(n * w for n, w in zip(digits, weights)), weights[increment - 1]
+    return (
+        weights,
+        code - sum(n * w for n, w in zip(digits, weights)),
+        weights[increment - 1],
+    )
 
 
 def next_version(version, maximum):
     weights, offset, step = version_layout(version)
-    highest = max(version["version_code"], maximum)
+    highest = max(version["code"], maximum)
     value = ((highest - offset) // step + 1) * step
     code = value + offset
     if not 0 < code <= MAX_CODE:
@@ -72,31 +89,45 @@ def next_version(version, maximum):
 
 def read_settings(path):
     with path.open("rb") as stream:
-        settings = tomllib.load(stream)
-    if set(settings) != {"android"}:
-        raise ValueError("Place all package settings in the [android] table.")
+        try:
+            settings = tomllib.load(stream)
+        except tomllib.TOMLDecodeError as error:
+            location = (
+                f" at line {error.lineno}, column {error.colno}" if hasattr(error, "lineno") else ""
+            )
+            raise ValueError(f"Invalid Android project TOML{location}.") from None
+    if "android" not in settings or settings.keys() - {"android", "google_play"}:
+        raise ValueError("Use [android] with an optional [google_play] table.")
     android = settings["android"]
-    required = {
-        "package",
-        "label",
-        "artifact_name",
-        "orientation",
-        "formats",
-        "min_sdk",
-        "target_sdk",
-        "version_name",
-        "version_code",
-        "version_weights",
-        "increment_component",
-    }
-    missing = required.difference(android)
-    if missing:
-        raise ValueError("Missing project Android settings: " + ", ".join(sorted(missing)))
-    if not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+", android["package"]):
+    check_table(
+        android,
+        "android",
+        {
+            "package",
+            "label",
+            "artifact_name",
+            "orientation",
+            "formats",
+            "min_sdk",
+            "target_sdk",
+            "version",
+        },
+        {"fullscreen", "signing"},
+    )
+    if not isinstance(android["package"], str) or not re.fullmatch(
+        r"[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+", android["package"]
+    ):
         raise ValueError("Invalid Android application ID.")
-    if not android["label"].strip() or android["orientation"] not in ORIENTATIONS:
+    if (
+        not isinstance(android["label"], str)
+        or not android["label"].strip()
+        or not isinstance(android["orientation"], str)
+        or android["orientation"] not in ORIENTATIONS
+    ):
         raise ValueError("Set the Android app label and screen orientation in project settings.")
-    if not re.fullmatch(r"[\w-]+", android["artifact_name"], re.ASCII):
+    if not isinstance(android["artifact_name"], str) or not re.fullmatch(
+        r"[\w-]+", android["artifact_name"], re.ASCII
+    ):
         raise ValueError("The artifact name must contain letters, digits, underscores or hyphens.")
     if type(android.get("fullscreen", False)) is not bool:
         raise ValueError("The Android fullscreen setting must be a boolean.")
@@ -111,33 +142,53 @@ def read_settings(path):
     minimum, target = android["min_sdk"], android["target_sdk"]
     if type(minimum) is not int or type(target) is not int or not 28 <= minimum <= target:
         raise ValueError("Android requires target SDK >= minimum SDK >= 28.")
-    version_layout(android)
-    play_keys = {"play_track", "play_status", "service_account"}
-    if play_keys.intersection(android):
-        if not play_keys.issubset(android):
-            raise ValueError(
-                "Set play_track, play_status and service_account together in project settings."
-            )
-        if not re.fullmatch(r"[a-zA-Z0-9_.:-]+", android["play_track"]):
+    version_layout(android["version"])
+    if "signing" in android:
+        signing = android["signing"]
+        check_table(
+            signing,
+            "android.signing",
+            {
+                "keystore",
+                "alias",
+                "certificate_sha256",
+                "store_password",
+                "key_password",
+            },
+            {"profile"},
+        )
+        if not all(isinstance(value, str) for value in signing.values()):
+            raise ValueError("Use strings for the fields in [android.signing].")
+        if not signing["keystore"].strip() or not signing["alias"].strip():
+            raise ValueError("Set the keystore path and alias in [android.signing].")
+        if not re.fullmatch(r"[0-9a-fA-F]{64}", signing["certificate_sha256"]):
+            raise ValueError("Invalid upload certificate SHA-256 in [android.signing].")
+    if "google_play" in settings:
+        play = settings["google_play"]
+        check_table(play, "google_play", {"track", "status", "service_account"})
+        if not isinstance(play["track"], str) or not re.fullmatch(
+            r"[a-zA-Z0-9_.:-]+", play["track"]
+        ):
             raise ValueError("Invalid Google Play track name.")
-        if android["play_status"] not in ("draft", "completed"):
+        if play["status"] not in ("draft", "completed"):
             raise ValueError("Expected a draft or completed Google Play release.")
-    return android
+        if not isinstance(play["service_account"], str) or not play["service_account"].strip():
+            raise ValueError("Set the service account file path in [google_play].")
+    return settings
 
 
-def private_file(project, profile, relative):
-    if not isinstance(profile, str) or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}", profile):
-        raise ValueError("Invalid Android signing profile name in project settings.")
+def private_file(project, relative):
     relative = Path(relative)
-    base = project.resolve() / "settings/private/android" / profile
-    path = (base / relative).resolve(strict=True)
+    settings = project.resolve() / "settings"
+    private = settings / "private"
+    path = (settings / relative).resolve()
     if (
         relative.is_absolute()
-        or base.resolve() != base
-        or not path.is_relative_to(base)
+        or private.resolve() != private
+        or not path.is_relative_to(private)
         or not path.is_file()
     ):
         raise ValueError(
-            "Select a file inside the current project's private Android signing profile."
+            "Select an existing file in this project's settings/private, relative to settings/."
         )
     return path
