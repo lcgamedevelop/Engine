@@ -4,11 +4,10 @@
 
 ## 填写项目设置
 
-在项目的 `settings/editor-android.toml` 中填写一个 `[android]` 表。以下示例使用三段版本号，默认同时导出两种格式。
+每个项目只维护一个 `settings/editor-android.toml`。Android 应用、版本与签名各有自己的表，Google Play 使用同文件中的独立表。下面的项目默认生成 APK 和 AAB，并将发布目标设为内部测试。
 
 ```toml
 [android]
-profile = "release"
 package = "com.example.adventure"
 label = "Adventure"
 artifact_name = "adventure"
@@ -18,35 +17,34 @@ formats = ["apk", "aab"]
 min_sdk = 28
 target_sdk = 36
 
-version_name = "1.2.3"
-version_code = 10203
-version_weights = [10000, 100, 1]
+[android.version]
+name = "1.2.3"
+code = 10203
+weights = [10000, 100, 1]
 increment_component = 3
 
-keystore = "upload.jks"
+[android.signing]
+profile = "release"
+keystore = "private/android/release/upload.jks"
 alias = "upload"
 certificate_sha256 = "<64 hex digits from the upload certificate>"
-password_file = "passwords.json"
+store_password = "<keystore password>"
+key_password = "<key password>"
 
-play_track = "internal"
-play_status = "completed"
-service_account = "play-account.json"
+[google_play]
+track = "internal"
+status = "completed"
+service_account = "private/android/release/play-account.json"
 ```
 
-| 字段 | 填写内容 |
+| 分组 | 填写内容 |
 | --- | --- |
-| `profile` | 当前项目的签名目录名。示例对应 `settings/private/android/release/` |
-| `package`、`label`、`artifact_name` | 商店应用 ID、设备显示名称和产物文件名前缀 |
-| `orientation`、`formats` | Android 屏幕方向和默认成品格式，可选 APK、AAB 或两者 |
-| `fullscreen` | 默认为 `false`。设为 `true` 时开启沉浸式全屏，内容延伸至刘海两侧。HUD 可读取窗口安全区 |
-| `min_sdk`、`target_sdk` | 项目支持的最低与目标 Android API。引擎 ARM64 运行时最低支持 API 28 |
-| `version_name`、`version_code` | 起始版本名称和代码。接续已上架应用时填写商店已有版本 |
-| `version_weights`、`increment_component` | 各段的代码权重和每次递增的段序号，首段为 1。低位清零，超过某一段的容量会进位 |
-| `keystore`、`alias`、`certificate_sha256` | 当前 profile 中的上传密钥库、私钥条目和预期证书 SHA‑256 |
-| `password_file` | 当前 profile 中的私有 JSON，字段为 `store_password` 和 `key_password` |
-| `play_track`、`play_status`、`service_account` | 发布轨道、`draft` 或 `completed`、当前 profile 中的 Google 服务帐号 JSON。仅做本地包的项目可以省略这三项 |
+| `[android]` | `package` 是应用 ID，`label` 是设备上显示的名称，`artifact_name` 是成品文件名前缀。`orientation`、`fullscreen` 控制方向与沉浸式全屏，全屏默认关闭。用 `formats` 选择 APK、AAB 或两者，用 `min_sdk`、`target_sdk` 指定 API 版本。当前最低支持 API 28。 |
+| `[android.version]` | `name` 和 `code` 填写起始版本，接续已上架应用时填写商店已有版本。`weights` 与名称的数字分段一一对应，`increment_component` 从 1 开始计数，递增时后面的段归零。 |
+| `[android.signing]` | 签名出包时填写。选填的 `profile` 是显示在回执中的签名身份名称。`keystore` 指向上传密钥库，`alias` 指定其中的私钥条目。`certificate_sha256` 填写上传证书的 64 位十六进制摘要。`store_password` 和 `key_password` 分别直接填写库口令和私钥口令。 |
+| `[google_play]` | 上传商店时填写。`track` 指定轨道，`status` 取 `draft` 或 `completed`，`service_account` 指向有该应用发布权限的服务帐号密钥 JSON。本地签名构建可省略整段。 |
 
-已有应用沿用原来的应用 ID、上传证书和版本基线。另一个项目填写自己的设置并放入自己的签名文件即可。密钥、口令和帐号凭据在项目的 `settings/private/` 下私存，此目录应排除版本管理和运行包。
+只有 `keystore` 和 `service_account` 填文件路径。两者相对于这份 TOML 所在的 `settings/` 目录解析，文件放在当前项目的 `settings/private/` 下，可使用不同子目录。用于发布的项目配置含实际口令，保存在项目本机；签名工具读取这些值，日志、回执与运行包只包含各自需要的非敏感数据。
 
 ## 出包与上传
 

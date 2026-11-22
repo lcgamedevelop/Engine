@@ -173,6 +173,8 @@ class AndroidBuildArgumentTest(unittest.TestCase):
                 self.assertEqual(build.main(), 0)
             gradle = next(command for command in commands if ":app:assembleDebug" in command)
             self.assertIn("-PengineFullscreen=false", gradle)
+            self.assertIn("-PengineVersionName=0.1.0", gradle)
+            self.assertIn("-PengineVersionCode=1", gradle)
             self.assertIn("-DENGINE_ANDROID_ASSET_BUILDER=" + str(builder.resolve()), commands[0])
             self.assertIn(
                 "-DENGINE_ANDROID_PROJECT=" + str((root / "projects/showcase").resolve()),
