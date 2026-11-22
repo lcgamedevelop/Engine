@@ -953,10 +953,10 @@ bool GameplaySession::start(std::string_view entry)
     return result;
 }
 
-bool GameplaySession::tick()
+bool GameplaySession::tick(const SceneWorkBudget& scene_budget)
 {
     ENGINE_PROFILE_ZONE("Gameplay.tick");
-    step_scene_loads({});
+    step_scene_loads(scene_budget);
     if (!state_ || script_ == nullptr || !App::is_initialized())
     {
         return true;

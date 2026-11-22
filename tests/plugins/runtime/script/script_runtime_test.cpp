@@ -2623,7 +2623,7 @@ export default class extends Gameplay {
     {
         for (int frame = 0; frame < 2000 && !log_contains(marker); ++frame)
         {
-            if (!services.tick() || !script.tick(.016) || !session.tick() ||
+            if (!services.tick() || !script.tick(.016) || !session.tick({}) ||
                 renderer.prepare_scope({}, {}) == engine::SceneWorkState::failed ||
                 !(renderer.render() == engine::RenderSubmitStatus::submitted) || !world.tick(0) ||
                 !script.status().running)
