@@ -1,0 +1,19 @@
+diff --git a/android-project/app/src/main/java/org/libsdl/app/SDLActivity.java b/android-project/app/src/main/java/org/libsdl/app/SDLActivity.java
+--- a/android-project/app/src/main/java/org/libsdl/app/SDLActivity.java
++++ b/android-project/app/src/main/java/org/libsdl/app/SDLActivity.java
+@@ -486,5 +486,12 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityChangeListener {
+         setContentView(mLayout);
+-
+-        setWindowStyle(false);
+-
++
++        // onCreate runs on the UI thread. Apply the launch theme before the first surface
++        // layout, without posting a native-thread resize request or waiting for that layout.
++        boolean fullscreen = (getWindow().getAttributes().flags
++                & WindowManager.LayoutParams.FLAG_FULLSCREEN) != 0;
++        Message style = commandHandler.obtainMessage(0, COMMAND_CHANGE_WINDOW_STYLE, 0,
++                fullscreen ? 1 : 0);
++        commandHandler.dispatchMessage(style);
++        style.recycle();
++
+         getWindow().getDecorView().setOnSystemUiVisibilityChangeListener(this);

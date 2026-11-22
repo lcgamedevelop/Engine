@@ -10,4 +10,4 @@
 
 桌面运行包将 `catalog.bin` 与实际使用的 `gen/`、`packs/` 部署到程序资源基目录的 `assets/` 下；原生目录模式为程序旁的 `assets/`，可选 macOS `.app` 模式为 `Contents/Resources/assets/`。Android 直接使用 APK 的 `assets/` 根，对应 App 的 `apk:/assets`，与桌面共用 catalog 和资源载体，不生成额外包内 JSON 清单。Android 打包将整个 `assets/` 作为一版原子替换，保留独立 `v8/` 数据；失败恢复上一版，旧构建残留不带入新快照。
 
-桌面与 Android 调试包共用完整资源版本协议。验证方法与平台限制见[测试文档](../testing.md)。发布签名、正式内容更新渠道与其他平台的单文件交付尚未实现。
+桌面与 Android 调试包共用完整资源版本协议。Android 项目可通过编辑器导出签名 APK、AAB 并上传到项目指定的 Google Play 轨道。正式内容更新渠道与其他平台的单文件交付尚未实现。[测试文档](../testing.md) · [Android 出包与发布](../plugins/editor/google-play.md)

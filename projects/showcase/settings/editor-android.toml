@@ -2,24 +2,15 @@
 package = "org.engine.minimal"
 label = "Engine"
 artifact_name = "engine-showcase"
-orientation = "unspecified"
-fullscreen = false
-formats = ["apk"]
-min_sdk = 28
-target_sdk = 35
 
 [android.version]
 name = "0.1.0"
 code = 1
-weights = [1000000, 1000, 1]
-increment_component = 3
 
 # Uncomment and fill in these sections in a private project for signed builds and Play uploads.
 # [android.signing]
-# profile = "release"
 # keystore = "private/android/upload.jks"
 # alias = "upload"
-# certificate_sha256 = ""
 # store_password = ""
 # key_password = ""
 #

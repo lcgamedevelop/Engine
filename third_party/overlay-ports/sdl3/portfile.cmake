@@ -7,6 +7,7 @@ vcpkg_from_github(
     PATCHES
         fix-freebsd.patch
         windows-share-delete.patch
+        android-initial-window-style.patch
 )
 
 string(COMPARE EQUAL "${VCPKG_LIBRARY_LINKAGE}" "static" SDL_STATIC)

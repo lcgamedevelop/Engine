@@ -142,12 +142,13 @@ def package(args, project, android, asset_builder, gradle):
     options = [
         "-PengineApplicationId=" + android["package"],
         "-PengineVersionName=" + (args.version_name or android["version"]["name"]),
-        "-PengineVersionCode=" + str(args.version_code or android["version"]["code"]),
+        "-PengineVersionCode=" + str(args.version_code or max(1, android["version"]["code"])),
         "-PengineMinSdk=" + str(android["min_sdk"]),
         "-PengineTargetSdk=" + str(android["target_sdk"]),
+        "-PengineCompileSdk=" + str(android["compile_sdk"]),
         "-PengineLabel=" + android["label"],
         "-PengineOrientation=" + android["orientation"],
-        "-PengineFullscreen=" + str(android.get("fullscreen", False)).lower(),
+        "-PengineFullscreen=" + str(android["fullscreen"]).lower(),
     ]
     task = ":app:assemble" + args.config.title()
     if args.unsigned_bundle:

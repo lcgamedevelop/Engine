@@ -111,6 +111,6 @@ classDiagram
 - 允许 SDL 在同一进程内重新创建 Activity；正常退出后再次启动通过已有的引擎关闭 / 重新初始化流程建立新窗口和渲染器。
 - 初始化前收到暂停请求时暂缓 GPU 创建；已有初始化开始后才收到请求，则完成初始化或失败清理后再确认关闭。关闭与退出的确认以平台内部渲染登记已清除为准。
 - 窗口可绘制性同时检查宿主暂停标志。渲染期间到达的暂停请求使本帧返回 `paused`，不进入不可恢复的 `failed` 状态；Surface 再次就绪后按需重新创建场景所需的渲染资源。
-- 项目在 `settings/editor-android.toml` 的 `[android].fullscreen` 选择沉浸式全屏。Android 宿主将选择交给 SDL 创建原生窗口，世界画面使用全部可绘制区域。项目 HUD 通过 `Window.GetSafeArea()` 避开刘海与手势操作区域。Android 11 起沿用 SDL 的窗口插边处理，Android 9 与 10 使用对应版本的系统栏、刘海和手势插边填充同一 SDL 接口。
+- Android 游戏宿主默认以沉浸式全屏创建 SDL 窗口。Activity 在首个 Surface 布局前按启动主题应用 SDL 的系统栏样式，原生窗口接续同一选择。项目有常驻系统栏的需求时可显式设置 `fullscreen = false`。世界画面使用完整可绘制区域，HUD 通过 `Window.GetSafeArea()` 避开刘海与手势操作区域。Android 11 起沿用 SDL 的窗口插边处理，Android 9 与 10 使用对应版本的系统栏、刘海和手势插边填充同一 SDL 接口。
 - SDLActivity 管理 Activity / Surface 回调和 SDL 原生线程；所有引擎系统与 bgfx API 仍由 `SDL_main` 所在线程调用，不从 Java UI 线程调用。
 - 平台辅助函数不增加引擎架构类或公开系统方法。图只定义 Android 宿主类；运行时装配与调度见 [RuntimeHost](runtime-host.md)，抽象系统生命周期见[引擎总图](engine-system.md)。实际 APK、模拟器与真机验证范围见[测试与范例](../../testing.md)。

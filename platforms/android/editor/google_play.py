@@ -149,7 +149,6 @@ def signed_packages(project, android, env, name, code, formats):
         raise ValueError("Configure [android.signing] to build signed Android packages.")
     signing = android["signing"]
     package = android["package"]
-    fingerprint = signing["certificate_sha256"].lower()
     keystore = private_file(project, signing["keystore"])
     output = SDK / "output/android/arm64/release/runtime" / package / str(code)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -172,7 +171,9 @@ def signed_packages(project, android, env, name, code, formats):
         capture_output=True,
         check=True,
     ).stdout
-    if hashlib.sha256(cert).hexdigest() != fingerprint:
+    fingerprint = hashlib.sha256(cert).hexdigest()
+    pinned = signing.get("certificate_sha256")
+    if pinned is not None and pinned.lower() != fingerprint:
         raise ValueError("The keystore certificate does not match this app's upload certificate.")
     android_project = android_project_snapshot(project, logs / package / "android-project")
     with tempfile.TemporaryDirectory(dir=output.parent) as tmp, logfile.open("w") as log:
@@ -250,13 +251,14 @@ def signed_packages(project, android, env, name, code, formats):
                 manifest.get(ANDROID + "versionCode"),
             )
             != (package, name, str(code))
+            or manifest.get(ANDROID + "compileSdkVersion") != str(android["compile_sdk"])
             or target is None
             or target.get(ANDROID + "targetSdkVersion") != str(android["target_sdk"])
             or target.get(ANDROID + "minSdkVersion") != str(android["min_sdk"])
             or application is None
             or application.get(ANDROID + "label") != android["label"]
             or fullscreen is None
-            or fullscreen.get(ANDROID + "value") != str(android.get("fullscreen", False)).lower()
+            or fullscreen.get(ANDROID + "value") != str(android["fullscreen"]).lower()
             or activity is None
             or activity.get(ANDROID + "screenOrientation")
             not in (android["orientation"], str(ORIENTATIONS[android["orientation"]]))
@@ -401,6 +403,14 @@ def release(project, action, output_format=None):
                 "nextLocalVersion": name,
                 "versionCode": code,
                 "formats": formats,
+                "android": {
+                    "artifactName": android["artifact_name"],
+                    "orientation": android["orientation"],
+                    "fullscreen": android["fullscreen"],
+                    "minSdk": android["min_sdk"],
+                    "targetSdk": android["target_sdk"],
+                    "compileSdk": android["compile_sdk"],
+                },
                 "pendingCommit": pending.exists(),
             }
         env = toolchain()
