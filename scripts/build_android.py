@@ -6,13 +6,15 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
 import zipfile
 
 from artifact_output import validate_output
 from build_lock import exclusive_build
-import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "platforms/android/editor"))
+from project_package import read_settings
 
 
 def require_directory(name):
@@ -58,29 +60,26 @@ def main():
     )
     parser.add_argument("--skip-native", action="store_true", help="Package native libraries already produced by CMake")
     parser.add_argument("--unsigned-bundle", type=Path, help="Build an unsigned release bundle into a staging file")
-    parser.add_argument("--application-id")
+    parser.add_argument("--package-settings", type=Path, help="Source project settings for an isolated Android asset build")
     parser.add_argument("--version-name")
     parser.add_argument("--version-code", type=int)
-    parser.add_argument("--target-sdk", type=int)
-    parser.add_argument("--label", default="Engine")
-    parser.add_argument("--orientation", choices=("unspecified", "sensorLandscape", "sensorPortrait"), default="unspecified")
     args = parser.parse_args()
     if args.unsigned_bundle and (args.config != "release" or args.skip_native or not args.project
-                                 or not args.asset_builder or not args.application_id or not args.version_name
-                                 or not args.version_code or not args.target_sdk):
-        parser.error("A bundle requires a release project build, asset builder, package identity and Android version settings.")
+                                 or not args.asset_builder or not args.version_name or not args.version_code):
+        parser.error("A bundle requires a release project build, asset builder and a resolved Android version.")
+    if not args.unsigned_bundle and (args.version_name or args.version_code is not None or args.package_settings):
+        parser.error("Local installation builds use the current project's package settings.")
     if args.jobs < 1:
         parser.error("--jobs must be greater than 0")
-    if args.skip_native and (args.project is not None or args.asset_builder is not None):
-        parser.error(
-            "--skip-native reuses built resources and cannot be combined with --project or --asset-builder; run a full build to update the project."
-        )
+    if args.skip_native and args.asset_builder is not None:
+        parser.error("--skip-native reuses built resources and cannot use an asset builder.")
     asset_builder = args.asset_builder.resolve() if args.asset_builder is not None else None
     if asset_builder is not None and (
         not asset_builder.is_file() or not os.access(asset_builder, os.X_OK)
     ):
         parser.error("--asset-builder must point to an executable host asset_build_app; build the desktop asset tool first.")
     project = args.project or ROOT / "projects/showcase"
+    settings = read_settings(args.package_settings or project / "settings/editor-android.toml")
     require_directory("ANDROID_HOME")
     ndk_root = require_directory("ANDROID_NDK_HOME")
     properties = (ndk_root / "source.properties").read_text(encoding="utf-8")
@@ -103,16 +102,23 @@ def main():
     if "Gradle 9.8.2" not in version:
         raise ValueError("Android requires Gradle 9.8.2; correct GRADLE_HOME or use the wrapper.")
     with exclusive_build(ROOT / "build/android-gradle/build.lock"):
-        return package(args, project, asset_builder, gradle)
+        return package(args, project, settings, asset_builder, gradle)
 
 
-def package(args, project, asset_builder, gradle):
+def package(args, project, android, asset_builder, gradle):
+    preset = "android-arm64-" + ("v8-" if args.backend == "v8" else "") + args.config
+    if args.skip_native:
+        cache = (ROOT / "build" / preset / "CMakeCache.txt").read_text(encoding="utf-8")
+        cached = next((v.partition("=")[2] for v in cache.splitlines()
+                       if v.startswith("ENGINE_ANDROID_PROJECT:PATH=")), "")
+        source = Path(cached).resolve() if cached else ROOT / "projects/showcase"
+        if source != project.resolve() and not source.is_relative_to(project.resolve() / "cache"):
+            raise ValueError("The cached Android resources belong to another project. Run a full project build.")
     if not args.skip_native:
         require_directory("VCPKG_ROOT")
         cmake = shutil.which("cmake")
         if not cmake:
             raise ValueError("CMake was not found; run the environment setup script first.")
-        preset = "android-arm64-" + ("v8-" if args.backend == "v8" else "") + args.config
         run(
             [
                 cmake,
@@ -133,15 +139,20 @@ def package(args, project, asset_builder, gradle):
         / args.config
         / ("app-" + args.config + ".apk")
     )
-    options = []
+    options = [
+        "-PengineApplicationId=" + android["package"],
+        "-PengineVersionName=" + (args.version_name or android["version_name"]),
+        "-PengineVersionCode=" + str(args.version_code or android["version_code"]),
+        "-PengineMinSdk=" + str(android["min_sdk"]),
+        "-PengineTargetSdk=" + str(android["target_sdk"]),
+        "-PengineLabel=" + android["label"],
+        "-PengineOrientation=" + android["orientation"],
+    ]
     task = ":app:assemble" + args.config.title()
     if args.unsigned_bundle:
         source = ROOT / "build/android-gradle/play/outputs/bundle/release/app-release.aab"
         task = ":app:bundleRelease"
-        options = ["-PenginePlayBundle=true", "-PengineApplicationId=" + args.application_id,
-                   "-PengineVersionName=" + args.version_name, "-PengineVersionCode=" + str(args.version_code),
-                   "-PengineTargetSdk=" + str(args.target_sdk), "-PengineLabel=" + args.label,
-                   "-PengineOrientation=" + args.orientation]
+        options.append("-PenginePlayBundle=true")
     # APK 增量更新可能保留被替换的 .so 占用的空洞；仅重建最终包，保留所有编译缓存。
     source.unlink(missing_ok=True)
     run(
@@ -174,7 +185,7 @@ def package(args, project, asset_builder, gradle):
     output = validate_output(ROOT / "output/android/arm64" / args.config / "runtime",
                              ROOT / "output", [source, project.resolve()])
     output.mkdir(parents=True, exist_ok=True)
-    destination = output / "engine-showcase.apk"
+    destination = output / (android["artifact_name"] + ".apk")
     with tempfile.TemporaryDirectory(dir=output) as stage:
         staged_apk = Path(stage) / destination.name
         shutil.copy2(source, staged_apk)

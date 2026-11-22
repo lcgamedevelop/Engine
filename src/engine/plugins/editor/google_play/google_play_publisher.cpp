@@ -78,6 +78,13 @@ bool GooglePlayPublisher::register_commands(editor::EditorCommands& commands)
                        error = "Select inspect, build or publish";
                        return false;
                    }
+                   const auto format = args.find("format");
+                   if (format != args.end() &&
+                       (*mode != "build" || (*format != "apk" && *format != "aab")))
+                   {
+                       error = "Select apk or aab for a local build";
+                       return false;
+                   }
                    const auto worker = sdk_ / "platforms/android/editor/google_play.py";
                    std::error_code code;
                    if (!sdk_.is_absolute() || !fs::is_regular_file(worker, code))
@@ -98,6 +105,10 @@ bool GooglePlayPublisher::register_commands(editor::EditorCommands& commands)
                    }
                    argv.insert(argv.end(), {PathUtils::to_utf8(worker), mode->get<std::string>(),
                                             "--project", PathUtils::to_utf8(project_)});
+                   if (format != args.end())
+                   {
+                       argv.insert(argv.end(), {"--format", format->get<std::string>()});
+                   }
                    pending_ = tasks_.submit(
                        "Google Play release",
                        [this, argv = std::move(argv)]

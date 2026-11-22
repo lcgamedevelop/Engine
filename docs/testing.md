@@ -16,6 +16,10 @@
 
 一次修改开始时选定最小验证集合；通过后不因整理文档、准备提交而重复执行。新增用例必须能捕获现有测试缺少的真实契约或回归；优先补入所属模块现有测试，不为每个修改点再建测试程序。不重复验证第三方库本身，不维护临时场景的全排列矩阵。
 
+## Android 项目出包
+
+`engine.android_asset_packaging` 验证项目设置、资产目录和原生包的交付约束。`editor.google_play_publishing` 验证项目独立的版本规则与签名文件边界、APK 和 AAB 格式选择、离线构建、草稿保留、商店校验失败及提交超时后的核对。商店事务用例使用模拟响应。[项目设置与编辑器命令](plugins/editor/google-play.md)
+
 ## 大世界地形与 RVT
 
 当前实现与边界见[地形架构](plugins/runtime/terrain-world-design.md)，

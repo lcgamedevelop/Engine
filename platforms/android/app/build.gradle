@@ -28,7 +28,7 @@ if (hasIcu && !hasV8) {
     throw new GradleException('ICU data is only supported by the V8 runtime')
 }
 def playBundle = providers.gradleProperty('enginePlayBundle').getOrElse('false').toBoolean()
-def targetApi = playBundle ? providers.gradleProperty('engineTargetSdk').get().toInteger() : 35
+def targetApi = providers.gradleProperty('engineTargetSdk').get().toInteger()
 def outputFlavor = playBundle ? 'play' : nativeConfiguration
 layout.buildDirectory.set(file("../../../build/android-gradle/${outputFlavor}"))
 
@@ -39,13 +39,13 @@ android {
     ndkVersion = '30.0.16248370'
     ndkPath = System.getenv('ANDROID_NDK_HOME')
     defaultConfig {
-        applicationId = playBundle ? providers.gradleProperty('engineApplicationId').get() : 'org.engine.minimal'
-        minSdk = 28
+        applicationId = providers.gradleProperty('engineApplicationId').get()
+        minSdk = providers.gradleProperty('engineMinSdk').get().toInteger()
         targetSdk = targetApi
-        versionCode = playBundle ? providers.gradleProperty('engineVersionCode').get().toInteger() : 1
-        versionName = playBundle ? providers.gradleProperty('engineVersionName').get() : '0.1.0'
-        manifestPlaceholders = [engineLabel: providers.gradleProperty('engineLabel').getOrElse('Engine'),
-                                engineOrientation: providers.gradleProperty('engineOrientation').getOrElse('unspecified')]
+        versionCode = providers.gradleProperty('engineVersionCode').get().toInteger()
+        versionName = providers.gradleProperty('engineVersionName').get()
+        manifestPlaceholders = [engineLabel: providers.gradleProperty('engineLabel').get(),
+                                engineOrientation: providers.gradleProperty('engineOrientation').get()]
         buildConfigField 'boolean', 'ENGINE_SCRIPT_V8', hasV8.toString()
         buildConfigField 'boolean', 'ENGINE_SCRIPT_ICU', hasIcu.toString()
         ndk {

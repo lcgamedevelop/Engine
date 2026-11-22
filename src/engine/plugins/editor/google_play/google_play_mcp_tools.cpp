@@ -8,10 +8,11 @@ bool register_google_play_tools(mcp::McpSystem& system, mcp::EditorMcpTools& edi
     using Json = nlohmann::json;
     return mcp::register_editor_command_tool(
                system, editor, "start_google_play_release",
-               "Inspect the current project's release profile, build its signed AAB, or publish it "
-               "to its configured Google Play track.",
+               "Inspect current project settings, build its signed APK or AAB outputs, or upload "
+               "an AAB to the project's Google Play track.",
                mcp::object_schema(
-                   {{"action", {{"type", "string"}, {"enum", {"inspect", "build", "publish"}}}}},
+                   {{"action", {{"type", "string"}, {"enum", {"inspect", "build", "publish"}}}},
+                    {"format", {{"type", "string"}, {"enum", {"apk", "aab"}}}}},
                    {"action"}),
                "start_google_play_release") &&
            mcp::register_editor_command_tool(

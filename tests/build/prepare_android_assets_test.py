@@ -144,6 +144,9 @@ class AndroidBuildArgumentTest(unittest.TestCase):
             builder = root / "host builder with spaces"
             builder.write_text("fixture only")
             builder.chmod(0o755)
+            project_settings = root / "projects/showcase/settings"
+            project_settings.mkdir(parents=True)
+            shutil.copy2(ROOT / "projects/showcase/settings/editor-android.toml", project_settings)
             commands = []
 
             def record(command):

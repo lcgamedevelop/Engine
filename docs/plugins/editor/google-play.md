@@ -1,49 +1,72 @@
-# Google Play 发布
+# Android 出包与 Google Play 发布
 
-桌面编辑器使用可选插件 `editor/google_play` 为当前项目构建签名 AAB，并发布到该项目配置的 Google Play 轨道。启用 `editor/mcp` 时可通过编辑器 MCP 操作。Android 运行包只包含运行时内容。
+桌面编辑器插件 `editor/google_play` 为当前项目导出可直接安装的签名 APK、供 Google Play 分发的 AAB，或将 AAB 发布到项目指定轨道。启用 `editor/mcp` 后可在编辑器调用这些操作。每次出包都重新读取当前项目设置。
 
-## 项目与发布身份
+## 填写项目设置
 
-项目的 `settings/editor-google-play.toml` 选择本机发布身份。应用名及方向属于项目。不同项目切换 `profile`，即可使用各自的包名、上传证书、版本和轨道。
+在项目的 `settings/editor-android.toml` 中填写一个 `[android]` 表。以下示例使用三段版本号，默认同时导出两种格式。
 
 ```toml
-[google_play]
-profile = "sample"
-label = "Sample"
+[android]
+profile = "release"
+package = "com.example.adventure"
+label = "Adventure"
+artifact_name = "adventure"
 orientation = "sensorLandscape"
+formats = ["apk", "aab"]
+min_sdk = 28
+target_sdk = 36
+
+version_name = "1.2.3"
+version_code = 10203
+version_weights = [10000, 100, 1]
+increment_component = 3
+
+keystore = "upload.jks"
+alias = "upload"
+certificate_sha256 = "<64 hex digits from the upload certificate>"
+password_file = "passwords.json"
+
+play_track = "internal"
+play_status = "completed"
+service_account = "play-account.json"
 ```
 
-每个身份单独保存在用户配置目录 `~/.config/engine/google-play/<profile>/`。可通过 `ENGINE_GOOGLE_PLAY_HOME` 指定团队使用的本机位置。该目录下的 `profile.json` 使用以下字段。签名文件与帐号文件的相对路径从身份目录解析。配置、密钥文件和服务帐号凭据均应仅对当前用户开放。
-
-| 字段 | 用途 |
+| 字段 | 填写内容 |
 | --- | --- |
-| `package`、`last_version` | 商店应用 ID 与已确认的四段版本，例如 `com.example.game` 和 `1.2.3.0` |
-| `track`、`status` | 目标轨道与状态，例如 `internal` 和 `completed`，也支持 `draft` |
-| `target_sdk` | 已安装的编译和目标 Android API 级别 |
-| `keystore`、`alias` | 上传密钥库及其中的私钥条目 |
-| `store_password`、`key_password` | 密钥库和私钥口令，仅传给签名子进程的环境 |
-| `certificate_sha256` | 此应用上传证书 DER 数据的 64 位十六进制 SHA‑256 |
-| `service_account` | 拥有目标应用和轨道发布权限的服务帐号 JSON |
+| `profile` | 当前项目的签名目录名。示例对应 `settings/private/android/release/` |
+| `package`、`label`、`artifact_name` | 商店应用 ID、设备显示名称和产物文件名前缀 |
+| `orientation`、`formats` | Android 屏幕方向和默认成品格式，可选 APK、AAB 或两者 |
+| `min_sdk`、`target_sdk` | 项目支持的最低与目标 Android API。引擎 ARM64 运行时最低支持 API 28 |
+| `version_name`、`version_code` | 起始版本名称和代码。接续已上架应用时填写商店已有版本 |
+| `version_weights`、`increment_component` | 各段的代码权重和每次递增的段序号，首段为 1。低位清零，超过某一段的容量会进位 |
+| `keystore`、`alias`、`certificate_sha256` | 当前 profile 中的上传密钥库、私钥条目和预期证书 SHA‑256 |
+| `password_file` | 当前 profile 中的私有 JSON，字段为 `store_password` 和 `key_password` |
+| `play_track`、`play_status`、`service_account` | 发布轨道、`draft` 或 `completed`、当前 profile 中的 Google 服务帐号 JSON。仅做本地包的项目可以省略这三项 |
 
-本机 `toolchain.toml` 的 `[tools]` 表接受 `ANDROID_HOME`、`ANDROID_NDK_HOME`、`JAVA_HOME`、`VCPKG_ROOT`、`ENGINE_ASSET_BUILDER`、`ENGINE_BUNDLETOOL` 和可选的 `GRADLE_HOME`。也可以设置同名环境变量，环境变量优先。通过代理连接 Google 时可设置 HTTPS_PROXY。资源构建器为宿主的 Release `asset_build_app`，bundletool 使用 Google 发布的可执行 JAR。引擎 Android 预设和 Gradle 版本见[构建指南](../../building.md)。编辑器从可执行文件目录向上寻找已安装的引擎源码工具链，独立部署可通过绝对路径 `ENGINE_SDK_ROOT` 选择 SDK。默认使用 `uv` 运行带固定依赖版本的发布脚本，已有 Python 环境也可以通过 `ENGINE_GOOGLE_PLAY_PYTHON` 指定。
+已有应用沿用原来的应用 ID、上传证书和版本基线。另一个项目填写自己的设置并放入自己的签名文件即可。密钥、口令和帐号凭据在项目的 `settings/private/` 下私存，此目录应排除版本管理和运行包。
 
-## 编辑器操作
+## 出包与上传
 
-| 命令 | 结果 |
+| 编辑器命令 | 项目收到的结果 |
 | --- | --- |
-| `start_google_play_release`，`action="inspect"` | 本机包名、轨道、候选版本及待核对提交状态 |
-| `start_google_play_release`，`action="build"` | 重新编译当前项目的 Android 资源，构建、签名并验证 AAB |
-| `start_google_play_release`，`action="publish"` | 读取 Play 版本，构建新包，上传、更新选定轨道、验证并提交 |
-| `get_google_play_status` | 当前作业的运行状态、结果路径或错误；完成的发布包含版本和摘要 |
+| `start_google_play_release`，`action="inspect"` | 包名、profile、默认格式、候选版本、待核对提交状态 |
+| `start_google_play_release`，`action="build"` | 按项目的 `formats` 输出成品。可临时指定 `format="apk"` 或 `format="aab"` |
+| `start_google_play_release`，`action="publish"` | 核对商店版本，构建签名 AAB，上传后验证并提交到项目指定轨道 |
+| `get_google_play_status` | 作业状态、版本和 `artifacts` 中各成品的路径，发布成功时还包含包摘要 |
 
-SDK 终端也可调用同一入口。示例构建当前项目的本机签名包。
+SDK 终端也可运行同一入口。下例仅生成可安装的 APK。
 
 ```sh
-uv run --script platforms/android/editor/google_play.py build --project projects/my-game
+uv run --script platforms/android/editor/google_play.py build --project projects/my-game --format apk
 ```
 
-发布选择本机基线、成功回执、Play 已有 AAB、APK 以及各轨道中的最高版本代码。整包递增第三段，第四段固定为零，编码为 `major × 100000000 + minor × 1000000 + patch × 1000`。本地构建仅产生候选包。不同设备并行发布时，Play 的版本或编辑冲突会使该次操作失败；下一次发布重新读取商店。发布草稿时会保留已完成版本及现有草稿的说明。提交已完成版本时遇到未处理的草稿，或轨道包含分阶段发布、多版本发布，插件会返回限制并保留轨道配置。
+APK 和 AAB 共用一次 Android 资源和原生构建。AAB 经 jarsigner 签名和 bundletool 验证，安装用 APK 从同一 bundle 生成并通过 apksigner 验签。插件核对包名、版本、屏幕方向、名称、最低及目标 SDK 和预期证书。成品位于 `output/android/arm64/release/runtime/<package>/<code>/<artifact_name>-<code>.apk` 或同名 `.aab`，构建日志在项目的 `cache/google-play/`。
 
-每个包名有独立的本机发布锁。发布作业在项目缓存内单独保存 Android 源快照和导入缓存，可在桌面编辑器打开项目时构建。发布配置和凭据不进入快照。所有 Android 构建还共享构建目录锁，避免同时写入不同项目的资源。AAB 通过 `jarsigner` 签名，核对实际签名证书，并由 bundletool 验证结构、清单中的包名、版本及目标 SDK。上传时校验 Google 返回的包摘要。成功提交后更新版本回执。提交中断时保留待核对记录，再次运行 `publish` 会先按包摘要、版本、轨道和状态核实提交结果。
+本地构建使用项目版本基线和最近的成功回执，可以重复出同一候选版本。发布同时读取 Play 已有 AAB、APK 和各轨道中的最高代码，再按项目规则递增。跨设备并发发布遇到商店版本冲突时，重新发布会读取最新版本。草稿保留已有正式版本和草稿说明。遇到分阶段发布、多版本发布或需要先处理的草稿，插件保留轨道状态并返回原因。
 
-签名成品位于 `output/android/arm64/release/runtime/<package>/<package>-<versionCode>.aab`。构建日志在当前项目的 `cache/google-play/`。发布帐号 JSON 和密钥库的存储位置独立于运行包。[Google Play 编辑事务](https://developers.google.com/android-publisher/edits) · [Bundle 上传摘要](https://developers.google.com/android-publisher/api-ref/rest/v3/edits.bundles) · [Android 应用签名](https://developer.android.com/studio/publish/app-signing)
+每个包名有独立的构建锁。项目在自己的缓存编译 Android 资源，桌面编辑器可以同时打开项目。成功回执和待核对提交保存在项目的 `settings/private/android/.releases/<package>/`。提交中断后再次发布会按摘要、版本、轨道和状态核对结果。框架使用 Google 官方编辑事务和 Android 签名工具。[Google Play 编辑事务](https://developers.google.com/android-publisher/edits) · [Android 应用签名](https://developer.android.com/studio/publish/app-signing)
+
+## 安装机器工具
+
+每台构建机准备 Android SDK、NDK、JDK、vcpkg、宿主 Release 的 `asset_build_app` 和 Google bundletool 一次。可用环境变量 `ANDROID_HOME`、`ANDROID_NDK_HOME`、`JAVA_HOME`、`VCPKG_ROOT`、`ENGINE_ASSET_BUILDER`、`ENGINE_BUNDLETOOL` 和可选的 `GRADLE_HOME`，也可在 `~/.config/engine/android-toolchain.toml` 的 `[tools]` 表设置。设置 `ENGINE_ANDROID_TOOLCHAIN` 可指定机器工具路径配置文件。编辑器从自身位置寻找引擎 SDK，独立部署使用 `ENGINE_SDK_ROOT`。默认用 `uv` 启动固定依赖的发布程序，也可设置 `ENGINE_GOOGLE_PLAY_PYTHON`。[工具链版本与构建指南](../../building.md)

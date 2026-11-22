@@ -1,20 +1,18 @@
 """Verify Play version selection and transaction boundaries without contacting a store."""
 
-import importlib.util
 from contextlib import ExitStack
 import hashlib
 import json
 from pathlib import Path
+import sys
 import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
 ROOT = Path(__file__).resolve().parents[4]
-spec = importlib.util.spec_from_file_location(
-    "publisher", ROOT / "platforms/android/editor/google_play.py"
-)
-publisher = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(publisher)
+sys.path.insert(0, str(ROOT / "platforms/android/editor"))
+import google_play as publisher
+from project_package import MAX_CODE, next_version, private_file, read_settings
 
 
 class PublishingTest(unittest.TestCase):
@@ -22,12 +20,22 @@ class PublishingTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.home = Path(self.temp.name)
-        self.profile = {
+        self.settings = {
+            "profile": "test",
             "package": "test.example",
-            "track": "internal",
-            "status": "completed",
-            "last_version": "1.0.6.0",
+            "formats": ["apk", "aab"],
+            "version_name": "1.0.6.0",
+            "version_code": 100006000,
+            "version_weights": [100000000, 1000000, 1000, 1],
+            "increment_component": 3,
+            "play_track": "internal",
+            "play_status": "completed",
+            "service_account": "account.json",
         }
+        private = self.home / "settings/private"
+        self.identity = private / "android/test"
+        self.identity.mkdir(parents=True)
+        (self.identity / "account.json").write_text("{}")
         self.edits = MagicMock()
         self.edits.insert.return_value.execute.return_value = {"id": "edit"}
         self.previous = {"status": "completed", "name": "old", "versionCodes": ["100007000"]}
@@ -42,21 +50,24 @@ class PublishingTest(unittest.TestCase):
         def replace(name, **kwargs):
             return stack.enter_context(patch.object(publisher, name, **kwargs))
 
-        replace("read_settings", return_value=({"profile": "sample"}, self.profile))
+        replace("read_settings", return_value=self.settings)
+        stack.enter_context(patch.object(publisher, "SDK", self.home / "sdk"))
         replace("toolchain", return_value={})
         self.service = replace("google_publisher")
         self.service.return_value.edits.return_value = self.edits
-        self.builder = replace("signed_bundle", return_value=self.home / "bundle.aab")
+        self.builder = replace(
+            "signed_packages", return_value={"aab": str(self.home / "bundle.aab")}
+        )
         (self.home / "bundle.aab").write_bytes(b"test signed bundle")
         self.digest = hashlib.sha256(b"test signed bundle").hexdigest()
         self.upload = replace(
             "upload_bundle", return_value={"versionCode": 100009000, "sha256": self.digest}
         )
-        self.state = self.home / "state/test.example.json"
-        self.pending = self.home / "state/test.example.pending.json"
+        self.state = private / "android/.releases/test.example/last-release.json"
+        self.pending = self.state.with_name("pending-release.json")
 
     def run_release(self, mode):
-        return publisher.release(self.home, self.home, mode)
+        return publisher.release(self.home, mode)
 
     def test_publish_uses_versions_across_play_and_commits_once(self):
         result = self.run_release("publish")
@@ -87,7 +98,9 @@ class PublishingTest(unittest.TestCase):
         self.assertFalse(self.state.exists())
         self.previous["versionCodes"] = ["100009000"]
         entry = {"versionCode": 100009000, "sha256": "0" * 64}
-        self.edits.bundles.return_value.list.return_value.execute.return_value = {"bundles": [entry]}
+        self.edits.bundles.return_value.list.return_value.execute.return_value = {
+            "bundles": [entry]
+        }
         with self.assertRaises(ValueError):
             self.run_release("build")
         with self.assertRaises(ValueError):
@@ -115,7 +128,9 @@ class PublishingTest(unittest.TestCase):
             "versionCodes": ["100008000"],
             "releaseNotes": [{"language": "en-US", "text": "Test draft"}],
         }
-        track = publisher.release_body("internal", [self.previous, draft], "draft", "1.0.9.0", 100009000)
+        track = publisher.release_body(
+            "internal", [self.previous, draft], "draft", "1.0.9.0", 100009000
+        )
         self.assertEqual(track["releases"][0], self.previous)
         self.assertEqual(track["releases"][1]["versionCodes"], ["100009000"])
         self.assertEqual(track["releases"][1]["releaseNotes"], draft["releaseNotes"])
@@ -128,11 +143,14 @@ class PublishingTest(unittest.TestCase):
         settings.mkdir()
         (assets / "stage.scene").write_text("first")
         (settings / "runtime-game.toml").write_text("[common]")
-        (settings / "editor-google-play.toml").write_text("[google_play]")
+        (settings / "editor-android.toml").write_text("[android]")
+        (settings / "private").mkdir()
+        (settings / "private/upload.jks").write_bytes(b"signing fixture")
         destination = original / "cache/google-play/test.example/android-project"
         publisher.android_project_snapshot(original, destination)
         self.assertEqual((destination / "assets/stage.scene").read_text(), "first")
-        self.assertFalse((destination / "settings/editor-google-play.toml").exists())
+        self.assertFalse((destination / "settings/editor-android.toml").exists())
+        self.assertFalse((destination / "settings/private").exists())
         (destination / "cache/android-cache").write_text("retained")
         (assets / "stage.scene").unlink()
         (assets / "another.scene").write_text("second")
@@ -142,13 +160,51 @@ class PublishingTest(unittest.TestCase):
         self.assertEqual((destination / "assets/another.scene").read_text(), "second")
 
     def test_version_rollover_and_nested_build_lock(self):
-        self.assertEqual(publisher.next_version(999_999), ("0.1.0.0", 1_000_000))
+        version = dict(self.settings, version_name="0.0.0.0", version_code=0)
+        self.assertEqual(next_version(version, 999_999), ("0.1.0.0", 1_000_000))
         with self.assertRaises(ValueError):
-            publisher.next_version(publisher.MAX_CODE)
+            next_version(version, MAX_CODE)
         with publisher.exclusive_build(self.home / "state.lock"):
             with self.assertRaises(ValueError):
                 with publisher.exclusive_build(self.home / "state.lock"):
                     pass
+
+    def test_build_uses_project_formats_without_a_store_account(self):
+        for key in ("play_track", "play_status", "service_account"):
+            del self.settings[key]
+        (self.identity / "account.json").unlink()
+        self.run_release("build")
+        self.assertEqual(self.builder.call_args.args[-1], ["apk", "aab"])
+        for fmt in ("apk", "aab"):
+            publisher.release(self.home, "build", fmt)
+            self.assertEqual(self.builder.call_args.args[-1], [fmt])
+        self.service.assert_not_called()
+        with self.assertRaises(ValueError):
+            self.run_release("publish")
+        self.assertFalse(self.pending.exists())
+
+    def test_project_version_schemes_and_private_files_are_independent(self):
+        android = read_settings(ROOT / "projects/showcase/settings/editor-android.toml")
+        self.assertEqual(next_version(android, 5), ("0.1.5", 6))
+        second = {
+            "version_name": "3",
+            "version_code": 126,
+            "version_weights": [1],
+            "increment_component": 1,
+        }
+        self.assertEqual(next_version(second, 130), ("8", 131))
+        with self.assertRaises(ValueError):
+            next_version(dict(second, version_weights=[2, 1]), 130)
+        outside = self.home / "other-project.key"
+        outside.write_text("fixture")
+        with self.assertRaises(ValueError):
+            private_file(self.home, "test", outside)
+        try:
+            (self.identity / "linked.key").symlink_to(outside)
+        except OSError:
+            return  # Windows hosts may restrict unprivileged symbolic links.
+        with self.assertRaises(ValueError):
+            private_file(self.home, "test", "linked.key")
 
 
 if __name__ == "__main__":

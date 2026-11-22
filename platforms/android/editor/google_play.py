@@ -18,37 +18,22 @@ import tempfile
 import tomllib
 from urllib.request import getproxies
 import xml.etree.ElementTree as ET
+import zipfile
 
 SDK = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(SDK / "scripts"))
 from build_lock import exclusive_build
-from artifact_output import staged_output
+from artifact_output import plain_path, staged_output
 from prepare_android_assets import asset_files
+from project_package import FORMATS, ORIENTATIONS, next_version, private_file, read_settings
 
-MAX_CODE = 2_100_000_000
 ANDROID = "{http://schemas.android.com/apk/res/android}"
 
 
-def version_code(name):
-    if not isinstance(name, str) or not re.fullmatch(r"(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*)){3}", name):
-        raise ValueError("Expected a four-part Android version.")
-    major, minor, patch, revision = map(int, name.split("."))
-    code = major * 100_000_000 + minor * 1_000_000 + patch * 1000 + revision
-    if minor > 99 or patch > 999 or revision or not 0 <= code <= MAX_CODE:
-        raise ValueError("Invalid Android release version; the fourth field must be zero.")
-    return code
-
-
-def next_version(maximum):
-    code = (maximum // 1000 + 1) * 1000
-    name = f"{code // 100_000_000}.{code // 1_000_000 % 100}.{code // 1000 % 1000}.0"
-    if version_code(name) != code:
-        raise ValueError("The Android version line is exhausted.")
-    return name, code
-
-
 def atomic_json(path, data):
-    with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, encoding="utf-8", delete=False) as f:
+    with tempfile.NamedTemporaryFile(
+        mode="w", dir=path.parent, encoding="utf-8", delete=False
+    ) as f:
         temp = Path(f.name)
         try:
             json.dump(data, f)
@@ -63,27 +48,12 @@ def atomic_json(path, data):
         temp.unlink(missing_ok=True)
 
 
-def read_settings(project, home):
-    settings = tomllib.loads((project / "settings/editor-google-play.toml").read_text())["google_play"]
-    profile = settings["profile"]
-    if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}", profile):
-        raise ValueError("Invalid publishing profile name.")
-    folder = home / profile
-    data = json.loads((folder / "profile.json").read_text())
-    if not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+", data["package"]):
-        raise ValueError("Invalid Android application ID.")
-    if not re.fullmatch(r"[\w.-]+", data["track"]) or data["status"] not in ("draft", "completed"):
-        raise ValueError("Expected a Play track and a draft or completed release.")
-    version_code(data["last_version"])
-    if not re.fullmatch(r"[a-fA-F0-9]{64}", data["certificate_sha256"]):
-        raise ValueError("Invalid upload certificate fingerprint.")
-    for key in ("keystore", "service_account"):
-        data[key] = (folder / data[key]).resolve(strict=True)
-    return settings, data
-
-
-def toolchain(home):
-    config = home / "toolchain.toml"
+def toolchain():
+    config = Path(
+        os.environ.get(
+            "ENGINE_ANDROID_TOOLCHAIN", Path.home() / ".config/engine/android-toolchain.toml"
+        )
+    )
     paths = tomllib.loads(config.read_text()).get("tools", {}) if config.exists() else {}
     env = dict(os.environ)
     for name in (
@@ -159,14 +129,36 @@ def android_project_snapshot(project, destination):
             # declarations still come from the same configured tooling as other builds.
             shutil.copytree(typescript, stage / "typescript")
         if settings_files() != selected:
-            raise ValueError("Runtime or import settings changed during the Android build snapshot.")
+            raise ValueError(
+                "Runtime or import settings changed during the Android build snapshot."
+            )
     return destination
 
 
-def signed_bundle(project, settings, profile, env, name, code):
-    package = profile["package"]
-    output = SDK / "output/android/arm64/release/runtime" / package
-    output.mkdir(parents=True, exist_ok=True)
+def signer_fingerprint(pem_output):
+    match = re.search(
+        rb"-----BEGIN CERTIFICATE-----(.*?)-----END CERTIFICATE-----", pem_output, re.S
+    )
+    if not match:
+        raise ValueError("The signing tool did not return a certificate.")
+    return hashlib.sha256(base64.b64decode(match[1])).hexdigest()
+
+
+def signed_packages(project, android, env, name, code, formats):
+    required = {"profile", "keystore", "alias", "certificate_sha256", "password_file"}
+    missing = required.difference(android)
+    if missing:
+        raise ValueError("Missing project Android signing settings: " + ", ".join(sorted(missing)))
+    package = android["package"]
+    fingerprint = android["certificate_sha256"].lower()
+    if not re.fullmatch(r"[a-f0-9]{64}", fingerprint):
+        raise ValueError("Invalid upload certificate fingerprint.")
+    keystore = private_file(project, android["profile"], android["keystore"])
+    passwords = json.loads(
+        private_file(project, android["profile"], android["password_file"]).read_text()
+    )
+    output = SDK / "output/android/arm64/release/runtime" / package / str(code)
+    output.parent.mkdir(parents=True, exist_ok=True)
     logs = project / "cache/google-play"
     logs.mkdir(parents=True, exist_ok=True)
     logfile = logs / f"build-{code}.log"
@@ -176,13 +168,12 @@ def signed_bundle(project, settings, profile, env, name, code):
     jarsigner = str(jdk / ("jarsigner" + suffix))
     secret_env = {
         **env,
-        "ENGINE_UPLOAD_STORE_PASSWORD": profile["store_password"],
-        "ENGINE_UPLOAD_KEY_PASSWORD": profile["key_password"],
+        "ENGINE_UPLOAD_STORE_PASSWORD": passwords["store_password"],
+        "ENGINE_UPLOAD_KEY_PASSWORD": passwords["key_password"],
     }
-    store = ["-keystore", str(profile["keystore"]), "-storepass:env", "ENGINE_UPLOAD_STORE_PASSWORD"]
-    fingerprint = profile["certificate_sha256"].lower()
+    store = ["-keystore", str(keystore), "-storepass:env", "ENGINE_UPLOAD_STORE_PASSWORD"]
     cert = subprocess.run(
-        [keytool, "-exportcert", *store, "-alias", profile["alias"]],
+        [keytool, "-exportcert", *store, "-alias", android["alias"]],
         env=secret_env,
         capture_output=True,
         check=True,
@@ -190,7 +181,7 @@ def signed_bundle(project, settings, profile, env, name, code):
     if hashlib.sha256(cert).hexdigest() != fingerprint:
         raise ValueError("The keystore certificate does not match this app's upload certificate.")
     android_project = android_project_snapshot(project, logs / package / "android-project")
-    with tempfile.TemporaryDirectory(dir=output) as tmp, logfile.open("w") as log:
+    with tempfile.TemporaryDirectory(dir=output.parent) as tmp, logfile.open("w") as log:
         stage = Path(tmp)
         unsigned, signed = stage / "unsigned.aab", stage / "signed.aab"
 
@@ -198,7 +189,9 @@ def signed_bundle(project, settings, profile, env, name, code):
             if subprocess.run(
                 args, env=secret_env if signing else env, stdout=log, stderr=subprocess.STDOUT
             ).returncode:
-                raise ValueError(f"Android bundle step failed ({Path(args[0]).name}); see {logfile}")
+                raise ValueError(
+                    f"Android bundle step failed ({Path(args[0]).name}); see {logfile}"
+                )
 
         run(
             [
@@ -212,18 +205,12 @@ def signed_bundle(project, settings, profile, env, name, code):
                 env["ENGINE_ASSET_BUILDER"],
                 "--unsigned-bundle",
                 str(unsigned),
-                "--application-id",
-                package,
+                "--package-settings",
+                str(project / "settings/editor-android.toml"),
                 "--version-name",
                 name,
                 "--version-code",
                 str(code),
-                "--target-sdk",
-                str(profile["target_sdk"]),
-                "--label",
-                settings.get("label", project.name),
-                "--orientation",
-                settings.get("orientation", "unspecified"),
             ]
         )
         run(
@@ -235,7 +222,7 @@ def signed_bundle(project, settings, profile, env, name, code):
                 "-signedjar",
                 str(signed),
                 str(unsigned),
-                profile["alias"],
+                android["alias"],
             ],
             signing=True,
         )
@@ -243,8 +230,7 @@ def signed_bundle(project, settings, profile, env, name, code):
         certs = subprocess.check_output(
             [keytool, "-printcert", "-rfc", "-jarfile", str(signed)], env=env
         )
-        match = re.search(rb"-----BEGIN CERTIFICATE-----(.*?)-----END CERTIFICATE-----", certs, re.S)
-        if not match or hashlib.sha256(base64.b64decode(match[1])).hexdigest() != fingerprint:
+        if signer_fingerprint(certs) != fingerprint:
             raise ValueError("The signed bundle does not have the configured upload certificate.")
         java = str(jdk / ("java" + suffix))
         bundletool = [java, "-jar", env["ENGINE_BUNDLETOOL"]]
@@ -254,6 +240,12 @@ def signed_bundle(project, settings, profile, env, name, code):
         )
         manifest = ET.fromstring(xml)
         target = manifest.find("uses-sdk")
+        application = manifest.find("application")
+        activity = manifest.find(
+            "application/activity/intent-filter/category[@"
+            + ANDROID
+            + "name='android.intent.category.LAUNCHER']/../.."
+        )
         if (
             (
                 manifest.get("package"),
@@ -262,21 +254,68 @@ def signed_bundle(project, settings, profile, env, name, code):
             )
             != (package, name, str(code))
             or target is None
-            or target.get(ANDROID + "targetSdkVersion") != str(profile["target_sdk"])
+            or target.get(ANDROID + "targetSdkVersion") != str(android["target_sdk"])
+            or target.get(ANDROID + "minSdkVersion") != str(android["min_sdk"])
+            or application is None
+            or application.get(ANDROID + "label") != android["label"]
+            or activity is None
+            or activity.get(ANDROID + "screenOrientation")
+            not in (android["orientation"], str(ORIENTATIONS[android["orientation"]]))
         ):
             raise ValueError("The signed bundle's manifest does not match the release profile.")
-        destination = output / f"{package}-{code}.aab"
-        os.replace(signed, destination)
-    return destination
+        files = {"aab": signed}
+        if "apk" in formats:
+            apk = stage / "signed.apk"
+            apks = stage / "device.apks"
+            signing_args = ["--ks=" + str(keystore), "--ks-key-alias=" + android["alias"]]
+            for field, option in (("store_password", "--ks-pass"), ("key_password", "--key-pass")):
+                password_file = stage / field
+                with os.fdopen(
+                    os.open(password_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600), "w"
+                ) as f:
+                    f.write(passwords[field])
+                signing_args.append(option + "=file:" + str(password_file))
+            run(
+                bundletool
+                + [
+                    "build-apks",
+                    "--mode=universal",
+                    "--bundle=" + str(signed),
+                    "--output=" + str(apks),
+                    *signing_args,
+                ]
+            )
+            with (
+                zipfile.ZipFile(apks) as archive,
+                archive.open("universal.apk") as source,
+                apk.open("wb") as out,
+            ):
+                shutil.copyfileobj(source, out)
+            apksigner = Path(env["ANDROID_HOME"]) / "build-tools/37.0.0/lib/apksigner.jar"
+            verified = subprocess.check_output(
+                [java, "-jar", str(apksigner), "verify", "--print-certs-pem", str(apk)], env=env
+            )
+            if signer_fingerprint(verified) != fingerprint:
+                raise ValueError("The APK does not match the configured signing certificate.")
+            files["apk"] = apk
+        stem = f"{android['artifact_name']}-{code}"
+        with staged_output(output) as completed:
+            for other in FORMATS:
+                previous = output / (stem + "." + other)
+                if other not in formats and previous.is_file():
+                    shutil.copy2(previous, completed / previous.name)
+            for fmt in formats:
+                os.replace(files[fmt], completed / (stem + "." + fmt))
+    return {fmt: str(output / (stem + "." + fmt)) for fmt in formats}
 
 
-def google_publisher(profile, env):
+def google_publisher(service_account_path, env):
     import httplib2
     from google.oauth2 import service_account
     from google_auth_httplib2 import AuthorizedHttp
     from googleapiclient.discovery import build
 
-    account = json.loads(profile["service_account"].read_text())
+    account = json.loads(service_account_path.read_text())
     if account.get("type") != "service_account" or account.get("token_uri") not in (
         "https://oauth2.googleapis.com/token",
         "https://accounts.google.com/o/oauth2/token",
@@ -289,7 +328,9 @@ def google_publisher(profile, env):
     proxy = env.get("HTTPS_PROXY") or env.get("https_proxy") or proxies.get("https")
     http = httplib2.Http(
         timeout=90,
-        proxy_info=httplib2.proxy_info_from_url(proxy, "https", env.get("NO_PROXY") or proxies.get("no"))
+        proxy_info=httplib2.proxy_info_from_url(
+            proxy, "https", env.get("NO_PROXY") or proxies.get("no")
+        )
         if proxy
         else httplib2.proxy_info_from_environment,
     )
@@ -316,7 +357,8 @@ def track_releases(edits, params):
 
 def release_body(track, previous, status, name, code):
     if any(
-        r["status"] in ("inProgress", "halted") or len(r.get("versionCodes", [])) > 1 for r in previous
+        r["status"] in ("inProgress", "halted") or len(r.get("versionCodes", [])) > 1
+        for r in previous
     ):
         raise ValueError(
             "This track contains a rollout or multi-code release; resolve its release policy in Play Console."
@@ -330,38 +372,47 @@ def release_body(track, previous, status, name, code):
     return {"track": track, "releases": [*keep, new_release]}
 
 
-def release(project, home, action):
-    settings, profile = read_settings(project, home)
-    package, track = profile["package"], profile["track"]
-    state_dir = home / "state"
-    state_dir.mkdir(mode=0o700, exist_ok=True)
-    state_file, pending = state_dir / (package + ".json"), state_dir / (package + ".pending.json")
-    summary = {
-        "profile": settings["profile"],
-        "package": package,
-        "track": track,
-        "releaseStatus": profile["status"],
-    }
-    with exclusive_build(state_dir / (package + ".lock")):
+def release(project, action, output_format=None):
+    project = project.resolve(strict=True)
+    android = read_settings(project / "settings/editor-android.toml")
+    package = android["package"]
+    track = android.get("play_track")
+    if output_format is not None and (action != "build" or output_format not in FORMATS):
+        raise ValueError("Select apk or aab for a local build.")
+    formats = [output_format] if output_format else android["formats"]
+    if action == "publish" and not track:
+        raise ValueError("Configure the Google Play track and service account in project settings.")
+    state_dir = plain_path(project / "settings/private/android/.releases" / package)
+    summary = {"package": package}
+    if android.get("profile"):
+        summary["profile"] = android["profile"]
+    if track:
+        summary.update(track=track, releaseStatus=android["play_status"])
+    state_file, pending = state_dir / "last-release.json", state_dir / "pending-release.json"
+    with exclusive_build(SDK / "build/android-gradle/publish-locks" / (package + ".lock")):
         last = json.loads(state_file.read_text())["versionCode"] if state_file.exists() else 0
-        base = max(version_code(profile["last_version"]), last)
-        name, code = next_version(base)
+        base = max(android["version_code"], last)
+        name, code = next_version(android, base)
         if action == "inspect":
             return {
                 **summary,
                 "nextLocalVersion": name,
                 "versionCode": code,
+                "formats": formats,
                 "pendingCommit": pending.exists(),
             }
-        env = toolchain(home)
+        env = toolchain()
         if action == "build":
             if pending.exists():
                 raise ValueError(
                     "A prior commit is pending reconciliation. Use publish to reconcile the stored bundle."
                 )
-            bundle = signed_bundle(project, settings, profile, env, name, code)
-            return {**summary, "versionName": name, "versionCode": code, "bundle": str(bundle)}
-        edits = google_publisher(profile, env).edits()
+            artifacts = signed_packages(project, android, env, name, code, formats)
+            return {**summary, "versionName": name, "versionCode": code, "artifacts": artifacts}
+        state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        edits = google_publisher(
+            private_file(project, android["profile"], android["service_account"]), env
+        ).edits()
         edit = edits.insert(packageName=package, body={}).execute()["id"]
         params = {"packageName": package, "editId": edit}
         committing = False
@@ -397,9 +448,10 @@ def release(project, home, action):
                         "The pending version is present on Play with a different bundle, track or status."
                     )
                 pending.unlink()
-            name, code = next_version(max([base, *versions]))
-            body = release_body(track, tracks.get(track, []), profile["status"], name, code)
-            bundle = signed_bundle(project, settings, profile, env, name, code)
+            name, code = next_version(android, max([base, *versions]))
+            body = release_body(track, tracks.get(track, []), android["play_status"], name, code)
+            artifacts = signed_packages(project, android, env, name, code, ["aab"])
+            bundle = Path(artifacts["aab"])
             with bundle.open("rb") as stream:
                 digest = hashlib.file_digest(stream, "sha256").hexdigest()
             upload = upload_bundle(edits, params, bundle)
@@ -412,7 +464,7 @@ def release(project, home, action):
                 "versionName": name,
                 "versionCode": code,
                 "sha256": digest,
-                "bundle": str(bundle),
+                "artifacts": artifacts,
             }
             atomic_json(pending, record)
             committing = True
@@ -432,12 +484,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("inspect", "build", "publish"))
     parser.add_argument("--project", type=Path, required=True)
-    args = parser.parse_args()
-    home = Path(
-        os.environ.get("ENGINE_GOOGLE_PLAY_HOME", str(Path.home() / ".config/engine/google-play"))
+    parser.add_argument(
+        "--format",
+        choices=FORMATS,
+        help="Build one format instead of the project's configured outputs",
     )
+    args = parser.parse_args()
     try:
-        result = release(args.project.resolve(strict=True), home, args.action)
+        result = release(args.project, args.action, args.format)
     except (KeyError, ValueError, OSError) as error:
         # JSON/TOML syntax errors report locations, never print credential values.
         print(json.dumps({"error": str(error)}))
@@ -446,7 +500,9 @@ def main():
         reason = getattr(getattr(error, "resp", None), "status", None)
         # Library exceptions and subprocess arguments may include private file names or HTTP data.
         print(
-            json.dumps({"error": f"Release operation failed ({type(error).__name__}, status {reason})."})
+            json.dumps(
+                {"error": f"Release operation failed ({type(error).__name__}, status {reason})."}
+            )
         )
         return 1
     print(json.dumps(result))

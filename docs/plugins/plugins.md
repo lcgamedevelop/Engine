@@ -156,7 +156,7 @@ CMake 的其余职责分别位于 `install/`、`dependencies/`、`core/`、`edit
 - [脚本](runtime/scripting.md)、[角色控制](runtime/character-controller.md)、[群体导航](runtime/navigation-crowd.md)。
 - [特效](runtime/effects.md)、[体积地形](runtime/terrain.md)、[建筑破坏](runtime/destruction.md)。
 - [MCP 场景编辑](editor/mcp.md)、[模型导入](editor/model-import.md)、[光照烘焙](editor/scene-bake.md)。
-- [Google Play 签名与发布](editor/google-play.md)。
+- [Android 项目出包与 Google Play 发布](editor/google-play.md)。
 - [完整资源同步](editor/resource-sync.md)、[公开范例与验证](../testing.md)。
 
 `character_controller` 明确依赖 `camera`；编辑器对应插件也通过依赖闭包装配。仅选 `camera` 可以运行普通镜头，无需角色或脚本插件。相机与角色类型登记表由可执行宿主持有并冻结，库不使用隐式进程全局类型表。

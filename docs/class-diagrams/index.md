@@ -261,7 +261,7 @@ RenderSubmitStatus 区分提交、暂缓和失败，GameplayStopCause 显式区�
 - [场景静态照明烘焙](../plugins/editor/class-diagrams/scene-lighting-bake.md)
 - [场景预览 MCP 适配](../plugins/editor/class-diagrams/scene-preview-mcp-tools.md)
 - [地形资源与编辑器命令](../plugins/editor/class-diagrams/terrain-editor.md)
-- [Google Play 发布](../plugins/editor/class-diagrams/google-play.md)
+- [Android 出包与 Google Play 发布](../plugins/editor/class-diagrams/google-play.md)
 - [UI 编辑器插件](../plugins/editor/class-diagrams/ui-editor.md)
 - [UI 文档导入](../plugins/editor/class-diagrams/ui-importer.md)
 - [USD 导入器](../plugins/editor/class-diagrams/usd-import.md)
