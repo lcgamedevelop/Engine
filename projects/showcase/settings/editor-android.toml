@@ -1,0 +1,13 @@
+[android]
+package = "org.engine.minimal"
+label = "Engine"
+artifact_name = "engine-showcase"
+orientation = "unspecified"
+formats = ["apk"]
+min_sdk = 28
+target_sdk = 35
+
+version_name = "0.1.0"
+version_code = 1
+version_weights = [1000000, 1000, 1]
+increment_component = 3

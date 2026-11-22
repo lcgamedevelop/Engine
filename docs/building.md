@@ -183,7 +183,7 @@ cmake --build --preset macos-native-release --target engine_export
 
 - Windows：`output/windows/x64/release/runtime/engine-showcase.exe`；编辑器为相邻 `editor/engine-editor.exe`，使用静态依赖和 CRT。
 - macOS ARM64 默认原生模式：`output/macos/arm64/release/runtime/engine-showcase`；编辑器为相邻 `editor/editor_app`，直接从终端运行。必要私有库放 `lib/`，离线导入工具放 `tools/`，不经过 `.app` 安装或交互签名流程。`macos-native-debug` / `macos-native-release` 预设显式固定此模式；其他 Mac 桌面预设也默认 `ENGINE_MACOS_APP_BUNDLE=OFF`。
-- Android ARM64：`output/android/arm64/<debug|release>/runtime/engine-showcase.apk`；原生部分仅一个 `libmain.so`。APK 继续使用测试签名。
+- Android ARM64：`output/android/arm64/<debug|release>/runtime/engine-showcase.apk`；原生部分仅一个 `libmain.so`。示例安装测试使用调试签名。项目的 APK 和 Google Play AAB 通过编辑器读取自身 Android 设置和签名身份导出。[项目签名出包](plugins/editor/google-play.md)
 
 原生桌面模式的 `catalog.bin`、`packs/` 或 `gen/` 位于程序旁的 `assets/`；默认不包含 ICU 数据。可选 `.app` 模式将它们放在 `Contents/Resources/assets/`，由 SDL 直接读取；宿主优先使用已发布的外部持久资源版本，否则使用包内版本，缺失条目不混用旧包。运行时直接读取资源，不使用自解压程序。编辑器继续要求 `--project`；运行包直接进入 Gameplay。若需要 macOS 原生应用包，配置时显式加 `-DENGINE_MACOS_APP_BUNDLE=ON`，再运行相同导出目标；程序、私有工具和初始资源均进入 `.app`，外部持久目录用于更新资源版本。本地构建仅使用系统要求的 ad-hoc 代码签名，不要求证书或用户确认；正式分发的开发者签名和公证另由发布流程提供。Linux 暂未提供或验证上述导出入口；iOS 使用下文的独立平台导出入口。
 

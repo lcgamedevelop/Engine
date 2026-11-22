@@ -229,6 +229,11 @@ if(TARGET mcp_app)
     set_tests_properties(editor.project_script_compile PROPERTIES TIMEOUT 60)
 endif()
 
+if(TARGET engine_google_play)
+    add_test(NAME editor.google_play_publishing
+             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/plugins/editor/google_play/publishing_test.py")
+endif()
+
 if(TARGET engine_mcp)
     add_executable(engine_mcp_registry_test plugins/editor/mcp/mcp_registry_test.cpp)
     target_link_libraries(engine_mcp_registry_test PRIVATE engine::mcp)

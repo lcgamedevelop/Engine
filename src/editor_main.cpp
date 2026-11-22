@@ -1,3 +1,7 @@
+#if defined(ENGINE_HAS_GOOGLE_PLAY)
+#include "plugins/editor/google_play/google_play_publisher.hpp"
+#include <SDL3/SDL_filesystem.h>
+#endif
 #if ENGINE_HAS_MCP_ENDPOINT
 #include "plugins/editor/mcp/editor_mcp_endpoint.hpp"
 #endif
@@ -265,6 +269,11 @@ int run_editor(const fs::path& project_root, engine::editor::EditorEnvironment& 
 #endif
     std::unique_ptr<engine::editor::RenderCommands> render_commands;
     std::unique_ptr<engine::editor::ScenePreview> preview;
+#if defined(ENGINE_HAS_GOOGLE_PLAY)
+    const char* editor_directory = SDL_GetBasePath();
+    engine::plugins::google_play::GooglePlayPublisher publisher(
+        tasks, project_root, editor_directory ? engine::PathUtils::from_utf8(editor_directory) : fs::path{});
+#endif
 #if ENGINE_HAS_UI_EDITOR
     std::unique_ptr<engine::plugins::ui::UiEditorCommands> ui_editor;
     std::uint64_t ui_run_id = 0;
@@ -497,6 +506,13 @@ int run_editor(const fs::path& project_root, engine::editor::EditorEnvironment& 
                                      {capture_root, engine::App::persistent_data_path(), {}}))
         {
             LogSystem::write(LogLevel::error, mcp_endpoint.last_error());
+            return 1;
+        }
+#endif
+#if defined(ENGINE_HAS_GOOGLE_PLAY)
+        if (!editor->commands() || !publisher.register_commands(*editor->commands()))
+        {
+            LogSystem::write(LogLevel::error, "Cannot register Google Play publishing commands");
             return 1;
         }
 #endif

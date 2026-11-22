@@ -1,3 +1,6 @@
+#if defined(ENGINE_HAS_GOOGLE_PLAY_MCP)
+#include "plugins/editor/google_play/google_play_mcp_tools.hpp"
+#endif
 #include "runtime/performance/profiling.hpp"
 
 #if ENGINE_HAS_CAMERA_EDITOR
@@ -321,6 +324,12 @@ int main(int argc, char** argv)
     if (!pipeline.set_importer(importer))
     {
         std::fputs("Cannot register modeling importer\n", stderr);
+        return 1;
+    }
+#endif
+#if defined(ENGINE_HAS_GOOGLE_PLAY_MCP)
+    if (!engine::plugins::google_play::register_google_play_tools(mcp, editor_tools))
+    {
         return 1;
     }
 #endif

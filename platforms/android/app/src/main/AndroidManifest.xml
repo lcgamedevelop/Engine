@@ -3,10 +3,10 @@
     <uses-feature android:name="android.hardware.vulkan.version"
         android:version="0x00400000" android:required="true" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
-    <application android:label="Engine" android:allowBackup="false"
+    <application android:label="${engineLabel}" android:allowBackup="false"
         android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen"
         android:hardwareAccelerated="true">
-        <activity android:name=".EngineActivity" android:exported="true"
+        <activity android:name="org.engine.minimal.EngineActivity" android:screenOrientation="${engineOrientation}" android:exported="true"
             android:launchMode="singleTask"
             android:configChanges="layoutDirection|locale|grammaticalGender|fontScale|fontWeightAdjustment|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation">
             <intent-filter>
