@@ -216,28 +216,101 @@ bool read_settings(const std::filesystem::path& source,
     return true;
 }
 
-bool validate_style(std::string_view text, std::string& error)
+bool declared_texture(std::string_view source, const schema::UiDocumentDataT& document,
+                      const editor::asset_pipeline::ImportContext& context)
+{
+    Guid guid;
+    std::string path, error;
+    return !source.empty() && source.find('&') == source.npos &&
+           resolve(source, schema::AssetKind::texture, context, guid, path, error) &&
+           std::find(document.texture_guids.begin(), document.texture_guids.end(), guid) !=
+               document.texture_guids.end();
+}
+
+std::string_view trimmed(std::string_view text)
+{
+    const auto first = text.find_first_not_of(" \t\r\n");
+    return first == text.npos ? std::string_view{}
+                              : text.substr(first, text.find_last_not_of(" \t\r\n") - first + 1);
+}
+
+bool validate_style(std::string_view text, const schema::UiDocumentDataT& document,
+                    const editor::asset_pipeline::ImportContext& context, bool stylesheet,
+                    std::string& error)
 {
     ENGINE_PROFILE_FUNCTION();
-    // RCSS images need additional resource dependency rules. Keep this stage explicit.
-    std::string normalized;
-    normalized.reserve(text.size());
-    for (const auto value : lowercase(text))
+    std::string css(text);
+    for (auto begin = css.find("/*"); begin != css.npos; begin = css.find("/*", begin + 2))
     {
-        if (!whitespace(value))
+        const auto end = css.find("*/", begin + 2);
+        if (end == css.npos)
         {
-            normalized.push_back(value);
-        }
-    }
-    for (const auto* external :
-         {"@import", "@font-face", "@spritesheet", "url(", "image(", "fill-image:"})
-    {
-        if (normalized.find(external) != std::string::npos)
-        {
-            error = "UI supports inline RCSS and declared img textures; external CSS resources "
-                    "are unsupported";
+            error = "UI stylesheet comment is unterminated";
             return false;
         }
+        std::fill(css.begin() + begin, css.begin() + end + 2, ' ');
+    }
+    const auto lower = lowercase(css);
+    std::string normalized;
+    for (const auto character : lower)
+    {
+        if (!whitespace(character))
+        {
+            normalized.push_back(character);
+        }
+    }
+    for (const auto* external : {"@import", "@font-face", "url(", "image(", "fill-image:"})
+    {
+        if (normalized.find(external) != normalized.npos)
+        {
+            error = "UI external CSS resources are unsupported";
+            return false;
+        }
+    }
+    constexpr std::string_view sheet_rule = "@spritesheet";
+    const std::string_view sheet(css);
+    for (auto at = lower.find(sheet_rule); at != lower.npos; at = lower.find(sheet_rule, at))
+    {
+        const auto open = sheet.find_first_of("{}", at + sheet_rule.size());
+        const auto end = open == sheet.npos ? sheet.npos : sheet.find_first_of("{}", open + 1);
+        if (!stylesheet || open == sheet.npos || sheet[open] != '{' || end == sheet.npos ||
+            sheet[end] != '}' ||
+            trimmed(sheet.substr(at + sheet_rule.size(), open - at - sheet_rule.size())).empty())
+        {
+            error = "UI spritesheets require a named inline stylesheet block";
+            return false;
+        }
+        auto fields = sheet.substr(open + 1, end - open - 1);
+        bool found = false;
+        while (!fields.empty())
+        {
+            const auto next = fields.find(';');
+            const auto field = fields.substr(0, next);
+            const auto colon = field.find(':');
+            if (colon != field.npos && lowercase(trimmed(field.substr(0, colon))) == "src")
+            {
+                auto source = trimmed(field.substr(colon + 1));
+                if (source.size() >= 2 && (source.front() == '\'' || source.front() == '"') &&
+                    source.back() == source.front())
+                {
+                    source = source.substr(1, source.size() - 2);
+                }
+                if (found || !declared_texture(source, document, context))
+                {
+                    error =
+                        "UI spritesheet src must identify one texture declared in [ui].textures";
+                    return false;
+                }
+                found = true;
+            }
+            fields = next == fields.npos ? std::string_view{} : fields.substr(next + 1);
+        }
+        if (!found)
+        {
+            error = "UI spritesheet requires a declared src texture";
+            return false;
+        }
+        at = end + 1;
     }
     return true;
 }
@@ -363,7 +436,7 @@ bool validate_markup(const schema::UiDocumentDataT& document,
                 error = "UI templates and script data models are not enabled";
                 return false;
             }
-            if (attribute == "style" && !validate_style(value, error))
+            if (attribute == "style" && !validate_style(value, document, context, false, error))
             {
                 return false;
             }
@@ -380,13 +453,7 @@ bool validate_markup(const schema::UiDocumentDataT& document,
         ++cursor;
         if (!closing && tag == "img")
         {
-            Guid guid;
-            std::string path;
-            if (!has_source || image_source.empty() ||
-                image_source.find('&') != std::string::npos ||
-                !resolve(image_source, schema::AssetKind::texture, context, guid, path, error) ||
-                std::find(document.texture_guids.begin(), document.texture_guids.end(), guid) ==
-                    document.texture_guids.end())
+            if (!has_source || !declared_texture(image_source, document, context))
             {
                 error = "UI img src must identify a texture declared in [ui].textures";
                 return false;
@@ -396,7 +463,7 @@ bool validate_markup(const schema::UiDocumentDataT& document,
         {
             const auto end = lower.find("</style", cursor);
             if (end == std::string::npos ||
-                !validate_style(text.substr(cursor, end - cursor), error))
+                !validate_style(text.substr(cursor, end - cursor), document, context, true, error))
             {
                 if (error.empty())
                 {
@@ -469,7 +536,7 @@ bool UiImporter::inspect_batch(const editor::asset_pipeline::ImportContext&,
     {
         return false;
     }
-    fingerprint += ":ui-importer-2:rmlui-6.1";
+    fingerprint += ":ui-importer-3:rmlui";
     return true;
 }
 

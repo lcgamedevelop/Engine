@@ -103,7 +103,10 @@ bool texture_dimensions(const Project& project, engine::editor::AssetPipelineSys
     for (const auto* texture : {"builtin://textures/white-srgb", "hdr.ktx", "cube.ktx"})
     {
         const std::string markup =
-            std::string("<rml><body><img src=\"") + texture + "\"/></body></rml>";
+            std::string("<rml><head><style>@spritesheet chart {src: ") + texture +
+            "; outer: 0px 0px 8px 8px; inner: 2px 2px 4px 4px;} " +
+            "body {decorator: ninepatch(outer, inner);}</style></head><body><img src=\"" + texture +
+            "\"/></body></rml>";
         const auto settings =
             metadata(ui_guid, std::string("textures = [\"") + texture +
                                   "\"]\n[[ui.fonts]]\nfamily = \"body\"\nasset = \"lato.ttf\"\n");

@@ -33,7 +33,8 @@ UI 生成物是 `cache/gen/<源GUID>`，包含文档标记、`UiFontBinding` 列
 
 - 文档最多 1 MiB；属性值需要引号。
 - 支持内嵌 RCSS 和 `<img src="textures/example.png">`；图片只能使用 meta 已声明的纹理路径或 GUID。
-- 外部 `<link>`、`<script>`、`<template>`、CSS `@import`、`@font-face`、`@spritesheet`、`url()`、`fill-image` 与图片装饰器暂不接入，导入时明确失败，避免未登记的运行时文件依赖。
+- 内嵌样式表可通过 `@spritesheet` 的单个 `src` 引用已声明的纹理。RmlUi 使用图集子矩形和内置 `ninepatch` 装饰器缩放九宫格边框，保留四角比例。
+- 外部 `<link>`、`<script>`、`<template>`、CSS `@import`、`@font-face`、`url()`、`fill-image` 与直接请求外部图片的装饰器暂不接入，导入时明确失败，避免未登记的运行时文件依赖。
 - 文档不嵌入脚本、项目 Model 或场景跳转规则。现有 Gameplay 与 `UiController<T>` 已提供 MVC 业务入口：Controller 订阅 `UiComponent` / `UiElement` 事件并显式刷新 View，细节见[运行时 UI](../../runtime/ui.md#mvc-与支持范围)。
 
 UiImporter 只处理编辑器导入，不调用 FontImporter 的具体实现，也不在编辑器基础库登记自己；可执行宿主根据 CMake 插件选择完成装配。
