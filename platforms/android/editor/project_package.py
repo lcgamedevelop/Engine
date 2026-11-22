@@ -5,6 +5,8 @@ import re
 import tomllib
 
 MAX_CODE = 2_100_000_000
+MIN_SDK = 28
+DEFAULT_TARGET_SDK = 36
 FORMATS = ("apk", "aab")
 ORIENTATIONS = {
     "unspecified": -1,
@@ -39,13 +41,18 @@ def check_table(table, name, required, optional=()):
 
 
 def version_layout(version):
-    check_table(version, "android.version", {"name", "code", "weights", "increment_component"})
-    weights = version["weights"]
-    base, code, increment = (
-        version["name"],
-        version["code"],
-        version["increment_component"],
-    )
+    scheme = {"weights", "increment_component"}
+    check_table(version, "android.version", {"name", "code"}, scheme)
+    base, code = version["name"], version["code"]
+    if not isinstance(base, str) or not base.strip():
+        raise ValueError("Set the Android version name to nonempty text.")
+    if type(code) is not int or not 0 <= code <= MAX_CODE:
+        raise ValueError("Invalid Android version code.")
+    if scheme.isdisjoint(version):
+        return None
+    if not scheme.issubset(version):
+        raise ValueError("Set weights and increment_component together in [android.version].")
+    weights, increment = version["weights"], version["increment_component"]
     if (
         not isinstance(weights, list)
         or not weights
@@ -54,12 +61,8 @@ def version_layout(version):
         or any(a <= b or a % b for a, b in zip(weights, weights[1:]))
         or type(increment) is not int
         or not 1 <= increment <= len(weights)
-        or type(code) is not int
-        or not 0 <= code <= MAX_CODE
     ):
-        raise ValueError("Invalid Android version weights, base code or increment component.")
-    if not isinstance(base, str):
-        raise ValueError("Use a quoted Android version name in project settings.")
+        raise ValueError("Invalid Android version weights or increment component.")
     parts = base.split(".")
     if len(parts) != len(weights) or not all(re.fullmatch(r"0|[1-9][0-9]*", p) for p in parts):
         raise ValueError("Version name must match the project's numeric version components.")
@@ -74,8 +77,13 @@ def version_layout(version):
 
 
 def next_version(version, maximum):
-    weights, offset, step = version_layout(version)
+    layout = version_layout(version)
     highest = max(version["code"], maximum)
+    if highest >= MAX_CODE:
+        raise ValueError("The Android version line is exhausted.")
+    if layout is None:
+        return version["name"], highest + 1
+    weights, offset, step = layout
     value = ((highest - offset) // step + 1) * step
     code = value + offset
     if not 0 < code <= MAX_CODE:
@@ -102,34 +110,36 @@ def read_settings(path):
     check_table(
         android,
         "android",
+        {"package", "label", "version"},
         {
-            "package",
-            "label",
             "artifact_name",
             "orientation",
+            "fullscreen",
             "formats",
             "min_sdk",
             "target_sdk",
-            "version",
+            "signing",
         },
-        {"fullscreen", "signing"},
     )
     if not isinstance(android["package"], str) or not re.fullmatch(
         r"[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+", android["package"]
     ):
         raise ValueError("Invalid Android application ID.")
-    if (
-        not isinstance(android["label"], str)
-        or not android["label"].strip()
-        or not isinstance(android["orientation"], str)
-        or android["orientation"] not in ORIENTATIONS
-    ):
-        raise ValueError("Set the Android app label and screen orientation in project settings.")
+    if not isinstance(android["label"], str) or not android["label"].strip():
+        raise ValueError("Set the Android app label to nonempty text.")
+    if "artifact_name" not in android:
+        stem = re.sub(r"[^a-z0-9]+", "-", android["label"].lower()).strip("-")
+        android["artifact_name"] = stem or android["package"].replace(".", "-")
+    android.setdefault("orientation", "unspecified")
+    android.setdefault("fullscreen", True)
+    android.setdefault("formats", list(FORMATS))
+    if not isinstance(android["orientation"], str) or android["orientation"] not in ORIENTATIONS:
+        raise ValueError("Invalid Android screen orientation.")
     if not isinstance(android["artifact_name"], str) or not re.fullmatch(
         r"[\w-]+", android["artifact_name"], re.ASCII
     ):
         raise ValueError("The artifact name must contain letters, digits, underscores or hyphens.")
-    if type(android.get("fullscreen", False)) is not bool:
+    if type(android["fullscreen"]) is not bool:
         raise ValueError("The Android fullscreen setting must be a boolean.")
     formats = android["formats"]
     if (
@@ -139,9 +149,13 @@ def read_settings(path):
         or len(formats) != len(set(formats))
     ):
         raise ValueError("Project outputs must be a list of distinct APK or AAB formats.")
-    minimum, target = android["min_sdk"], android["target_sdk"]
-    if type(minimum) is not int or type(target) is not int or not 28 <= minimum <= target:
-        raise ValueError("Android requires target SDK >= minimum SDK >= 28.")
+    minimum = android.setdefault("min_sdk", MIN_SDK)
+    if type(minimum) is not int or minimum < MIN_SDK:
+        raise ValueError(f"Android requires a minimum SDK of at least {MIN_SDK}.")
+    target = android.setdefault("target_sdk", max(DEFAULT_TARGET_SDK, minimum))
+    if type(target) is not int or target < minimum:
+        raise ValueError(f"Android requires target SDK >= minimum SDK >= {MIN_SDK}.")
+    android["compile_sdk"] = max(DEFAULT_TARGET_SDK, target)
     version_layout(android["version"])
     if "signing" in android:
         signing = android["signing"]
@@ -151,17 +165,18 @@ def read_settings(path):
             {
                 "keystore",
                 "alias",
-                "certificate_sha256",
                 "store_password",
                 "key_password",
             },
-            {"profile"},
+            {"profile", "certificate_sha256"},
         )
         if not all(isinstance(value, str) for value in signing.values()):
             raise ValueError("Use strings for the fields in [android.signing].")
         if not signing["keystore"].strip() or not signing["alias"].strip():
             raise ValueError("Set the keystore path and alias in [android.signing].")
-        if not re.fullmatch(r"[0-9a-fA-F]{64}", signing["certificate_sha256"]):
+        if "certificate_sha256" in signing and not re.fullmatch(
+            r"[0-9a-fA-F]{64}", signing["certificate_sha256"]
+        ):
             raise ValueError("Invalid upload certificate SHA-256 in [android.signing].")
     if "google_play" in settings:
         play = settings["google_play"]

@@ -8,7 +8,7 @@
 
 ## Android 出包
 
-项目在同一个 `settings/editor-android.toml` 中填写四组设置。`[android]` 保存应用和 APK、AAB 打包参数，`[android.version]` 保存版本策略，`[android.signing]` 保存签名参数，`[google_play]` 保存商店发布参数。[字段与出包操作](../plugins/editor/google-play.md)
+项目在同一个 `settings/editor-android.toml` 中分组填写参数。`[android]` 指定包名、显示名和需要的方向，`[android.version]` 指定版本。签名出包、上传商店时分别填写 `[android.signing]` 和 `[google_play]`。沉浸式全屏、SDK 基线、产物格式与命名由框架提供默认值。编辑器的 `inspect` 可查看最终生效的设置。[字段与出包操作](../plugins/editor/google-play.md)
 
 ## 帧率上限
 

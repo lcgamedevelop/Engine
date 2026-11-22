@@ -2,7 +2,7 @@
 
 Android 平台工程位于 `platforms/android/`，沿用 [SDL3 的 Activity / JNI 框架](https://wiki.libsdl.org/SDL3/README-android)。原生部分仍由根 CMake Presets 编译，Gradle 只处理 Java、Manifest 和 APK；SDLActivity 源码从同版本 SDL3 的 vcpkg overlay 安装结果取得。APK 直接启动引擎，不包含编辑器项目目录、项目校验或编辑器 UI。
 
-准备 Python 3、JDK 17、Android SDK Platform 35、Build Tools 37.0.0、NDK 30.0.16248370，以及[构建指南](../building.md)要求的 CMake / Ninja / 编译缓存 / vcpkg。设置 `ANDROID_HOME`、`ANDROID_NDK_HOME`、`JAVA_HOME` 和 `VCPKG_ROOT` 指向已有安装；可复用其他工程的安装目录。Android Gradle Plugin 固定 9.5.0，wrapper 固定 Gradle 9.8.2 并核对官方 SHA-256；也可通过 `GRADLE_HOME` 复用相同版本，脚本会检查版本。
+准备 Python 3.11 或更新版本、JDK 17、Android SDK Platform 36、Build Tools 37.0.0、NDK 30.0.16248370，以及[构建指南](../building.md)要求的 CMake / Ninja / 编译缓存 / vcpkg。设置 `ANDROID_HOME`、`ANDROID_NDK_HOME`、`JAVA_HOME` 和 `VCPKG_ROOT` 指向已有安装，可复用其他工程的安装目录。Android Gradle Plugin 固定 9.5.0，wrapper 固定 Gradle 9.8.2 并核对官方 SHA-256，也可通过 `GRADLE_HOME` 复用相同版本。
 
 ```sh
 npm ci --prefix projects/showcase/settings/typescript
@@ -10,9 +10,9 @@ python3 scripts/build_android.py --config debug --project projects/showcase --as
 python3 scripts/build_android.py --config release --project projects/showcase --asset-builder build/ninja-engine-release/asset_build_app
 ```
 
-Android 默认使用 QuickJS；脚本依次调用 `android-arm64-debug` / `android-arm64-release` 的根 configure、显式 `-prepare`（`engine_script_prepare`）、build Preset，再打包。传入 `--backend v8` 使用独立 `android-arm64-v8-debug` / `android-arm64-v8-release` 预设，不混用后端缓存。V8 的 Android 构建入口支持 macOS ARM64 / x64 和 Linux x64 宿主，Windows 宿主的 Android V8 工具链尚未接入。产物为 `output/android/arm64/debug/runtime/engine-showcase.apk` 和 `output/android/arm64/release/runtime/engine-showcase.apk`；最低 Android 9 / API 28，ABI 为 `arm64-v8a`，需要 Vulkan。两种 APK 均使用本机调试签名，供安装测试；发布签名尚未配置，签名密钥不进入仓库。
+Android 默认使用 QuickJS。脚本依次调用 `android-arm64-debug` / `android-arm64-release` 的根 configure、显式 `-prepare`（`engine_script_prepare`）、build Preset，再打包。传入 `--backend v8` 使用独立 `android-arm64-v8-debug` / `android-arm64-v8-release` 预设。V8 的 Android 构建入口支持 macOS ARM64 / x64 和 Linux x64 宿主，Windows 宿主的 Android V8 工具链尚未接入。示例命令生成 `output/android/arm64/debug/runtime/engine-showcase.apk` 和 `output/android/arm64/release/runtime/engine-showcase.apk`，ABI 为 `arm64-v8a`，需要 Vulkan。两者使用本机调试签名，供安装测试。项目上传密钥签名的 APK、AAB 与商店上传由编辑器提供。[项目打包设置与发布](../plugins/editor/google-play.md)
 
-2026-11-04 工具依赖升级采用 Gradle 官方 `versions/current` 和 Google Android SDK 官方 `repository2-3.xml` 的稳定 `channel-0`，不采用 preview：Gradle 9.8.2、AGP 9.5.0、NDK r30（30.0.16248370）、Build Tools 37.0.0。`compileSdk` / `targetSdk` 继续为 35，最低 API 继续为 28；升级构建工具不提升应用的平台要求。
+游戏宿主默认沉浸式全屏，原生库最低支持 Android 9 / API 28。项目的最低与目标 API 从同一份打包设置读取，编译 API 由框架计算。[Android 宿主窗口与安全区](class-diagrams/android-host.md)
 
 wrapper 的分发 SHA-256 为 `21bd5da2de49b642904077f38c0efdc7778e92b3ed0889392dca61b97e389607`，wrapper JAR SHA-256 为 `3b8a25775a69158b5ad2b1d17a80a88dc7b40a352a73eb27d06c612a7ce68e98`，JAR 与启动脚本来自 Gradle `v9.8.2` 正式 tag。SDK 包通过官方 sdkmanager 安装并校验发布归档；NDK 与 V8 GN 使用同版 r30，不能混用其他 NDK 的 libc++ 头文件或静态运行库。
 

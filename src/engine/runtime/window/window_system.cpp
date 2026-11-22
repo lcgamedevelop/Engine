@@ -369,7 +369,7 @@ bool WindowSystem::on_initialize(const EngineConfig& config)
     flags |= SDL_WINDOW_METAL;
 #elif defined(SDL_PLATFORM_ANDROID)
     flags |= SDL_WINDOW_VULKAN;
-    if (SDL_GetHintBoolean("ENGINE_ANDROID_FULLSCREEN", false))
+    if (SDL_GetHintBoolean("ENGINE_ANDROID_FULLSCREEN", true))
     {
         flags |= SDL_WINDOW_FULLSCREEN;
     }

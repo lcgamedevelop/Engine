@@ -146,7 +146,10 @@ class AndroidBuildArgumentTest(unittest.TestCase):
             builder.chmod(0o755)
             project_settings = root / "projects/showcase/settings"
             project_settings.mkdir(parents=True)
-            shutil.copy2(ROOT / "projects/showcase/settings/editor-android.toml", project_settings)
+            template = ROOT / "projects/showcase/settings/editor-android.toml"
+            (project_settings / template.name).write_text(
+                template.read_text().replace("code = 1", "code = 0")
+            )
             commands = []
 
             def record(command):
@@ -172,7 +175,10 @@ class AndroidBuildArgumentTest(unittest.TestCase):
             ):
                 self.assertEqual(build.main(), 0)
             gradle = next(command for command in commands if ":app:assembleDebug" in command)
-            self.assertIn("-PengineFullscreen=false", gradle)
+            self.assertIn("-PengineFullscreen=true", gradle)
+            self.assertIn("-PengineMinSdk=28", gradle)
+            self.assertIn("-PengineTargetSdk=36", gradle)
+            self.assertIn("-PengineCompileSdk=36", gradle)
             self.assertIn("-PengineVersionName=0.1.0", gradle)
             self.assertIn("-PengineVersionCode=1", gradle)
             self.assertIn("-DENGINE_ANDROID_ASSET_BUILDER=" + str(builder.resolve()), commands[0])

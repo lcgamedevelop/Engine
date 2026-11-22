@@ -35,7 +35,7 @@ layout.buildDirectory.set(file("../../../build/android-gradle/${outputFlavor}"))
 
 android {
     namespace = 'org.engine.minimal'
-    compileSdk = targetApi
+    compileSdk = providers.gradleProperty('engineCompileSdk').get().toInteger()
     buildToolsVersion = '37.0.0'
     ndkVersion = '30.0.16248370'
     ndkPath = System.getenv('ANDROID_NDK_HOME')
@@ -48,7 +48,7 @@ android {
         manifestPlaceholders = [engineLabel: providers.gradleProperty('engineLabel').get(),
                                 engineOrientation: providers.gradleProperty('engineOrientation').get(),
                                 engineFullscreen: fullscreen.toString(),
-                                engineWindowTheme: fullscreen ? '@style/EngineFullscreen' : '@android:style/Theme.Material.NoActionBar.Fullscreen']
+                                engineWindowTheme: fullscreen ? '@style/EngineFullscreen' : '@android:style/Theme.Material.NoActionBar']
         buildConfigField 'boolean', 'ENGINE_SCRIPT_V8', hasV8.toString()
         buildConfigField 'boolean', 'ENGINE_SCRIPT_ICU', hasIcu.toString()
         ndk {

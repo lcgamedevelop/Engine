@@ -208,12 +208,11 @@ service_account = "private/android/test/account.json"
 
     def test_project_version_schemes_and_private_files_are_independent(self):
         android = read_settings(ROOT / "projects/showcase/settings/editor-android.toml")["android"]
-        self.assertEqual(next_version(android["version"], 5), ("0.1.5", 6))
+        self.assertEqual(next_version(android["version"], 5), ("0.1.0", 6))
         settings = self.home / "settings/editor-android.toml"
         template = (ROOT / "projects/showcase/settings/editor-android.toml").read_text()
-        settings.write_text(template.replace("fullscreen = false", "fullscreen = true"))
-        self.assertTrue(read_settings(settings)["android"]["fullscreen"])
-        settings.write_text(template.replace("fullscreen = false", 'fullscreen = "true"'))
+        self.assertTrue(android["fullscreen"])
+        settings.write_text(template.replace("[android]\n", '[android]\nfullscreen = "true"\n'))
         with self.assertRaises(ValueError):
             read_settings(settings)
         second = {
@@ -238,6 +237,68 @@ service_account = "private/android/test/account.json"
         with self.assertRaises(ValueError):
             private_file(self.home, "private/android/test/linked.key")
 
+    def test_new_game_inherits_engine_defaults_and_can_override_product_choices(self):
+        project = """[android]
+package = "test.example"
+label = "Crystal Vault"
+[android.version]
+name = "1.0-beta"
+code = 12
+"""
+        self.config.write_text(project)
+        receipt = self.run_release("inspect")
+        self.assertEqual((receipt["nextLocalVersion"], receipt["versionCode"]), ("1.0-beta", 13))
+        self.assertEqual(receipt["formats"], ["apk", "aab"])
+        self.assertEqual(
+            receipt["android"],
+            dict(
+                artifactName="crystal-vault",
+                orientation="unspecified",
+                fullscreen=True,
+                minSdk=28,
+                targetSdk=36,
+                compileSdk=36,
+            ),
+        )
+        self.config.write_text(
+            project.replace(
+                "[android]\n",
+                """[android]
+orientation = "portrait"
+fullscreen = false
+min_sdk = 29
+target_sdk = 34
+formats = ["apk"]
+""",
+            )
+        )
+        receipt = self.run_release("inspect")
+        self.assertEqual(receipt["formats"], ["apk"])
+        self.assertEqual(
+            receipt["android"],
+            dict(
+                artifactName="crystal-vault",
+                orientation="portrait",
+                fullscreen=False,
+                minSdk=29,
+                targetSdk=34,
+                compileSdk=36,
+            ),
+        )
+        self.config.write_text(project.replace("[android]\n", "[android]\nmin_sdk = 37\n"))
+        android = read_settings(self.config)["android"]
+        self.assertEqual(
+            (android["min_sdk"], android["target_sdk"], android["compile_sdk"]), (37, 37, 37)
+        )
+        self.config.write_text(project.replace("[android]\n", "[android]\ncompile_sdk = 34\n"))
+        with self.assertRaises(ValueError):
+            read_settings(self.config)
+        with self.assertRaises(ValueError):
+            next_version({"name": "1.0", "code": MAX_CODE}, 0)
+        for partial in ({"weights": [1]}, {"increment_component": 1}):
+            with self.subTest(partial=partial), self.assertRaises(ValueError):
+                next_version({"name": "1", "code": 0, **partial}, 0)
+
     def test_inline_signing_values_and_group_boundaries(self):
         text = self.config.read_text()
         signing = read_settings(self.config)["android"]["signing"]
@@ -246,7 +307,13 @@ service_account = "private/android/test/account.json"
         receipt = json.dumps(self.run_release("inspect"))
         for password in ("fixture-store", "fixture-key"):
             self.assertNotIn(password, receipt)
+        without_pin = "\n".join(
+            line for line in text.splitlines() if not line.startswith("certificate_sha256 =")
+        )
+        self.config.write_text(without_pin)
+        self.assertNotIn("certificate_sha256", read_settings(self.config)["android"]["signing"])
         for old, wrong in (
+            ("00" * 32, "not-a-fingerprint"),
             ("[google_play]", "[android.google_play]"),
             ("store_password =", "password_file ="),
             ("[android]", '[android]\ntrack = "internal"'),
