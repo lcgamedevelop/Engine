@@ -1,4 +1,5 @@
 #include "plugins/runtime/effects/effect_system.hpp"
+#include "runtime/log/log_system.hpp"
 
 #include "plugins/runtime/effects/effect_component_runtime.hpp"
 #include "runtime/render/render_constants.hpp"
@@ -630,6 +631,7 @@ bool EffectSystem::on_tick(double delta_time)
         if (!state_->synchronize(world_, elapsed, paused))
         {
             last_error_ = state_->resources.error;
+            LogSystem::write(LogLevel::error, "Effect update failed: " + last_error_);
             return false;
         }
     }
@@ -766,6 +768,7 @@ bool EffectSystem::draw(const RenderContext& context)
          !state_->synchronize(world_, std::exchange(pending_seconds_, 0.0), paused)))
     {
         last_error_ = state_->resources.error;
+        LogSystem::write(LogLevel::error, "Effect rendering failed: " + last_error_);
         return false;
     }
     state_->prepared = false;

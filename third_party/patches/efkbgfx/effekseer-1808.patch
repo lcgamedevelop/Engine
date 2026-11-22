@@ -79,7 +79,17 @@
  		} m_uniform[maxUniform];
  		bgfx_uniform_handle_t m_samplers[maxSamplers];
  		bgfx_program_handle_t m_program;
-@@ -640,6 +660,7 @@
+@@ -444,7 +464,8 @@
+ 			}
+ 			if (!m_renderer->AppendSprites(count, stride, data)) {
+ 				DoRendering();
+-				m_renderer->AllocVertexBuffer();
++				if (!m_renderer->AllocVertexBuffer(count))
++					return;
+ 				m_renderer->AppendSprites(count, stride, data);
+ 			}
+ 			if (state.Collector.IsBackgroundRequiredOnFirstPass && m_renderer->GetDistortingCallback() != nullptr) {
+@@ -640,6 +661,7 @@
  	int32_t m_squareMaxCount = 0;
  	int32_t m_indexBufferStride = 2;
  	bgfx_view_id_t m_viewid = 0;
@@ -87,7 +97,7 @@
  	bgfx_vertex_layout_t m_modellayout;
  
  	struct VertexLayoutInfo {
-@@ -659,6 +680,10 @@
+@@ -659,6 +681,10 @@
  			return t;
  		bgfx_texture_handle_t h = m_initArgs.texture_get(type, param, m_initArgs.ud);
  		t.DownCast<Texture>()->ReplaceInterface(h);
@@ -98,7 +108,7 @@
  		return t;
  	}
  	//! because gleDrawElements has only index offset
-@@ -783,6 +808,7 @@
+@@ -783,6 +809,7 @@
  			BGFX(vertex_layout_add)(layout, BGFX_ATTRIB_BITANGENT, 3, BGFX_ATTRIB_TYPE_FLOAT, false, false);
  			BGFX(vertex_layout_add)(layout, BGFX_ATTRIB_TANGENT, 3, BGFX_ATTRIB_TYPE_FLOAT, false, false);
  			BGFX(vertex_layout_add)(layout, BGFX_ATTRIB_TEXCOORD0, 2, BGFX_ATTRIB_TYPE_FLOAT, false, false);
@@ -106,7 +116,7 @@
  			BGFX(vertex_layout_add)(layout, BGFX_ATTRIB_COLOR0, 4, BGFX_ATTRIB_TYPE_UINT8, true, false);
  		BGFX(vertex_layout_end)(layout);
  		
-@@ -945,8 +971,8 @@
+@@ -945,8 +972,8 @@
  		if (init->texture_get == nullptr)
  			return;
  		bgfx_texture_handle_t invalid = BGFX_INVALID_HANDLE;
@@ -117,7 +127,7 @@
  	}
  public:
  	RendererImplemented() {
-@@ -981,16 +1007,24 @@
+@@ -981,16 +1008,24 @@
  		
  		m_standardRenderer = new BGFXStandardRenderer(this);
  
@@ -142,7 +152,69 @@
  
  		m_renderState->GetActiveState().Reset();
  		m_renderState->GetActiveState().TextureIDs.fill(0);
-@@ -1249,6 +1283,12 @@
+@@ -1084,11 +1119,19 @@
+ 	}
+ 	void SetLayout(Shader* shader) {}
+ 
+-	void AllocVertexBuffer() {
++	bool AllocVertexBuffer(int count) {
+ 		auto &info = m_layouts[m_current_layout];
+ 		info.offset = 0;
+ 		info.count = 0;
+-		BGFX(alloc_transient_vertex_buffer)(&info.tvb, info.cap, &info.layout);
++		info.cap = 0;
++		if (count <= 0 || count > 4 * GetSquareMaxCount())
++			return false;
++		const uint32_t needed = static_cast<uint32_t>(count);
++		if (BGFX(get_avail_transient_vertex_buffer)(needed, &info.layout) < needed)
++			return false;
++		BGFX(alloc_transient_vertex_buffer)(&info.tvb, needed, &info.layout);
++		info.cap = count;
++		return true;
+ 	}
+ 
+ 	void SwitchLayout(EffekseerRenderer::RendererShaderType renderingMode) {
+@@ -1112,32 +1155,24 @@
+ 			m_current_layout = LAYOUT_MATERIAL;
+ 			return;
+ 		}
+-		if (m_layouts[m_current_layout].cap == 0) {
+-			m_layouts[m_current_layout].cap = 4 * GetSquareMaxCount();
+-			AllocVertexBuffer();
+-		}
+ 	}
+ 	bool AppendSprites(int count, int& stride, void*& data) {
+-		if (m_current_layout == LAYOUT_MATERIAL) {
+-			stride = 0;
+-			data = nullptr;
+-			return true;	// todo
+-		}
++		data = nullptr;
++		stride = 0;
++		if (m_current_layout == LAYOUT_MATERIAL || count <= 0)
++			return true;
+ 
+ 		auto& layout = m_layouts[m_current_layout];
+-		assert(layout.cap > 0);
++		if (count > layout.cap - layout.count)
++			return false;
+ 		stride = layout.tvb.stride;
+ 		data = layout.tvb.data + layout.count * stride;
+-		if (count + layout.count > layout.cap) {
+-			// full
+-			return false;
+-		}
+ 		layout.count += count;
+ 		return true;
+ 	}
+ 
+ 	bool NeedDraw() {
+-		return m_layouts[m_current_layout].count > 0;
++		return m_layouts[m_current_layout].count > m_layouts[m_current_layout].offset;
+ 	}
+ 	void ResetDraw() {
+ 		auto& layout = m_layouts[m_current_layout];
+@@ -1249,6 +1284,12 @@
  			s->m_uniform[i+s->m_vsSize].handle = u[i];
  			s->m_uniform[i+s->m_vsSize].count = 0;
  			s->m_uniform[i+s->m_vsSize].ptr = nullptr;
@@ -155,7 +227,7 @@
  		}
  		for (i=0;i<Shader::maxSamplers;i++) {
  			s->m_samplers[i].idx = UINT16_MAX;
-@@ -1331,13 +1371,13 @@
+@@ -1331,13 +1372,13 @@
  
  		const bgfx_memory_t *mem = BGFX(copy)(initialData.data(), (uint32_t)initialData.size());
  		bgfx_texture_handle_t handle = BGFX(create_texture_2d)(param.Size[0], param.Size[1], false, 1, BGFX_TEXTURE_FORMAT_RGBA8,
@@ -171,7 +243,7 @@
  			BGFX(destroy_texture)(h);
  	}
  	Effekseer::Backend::IndexBufferRef CreateIndexBuffer(int32_t elementCount, const void* initialData, Effekseer::Backend::IndexBufferStrideType stride) const {
-@@ -1399,6 +1439,7 @@
+@@ -1399,6 +1440,7 @@
  			BGFX(vertex_layout_add)(&layout, BGFX_ATTRIB_BITANGENT, 3, BGFX_ATTRIB_TYPE_FLOAT, false, false);
  			BGFX(vertex_layout_add)(&layout, BGFX_ATTRIB_TANGENT, 3, BGFX_ATTRIB_TYPE_FLOAT, false, false);
  			BGFX(vertex_layout_add)(&layout, BGFX_ATTRIB_TEXCOORD0, 2, BGFX_ATTRIB_TYPE_FLOAT, false, false);
@@ -179,7 +251,7 @@
  			BGFX(vertex_layout_add)(&layout, BGFX_ATTRIB_COLOR0, 4, BGFX_ATTRIB_TYPE_UINT8, true, false);
  		BGFX(vertex_layout_end)(&layout);
  		return BGFX(create_vertex_layout)(&layout);
-@@ -1413,43 +1454,43 @@
+@@ -1413,43 +1455,43 @@
  		| BGFX_STATE_FRONT_CCW
  		| BGFX_STATE_MSAA;
  
@@ -238,7 +310,7 @@
  }
  
  Effekseer::Backend::TextureRef GraphicsDevice::CreateTexture(const Effekseer::Backend::TextureParameter& param, const Effekseer::CustomVector<uint8_t>& initialData) {
-@@ -1471,6 +1512,11 @@
+@@ -1471,6 +1513,11 @@
  
  // Create Renderer
  

@@ -459,12 +459,16 @@ FrameStatus step_runtime_app(RuntimeAppState& state, double delta_time)
     }
     if (status == engine::FrameStatus::failed)
     {
+        engine::RuntimeHostStatus details;
+        const auto message = engine.status(details) && !details.error_code.empty()
+                                 ? "Engine frame failed (" + details.error_code + "): " + details.error
+                                 : std::string("Engine frame failed");
 #if ENGINE_HAS_APP_SERVICES
-        engine::LogSystem::write(engine::LogLevel::error, "Engine frame failed");
+        engine::LogSystem::write(engine::LogLevel::error, message);
 #else
-        std::fputs("Engine frame failed\n", stderr);
+        std::fprintf(stderr, "%s\n", message.c_str());
 #endif
-        return fail("Runtime frame failed");
+        return fail(message);
     }
 #if defined(ENGINE_HAS_RUNTIME_MCP_ENDPOINT)
     if (!mcp_bridge.poll())
