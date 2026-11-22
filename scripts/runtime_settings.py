@@ -41,7 +41,7 @@ def read_source(source, platform):
     return compact(merge(document.get("common", {}), platforms.get(platform, {})))
 
 
-def export_runtime_settings(project, destination, platform):
+def runtime_settings_bytes(project, platform):
     if platform not in PLATFORMS:
         raise ValueError(f"Invalid runtime configuration target platform: {platform}")
     settings = plain_path(Path(project) / "settings")
@@ -61,6 +61,11 @@ def export_runtime_settings(project, destination, platform):
         raise ValueError("Runtime configuration does not support dates or nonfinite numbers") from error
     if len(payload) > 65536:
         raise ValueError("Combined runtime.json must not exceed 64 KiB")
+    return payload
+
+
+def export_runtime_settings(project, destination, platform):
+    payload = runtime_settings_bytes(project, platform)
     target = Path(destination) / "settings/runtime.json"
     if target.exists():
         raise ValueError("Runtime resources must not overwrite host configuration settings/runtime.json")

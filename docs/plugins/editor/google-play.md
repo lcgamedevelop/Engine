@@ -35,7 +35,7 @@ service_account = "private/android/release/play-account.json"
 | `[android.signing]` | `keystore`、`alias`、`store_password`、`key_password` 分别指定上传密钥库、别名和两项口令。框架从实际密钥取得证书并校验成品。已有商店应用可用 `certificate_sha256` 锁定上传证书，选填 `profile` 可为回执中的签名身份命名。 |
 | `[google_play]` | `track` 指定轨道，`status` 取 `draft` 或 `completed`，`service_account` 指向有发布权限的服务帐号密钥 JSON。 |
 
-只有 `keystore` 和 `service_account` 填文件路径。两者相对于这份 TOML 所在的 `settings/` 目录解析，文件放在当前项目的 `settings/private/` 下，可使用不同子目录。用于发布的项目配置含实际口令，保存在项目本机；签名工具读取这些值，日志、回执与运行包只包含各自需要的非敏感数据。
+只有 `keystore` 和 `service_account` 填文件路径。两者相对于这份 TOML 所在的 `settings/` 目录解析，文件放在当前项目的 `settings/private/` 下，可使用不同子目录。含实际口令的项目配置保存在本机。APK 签名时，bundletool 从项目缓存中的私有临时目录读取口令文件。签名子进程结束后，编辑器发布工具清理这些文件。
 
 ## 框架默认值
 

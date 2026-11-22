@@ -192,6 +192,10 @@ def read_settings(path):
     return settings
 
 
+def android_snapshot_path(project, package):
+    return project / "cache/google-play" / package / "android-project"
+
+
 def private_file(project, relative):
     relative = Path(relative)
     settings = project.resolve() / "settings"

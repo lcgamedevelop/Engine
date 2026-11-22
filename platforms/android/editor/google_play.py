@@ -6,6 +6,7 @@
 
 import argparse
 import base64
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -25,7 +26,14 @@ sys.path.insert(0, str(SDK / "scripts"))
 from build_lock import exclusive_build
 from artifact_output import plain_path, staged_output
 from prepare_android_assets import asset_files
-from project_package import FORMATS, ORIENTATIONS, next_version, private_file, read_settings
+from project_package import (
+    FORMATS,
+    ORIENTATIONS,
+    android_snapshot_path,
+    next_version,
+    private_file,
+    read_settings,
+)
 
 ANDROID = "{http://schemas.android.com/apk/res/android}"
 
@@ -144,6 +152,20 @@ def signer_fingerprint(pem_output):
     return hashlib.sha256(base64.b64decode(match[1])).hexdigest()
 
 
+@contextmanager
+def bundletool_password_args(project, signing):
+    with tempfile.TemporaryDirectory(dir=project / "cache/google-play") as directory:
+        args = []
+        for field, option in (("store_password", "--ks-pass"), ("key_password", "--key-pass")):
+            path = Path(directory) / field
+            with os.fdopen(
+                os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600), "w", encoding="utf-8"
+            ) as stream:
+                stream.write(signing[field])
+            args.append(option + "=file:" + str(path))
+        yield args
+
+
 def signed_packages(project, android, env, name, code, formats):
     if "signing" not in android:
         raise ValueError("Configure [android.signing] to build signed Android packages.")
@@ -175,7 +197,7 @@ def signed_packages(project, android, env, name, code, formats):
     pinned = signing.get("certificate_sha256")
     if pinned is not None and pinned.lower() != fingerprint:
         raise ValueError("The keystore certificate does not match this app's upload certificate.")
-    android_project = android_project_snapshot(project, logs / package / "android-project")
+    android_project = android_project_snapshot(project, android_snapshot_path(project, package))
     with tempfile.TemporaryDirectory(dir=output.parent) as tmp, logfile.open("w") as log:
         stage = Path(tmp)
         unsigned, signed = stage / "unsigned.aab", stage / "signed.aab"
@@ -268,24 +290,19 @@ def signed_packages(project, android, env, name, code, formats):
         if "apk" in formats:
             apk = stage / "signed.apk"
             apks = stage / "device.apks"
-            signing_args = ["--ks=" + str(keystore), "--ks-key-alias=" + signing["alias"]]
-            for field, option in (("store_password", "--ks-pass"), ("key_password", "--key-pass")):
-                password_file = stage / field
-                with os.fdopen(
-                    os.open(password_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600), "w"
-                ) as f:
-                    f.write(signing[field])
-                signing_args.append(option + "=file:" + str(password_file))
-            run(
-                bundletool
-                + [
-                    "build-apks",
-                    "--mode=universal",
-                    "--bundle=" + str(signed),
-                    "--output=" + str(apks),
-                    *signing_args,
-                ]
-            )
+            with bundletool_password_args(project, signing) as passwords:
+                run(
+                    bundletool
+                    + [
+                        "build-apks",
+                        "--mode=universal",
+                        "--bundle=" + str(signed),
+                        "--output=" + str(apks),
+                        "--ks=" + str(keystore),
+                        "--ks-key-alias=" + signing["alias"],
+                        *passwords,
+                    ]
+                )
             with (
                 zipfile.ZipFile(apks) as archive,
                 archive.open("universal.apk") as source,

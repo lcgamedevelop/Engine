@@ -11,10 +11,11 @@ import zipfile
 
 from artifact_output import validate_output
 from build_lock import exclusive_build
+from runtime_settings import runtime_settings_bytes
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "platforms/android/editor"))
-from project_package import read_settings
+from project_package import android_snapshot_path, read_settings
 
 
 def require_directory(name):
@@ -111,10 +112,11 @@ def package(args, project, android, asset_builder, gradle):
         cache = (ROOT / "build" / preset / "CMakeCache.txt").read_text(encoding="utf-8")
         cached = next((v.partition("=")[2] for v in cache.splitlines()
                        if v.startswith("ENGINE_ANDROID_PROJECT:PATH=")), "")
-        source = Path(cached).resolve() if cached else ROOT / "projects/showcase"
-        if source != project.resolve() and not source.is_relative_to(project.resolve() / "cache"):
+        owner = project.resolve()
+        cached_project = Path(cached).resolve() if cached else None
+        if cached_project not in (owner, android_snapshot_path(owner, android["package"])):
             raise ValueError("The cached Android resources belong to another project. Run a full project build.")
-    if not args.skip_native:
+    else:
         require_directory("VCPKG_ROOT")
         cmake = shutil.which("cmake")
         if not cmake:
@@ -180,6 +182,19 @@ def package(args, project, android, asset_builder, gradle):
             raise ValueError(f"Android delivery must contain only libmain.so; found: {native}")
         if prefix + "assets/catalog.bin" not in archive.namelist():
             raise ValueError("Android package is missing the separate runtime resource catalog")
+        if args.skip_native:
+            # CMake can select the next project before its resource build succeeds.
+            catalog = cached_project / "cache/build/android/catalog.bin"
+            settings = "assets/settings/runtime.json"
+            if (
+                not catalog.is_file()
+                or archive.read("assets/catalog.bin") != catalog.read_bytes()
+                or settings not in archive.namelist()
+                or archive.read(settings) != runtime_settings_bytes(project, "android")
+            ):
+                raise ValueError(
+                    "The packaged Android assets do not match this project. Run a full project build."
+                )
     if args.unsigned_bundle:
         with args.unsigned_bundle.open("xb") as target, source.open("rb") as bundle:
             shutil.copyfileobj(bundle, target)
