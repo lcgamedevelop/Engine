@@ -3,6 +3,7 @@ package = "org.engine.minimal"
 label = "Engine"
 artifact_name = "engine-showcase"
 orientation = "unspecified"
+fullscreen = false
 formats = ["apk"]
 min_sdk = 28
 target_sdk = 35

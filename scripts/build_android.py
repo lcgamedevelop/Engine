@@ -147,6 +147,7 @@ def package(args, project, android, asset_builder, gradle):
         "-PengineTargetSdk=" + str(android["target_sdk"]),
         "-PengineLabel=" + android["label"],
         "-PengineOrientation=" + android["orientation"],
+        "-PengineFullscreen=" + str(android.get("fullscreen", False)).lower(),
     ]
     task = ":app:assemble" + args.config.title()
     if args.unsigned_bundle:
