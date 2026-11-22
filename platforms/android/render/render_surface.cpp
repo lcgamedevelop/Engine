@@ -36,6 +36,8 @@ bool RenderSurface::prepare(bgfx::Init& init, bool& available)
     ANativeWindow_acquire(static_cast<ANativeWindow*>(swap_chain.nwh));
     swap_chain.width = width;
     swap_chain.height = height;
+    // Leave a renderable image while Android holds the displayed and queued buffers.
+    swap_chain.numBackBuffers = 3;
     current_ = swap_chain;
     platform_data_ = data;
     init.type = bgfx::RendererType::Vulkan;
