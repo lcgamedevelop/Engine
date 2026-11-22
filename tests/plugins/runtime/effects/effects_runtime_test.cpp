@@ -368,6 +368,9 @@ int main(int argc, char** argv)
         !expect(first.playing() && second.playing() &&
                     bgfx::getStats()->numTextures == first_textures,
                 "two instances share immutable effect and texture resources") ||
+        !expect(bgfx::getStats()->transientVbUsed >= 0 &&
+                    bgfx::getStats()->transientVbUsed < 1024 * 1024,
+                "overlapping laser fixtures leave transient space for the HUD") ||
         !expect(first.pause(), "pause only the first emitter") ||
         !advance(windows, renderer, effects) ||
         !expect(!first.playing() && second.playing() && first.play(),

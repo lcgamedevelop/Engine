@@ -459,7 +459,9 @@ FrameStatus RuntimeHost::tick_runtime(double delta_time)
         ENGINE_PROFILE_ZONE("Host.gameplayTick");
         if (gameplay_ && !gameplay_->tick())
         {
-            return fail_runtime("gameplay_update_failed", "Cannot update the gameplay session");
+            const auto reason = gameplay_->last_error();
+            return fail_runtime("gameplay_update_failed",
+                                reason.empty() ? "Cannot update the gameplay session" : reason);
         }
     }
     // 不可呈现期间暂停整个设备，恢复首帧提交后才恢复音轨时钟。
