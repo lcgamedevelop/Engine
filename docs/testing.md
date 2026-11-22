@@ -18,7 +18,7 @@
 
 ## Android 项目出包
 
-`engine.android_asset_packaging` 验证项目省略显示和 SDK 选项时传给 Gradle 的生效值、资产目录和原生包的交付约束。`editor.google_play_publishing` 覆盖简版与自定义版本规则、显式覆盖全屏和目标 API、签名文件边界、APK 和 AAB 选择、离线构建及商店事务恢复。商店事务用例使用模拟响应。[项目设置与编辑器命令](plugins/editor/google-play.md)
+`engine.android_asset_packaging` 验证项目省略显示和 SDK 选项时传给 Gradle 的生效值、资产目录和原生包的交付约束，也验证快速重打包发现其他项目的资源清单或运行设置时会保留上次导出的 APK。`editor.google_play_publishing` 覆盖简版与自定义版本规则、显式覆盖全屏和目标 API、签名临时文件的隔离与清理、APK 和 AAB 选择、离线构建及商店事务恢复。商店事务用例使用模拟响应。[项目设置与编辑器命令](plugins/editor/google-play.md)
 
 Android 14 ARM64 模拟器上，省略 `fullscreen` 的横屏游戏和竖屏公开范例，从第一个 SDL Surface 到首个 Vulkan 画面均分别为 1280 × 720 和 720 × 1280。退到桌面再恢复时，应用窗口仍占满显示区域，状态栏和导航栏均处于隐藏状态。显式关闭全屏的竖屏应用使用目标 API 34、编译 API 36，首帧为 720 × 1108，两种系统栏均可见。复核启动尺寸时，从冷启动日志依次读取 SDL 的 `Window size` 和 `Renderer initialized: Vulkan`，再用 `dumpsys window displays` 检查系统栏的实际可见性。
 

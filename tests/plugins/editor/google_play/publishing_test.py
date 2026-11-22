@@ -3,6 +3,7 @@
 from contextlib import ExitStack
 import hashlib
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -322,6 +323,29 @@ formats = ["apk"]
             with self.subTest(wrong=wrong), self.assertRaises(ValueError):
                 self.config.write_text(text.replace(old, wrong))
                 read_settings(self.config)
+
+    def test_bundletool_password_files_stay_in_private_cache_and_are_removed_on_failure(self):
+        cache = self.home / "cache/google-play"
+        cache.mkdir(parents=True)
+        signing = read_settings(self.config)["android"]["signing"]
+        with self.assertRaisesRegex(RuntimeError, "signer failed"):
+            with publisher.bundletool_password_args(self.home, signing) as args:
+                for field, option, arg in zip(
+                    ("store_password", "key_password"),
+                    ("--ks-pass", "--key-pass"),
+                    args,
+                    strict=True,
+                ):
+                    prefix, path = arg.split("=file:", 1)
+                    self.assertEqual(prefix, option)
+                    self.assertNotIn(signing[field], arg)
+                    path = Path(path)
+                    self.assertTrue(path.is_relative_to(cache))
+                    self.assertEqual(path.read_text(encoding="utf-8"), signing[field])
+                    if os.name != "nt":
+                        self.assertEqual(path.stat().st_mode & 0o077, 0)
+                raise RuntimeError("signer failed")
+        self.assertEqual(list(cache.iterdir()), [])
 
 
 if __name__ == "__main__":

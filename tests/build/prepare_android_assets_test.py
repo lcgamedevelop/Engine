@@ -1,6 +1,7 @@
 """Validate delivery with the standard library and the configured host FlatBuffers compiler."""
 
 import importlib.util
+from argparse import Namespace
 import json
 import os
 import shutil
@@ -28,6 +29,7 @@ SPEC = importlib.util.spec_from_file_location(
 )
 PACK = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PACK)
+import build_android as build
 import resource_catalog as catalog
 from resource_catalog import FNV_MASK, FNV_OFFSET, FNV_PRIME, catalog_entries
 
@@ -129,11 +131,6 @@ def catalog_fixture(entries, target="android"):
 
 class AndroidBuildArgumentTest(unittest.TestCase):
     def test_asset_builder_argument_reaches_native_configuration(self):
-        spec = importlib.util.spec_from_file_location(
-            "build_android", ROOT / "scripts/build_android.py"
-        )
-        build = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(build)
         with tempfile.TemporaryDirectory(prefix="engine-android-command-") as directory:
             root = Path(directory).resolve()
             sdk = root / "sdk"
@@ -236,6 +233,61 @@ class PrepareAndroidAssetsTest(unittest.TestCase):
 
     def tearDown(self):
         self.temporary.cleanup()
+
+    def test_skip_native_checks_the_project_assets_in_the_apk(self):
+        self.prepare()
+        preset = self.root / "build/android-arm64-release"
+        preset.mkdir(parents=True)
+        cache = preset / "CMakeCache.txt"
+        cache.write_text(f"ENGINE_ANDROID_PROJECT:PATH={self.project}\n")
+        apk = self.root / "build/android-gradle/release/outputs/apk/release/app-release.apk"
+        apk.parent.mkdir(parents=True)
+        args = Namespace(
+            backend="quickjs",
+            config="release",
+            skip_native=True,
+            version_name=None,
+            version_code=None,
+            unsigned_bundle=None,
+        )
+        android = build.read_settings(ROOT / "projects/showcase/settings/editor-android.toml")[
+            "android"
+        ]
+        catalog_bytes = (self.source / "catalog.bin").read_bytes()
+        runtime_bytes = (self.output / "settings/runtime.json").read_bytes()
+        contents = {
+            "assets/catalog.bin": catalog_bytes,
+            "assets/settings/runtime.json": runtime_bytes,
+        }
+
+        def assemble(command):
+            self.assertIn(":app:assembleRelease", command)
+            with zipfile.ZipFile(apk, "w") as archive:
+                archive.writestr("lib/arm64-v8a/libmain.so", b"fixture ELF")
+                for name, data in contents.items():
+                    archive.writestr(name, data)
+
+        with mock.patch.object(build, "ROOT", self.root), mock.patch.object(build, "run", assemble):
+
+            def package():
+                return build.package(args, self.project, android, None, ["gradle"])
+
+            self.assertEqual(package(), 0)
+            destination = self.root / "output/android/arm64/release/runtime/engine-showcase.apk"
+            previous = destination.read_bytes()
+            for name in tuple(contents):
+                with self.subTest(name=name), mock.patch.dict(contents, {name: b"other project"}):
+                    with self.assertRaisesRegex(ValueError, "do not match this project"):
+                        package()
+                    self.assertEqual(destination.read_bytes(), previous)
+            snapshot = build.android_snapshot_path(self.project, android["package"])
+            (snapshot / "cache/build/android").mkdir(parents=True)
+            (snapshot / "cache/build/android/catalog.bin").write_bytes(catalog_bytes)
+            cache.write_text(f"ENGINE_ANDROID_PROJECT:PATH={snapshot}\n")
+            self.assertEqual(package(), 0)
+            cache.write_text(f"ENGINE_ANDROID_PROJECT:PATH={self.project / 'cache/another-app'}\n")
+            with self.assertRaisesRegex(ValueError, "another project"):
+                package()
 
     def test_parallel_settings_ship_outside_the_resource_catalog(self):
         parallel = self.project / "settings/runtime-parallel.toml"
