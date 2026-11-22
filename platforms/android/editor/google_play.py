@@ -335,6 +335,8 @@ def google_publisher(service_account_path, env):
         if proxy
         else httplib2.proxy_info_from_environment,
     )
+    # Google uses 308 without Location to acknowledge a resumable upload chunk.
+    http.redirect_codes = http.redirect_codes - {308}
     return build(
         "androidpublisher", "v3", http=AuthorizedHttp(credentials, http=http), cache_discovery=False
     )
