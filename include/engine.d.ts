@@ -835,6 +835,8 @@ declare module "engine" {
     export class Animator extends Component {
         private constructor();
         PlayAnimation(request: AnimationPlayRequest): boolean;
+        /** Sample a compatible clip on a joint subtree. An empty animation clears the overlay. */
+        SetAnimationOverlay(animation: string, jointPath?: string, seconds?: number, weight?: number): boolean;
         GetPlaybackInfo(): AnimatorPlaybackInfo | null;
         SetIkEnabled(enabled: boolean): boolean;
         GetBonePose(path: string): AnimationPoseTransform | null;

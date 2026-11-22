@@ -238,6 +238,62 @@ bool Animator::play_animation(const AnimationPlayRequest& request)
     ENGINE_PROFILE_FUNCTION();
     return apply_animation(request, {});
 }
+bool Animator::set_animation_overlay(std::string_view animation, std::string_view joint_path,
+                                     double seconds, float weight)
+{
+    ENGINE_PROFILE_FUNCTION();
+    if (!writable())
+    {
+        return false;
+    }
+    auto* state = runtime();
+    if (animation.empty())
+    {
+        if (state->overlay_animation_)
+        {
+            state->overlay_animation_.reset();
+            state->overlay_path_.clear();
+            state->overlay_joint_.clear();
+            state->pose_dirty_ = true;
+        }
+        return true;
+    }
+    if (!active() || !state->animation_ || !std::isfinite(seconds) || seconds < 0 ||
+        !std::isfinite(weight) || weight < 0 || weight > 1)
+    {
+        return false;
+    }
+    if (!state->overlay_animation_ || state->overlay_path_ != animation ||
+        state->overlay_joint_ != joint_path)
+    {
+        ResourceReference clip, source, target;
+        const auto renderer = node().get_component<MeshRenderer>();
+        const auto* mesh = renderer ? renderer.mesh_data() : nullptr;
+        auto* resources = node().world()->resource_loader();
+        std::vector<std::string> paths;
+        if (!resources || !mesh || !target_skeleton(*this, target) ||
+            !ecs_detail::acquire_resource(node(), animation, clip) ||
+            !clip.data<AnimationResource>() ||
+            !source.dependency(resources, clip.handle(),
+                               clip.data<AnimationResource>()->skeleton_guid) ||
+            !source.data<SkeletonResource>() ||
+            !animation_detail::valid_binding(*mesh, *target.data<SkeletonResource>(),
+                                             *source.data<SkeletonResource>(),
+                                             *clip.data<AnimationResource>()) ||
+            !animation_detail::readable_joint_paths(*target.data<SkeletonResource>(), paths) ||
+            std::find(paths.begin(), paths.end(), joint_path) == paths.end())
+        {
+            return false;
+        }
+        state->overlay_animation_ = std::move(clip);
+        state->overlay_path_ = animation;
+        state->overlay_joint_ = joint_path;
+    }
+    state->overlay_seconds_ = seconds;
+    state->overlay_weight_ = weight;
+    state->pose_dirty_ = true;
+    return true;
+}
 bool Animator::apply_animation(const AnimationPlayRequest& request, ResourceReference clip)
 {
     ENGINE_PROFILE_FUNCTION();
@@ -448,6 +504,9 @@ bool Animator::stop() noexcept
         return false;
     }
     auto* state = runtime();
+    state->overlay_animation_.reset();
+    state->overlay_path_.clear();
+    state->overlay_joint_.clear();
     state->previous_animation_.reset();
     state->previous_source_skeleton_.reset();
     state->previous_retarget_profile_.reset();

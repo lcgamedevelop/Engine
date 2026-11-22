@@ -114,6 +114,10 @@ export class Animator extends Component {
             request.retargetProfile ?? "", request.fadeSeconds ?? 0, request.speed ?? 1,
             request.loop ?? true, request.restart ?? true);
     }
+    SetAnimationOverlay(animation, jointPath = "", seconds = 0, weight = 1) {
+        const h = handles.get(this);
+        return native.AnimatorOverlay(h.scene, h.node, animation, jointPath, seconds, weight);
+    }
     SetStateMachine(definition, aliases) { return animationMachineBind(this, definition, aliases); }
     ClearStateMachine() { return animationMachineClear(this); }
     SetParameters(values) { return animationMachineSetParameters(this, values); }
@@ -425,6 +429,22 @@ void ik_enabled(const Arguments& arguments)
     }
 }
 
+void overlay(const Arguments& arguments)
+{
+    ENGINE_PROFILE_FUNCTION();
+    auto value = binding_detail::component<Animator>(arguments, 6);
+    std::string animation, joint;
+    double seconds = 0;
+    float weight = 0;
+    if (value && BindingContext::text(arguments, 2, animation) &&
+        BindingContext::text(arguments, 3, joint) &&
+        BindingContext::number(arguments, 4, seconds) &&
+        BindingContext::scalar(arguments, 5, weight))
+    {
+        arguments.set_return(value.set_animation_overlay(animation, joint, seconds, weight));
+    }
+}
+
 vm::NativeValue vector_value(const Vec3& value)
 {
     ENGINE_PROFILE_FUNCTION();
@@ -658,6 +678,7 @@ bool AnimatorBinding::register_functions(vm::ScriptVm& vm) const
            vm.function("AnimatorPlaying", playing) && vm.function("AnimatorPlayback", playback) &&
            vm.function("AnimatorTime", time) && vm.function("AnimatorSnapshot", snapshot) &&
            vm.function("AnimatorPlayAnimation", play_animation) &&
+           vm.function("AnimatorOverlay", overlay) &&
            vm.function("AnimatorIkEnabled", ik_enabled) && vm.function("AnimatorIkSet", ik_set) &&
            vm.function("AnimatorIkTarget", ik_target) && vm.function("AnimatorBonePose", pose, 0) &&
            vm.function("AnimatorSocketPose", pose, 1) &&

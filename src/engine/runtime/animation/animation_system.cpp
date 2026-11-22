@@ -127,7 +127,10 @@ struct AnimationSampler
 };
 struct AnimationEntry
 {
-    AnimationSampler current, previous;
+    AnimationSampler current, previous, overlay;
+    std::string overlay_joint;
+    std::vector<ozz::math::SimdFloat4> overlay_mask, base_mask;
+    std::vector<ozz::math::SoaTransform> unlayered, mixed;
     std::shared_ptr<const animation_detail::AnimationPose> frozen;
     std::vector<ozz::math::SoaTransform> locals, committed_locals;
     std::vector<ozz::math::Float4x4> models;
@@ -157,7 +160,8 @@ struct AnimationEntry
         return true;
     }
     bool sample(double seconds, double previous_seconds, double blend, bool rest, bool frozen_final,
-                std::span<const animation_detail::IkOperation> ik)
+                std::span<const animation_detail::IkOperation> ik, double overlay_seconds = 0,
+                float overlay_weight = 0)
     {
         ENGINE_PROFILE_FUNCTION();
         const auto& skeleton = *current.clip->target;
@@ -214,6 +218,41 @@ struct AnimationEntry
                 locals = current.locals;
             }
         }
+        if (!frozen_final)
+        {
+            unlayered.clear();
+        }
+        if (!rest && !frozen_final && overlay.clip && overlay_weight > 0)
+        {
+            if (!overlay.sample(std::min(overlay_seconds,
+                                         static_cast<double>(overlay.clip->animation->duration()))))
+            {
+                return false;
+            }
+            unlayered = locals;
+            mixed.resize(locals.size());
+            for (std::size_t i = 0; i < overlay_mask.size(); ++i)
+            {
+                base_mask[i] = ozz::math::simd_float4::one() -
+                               overlay_mask[i] * ozz::math::simd_float4::Load1(overlay_weight);
+            }
+            std::array<ozz::animation::BlendingJob::Layer, 2> layers;
+            layers[0].transform = ozz::make_span(locals);
+            layers[0].weight = 1.0F;
+            layers[0].joint_weights = ozz::make_span(base_mask);
+            layers[1].transform = ozz::make_span(overlay.locals);
+            layers[1].weight = overlay_weight;
+            layers[1].joint_weights = ozz::make_span(overlay_mask);
+            ozz::animation::BlendingJob job;
+            job.layers = ozz::make_span(layers);
+            job.rest_pose = skeleton.skeleton->joint_rest_poses();
+            job.output = ozz::make_span(mixed);
+            if (!job.Run())
+            {
+                return false;
+            }
+            locals.swap(mixed);
+        }
         ozz::animation::LocalToModelJob fk;
         fk.skeleton = skeleton.skeleton.get();
         fk.input = ozz::make_span(locals);
@@ -249,6 +288,8 @@ struct AnimationSample
     Animator animator;
     MeshRenderer renderer;
     double seconds = 0, previous_seconds = 0, blend = 1, fade_elapsed = 0;
+    double overlay_seconds = 0;
+    float overlay_weight = 0;
     AnimationPlayback playback = AnimationPlayback::stopped;
     std::uint64_t cycle = 0;
     bool completed = false, rest = false, frozen_final = false, event_starting = false;
@@ -262,7 +303,8 @@ bool sample_range(std::vector<AnimationSample>& samples, std::size_t begin, std:
     {
         auto& sample = samples[index];
         if (!sample.entry->sample(sample.seconds, sample.previous_seconds, sample.blend,
-                                  sample.rest, sample.frozen_final, sample.ik))
+                                  sample.rest, sample.frozen_final, sample.ik,
+                                  sample.overlay_seconds, sample.overlay_weight))
         {
             return false;
         }
@@ -684,7 +726,8 @@ struct AnimationSystem::State
                     {
                         return nullptr;
                     }
-                    pose->locals = previous->committed_locals;
+                    pose->locals = previous->unlayered.empty() ? previous->committed_locals
+                                                               : previous->unlayered;
                     candidate->frozen = std::move(pose);
                 }
                 else
@@ -722,7 +765,49 @@ struct AnimationSystem::State
             found = entries.find(node.id());
         }
 
-        return found->second.get();
+        auto& entry = *found->second;
+        if (!runtime->overlay_animation_)
+        {
+            entry.overlay = {};
+            return &entry;
+        }
+        if (!entry.overlay.clip ||
+            animation_detail::identity(*entry.overlay.clip->resource) !=
+                animation_detail::identity(*runtime->overlay_animation_) ||
+            entry.overlay_joint != runtime->overlay_joint_)
+        {
+            std::shared_ptr<const animation_detail::CompiledAnimation> clip;
+            const auto& root = runtime->overlay_joint_;
+            if (!compile(loader, renderer.mesh_resource(), runtime->overlay_animation_, *mesh, {},
+                         {}, {}, clip) ||
+                std::find(clip->target->readable_paths.begin(), clip->target->readable_paths.end(),
+                          root) == clip->target->readable_paths.end())
+            {
+                (void)animator.set_animation_overlay({}, {}, 0, 0);
+                entry.overlay = {};
+                return &entry;
+            }
+            const auto& skeleton = *clip->target;
+            entry.overlay_mask.clear();
+            for (std::size_t base = 0; base < skeleton.order.size(); base += 4)
+            {
+                float lanes[4]{};
+                for (std::size_t lane = 0; lane < 4 && base + lane < skeleton.order.size(); ++lane)
+                {
+                    const auto& path = skeleton.readable_paths[skeleton.order[base + lane]];
+                    lanes[lane] =
+                        path == root || (path.starts_with(root) && path.size() > root.size() &&
+                                         path[root.size()] == '/')
+                            ? 1.0F
+                            : 0.0F;
+                }
+                entry.overlay_mask.push_back(ozz::math::simd_float4::LoadPtrU(lanes));
+            }
+            entry.base_mask.resize(entry.overlay_mask.size());
+            entry.overlay_joint = root;
+            entry.overlay.prepare(std::move(clip));
+        }
+        return &entry;
     }
 
     std::map<animation_detail::ResourceIdentity,
@@ -1003,7 +1088,8 @@ SceneWorkState AnimationSystem::prepare_scope(SceneScopeId scope, const SceneWor
                 return false;
             }
             if (!entry->sample(sample.seconds, sample.previous_seconds, sample.blend, sample.rest,
-                               false, sample.ik))
+                               false, sample.ik, runtime->overlay_seconds_,
+                               runtime->overlay_weight_))
             {
                 return false;
             }
@@ -1149,6 +1235,8 @@ bool AnimationSystem::on_tick(double delta_time)
                     return;
                 }
                 sample.frozen_final = !running && !runtime->pose_dirty_ && entry.sampled;
+                sample.overlay_seconds = runtime->overlay_seconds_;
+                sample.overlay_weight = runtime->overlay_weight_;
                 std::array<double, 16> mesh_world;
                 if (!sample.rest && !sample.frozen_final &&
                     (!node.get_component<Transform>().world_matrix(mesh_world.data()) ||
