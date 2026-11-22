@@ -13,6 +13,7 @@ package = "com.example.adventure"
 label = "Adventure"
 artifact_name = "adventure"
 orientation = "sensorLandscape"
+fullscreen = true
 formats = ["apk", "aab"]
 min_sdk = 28
 target_sdk = 36
@@ -37,6 +38,7 @@ service_account = "play-account.json"
 | `profile` | 当前项目的签名目录名。示例对应 `settings/private/android/release/` |
 | `package`、`label`、`artifact_name` | 商店应用 ID、设备显示名称和产物文件名前缀 |
 | `orientation`、`formats` | Android 屏幕方向和默认成品格式，可选 APK、AAB 或两者 |
+| `fullscreen` | 默认为 `false`。设为 `true` 时开启沉浸式全屏，内容延伸至刘海两侧。HUD 可读取窗口安全区 |
 | `min_sdk`、`target_sdk` | 项目支持的最低与目标 Android API。引擎 ARM64 运行时最低支持 API 28 |
 | `version_name`、`version_code` | 起始版本名称和代码。接续已上架应用时填写商店已有版本 |
 | `version_weights`、`increment_component` | 各段的代码权重和每次递增的段序号，首段为 1。低位清零，超过某一段的容量会进位 |

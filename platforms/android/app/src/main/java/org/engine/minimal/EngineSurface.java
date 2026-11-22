@@ -1,8 +1,14 @@
 package org.engine.minimal;
 
 import android.content.Context;
+import android.graphics.Insets;
+import android.os.Build;
 import android.os.Trace;
+import android.view.DisplayCutout;
 import android.view.SurfaceHolder;
+import android.view.View;
+import android.view.WindowInsets;
+import org.libsdl.app.SDLActivity;
 import org.libsdl.app.SDLSurface;
 
 final class EngineSurface extends SDLSurface
@@ -23,6 +29,36 @@ final class EngineSurface extends SDLSurface
         {
             Trace.endSection();
         }
+    }
+
+    @Override public WindowInsets onApplyWindowInsets(View view, WindowInsets insets)
+    {
+        // SDL 3.4 handles the typed insets API on Android 11 and later.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R)
+        {
+            int left = insets.getSystemWindowInsetLeft();
+            int top = insets.getSystemWindowInsetTop();
+            int right = insets.getSystemWindowInsetRight();
+            int bottom = insets.getSystemWindowInsetBottom();
+            DisplayCutout cutout = insets.getDisplayCutout();
+            if (cutout != null)
+            {
+                left = Math.max(left, cutout.getSafeInsetLeft());
+                top = Math.max(top, cutout.getSafeInsetTop());
+                right = Math.max(right, cutout.getSafeInsetRight());
+                bottom = Math.max(bottom, cutout.getSafeInsetBottom());
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+            {
+                Insets gestures = insets.getSystemGestureInsets();
+                left = Math.max(left, gestures.left);
+                top = Math.max(top, gestures.top);
+                right = Math.max(right, gestures.right);
+                bottom = Math.max(bottom, gestures.bottom);
+            }
+            SDLActivity.onNativeInsetsChanged(left, right, top, bottom);
+        }
+        return super.onApplyWindowInsets(view, insets);
     }
 
     @Override public void surfaceDestroyed(SurfaceHolder holder)

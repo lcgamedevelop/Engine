@@ -186,6 +186,13 @@ class PublishingTest(unittest.TestCase):
     def test_project_version_schemes_and_private_files_are_independent(self):
         android = read_settings(ROOT / "projects/showcase/settings/editor-android.toml")
         self.assertEqual(next_version(android, 5), ("0.1.5", 6))
+        settings = self.home / "settings/editor-android.toml"
+        template = (ROOT / "projects/showcase/settings/editor-android.toml").read_text()
+        settings.write_text(template.replace("fullscreen = false", "fullscreen = true"))
+        self.assertTrue(read_settings(settings)["fullscreen"])
+        settings.write_text(template.replace("fullscreen = false", 'fullscreen = "true"'))
+        with self.assertRaises(ValueError):
+            read_settings(settings)
         second = {
             "version_name": "3",
             "version_code": 126,

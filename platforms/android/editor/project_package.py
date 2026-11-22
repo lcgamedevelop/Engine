@@ -98,6 +98,8 @@ def read_settings(path):
         raise ValueError("Set the Android app label and screen orientation in project settings.")
     if not re.fullmatch(r"[\w-]+", android["artifact_name"], re.ASCII):
         raise ValueError("The artifact name must contain letters, digits, underscores or hyphens.")
+    if type(android.get("fullscreen", False)) is not bool:
+        raise ValueError("The Android fullscreen setting must be a boolean.")
     formats = android["formats"]
     if (
         not isinstance(formats, list)

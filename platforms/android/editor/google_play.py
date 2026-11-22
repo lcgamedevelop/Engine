@@ -241,6 +241,9 @@ def signed_packages(project, android, env, name, code, formats):
         manifest = ET.fromstring(xml)
         target = manifest.find("uses-sdk")
         application = manifest.find("application")
+        fullscreen = manifest.find(
+            "application/meta-data[@" + ANDROID + "name='SDL_ENV.ENGINE_ANDROID_FULLSCREEN']"
+        )
         activity = manifest.find(
             "application/activity/intent-filter/category[@"
             + ANDROID
@@ -258,6 +261,8 @@ def signed_packages(project, android, env, name, code, formats):
             or target.get(ANDROID + "minSdkVersion") != str(android["min_sdk"])
             or application is None
             or application.get(ANDROID + "label") != android["label"]
+            or fullscreen is None
+            or fullscreen.get(ANDROID + "value") != str(android.get("fullscreen", False)).lower()
             or activity is None
             or activity.get(ANDROID + "screenOrientation")
             not in (android["orientation"], str(ORIENTATIONS[android["orientation"]]))
