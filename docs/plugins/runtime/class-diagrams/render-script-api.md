@@ -13,6 +13,7 @@ classDiagram
     class Render {
         <<static facade>>
         +GetViewportSize() Vector2_or_null$
+        +GetFrameNumber() number_or_null$
         +SetVSync(boolean enabled) boolean$
         +GetVSync() boolean_or_null$
         +SetMsaaSamples(number samples) boolean$
@@ -35,11 +36,12 @@ classDiagram
 
 - `Render` 是不可构造的静态设备门面，提供视口尺寸与设备呈现/采样画质。环境、后处理和阴影设置直接通过下方组件接口提交，组件是唯一写入与校验入口，不再提供重复的静态效果 setter。
 - `GetViewportSize()` 返回当前绘制目标像素尺寸 `{x,y}`；系统未初始化、GPU 不可用、尺寸为零或当前回调没有渲染器时返回 null。窗口尺寸变化在下一次渲染应用后可见。
+- `GetFrameNumber()` 返回当前图形设备最近一次提交的 32 位无符号帧号。GPU 未就绪时返回 null。调用方可按实际经过时间计算提交帧率，设备重建时重新采样。
 - `SetVSync(enabled)` / `GetVSync()` 调用 RenderSystem 的窗口级状态；仅活动回调可用，未注入或未初始化渲染器时设置返回 false、查询返回 null。设置成功表示接受请求，下次正常绘制应用，不进入场景持久数据。
 - `SetMsaaSamples(samples)` / `GetMsaaSamples()` / `SupportsMsaaSamples(samples)` 使用 `1/2/4/8`，`1` 表示关闭。绑定严格校验整数档位，不转换字符串或截断小数；无效或当前设备不支持返回 false，保持旧设置。getter 返回最近接受的档位，无渲染器或未初始化返回 null。
 - `SetMaxAnisotropy(enabled)` / `GetMaxAnisotropy()` / `SupportsMaxAnisotropy()` 控制普通材质贴图的最大各向异性过滤；参数须为 boolean。setter/getter 生命周期和延迟应用语义与 MSAA 相同。两个 Supports 查询在设备未就绪时均返回 false。UI 可据此禁用不可用选项，不把 setter 失败显示为设置成功。
 - 六个接口直接映射 [RenderSystem 的最小设备画质契约](../../../runtime/class-diagrams/render-system.md)，默认 MSAA 关闭、各向异性关闭；项目负责用户偏好的保存与恢复，核心不读项目设置文件。
-- 项目通过 Camera、MeshRenderer、EnvironmentComponent 和 Material 的属性组合渲染能力；Render 静态门面不提供状态、统计或调试方法。统一诊断查询、逐视图提交统计和有限寿命调试线仅由编辑器 MCP 提供，见[统一功能入口](../../editor/render-feature-controls.md)。
+- 项目通过 Camera、MeshRenderer、EnvironmentComponent 和 Material 的属性组合渲染能力；Render 门面公开设备呈现进度。统一诊断查询、逐视图提交统计和有限寿命调试线仅由编辑器 MCP 提供，见[统一功能入口](../../editor/render-feature-controls.md)。
 - 场景初始外观保存在 EnvironmentComponent、相机节点上的 PostProcessComponent 与 Light 中。组件门面使用当前 Run 的节点及组件身份校验；失效句柄返回失败，不通过全局活动场景寻找替代对象。
 
 ```mermaid

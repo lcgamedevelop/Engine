@@ -12,6 +12,7 @@ constexpr std::string_view javascript = R"js(
 export class Render {
     constructor() { throw new TypeError('Render is static'); }
     static GetViewportSize() { return native.RenderGetViewportSize(); }
+    static GetFrameNumber() { return native.RenderGetFrameNumber(); }
     static SetVSync(enabled) { return native.RenderSetVSync(enabled); }
     static GetVSync() { return native.RenderGetVSync(); }
     static SetMsaaSamples(samples) { return native.RenderSetMsaaSamples(samples); }
@@ -43,6 +44,17 @@ void viewport_size(const Arguments& arguments)
     if (target != nullptr && arguments.count() == 0 && target->viewport_size(size))
     {
         arguments.set_return(vm::NativeValue::Object{{"x", size.x()}, {"y", size.y()}});
+    }
+}
+
+void frame_number(const Arguments& arguments)
+{
+    ENGINE_PROFILE_FUNCTION();
+    const auto* target = renderer(arguments, 0);
+    arguments.set_return({});
+    if (target != nullptr && target->gpu_ready())
+    {
+        arguments.set_return(static_cast<double>(target->frame_number()));
     }
 }
 
@@ -166,6 +178,7 @@ bool RenderBinding::register_functions(vm::ScriptVm& vm) const
 {
     ENGINE_PROFILE_FUNCTION();
     return vm.function("RenderGetViewportSize", viewport_size) &&
+           vm.function("RenderGetFrameNumber", frame_number) &&
            vm.function("RenderSetVSync", set_vsync) && vm.function("RenderGetVSync", vsync) &&
            vm.function("RenderSetMsaaSamples", set_msaa_samples) &&
            vm.function("RenderGetMsaaSamples", msaa_samples) &&
