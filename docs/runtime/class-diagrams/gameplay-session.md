@@ -26,7 +26,7 @@ classDiagram
         +activate_prepared() bool
         +prepare_status(uint64_t id, GameplayPrepareSnapshot& output) bool
         +release_prepare(uint64_t id) bool
-        +tick() bool
+        +tick(const SceneWorkBudget& scene_budget) bool
         +stop(GameplayStopCause cause, string_view reason) void
         +execute_project_script(const ProjectScriptRequest& request, string& result_json, string& error) bool
         +script_status() const ScriptStatus#42;
@@ -128,7 +128,7 @@ classDiagram
 - `start()` 已运行时幂等。先预检选定完整版本的脚本，再停止旧玩法、销毁场景与 GPU，提交目录、启动已预检脚本并准备 GPU。候选预检失败保留旧玩法；目录应用或新入口失败保持停止并报告。热重载候选的发布校验失败保留活动版本，不切换到内置版本。
 - background 非空时，control、manifest、目录读取和完整文件 hash 由后台任务域执行，保持一个在途候选。任务只接路径和旧标识快照，不访问 App、Scene、VM 或会话对象；完成委托标记私有结果，tick 在所属线程应用。目录替换/启停递增请求代际，旧候选不再应用。
 - 状态文本按最新值合并，写入与部署读取共用一个串行后台作业，避免旧状态晚到覆盖新状态。显式 start 保留同步语义；析构关闭可等待后台收尾并发布最后状态。扫描和流式 hash 仍使用同步文件工具，但限为后台域中的单个任务，不占主线程；后续可迁移为原生分块异步 I/O。
-- `tick()` 由 RuntimeHost 在系统更新后显式调用，处理 `script-control.json` 与 MCP 发布的 `assets/available.json`。这是调用方部署协议，核心不识别这些文件。完整目录元数据与发布文件校验通过后记录候选；热重载关闭只更新可用状态，不切换。
+- `tick(scene_budget)` 使用宿主传入的每帧项数、时长和上传字节上限推进候选场景。RuntimeHost 使用项目运行设置中的场景和渲染准备预算。此方法由 RuntimeHost 在系统更新后显式调用，处理 `script-control.json` 与 MCP 发布的 `assets/available.json`。这是调用方部署协议，核心不识别这些文件。完整目录元数据与发布文件校验通过后记录候选；热重载关闭只更新可用状态，不切换。
 - 持久部署版本位于 `assets/versions/<revision>`，不可原地覆盖。目录中的位置可指向散文件或包成员；清单与存储集合必须一致。发布文件用固定缓冲区流式校验，不解包整个目录。实体只在脚本预检或核心按需加载时读取；包体尺寸不受单实体上限约束。
 - 显式 stop 或 Update 失败后不因新候选而自动重启。重新开启重载允许重试最新候选。普通运行集合固定，只有显式发布部署文件才触发候选处理。
 - `stop()` 先按上述原因语义锁存启动及加载结果，再退出脚本、停止音频、清理物理、销毁场景和 GPU；资源随共享引用释放，保留资源索引和内置定义以供下次启动。重复关闭安全，不清除仍由调用方观察的结果记录。

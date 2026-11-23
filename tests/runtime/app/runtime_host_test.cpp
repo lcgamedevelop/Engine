@@ -486,11 +486,13 @@ class TestPreparation final : public ScenePreparation
 {
 public:
     WorldSystem* world = nullptr;
+    SceneWorkBudget last_budget;
     std::map<SceneScopeId, ScenePreparationSnapshot> pending;
     std::map<SceneScopeId, unsigned> releases;
 
-    SceneWorkState prepare_scope(SceneScopeId scope, const SceneWorkBudget&) override
+    SceneWorkState prepare_scope(SceneScopeId scope, const SceneWorkBudget& budget) override
     {
+        last_budget = budget;
         const bool first = !pending.contains(scope);
         auto& status = pending[scope];
         status.scope = scope;
@@ -535,8 +537,11 @@ public:
     }
 };
 
-bool test_scene_publication_order(const EngineConfig& config, const RuntimeParallelConfig& parallel)
+bool test_scene_publication_order(const EngineConfig& config, RuntimeParallelConfig parallel)
 {
+    parallel.rendering.prepare_items_per_step = 128;
+    parallel.rendering.prepare_seconds_per_step = 0.012;
+    parallel.rendering.upload_bytes_per_step = 16 * 1024 * 1024;
     test_support::ResourceFixture fixture;
     schema::SceneDataT replacement;
     replacement.schema_version = 6;
@@ -573,7 +578,7 @@ bool test_scene_publication_order(const EngineConfig& config, const RuntimeParal
         while (std::chrono::steady_clock::now() < deadline)
         {
             SceneLoadSnapshot status;
-            if (!services.tick() || host.poll_events(0) == FrameStatus::failed || !session.tick() ||
+            if (!services.tick() || host.tick(0) != FrameStatus::running ||
                 !session.scene_load_status(id, status))
             {
                 return false;
@@ -593,6 +598,15 @@ bool test_scene_publication_order(const EngineConfig& config, const RuntimeParal
             }
             if (status.state == SceneLoadState::ready)
             {
+                const auto& budget = preparation.last_budget;
+                if (!expect(budget.items == parallel.rendering.prepare_items_per_step &&
+                                budget.upload_bytes == parallel.rendering.upload_bytes_per_step &&
+                                budget.seconds > 0 &&
+                                budget.seconds <= parallel.rendering.prepare_seconds_per_step,
+                            "scene preparation receives the configured frame budget"))
+                {
+                    return false;
+                }
                 auto* candidate = world.scope_candidate(status.scope);
                 return expect(
                     candidate && candidate->find_node("Generated domain content") &&
@@ -627,7 +641,7 @@ bool test_scene_publication_order(const EngineConfig& config, const RuntimeParal
     if (!late_removed || !persistent_root || !persistent_child ||
         !persistent_root.set_persistent(true) || !persistent_child.set_parent(persistent_root) ||
         !session.activate_scene_load(earlier) || !session.activate_scene_load(first) ||
-        !session.activate_scene_load(replace) || !session.tick())
+        !session.activate_scene_load(replace) || !session.tick({}))
     {
         return false;
     }
@@ -643,7 +657,7 @@ bool test_scene_publication_order(const EngineConfig& config, const RuntimeParal
     {
         return false;
     }
-    if (host.tick(0) != FrameStatus::running || !session.tick() ||
+    if (host.tick(0) != FrameStatus::running || !session.tick({}) ||
         !expect(session.scene_load_status(earlier, status) &&
                     status.state == SceneLoadState::active &&
                     status.first_scene_submission_id != 0 &&
@@ -656,7 +670,7 @@ bool test_scene_publication_order(const EngineConfig& config, const RuntimeParal
     {
         return false;
     }
-    if (host.tick(0) != FrameStatus::running || !session.tick() ||
+    if (host.tick(0) != FrameStatus::running || !session.tick({}) ||
         !expect(
             session.scene_load_status(replace, status) && status.state == SceneLoadState::active &&
                 session.scene_load_status(pending, status) &&
@@ -682,7 +696,7 @@ bool test_scene_publication_order(const EngineConfig& config, const RuntimeParal
     append.destination_scene_id = world.scene()->id();
     SceneLoadId unloaded;
     if (!session.begin_scene_load(append, unloaded) || !ready(unloaded) ||
-        !world.destroy_scene(append.destination_scene_id) || !session.tick())
+        !world.destroy_scene(append.destination_scene_id) || !session.tick({}))
     {
         return false;
     }
@@ -725,7 +739,7 @@ bool test_scene_publication_order(const EngineConfig& config, const RuntimeParal
     SceneLoadId orphaned;
     return session.begin_scene_load(replacing, orphaned) && ready(orphaned) &&
            session.activate_scene_load(orphaned) && world.destroy_scene(target->id()) &&
-           session.tick() &&
+           session.tick({}) &&
            expect(session.scene_load_status(orphaned, status) &&
                       status.state == SceneLoadState::failed &&
                       status.error_code == "target_unloaded" && !world.scene() &&
@@ -1090,7 +1104,7 @@ bool test_deployment_selection(const EngineConfig& config, const RuntimeParallel
     for (std::size_t pass = 0; pass < 4; ++pass)
     {
         if (!background_tasks->wait() || host.poll_events(0.0) == FrameStatus::failed ||
-            !active.tick())
+            !active.tick({}))
         {
             return false;
         }

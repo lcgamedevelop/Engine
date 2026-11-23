@@ -127,6 +127,37 @@ bool persistent_animation()
     return expect(fixture.animation.tick(0), "full stop retires every animation container");
 }
 
+bool masked_overlay()
+{
+    Fixture fixture;
+    if (!fixture.initialize())
+    {
+        return false;
+    }
+    auto node = fixture.create();
+    auto animator = node.get_component<engine::Animator>();
+    auto renderer = node.get_component<engine::MeshRenderer>();
+    const auto tip_y = [&](double expected)
+    {
+        engine::AnimationPoseTransform pose;
+        return animator.get_bone_pose("root/left/tip", pose) && close(pose.world[13], expected);
+    };
+    return expect(fixture.animation.tick(0.25) && tip_y(4),
+                  "base pose has advanced before layering") &&
+           expect(!animator.set_animation_overlay(clip_path, "root/missing", 0.75, 1),
+                  "unknown mask root rejects the request") &&
+           expect(animator.set_animation_overlay(clip_path, "root/left", 0.75, 1) &&
+                      fixture.animation.tick(0.25) && tip_y(6) &&
+                      close(sampled_vertex(renderer).x(), 2) && close(animator.time(), 0.5),
+                  "overlay affects descendants while the base sibling continues to advance") &&
+           expect(animator.set_animation_overlay(clip_path, "root/left", 0.75, 0.5F) &&
+                      fixture.animation.tick(0) && tip_y(5.5),
+                  "partial weight mixes the base and overlay on the masked subtree") &&
+           expect(animator.pause() && animator.set_animation_overlay({}, {}, 0, 0) &&
+                      fixture.animation.tick(0) && tip_y(5) && close(animator.time(), 0.5),
+                  "clearing the overlay also restores a paused base pose");
+}
+
 bool skinning_and_lifecycle()
 {
     Fixture fixture;
@@ -553,7 +584,7 @@ int main()
     return offline_archive_contracts() && persistent_animation() &&
                    parallel_sampling_matches_serial() &&
                    world_pause_preserves_individual_playback() && sampling_and_controls() &&
-                   skinning_and_lifecycle() && blending_and_instances()
+                   skinning_and_lifecycle() && blending_and_instances() && masked_overlay()
                ? 0
                : 1;
 }

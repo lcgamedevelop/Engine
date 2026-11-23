@@ -400,6 +400,8 @@ declare module "engine" {
         private constructor();
         /** Current render target size in pixels; null without an initialized renderer. */
         static GetViewportSize(): Vector2 | null;
+        /** Most recent submitted frame on the current GPU device, or null when unavailable. */
+        static GetFrameNumber(): number | null;
         /** Accepted requests are applied through bgfx at the next drawable frame. */
         static SetVSync(enabled: boolean): boolean;
         /** Last accepted request, not a measurement of presentation timing. */
@@ -833,6 +835,8 @@ declare module "engine" {
     export class Animator extends Component {
         private constructor();
         PlayAnimation(request: AnimationPlayRequest): boolean;
+        /** Sample a compatible clip on a joint subtree. An empty animation clears the overlay. */
+        SetAnimationOverlay(animation: string, jointPath?: string, seconds?: number, weight?: number): boolean;
         GetPlaybackInfo(): AnimatorPlaybackInfo | null;
         SetIkEnabled(enabled: boolean): boolean;
         GetBonePose(path: string): AnimationPoseTransform | null;

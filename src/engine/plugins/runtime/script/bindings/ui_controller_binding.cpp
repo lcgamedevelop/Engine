@@ -112,9 +112,9 @@ function dispatchUiEvents() {
                 entry.document, entry.element);
             if (!ancestor.isValid) continue;
             for (const [id, subscription] of subscriptions) {
-                if (!uiEventTargetReady(target) || !ancestor.isValid) break;
                 if (uiSubscriptions.get(id) !== subscription || subscription.type !== event.type ||
                     !uiSameElement(subscription.element, ancestor)) continue;
+                if (!uiEventTargetReady(target) || !ancestor.isValid) break;
                 const value = Object.freeze({
                     type: event.type, target, currentTarget: subscription.element,
                     value: event.value
@@ -129,7 +129,6 @@ function dispatchUiEvents() {
         // Stop old events when targets unload or documents change; persistent documents retain valid subscriptions.
         if (!uiEventTargetReady(target)) break;
     }
-    uiPruneSubscriptions();
 }
 function clearUiControllers() {
     let failed = false, failure;

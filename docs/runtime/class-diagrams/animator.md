@@ -17,6 +17,7 @@ classDiagram
         +restore_data(const ComponentDataT& data) bool
         +set_animation(string_view path) bool
         +play_animation(const AnimationPlayRequest& request) bool
+        +set_animation_overlay(animation, joint_path, seconds, weight) bool
         +get_playback_info(AnimatorPlaybackInfo& output) bool
         +get_bone_pose(string_view path, AnimationPoseTransform& output) bool
         +get_socket_pose(string_view name, AnimationPoseTransform& output) bool
@@ -79,6 +80,8 @@ classDiagram
     Animator ..> ComponentRegistry : 静态登记类型操作
 
 ```
+
+骨骼叠层是 Animator 的临时播放状态。调用方提交兼容骨架的动画、骨骼根路径、采样秒数和 0～1 的权重。动画系统在过渡混合后、IK 前将该关节及其后代与底层姿态混合。底层继续独立推进，叠层由调用方推进并可用空动画路径清除。叠层不产生动画事件。
 
 - 使用 `Node::add_component<Animator>()` 创建；公开接口无 ozz 类型。
 - 持久设置来自 `AnimatorDataT`：独立动画 GUID、速度、循环、自动播放和默认关闭的 IK。播放时间、状态和采样缓存不进入场景数据。

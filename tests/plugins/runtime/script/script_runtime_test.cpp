@@ -2623,7 +2623,7 @@ export default class extends Gameplay {
     {
         for (int frame = 0; frame < 2000 && !log_contains(marker); ++frame)
         {
-            if (!services.tick() || !script.tick(.016) || !session.tick() ||
+            if (!services.tick() || !script.tick(.016) || !session.tick({}) ||
                 renderer.prepare_scope({}, {}) == engine::SceneWorkState::failed ||
                 !(renderer.render() == engine::RenderSubmitStatus::submitted) || !world.tick(0) ||
                 !script.status().running)
@@ -3084,7 +3084,8 @@ bool run_render_binding_cases(test_support::ResourceServices& services, const fs
     constexpr std::string_view source = R"js(
 import { Gameplay, Render } from 'engine';
 const blocked = !Render.SetVSync(false) && Render.GetVSync() === null &&
-    Render.GetViewportSize() === null && !Render.SetMsaaSamples(4) &&
+    Render.GetViewportSize() === null && Render.GetFrameNumber() === null &&
+    !Render.SetMsaaSamples(4) &&
     Render.GetMsaaSamples() === null && !Render.SupportsMsaaSamples(4) &&
     !Render.SetMaxAnisotropy(true) && Render.GetMaxAnisotropy() === null &&
     !Render.SupportsMaxAnisotropy() && typeof Render.SetFeature === 'undefined' &&
@@ -3093,7 +3094,8 @@ const blocked = !Render.SetVSync(false) && Render.GetVSync() === null &&
 export default class extends Gameplay {
     OnInitialize() {
         return blocked && Object.isFrozen(Render) &&
-            Render.GetViewportSize() === null && Render.GetVSync() === null &&
+            Render.GetViewportSize() === null && Render.GetFrameNumber() === null &&
+            Render.GetVSync() === null &&
             !Render.SetVSync(true) && !Render.SetVSync(1) &&
             !Render.SetMsaaSamples(4) && Render.GetMsaaSamples() === null &&
             !Render.SupportsMsaaSamples(1) && !Render.SupportsMsaaSamples(4) &&

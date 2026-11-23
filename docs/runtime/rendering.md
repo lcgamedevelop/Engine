@@ -4,6 +4,8 @@
 
 [bgfx](https://github.com/bkaradzic/bgfx) 提供跨平台图形接口。macOS / iOS 固定使用 Metal，Windows 使用 DirectX 12，Android / Linux 使用 Vulkan。所选后端不可用时初始化失败，不以 Noop 或其他后端回退代替成功。
 
+Android 窗口默认请求三张 Vulkan 交换链图像，让显示、等待合成和渲染下一帧可以重叠。设备表面的能力决定最终分配数量。
+
 渲染阶段、目标缓冲、GPU 资源生命周期和绘制提交的代码组织优先适配上游范例，再接入引擎的节点、组件与资源接口。项目可自定义 Shader、具名参数和材质；框架复用不要求保留范例的固定外观或参数。
 
 ## 实现职责

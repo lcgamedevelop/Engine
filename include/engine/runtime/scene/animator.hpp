@@ -50,6 +50,9 @@ public:
     [[nodiscard]] bool restore_data(const schema::ComponentDataT& data);
     [[nodiscard]] bool set_animation(std::string_view path);
     [[nodiscard]] bool play_animation(const AnimationPlayRequest& request);
+    [[nodiscard]] bool set_animation_overlay(std::string_view animation,
+                                             std::string_view joint_path, double seconds,
+                                             float weight);
     [[nodiscard]] bool get_playback_info(AnimatorPlaybackInfo& output) const;
     [[nodiscard]] bool get_bone_pose(std::string_view path, AnimationPoseTransform& output) const;
     [[nodiscard]] bool get_socket_pose(std::string_view name, AnimationPoseTransform& output) const;

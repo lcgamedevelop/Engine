@@ -457,7 +457,11 @@ FrameStatus RuntimeHost::tick_runtime(double delta_time)
     }
     {
         ENGINE_PROFILE_ZONE("Host.gameplayTick");
-        if (gameplay_ && !gameplay_->tick())
+        const auto& rendering = parallel_.rendering;
+        const SceneWorkBudget scene_budget{rendering.prepare_items_per_step,
+                                           rendering.prepare_seconds_per_step,
+                                           rendering.upload_bytes_per_step};
+        if (gameplay_ && !gameplay_->tick(scene_budget))
         {
             const auto reason = gameplay_->last_error();
             return fail_runtime("gameplay_update_failed",

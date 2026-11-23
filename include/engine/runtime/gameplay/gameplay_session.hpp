@@ -85,7 +85,7 @@ public:
     [[nodiscard]] bool activate_prepared();
     [[nodiscard]] bool prepare_status(std::uint64_t id, GameplayPrepareSnapshot& output) const;
     [[nodiscard]] bool release_prepare(std::uint64_t id);
-    [[nodiscard]] bool tick();
+    [[nodiscard]] bool tick(const SceneWorkBudget& scene_budget);
     [[nodiscard]] bool start(std::string_view entry = {});
     void stop(GameplayStopCause cause, std::string_view reason = {}) noexcept;
 #if defined(ENGINE_ENABLE_TEST_SUPPORT)

@@ -10,6 +10,11 @@ namespace engine
 struct AnimatorRuntime
 {
     ResourceReference animation_;
+    ResourceReference overlay_animation_;
+    std::string overlay_path_;
+    std::string overlay_joint_;
+    double overlay_seconds_ = 0;
+    float overlay_weight_ = 0;
     ResourceReference target_skeleton_;
     ResourceReference source_skeleton_;
     ResourceReference previous_source_skeleton_;

@@ -135,7 +135,7 @@ bool test_background_protocol(const std::filesystem::path& root)
     {
         return false;
     }
-    const bool accepted = session.tick();
+    const bool accepted = session.tick({});
     const bool untouched = !published_hot_reload(root, true);
     release.set_value();
     if (!expect(accepted && untouched,
@@ -147,7 +147,7 @@ bool test_background_protocol(const std::filesystem::path& root)
         return false;
     }
     (void)tasks.dispatch_completions(8, 1.0);
-    if (!session.tick() || !tasks.wait() ||
+    if (!session.tick({}) || !tasks.wait() ||
         !expect(published_hot_reload(root, true) && script.owner_only,
                 "owner-thread tick applies control and publishes the session policy"))
     {
@@ -165,7 +165,7 @@ bool test_background_protocol(const std::filesystem::path& root)
         return false;
     }
     (void)tasks.dispatch_completions(8, 1.0);
-    if (!session.tick() || !expect(published_hot_reload(root, true),
+    if (!session.tick({}) || !expect(published_hot_reload(root, true),
                                    "replaced resource state discards old completion generation"))
     {
         return false;
@@ -174,7 +174,7 @@ bool test_background_protocol(const std::filesystem::path& root)
     while (!published_hot_reload(root, false) && std::chrono::steady_clock::now() < deadline)
     {
         (void)tasks.dispatch_completions(8, 1.0);
-        if (!session.tick())
+        if (!session.tick({}))
         {
             return false;
         }
@@ -197,7 +197,7 @@ bool test_background_protocol(const std::filesystem::path& root)
     while (session.last_error().empty() && std::chrono::steady_clock::now() < error_deadline)
     {
         (void)tasks.dispatch_completions(8, 1.0);
-        if (!session.tick())
+        if (!session.tick({}))
         {
             return false;
         }
