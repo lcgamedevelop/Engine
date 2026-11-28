@@ -1,5 +1,6 @@
 #include "runtime/utils/mesh_utils.hpp"
 #include "runtime/performance/profiling.hpp"
+#include "runtime/resource/mesh_storage.hpp"
 
 #include <algorithm>
 #include <array>
@@ -65,7 +66,7 @@ Vector orthogonal(const Vector& normal) noexcept
 
 bool validate_meshlets(const schema::MeshletDataT* data,
                        const std::vector<schema::MeshVertex>& vertices,
-                       const std::vector<std::uint32_t>& indices,
+                       mesh_storage::MeshIndexView indices,
                        const std::vector<schema::MeshSubmesh>& submeshes)
 {
     ENGINE_PROFILE_FUNCTION();
@@ -73,7 +74,8 @@ bool validate_meshlets(const schema::MeshletDataT* data,
     {
         return true;
     }
-    if (data->indices.size() != indices.size() || data->meshlets.empty() ||
+    const auto topology = mesh_storage::meshlet_indices(*data, indices);
+    if (topology.size() != indices.size() || data->meshlets.empty() ||
         data->submeshes.size() != std::max<std::size_t>(1, submeshes.size()))
     {
         return false;
@@ -86,9 +88,8 @@ bool validate_meshlets(const schema::MeshletDataT* data,
         const double axis_length = std::hypot(axis.x(), axis.y(), axis.z());
         if (cluster.first_index() != next_index || cluster.index_count() == 0 ||
             cluster.index_count() > 124 * 3 || cluster.index_count() % 3 != 0 ||
-            next_index > data->indices.size() ||
-            cluster.index_count() > data->indices.size() - next_index || !float_value(center.x()) ||
-            !float_value(center.y()) || !float_value(center.z()) ||
+            next_index > topology.size() || cluster.index_count() > topology.size() - next_index ||
+            !float_value(center.x()) || !float_value(center.y()) || !float_value(center.z()) ||
             !float_value(cluster.radius()) || cluster.radius() < 0 || !float_value(axis.x()) ||
             !float_value(axis.y()) || !float_value(axis.z()) ||
             !unit_value(cluster.cone_cutoff()) ||
@@ -100,7 +101,7 @@ bool validate_meshlets(const schema::MeshletDataT* data,
         std::size_t unique_count = 0;
         for (std::size_t j = 0; j < cluster.index_count(); ++j)
         {
-            const auto index = data->indices[next_index + j];
+            const auto index = topology[next_index + j];
             if (index >= vertices.size())
             {
                 return false;
@@ -144,6 +145,16 @@ bool validate_meshlets(const schema::MeshletDataT* data,
         }
         const auto first = submeshes.empty() ? 0 : submeshes[part].first_index();
         const auto count = submeshes.empty() ? indices.size() : submeshes[part].index_count();
+        // Shared topology is already identical when this material covers the same interval.
+        const auto& first_cluster = data->meshlets[next_meshlet];
+        const auto& last_cluster = data->meshlets[next_meshlet + range.meshlet_count() - 1];
+        if (data->uses_parent_indices && first_cluster.first_index() == first &&
+            static_cast<std::size_t>(last_cluster.first_index()) + last_cluster.index_count() ==
+                static_cast<std::size_t>(first) + count)
+        {
+            next_meshlet += range.meshlet_count();
+            continue;
+        }
         original.clear();
         generated.clear();
         for (std::size_t i = first; i < first + count; i += 3)
@@ -156,7 +167,7 @@ bool validate_meshlets(const schema::MeshletDataT* data,
             for (std::size_t j = cluster.first_index();
                  j < cluster.first_index() + cluster.index_count(); j += 3)
             {
-                generated.push_back({data->indices[j], data->indices[j + 1], data->indices[j + 2]});
+                generated.push_back({topology[j], topology[j + 1], topology[j + 2]});
             }
         }
         std::sort(original.begin(), original.end());
@@ -175,14 +186,21 @@ bool validate_meshlets(const schema::MeshletDataT* data,
 bool MeshUtils::validate(const schema::MeshDataT& data) noexcept
 {
     ENGINE_PROFILE_FUNCTION();
+    if (!mesh_storage::valid_encoding(data))
+    {
+        return false;
+    }
+    const auto indices = mesh_storage::indices(data);
+    const auto uvs = mesh_storage::texcoord_count(data);
+    const auto lightmap_uvs = mesh_storage::lightmap_texcoord_count(data);
+    const auto tangents = mesh_storage::tangent_count(data);
     const auto count = data.vertices.size();
     if (data.schema_version != 2 || count == 0 ||
         count > std::numeric_limits<std::uint32_t>::max() / (16 * sizeof(float)) ||
-        data.indices.empty() || data.indices.size() % 3 != 0 ||
-        data.indices.size() > std::numeric_limits<std::uint32_t>::max() / sizeof(std::uint32_t) ||
-        (!data.texcoords.empty() && data.texcoords.size() != count) ||
-        (!data.lightmap_texcoords.empty() && data.lightmap_texcoords.size() != count) ||
-        (!data.tangents.empty() && data.tangents.size() != count) ||
+        indices.empty() || indices.size() % 3 != 0 ||
+        indices.size() > std::numeric_limits<std::uint32_t>::max() / sizeof(std::uint32_t) ||
+        (uvs != 0 && uvs != count) || (lightmap_uvs != 0 && lightmap_uvs != count) ||
+        (tangents != 0 && tangents != count) ||
         (!data.colors.empty() && data.colors.size() != count))
     {
         return false;
@@ -197,29 +215,32 @@ bool MeshUtils::validate(const schema::MeshDataT& data) noexcept
             return false;
         }
     }
-    for (auto index : data.indices)
+    for (std::size_t i = 0; i < indices.size(); ++i)
     {
-        if (index >= count)
+        if (indices[i] >= count)
         {
             return false;
         }
     }
-    for (const auto& uv : data.texcoords)
+    for (std::size_t i = 0; i < uvs; ++i)
     {
+        const auto uv = mesh_storage::texcoord(data, i);
         if (!float_value(uv.x()) || !float_value(uv.y()))
         {
             return false;
         }
     }
-    for (const auto& uv : data.lightmap_texcoords)
+    for (std::size_t i = 0; i < lightmap_uvs; ++i)
     {
+        const auto uv = mesh_storage::lightmap_texcoord(data, i);
         if (!unit_value(uv.x()) || !unit_value(uv.y()))
         {
             return false;
         }
     }
-    for (const auto& tangent : data.tangents)
+    for (std::size_t i = 0; i < tangents; ++i)
     {
+        const auto tangent = mesh_storage::tangent(data, i);
         if (!float_value(tangent.x()) || !float_value(tangent.y()) || !float_value(tangent.z()) ||
             (tangent.w() != -1.0 && tangent.w() != 1.0) ||
             std::hypot(tangent.x(), tangent.y(), tangent.z()) <= 0.0)
@@ -240,13 +261,13 @@ bool MeshUtils::validate(const schema::MeshDataT& data) noexcept
     {
         if (submesh.first_index() != next_index || submesh.index_count() == 0 ||
             submesh.index_count() % 3 != 0 || submesh.material_slot() >= 16 ||
-            submesh.index_count() > data.indices.size() - next_index)
+            submesh.index_count() > indices.size() - next_index)
         {
             return false;
         }
         next_index += submesh.index_count();
     }
-    if (!data.submeshes.empty() && next_index != data.indices.size())
+    if (!data.submeshes.empty() && next_index != indices.size())
     {
         return false;
     }
@@ -255,21 +276,26 @@ bool MeshUtils::validate(const schema::MeshDataT& data) noexcept
     {
         return false;
     }
-    std::size_t previous_count = data.indices.size();
+    std::size_t previous_count = indices.size();
     float previous_height = std::nextafter(1.0F, 2.0F);
     for (const auto& lod : data.lods)
     {
-        if (!lod || !std::isfinite(lod->screen_height) || lod->screen_height <= 0 ||
+        if (!lod)
+        {
+            return false;
+        }
+        const auto lod_indices = mesh_storage::indices(*lod);
+        if (!std::isfinite(lod->screen_height) || lod->screen_height <= 0 ||
             lod->screen_height > 1 || lod->screen_height >= previous_height ||
-            lod->indices.empty() || lod->indices.size() % 3 != 0 ||
-            lod->indices.size() >= previous_count ||
+            lod_indices.empty() || lod_indices.size() % 3 != 0 ||
+            lod_indices.size() >= previous_count ||
             static_cast<bool>(lod->meshlets) != static_cast<bool>(data.meshlets))
         {
             return false;
         }
-        for (const auto index : lod->indices)
+        for (std::size_t i = 0; i < lod_indices.size(); ++i)
         {
-            if (index >= count)
+            if (lod_indices[i] >= count)
             {
                 return false;
             }
@@ -285,22 +311,22 @@ bool MeshUtils::validate(const schema::MeshDataT& data) noexcept
             const auto slot = data.submeshes.empty() ? 0U : data.submeshes[part].material_slot();
             if (range.first_index() != next_index || range.index_count() == 0 ||
                 range.index_count() % 3 != 0 || range.material_slot() != slot ||
-                next_index > lod->indices.size() ||
-                range.index_count() > lod->indices.size() - next_index)
+                next_index > lod_indices.size() ||
+                range.index_count() > lod_indices.size() - next_index)
             {
                 return false;
             }
             next_index += range.index_count();
         }
-        if (next_index != lod->indices.size() ||
-            !validate_meshlets(lod->meshlets.get(), data.vertices, lod->indices, lod->submeshes))
+        if (next_index != lod_indices.size() ||
+            !validate_meshlets(lod->meshlets.get(), data.vertices, lod_indices, lod->submeshes))
         {
             return false;
         }
-        previous_count = lod->indices.size();
+        previous_count = lod_indices.size();
         previous_height = lod->screen_height;
     }
-    return validate_meshlets(data.meshlets.get(), data.vertices, data.indices, data.submeshes);
+    return validate_meshlets(data.meshlets.get(), data.vertices, indices, data.submeshes);
 }
 
 bool MeshUtils::build_tangents(const schema::MeshDataT& data, std::vector<schema::Vec4>& output)
@@ -311,18 +337,25 @@ bool MeshUtils::build_tangents(const schema::MeshDataT& data, std::vector<schema
         output.clear();
         return false;
     }
-    std::vector<Vector> tangents(data.vertices.size());
-    std::vector<Vector> bitangents(data.vertices.size());
+    const bool supplied_tangents = mesh_storage::tangent_count(data) != 0;
+    const auto indices = mesh_storage::indices(data);
+    std::vector<Vector> tangents;
+    std::vector<Vector> bitangents;
     // Adapted from bgfx examples/common/bgfx_utils.cpp calcTangents (BSD-2-Clause).
     // Copyright 2010-2025 Branimir Karadzic. See third_party/notices/bgfx.txt.
     // Changes: generated data, uint32 indices, double arithmetic and degenerate-UV fallback.
-    if (data.tangents.empty() && !data.texcoords.empty())
+    if (!supplied_tangents)
     {
-        for (std::size_t triangle = 0; triangle < data.indices.size(); triangle += 3)
+        tangents.resize(data.vertices.size());
+        bitangents.resize(data.vertices.size());
+    }
+    if (!supplied_tangents && mesh_storage::texcoord_count(data) != 0)
+    {
+        for (std::size_t triangle = 0; triangle < indices.size(); triangle += 3)
         {
-            const auto i0 = data.indices[triangle];
-            const auto i1 = data.indices[triangle + 1];
-            const auto i2 = data.indices[triangle + 2];
+            const auto i0 = indices[triangle];
+            const auto i1 = indices[triangle + 1];
+            const auto i2 = indices[triangle + 2];
             const auto& a = data.vertices[i0];
             const auto& b = data.vertices[i1];
             const auto& c = data.vertices[i2];
@@ -332,10 +365,13 @@ bool MeshUtils::build_tangents(const schema::MeshDataT& data, std::vector<schema
             const Vector edge_c = {static_cast<double>(c.x()) - a.x(),
                                    static_cast<double>(c.y()) - a.y(),
                                    static_cast<double>(c.z()) - a.z()};
-            const double bu = data.texcoords[i1].x() - data.texcoords[i0].x();
-            const double bv = data.texcoords[i1].y() - data.texcoords[i0].y();
-            const double cu = data.texcoords[i2].x() - data.texcoords[i0].x();
-            const double cv = data.texcoords[i2].y() - data.texcoords[i0].y();
+            const auto uv0 = mesh_storage::texcoord(data, i0);
+            const auto uv1 = mesh_storage::texcoord(data, i1);
+            const auto uv2 = mesh_storage::texcoord(data, i2);
+            const double bu = uv1.x() - uv0.x();
+            const double bv = uv1.y() - uv0.y();
+            const double cu = uv2.x() - uv0.x();
+            const double cv = uv2.y() - uv0.y();
             const double determinant = bu * cv - bv * cu;
             if (std::abs(determinant) <= 1.0e-20)
             {
@@ -364,13 +400,17 @@ bool MeshUtils::build_tangents(const schema::MeshDataT& data, std::vector<schema
             output.clear();
             return false;
         }
-        Vector tangent = tangents[index];
+        Vector tangent{};
         double handedness = 1.0;
-        if (!data.tangents.empty())
+        if (supplied_tangents)
         {
-            const auto& supplied = data.tangents[index];
+            const auto supplied = mesh_storage::tangent(data, index);
             tangent = {supplied.x(), supplied.y(), supplied.z()};
             handedness = supplied.w();
+        }
+        else
+        {
+            tangent = tangents[index];
         }
         const double normal_dot_tangent = dot(normal, tangent);
         for (std::size_t axis = 0; axis < 3; ++axis)
@@ -381,7 +421,7 @@ bool MeshUtils::build_tangents(const schema::MeshDataT& data, std::vector<schema
         {
             tangent = orthogonal(normal);
         }
-        else if (data.tangents.empty())
+        else if (!supplied_tangents)
         {
             handedness = dot(cross(normal, tangent), bitangents[index]) < 0.0 ? -1.0 : 1.0;
         }

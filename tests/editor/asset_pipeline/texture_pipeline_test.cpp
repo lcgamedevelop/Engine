@@ -6,6 +6,7 @@
 #include "runtime/engine_config.hpp"
 #include "runtime/render/resources/gpu_texture.hpp"
 #include "runtime/resource/codecs/texture_resource_codec.hpp"
+#include "runtime/resource/mesh_storage.hpp"
 #include "runtime/resource/resource_system.hpp"
 #include "runtime/scene/mesh_renderer.hpp"
 #include "runtime/scene/scene.hpp"
@@ -515,7 +516,7 @@ bool tests()
         }
         const auto* imported_mesh =
             engine::resource_detail::data<engine::MeshResource>(mesh_resource.get());
-        if (!expect(imported_mesh && imported_mesh->texcoords.size() == 4 &&
+        if (!expect(imported_mesh && engine::mesh_storage::texcoord_count(*imported_mesh) == 4 &&
                         imported_mesh->submeshes.size() == 2,
                     "runtime receives UVs, colors, tangents and material submeshes"))
         {

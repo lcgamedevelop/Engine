@@ -8,6 +8,7 @@ class MeshImporter : public AssetImporter
 {
 public:
     [[nodiscard]] schema::AssetKind kind() const noexcept override;
+    [[nodiscard]] std::string_view default_meta() const noexcept override;
     [[nodiscard]] bool matches(const std::filesystem::path& source) const override;
     [[nodiscard]] bool inspect_batch(const ImportContext& context, std::string& fingerprint,
                                      std::string& error) override;

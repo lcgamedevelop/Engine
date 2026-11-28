@@ -11,6 +11,7 @@
 #include "editor/mesh/mesh_lods.hpp"
 #include "runtime/core/guid_map.hpp"
 #include "runtime/resource/codecs/mesh_resource_codec.hpp"
+#include "runtime/resource/mesh_storage.hpp"
 #include "runtime/resource/resource_system.hpp"
 #include "runtime/utils/path_utils.hpp"
 
@@ -181,12 +182,14 @@ bool mesh_results(const fs::path& project, std::string_view path, const MeshLodS
             error = "Imported mesh LOD result failed mesh validation";
             return false;
         }
-        Json levels = Json::array({{{"level", 0}, {"triangleCount", mesh->indices.size() / 3}}});
+        Json levels = Json::array(
+            {{{"level", 0}, {"triangleCount", mesh_storage::indices(*mesh).size() / 3}}});
         for (std::size_t level = 0; level < mesh->lods.size(); ++level)
         {
-            levels.push_back({{"level", level + 1},
-                              {"triangleCount", mesh->lods[level]->indices.size() / 3},
-                              {"screenHeight", mesh->lods[level]->screen_height}});
+            levels.push_back(
+                {{"level", level + 1},
+                 {"triangleCount", mesh_storage::indices(*mesh->lods[level]).size() / 3},
+                 {"screenHeight", mesh->lods[level]->screen_height}});
         }
         if (meshlets)
         {

@@ -21,6 +21,16 @@
 
 后续普通源格式在统一 `editor/asset_import` 内增加独立文件，实现既有 `AssetImporter::id/matches/discover/convert`，并由宿主显式登记，不再为每个格式创建插件或注册门面。`discover` 只描述稳定子资源 key 和类型，GUID 分配与发布仍由管线处理。尽量输出已有运行 Schema；新增运行语义时先评审 Schema/ResourceCodec 契约，再增加核心单项能力，不把源格式 SDK 或编辑器设置传入运行时。类图见 [FBX](class-diagrams/fbx-importer.md)、[USD](class-diagrams/usd-import.md)和[模型资源](../../runtime/class-diagrams/model-resources.md)。
 
+## 网格无损优化
+
+在 FBX、USD 或独立 `.mesh` 的相邻 `.meta` 顶层设置 `optimize_mesh`。新导入的模型默认写入 `true`，已有模型省略该项时也默认开启。模型的全部 Mesh 子资源继承同一个设置，修改后通过常规增量导入生效，保留各自的 GUID。要让单个模型使用完整宽度的 CPU 数组，将下面一行放在第一个 TOML 表或数组表之前。
+
+```toml
+optimize_mesh = false
+```
+
+开启时，运行时按实际索引范围选用 16 或 32 位索引，完全相同的 Meshlet 索引与所属级别共享存储。UV、光照 UV 和切线仅在逐个分量均可逐位还原时使用单精度。此项控制 CPU 网格常驻内存，三角形数量、顺序以及场景的 LOD 和 Meshlet 设置各自保留原值。具体规则见[网格工具](../../runtime/class-diagrams/mesh-utils.md)。
+
 ## 模型坐标与材质映射
 
 模型适配由导入属性组合完成：FBX `.meta` 的 `scale_factor` 控制统一缩放，`rotation_offset` 指定 XYZ 欧拉角（度），`material_remaps` 按 Mesh 子资源路径绑定各材质槽。模型、骨架和动画使用一致的导入坐标；外部动画与引用骨架的坐标设置必须相同。材质引用自动进入模型的运行依赖，参数变化参与增量构建，已有子 GUID 保持不变。错误配置保留上一批有效缓存，不能通过项目名或模型名分支修补。字段格式与限制见 [FBX 导入契约](class-diagrams/fbx-importer.md)。

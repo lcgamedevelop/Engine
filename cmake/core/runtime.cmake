@@ -122,6 +122,7 @@ if(ENGINE_ENABLE_RUNTIME_DEPS)
         PRIVATE src/engine/runtime/resource/builtin_resources.cpp
                 src/engine/runtime/resource/builtin_font.cpp
                 src/engine/runtime/utils/mesh_utils.cpp
+                src/engine/runtime/resource/mesh_storage.cpp
                 src/engine/runtime/resource/resource.cpp
                 src/engine/runtime/resource/resource_read.cpp
                 src/engine/runtime/resource/resource_loader.cpp

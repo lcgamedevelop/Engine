@@ -141,7 +141,9 @@ bool ModelingMeshImporter::convert(const editor::asset_pipeline::ImportAsset& as
         error = asset.path + ": " + error;
         return false;
     }
-    return editor::generate_mesh_lods(mesh, asset.source, error) &&
+    return editor::asset_pipeline::read_mesh_optimization(asset.source, mesh.optimize_storage,
+                                                        error) &&
+           editor::generate_mesh_lods(mesh, asset.source, error) &&
            editor::generate_meshlets(mesh, asset.source, error) &&
            write_mesh(context.output / asset.guid, mesh, error);
 }

@@ -69,6 +69,11 @@ classDiagram
         +string path
         +vector~MeshVertex~ vertices
         +vector~uint32_t~ indices
+        +bool optimize_storage
+        +vector~uint16_t~ indices16
+        +vector~MeshFloat2~ texcoords32
+        +vector~MeshFloat4~ tangents32
+        +vector~MeshFloat2~ lightmap_texcoords32
         +vector~Vec2~ texcoords
         +vector~Vec4~ tangents
         +vector~Color~ colors
@@ -93,7 +98,7 @@ classDiagram
     MeshRendererDataT ..> MeshDataT : mesh_guid引用
 ```
 
-`MeshVertex` 是生成的值结构，包含位置和法线；顶点容器不使用 `unique_ptr`。资源路径与引用 GUID 的对应关系由资源目录维护。
+`MeshVertex` 是生成的值结构，包含位置和法线；顶点以值存储。资源目录维护逻辑路径与 GUID 的对应关系。各索引和属性流的位宽选择、共享及读取约定见[网格工具](mesh-utils.md#运行时网格的紧凑存储)。
 
 ## 材质
 

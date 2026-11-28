@@ -1,4 +1,5 @@
 #include "runtime/scene/mesh_renderer.hpp"
+#include "runtime/resource/mesh_storage.hpp"
 #include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 
@@ -201,7 +202,7 @@ ResourceHandle MeshRenderer::lightmap_resource() const noexcept
     auto transform = node().get_component<Transform>();
     std::array<double, 16> matrix{};
     if (!runtime()->lightmap_resource_ || !runtime()->mesh_resource_ || !mesh ||
-        mesh->lightmap_texcoords.size() != mesh->vertices.size() ||
+        mesh_storage::lightmap_texcoord_count(*mesh) != mesh->vertices.size() ||
         settings.lightmap_mesh_hash != runtime()->mesh_resource_->info().content_hash ||
         settings.lightmap_transform.size() != matrix.size() || runtime()->skin_joint_count_ != 0 ||
         !runtime()->deformed_vertices_.empty() || !runtime()->skinning_palette_.empty() ||
@@ -254,7 +255,7 @@ bool MeshRenderer::set_lightmap(std::string_view path)
     std::array<double, 16> matrix{};
     if (!runtime()->mesh_resource_ || !mesh || runtime()->skin_joint_count_ != 0 ||
         !runtime()->deformed_vertices_.empty() || !runtime()->skinning_palette_.empty() ||
-        mesh->lightmap_texcoords.size() != mesh->vertices.size() || !transform ||
+        mesh_storage::lightmap_texcoord_count(*mesh) != mesh->vertices.size() || !transform ||
         !transform.world_matrix(matrix.data()) ||
         !ecs_detail::acquire_resource(node(), path, replacement))
     {
@@ -751,7 +752,7 @@ bool MeshRenderer::restore_data(const schema::ComponentDataT& data)
             replacement.lightmap_resource_.data<TextureResource>()->cube_map ||
             replacement.lightmap_resource_.data<TextureResource>()->srgb ||
             replacement.skin_joint_count_ != 0 ||
-            mesh->lightmap_texcoords.size() != mesh->vertices.size() ||
+            mesh_storage::lightmap_texcoord_count(*mesh) != mesh->vertices.size() ||
             settings->lightmap_mesh_hash.empty() || settings->lightmap_transform.size() != 16 ||
             !std::all_of(settings->lightmap_transform.begin(), settings->lightmap_transform.end(),
                          [](float value)

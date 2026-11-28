@@ -1,4 +1,5 @@
 #include "resource_services.hpp"
+#include "runtime/resource/mesh_storage.hpp"
 #include "scene_snapshot.hpp"
 #pragma once
 
@@ -80,7 +81,7 @@ inline engine::schema::MeshVertex sampled_vertex(engine::MeshRenderer renderer,
 inline engine::Vec4 sampled_tangent(engine::MeshRenderer renderer, std::size_t index = 0)
 {
     const auto& bind = renderer.mesh_data()->vertices[index];
-    const auto& tangent = renderer.mesh_data()->tangents[index];
+    const auto tangent = engine::mesh_storage::tangent(*renderer.mesh_data(), index);
     const auto normal = sampled_vertex(renderer, index);
     auto linear = skin_vector(renderer, index, {tangent.x(), tangent.y(), tangent.z()}, false);
     const double dot =

@@ -1,6 +1,7 @@
 #include "editor/mesh/mesh_lods.hpp"
 #include "editor/mesh/meshlets.hpp"
 #include "runtime/resource/codecs/mesh_resource_codec.hpp"
+#include "runtime/resource/mesh_storage.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -229,6 +230,15 @@ bool meshlet_tests()
                 "meshlet payload preserves ordinary topology and material boundaries"))
     {
         std::fprintf(stderr, "%s\n", error.c_str());
+        return false;
+    }
+    auto compact = source;
+    if (!expect(engine::mesh_storage::compact(compact) && !compact.indices16.empty() &&
+                    engine::editor::generate_mesh_lods(compact, options.table(), error) &&
+                    engine::editor::generate_meshlets(compact, options.table(), error) &&
+                    engine::mesh_storage::expand(compact) && compact == mesh,
+                "compact and expanded authoring inputs produce identical LODs and meshlets"))
+    {
         return false;
     }
     for (const auto& lod : mesh.lods)

@@ -1,4 +1,5 @@
 #include "editor/asset_pipeline/asset_pipeline_system.hpp"
+#include "file_text.hpp"
 #include "plugins/editor/asset_import/fbx_importer.hpp"
 #include "plugins/editor/asset_import/usd_importer.hpp"
 #include "runtime/engine_config.hpp"
@@ -15,6 +16,7 @@
 #include <fstream>
 #include <memory>
 #include <string>
+#include <string_view>
 
 namespace
 {
@@ -141,7 +143,8 @@ int main()
         return 1;
     }
     const auto* mesh = schema::GetMeshData(bytes.data());
-    if (!expect(mesh->vertices()->size() == 4 && mesh->indices()->size() == 6 &&
+    if (!expect(mesh->optimize_storage(), "new USD mesh enables storage optimization") ||
+        !expect(mesh->vertices()->size() == 4 && mesh->indices()->size() == 6 &&
                     std::abs(mesh->vertices()->Get(0)->x() - 2.0F) < 0.00001F,
                 "convex polygon triangulated with world transform baked"))
     {
@@ -170,6 +173,32 @@ int main()
                                                       next_mesh_guid) &&
                     next_mesh_guid == original_mesh_guid,
                 "new USD contents replace cache while preserving child identity"))
+    {
+        return 1;
+    }
+    const auto usd_meta = project.root / "assets/models/quad.usda.meta";
+    std::string metadata;
+    std::string fbx_metadata;
+    constexpr std::string_view enabled = "optimize_mesh = true";
+    if (!expect(test_support::read_text(usd_meta, metadata) &&
+                    test_support::read_text(project.root / "assets/models/person.fbx.meta",
+                                            fbx_metadata) &&
+                    metadata.find(enabled) != std::string::npos &&
+                    fbx_metadata.find(enabled) != std::string::npos,
+                "new FBX and USD model sidecars explicitly enable mesh optimization"))
+    {
+        return 1;
+    }
+    metadata.replace(metadata.find(enabled), enabled.size(), "optimize_mesh = false");
+    if (!expect(write(usd_meta, metadata) && pipeline.build_assets(project.root),
+                "disable mesh optimization on the USD model") ||
+        !expect(pipeline.last_build().imported == 2 && pipeline.last_build().reused == count - 2,
+                "toggling optimization rebuilds only the selected model and its mesh") ||
+        !expect(ResourceSystem::read_catalog(project.root / "cache", catalog) &&
+                    ResourceSystem::read_resource(catalog, {{"content", project.root / "cache"}},
+                                                  original_mesh_guid, bytes) &&
+                    !schema::GetMeshData(bytes.data())->optimize_storage(),
+                "USD mesh retains its GUID and carries its model's opt-out"))
     {
         return 1;
     }

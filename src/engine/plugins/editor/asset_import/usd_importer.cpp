@@ -188,6 +188,11 @@ schema::AssetKind UsdImporter::kind() const noexcept
     ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::model;
 }
+std::string_view UsdImporter::default_meta() const noexcept
+{
+    ENGINE_PROFILE_FUNCTION();
+    return editor::asset_pipeline::mesh_optimization_default_meta;
+}
 bool UsdImporter::matches(const std::filesystem::path& source) const
 {
     ENGINE_PROFILE_FUNCTION();
@@ -237,7 +242,8 @@ bool UsdImporter::discover(const editor::asset_pipeline::ImportAsset& source,
     output.clear();
     parsed_.erase(source.source);
     ParsedModel parsed;
-    if (!editor::asset_pipeline::file_hash(source.source, parsed.source_hash, error))
+    if (!editor::asset_pipeline::file_hash(source.source, parsed.source_hash, error) ||
+        !editor::asset_pipeline::read_mesh_optimization(source.source, parsed.optimize_mesh, error))
     {
         return false;
     }
@@ -437,6 +443,7 @@ bool UsdImporter::convert(const editor::asset_pipeline::ImportAsset& asset,
         {
             return false;
         }
+        result.optimize_storage = found->second.optimize_mesh;
         schema::FinishMeshDataBuffer(builder, schema::MeshData::Pack(builder, &result));
     }
     return editor::asset_pipeline::write_bytes(

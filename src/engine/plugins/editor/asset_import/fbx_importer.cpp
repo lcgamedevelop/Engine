@@ -257,7 +257,7 @@ std::string_view FbxImporter::default_meta() const noexcept
 {
     ENGINE_PROFILE_FUNCTION();
     return "sample_rate = 30\nskeleton = \"\"\nnormals = \"import\"\n"
-           "scale_factor = 1.0\nrotation_offset = [0.0, 0.0, 0.0]\n";
+           "optimize_mesh = true\nscale_factor = 1.0\nrotation_offset = [0.0, 0.0, 0.0]\n";
 }
 bool FbxImporter::discover(const ImportAsset& source, std::vector<ImportSubresource>& output,
                            std::string& error) const
@@ -501,6 +501,7 @@ bool FbxImporter::convert(const ImportAsset& asset, const ImportContext& context
             }
             return false;
         }
+        result.optimize_storage = document.optimize_mesh;
         schema::FinishMeshDataBuffer(builder, schema::MeshData::Pack(builder, &result));
     }
     else if (asset.kind == schema::AssetKind::animation)

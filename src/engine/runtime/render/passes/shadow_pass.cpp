@@ -8,6 +8,7 @@
 #include "runtime/render/render_submission.hpp"
 #include "runtime/render/render_system.hpp"
 #include "runtime/render/resources/gpu_program.hpp"
+#include "runtime/resource/mesh_storage.hpp"
 #include "runtime/schema/shader_generated.h"
 
 #include "fs_shadow.bin.h"
@@ -782,10 +783,10 @@ void ShadowPass::prepare_solid_batches(const RenderFrameData& frame)
             continue;
         }
         const auto& data = *source.data;
+        const auto topology = mesh_storage::indices(data);
         // Use the cache for smaller draw-heavy participants. Large meshes keep their own buffers.
-        if (data.vertices.empty() || data.vertices.size() > vertex_limit / 16 ||
-            data.indices.empty() || data.indices.size() % 3 != 0 ||
-            data.indices.size() > memory_limit / sizeof(std::uint16_t))
+        if (data.vertices.empty() || data.vertices.size() > vertex_limit / 16 || topology.empty() ||
+            topology.size() % 3 != 0 || topology.size() > memory_limit / sizeof(std::uint16_t))
         {
             continue;
         }
@@ -814,7 +815,7 @@ void ShadowPass::prepare_solid_batches(const RenderFrameData& frame)
             {
                 ENGINE_PROFILE_FUNCTION_PROBE();
                 if (range.first_index() != total_indices || range.index_count() % 3 != 0 ||
-                    range.index_count() > data.indices.size() - total_indices ||
+                    range.index_count() > topology.size() - total_indices ||
                     !compatible(range.material_slot()))
                 {
                     return false;
@@ -822,13 +823,14 @@ void ShadowPass::prepare_solid_batches(const RenderFrameData& frame)
                 total_indices += range.index_count();
                 return true;
             });
-        if (!complete || (!data.submeshes.empty() && total_indices != data.indices.size()) ||
-            !std::ranges::all_of(data.indices,
-                                 [&](auto value)
-                                 {
-                                     ENGINE_PROFILE_FUNCTION_PROBE();
-                                     return value < data.vertices.size();
-                                 }))
+        const auto valid_vertex = [&](std::uint32_t value)
+        {
+            ENGINE_PROFILE_FUNCTION_PROBE();
+            return value < data.vertices.size();
+        };
+        if (!complete || (!data.submeshes.empty() && total_indices != topology.size()) ||
+            !std::ranges::all_of(topology.wide, valid_vertex) ||
+            !std::ranges::all_of(topology.narrow, valid_vertex))
         {
             continue;
         }
@@ -889,12 +891,13 @@ void ShadowPass::prepare_solid_batches(const RenderFrameData& frame)
         for (const auto source : group)
         {
             const auto& data = *frame.meshes[source].data;
+            const auto topology = mesh_storage::indices(data);
             if (positions.size() + data.vertices.size() > vertex_limit)
             {
                 upload(key.second);
             }
             const auto bytes = (positions.size() + data.vertices.size()) * sizeof(Position) +
-                               (indices.size() + data.indices.size()) * sizeof(std::uint16_t);
+                               (indices.size() + topology.size()) * sizeof(std::uint16_t);
             if (bytes > memory_limit - solid_batch_bytes_)
             {
                 continue;
@@ -902,15 +905,15 @@ void ShadowPass::prepare_solid_batches(const RenderFrameData& frame)
             const auto base = positions.size();
             const auto draws = std::max<std::size_t>(1, data.submeshes.size());
             ranges.push_back({source, static_cast<std::uint32_t>(indices.size()),
-                              static_cast<std::uint32_t>(data.indices.size()),
+                              static_cast<std::uint32_t>(topology.size()),
                               static_cast<std::uint32_t>(draws)});
             for (const auto& point : data.vertices)
             {
                 positions.push_back({point.x(), point.y(), point.z()});
             }
-            for (const auto index : data.indices)
+            for (std::size_t index = 0; index < topology.size(); ++index)
             {
-                indices.push_back(static_cast<std::uint16_t>(base + index));
+                indices.push_back(static_cast<std::uint16_t>(base + topology[index]));
             }
         }
         upload(key.second);
@@ -1097,7 +1100,7 @@ bool ShadowPass::encode_pages(const RenderFrameData& frame_data, std::span<const
             return true;
         };
         if (data->submeshes.empty() &&
-            !collect(0, static_cast<std::uint32_t>(data->indices.size()), 0))
+            !collect(0, static_cast<std::uint32_t>(mesh_storage::indices(*data).size()), 0))
         {
             return false;
         }

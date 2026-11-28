@@ -1,6 +1,7 @@
 #include "editor/mesh/mesh_tangents.hpp"
 #include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
+#include "runtime/resource/mesh_storage.hpp"
 
 #include <mikktspace.h>
 
@@ -19,9 +20,14 @@ namespace engine::editor
 bool generate_mesh_tangents(schema::MeshDataT& mesh, std::string& error)
 {
     ENGINE_PROFILE_FUNCTION();
-    if (mesh.texcoords.empty() || !mesh.tangents.empty())
+    if (mesh_storage::texcoord_count(mesh) == 0 || mesh_storage::tangent_count(mesh) != 0)
     {
         return true;
+    }
+    if (!mesh_storage::expand(mesh))
+    {
+        error = "Cannot generate tangents for an ambiguous mesh encoding";
+        return false;
     }
     // Upstream MakeIndex packs face/corner as (face << 2) | corner in a signed int.
     if (mesh.indices.size() / 3 > static_cast<std::size_t>(std::numeric_limits<int>::max() / 4))

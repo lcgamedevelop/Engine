@@ -40,6 +40,7 @@ struct FbxDocument
     std::vector<const ufbx_node*> joints;
     std::map<const ufbx_node*, std::uint32_t> joint_indices;
     std::string external_skeleton;
+    bool optimize_mesh = true;
     std::string normals_mode = "import";
     std::string source_hash;
     double sample_rate = 30.0;

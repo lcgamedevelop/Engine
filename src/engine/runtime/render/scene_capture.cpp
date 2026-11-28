@@ -1,9 +1,10 @@
-#include "runtime/render/render_constants.hpp"
 #include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
+#include "runtime/render/render_constants.hpp"
 #include "runtime/render/render_math.hpp"
 #include "runtime/render/scene_gpu_resources.hpp"
 #include "runtime/resource/codecs/texture_resource_codec.hpp"
+#include "runtime/resource/mesh_storage.hpp"
 #include "runtime/resource/resource.hpp"
 #include "runtime/scene/ecs_scene.hpp"
 #include "runtime/scene/ecs_storage.hpp"
@@ -851,6 +852,7 @@ bool RenderSystem::SceneGpuResources::prepare_capture(const SceneCaptureRequest&
         if (item.mesh)
         {
             const auto& data = *item.mesh;
+            const auto indices = mesh_storage::indices(data);
             std::vector<schema::Vec4> tangents;
             std::vector<render_detail::GpuVertex> vertices;
             geometry = std::make_unique<render_detail::GpuGeometry>();
@@ -858,7 +860,7 @@ bool RenderSystem::SceneGpuResources::prepare_capture(const SceneCaptureRequest&
                 !render_detail::GpuGeometry::pack_vertices(data, data.vertices, tangents, vertices,
                                                            geometry->minimum, geometry->maximum) ||
                 vertices.size() > UINT32_MAX / sizeof(render_detail::GpuVertex) ||
-                data.indices.size() > UINT32_MAX / sizeof(std::uint32_t))
+                indices.size() > UINT32_MAX / sizeof(std::uint32_t))
             {
                 return false;
             }
@@ -866,7 +868,7 @@ bool RenderSystem::SceneGpuResources::prepare_capture(const SceneCaptureRequest&
                 bgfx::copy(vertices.data(),
                            static_cast<std::uint32_t>(vertices.size() * sizeof(vertices[0]))),
                 render_detail::GpuGeometry::vertex_layout());
-            if (!bgfx::isValid(geometry->vertices) || !geometry->create_base_indices(data.indices))
+            if (!bgfx::isValid(geometry->vertices) || !geometry->create_base_indices(indices))
             {
                 return false;
             }

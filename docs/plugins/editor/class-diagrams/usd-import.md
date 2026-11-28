@@ -8,6 +8,7 @@ classDiagram
     class UsdImporter {
         +id() string_view
         +kind() AssetKind
+        +default_meta() string_view
         +matches(const Path& source) bool
         +discover(const ImportAsset& source, vector~ImportSubresource~& output, string& error) bool
         +inspect_batch(const ImportContext& context, string& fingerprint, string& error) bool

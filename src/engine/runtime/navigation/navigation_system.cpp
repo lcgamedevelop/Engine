@@ -1,4 +1,5 @@
 #include "runtime/navigation/navigation_system.hpp"
+#include "runtime/resource/mesh_storage.hpp"
 
 #include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
@@ -164,15 +165,22 @@ bool prepare_geometry(std::span<const NavigationGeometry> sources, const Vec3& o
     {
         const auto* mesh = source.mesh;
         const auto& m = source.transform;
-        if (!mesh || mesh->schema_version != 2 || mesh->indices.size() % 3 != 0 ||
-            mesh->vertices.empty() != mesh->indices.empty() ||
+        if (!mesh || (!mesh->indices.empty() && !mesh->indices16.empty()))
+        {
+            error = "Invalid navigation mesh";
+            return false;
+        }
+        const auto indices = mesh_storage::indices(*mesh);
+        if (mesh->schema_version != 2 || indices.size() % 3 != 0 ||
+            mesh->vertices.empty() != indices.empty() ||
             mesh->vertices.size() > maximum_vertices - output.vertices.size() / 3 ||
-            mesh->indices.size() / 3 > maximum_triangles - output.triangles.size() / 3 ||
-            !std::all_of(m.begin(), m.end(), [](double value)
-            {
-                ENGINE_PROFILE_FUNCTION_PROBE();
-                return std::isfinite(value);
-            }) ||
+            indices.size() / 3 > maximum_triangles - output.triangles.size() / 3 ||
+            !std::all_of(m.begin(), m.end(),
+                         [](double value)
+                         {
+                             ENGINE_PROFILE_FUNCTION_PROBE();
+                             return std::isfinite(value);
+                         }) ||
             std::abs(m[3]) > 0.000001F || std::abs(m[7]) > 0.000001F ||
             std::abs(m[11]) > 0.000001F || std::abs(m[15] - 1) > 0.000001F)
         {
@@ -210,12 +218,12 @@ bool prepare_geometry(std::span<const NavigationGeometry> sources, const Vec3& o
                                    {static_cast<float>(value.x()), static_cast<float>(value.y()),
                                     static_cast<float>(value.z())});
         }
-        for (std::size_t index = 0; index < mesh->indices.size(); index += 3)
+        for (std::size_t index = 0; index < indices.size(); index += 3)
         {
             std::array<int, 3> triangle{};
             for (std::size_t corner = 0; corner < 3; ++corner)
             {
-                const auto vertex = mesh->indices[index + corner];
+                const auto vertex = indices[index + corner];
                 if (vertex >= mesh->vertices.size())
                 {
                     error = "Navigation triangle references a missing vertex";

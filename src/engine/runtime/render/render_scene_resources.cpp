@@ -10,6 +10,7 @@
 #include "runtime/render/scene_gpu_resources.hpp"
 #include "runtime/render/scene_render_query.hpp"
 #include "runtime/render/scene_render_settings.hpp"
+#include "runtime/resource/mesh_storage.hpp"
 #include "runtime/resource/resource.hpp"
 #include "runtime/resource/types/mesh_resource.hpp"
 #include "runtime/scene/camera_math.hpp"
@@ -1452,7 +1453,8 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
         const auto meshlet_bytes = [&bytes](const schema::MeshletDataT* value)
         {
             ENGINE_PROFILE_FUNCTION_PROBE();
-            return value ? bytes(value->indices) + bytes(value->meshlets) + bytes(value->submeshes)
+            return value ? bytes(value->indices) + bytes(value->indices16) +
+                               bytes(value->meshlets) + bytes(value->submeshes)
                          : std::uint64_t{0};
         };
         std::uint64_t mesh_cpu = 0, meshlet_cpu = 0, geometry_gpu = 0, texture_cpu = 0;
@@ -1468,11 +1470,12 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
             }
             ++geometries;
             vertices += data->vertices.size();
-            indices += data->indices.size();
-            mesh_cpu += bytes(data->vertices) + bytes(data->indices) + bytes(data->texcoords) +
-                        bytes(data->tangents) + bytes(data->colors) + bytes(data->submeshes) +
+            indices += mesh_storage::indices(*data).size();
+            mesh_cpu += bytes(data->vertices) + bytes(data->indices) + bytes(data->indices16) +
+                        bytes(data->texcoords) + bytes(data->texcoords32) + bytes(data->tangents) +
+                        bytes(data->tangents32) + bytes(data->colors) + bytes(data->submeshes) +
                         bytes(data->skin) + bytes(data->mesh_to_skeleton) +
-                        bytes(data->lightmap_texcoords);
+                        bytes(data->lightmap_texcoords) + bytes(data->lightmap_texcoords32);
             meshlet_cpu += meshlet_bytes(data->meshlets.get());
             geometry_gpu += geometry->vertex_buffer_bytes() + geometry->index_buffer_bytes();
             const auto gpu_meshlets = [&](const schema::MeshletDataT* value, std::size_t level)
@@ -1487,7 +1490,7 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
             for (std::size_t level = 0; level < data->lods.size(); ++level)
             {
                 const auto& lod = *data->lods[level];
-                mesh_cpu += bytes(lod.indices) + bytes(lod.submeshes);
+                mesh_cpu += bytes(lod.indices) + bytes(lod.indices16) + bytes(lod.submeshes);
                 meshlet_cpu += meshlet_bytes(lod.meshlets.get());
                 gpu_meshlets(lod.meshlets.get(), level + 1);
             }

@@ -121,7 +121,8 @@ bool read_document_settings(const std::filesystem::path& path, FbxDocument& docu
     auto meta = path;
     meta += ".meta";
     toml::table settings;
-    if (!read_table(meta, settings, error))
+    if (!read_table(meta, settings, error) ||
+        !read_mesh_optimization(settings, document.optimize_mesh, error))
     {
         return false;
     }
@@ -394,6 +395,7 @@ bool document_settings_match(const std::filesystem::path& path, const FbxDocumen
     }
     if (current.sample_rate != document.sample_rate ||
         current.external_skeleton != document.external_skeleton ||
+        current.optimize_mesh != document.optimize_mesh ||
         current.normals_mode != document.normals_mode ||
         current.scale_factor != document.scale_factor ||
         current.rotation_offset != document.rotation_offset ||

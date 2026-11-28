@@ -12,6 +12,7 @@
 #endif
 #include "runtime/engine_config.hpp"
 #include "runtime/resource/builtin_resources.hpp"
+#include "runtime/resource/codecs/mesh_resource_codec.hpp"
 #include "runtime/resource/resource_system.hpp"
 #include "runtime/schema/animation_generated.h"
 #include "runtime/schema/mesh_generated.h"
@@ -70,6 +71,22 @@ bool read(const ResourceCatalog& catalog, const fs::path& root, const std::strin
     Guid guid;
     return catalog.identities().path_to_guid(path, guid) &&
            ResourceSystem::read_resource(catalog, {{"content", root / "cache"}}, guid, bytes);
+}
+
+bool has_expected_mesh_storage(const ResourceCatalog& catalog, const Guid& guid,
+                               const ByteBuffer& bytes, bool optimize)
+{
+    const auto* entry = catalog.find(guid);
+    std::unique_ptr<Resource> resource;
+    std::string error;
+    if (!entry || !MeshResourceCodec{}.decode(*entry, bytes, resource, error))
+    {
+        return false;
+    }
+    const auto* mesh = resource_detail::data<MeshResource>(resource.get());
+    return mesh && mesh->optimize_storage == optimize &&
+           (optimize ? mesh->indices.empty() && mesh->indices16.size() == 2811 * 3
+                     : mesh->indices16.empty() && mesh->indices.size() == 2811 * 3);
 }
 
 double mean_normal_orientation(const schema::MeshData& mesh)
@@ -737,7 +754,9 @@ int main()
     const auto* mesh = schema::GetMeshData(bytes.data());
     const Guid skeleton_guid = mesh->skeleton_guid()->str();
     const auto original_vertex_count = mesh->vertices()->size();
-    if (!expect(mesh->indices()->size() / 3 == 2811 &&
+    if (!expect(has_expected_mesh_storage(catalog, mesh_guid, bytes, true),
+                "FBX metadata with no optimization setting loads narrow mesh indices") ||
+        !expect(mesh->indices()->size() / 3 == 2811 &&
                     mesh->skin()->size() == mesh->vertices()->size(),
                 "real FBX geometry and split-corner skin weights imported") ||
         !expect(!skeleton_guid.empty() && mesh->mesh_to_skeleton()->size() == 16,
@@ -820,6 +839,17 @@ int main()
     {
         return 1;
     }
+    if (!expect(write(skeleton_meta, "optimize_mesh = false\n" + original_meta),
+                "disable mesh optimization on the skinned model") ||
+        !expect(pipeline.build_assets(project.root), pipeline.last_error()) ||
+        !expect(ResourceSystem::read_catalog(project.root / "cache", catalog) &&
+                    ResourceSystem::read_resource(catalog, {{"content", project.root / "cache"}},
+                                                  mesh_guid, bytes) &&
+                    has_expected_mesh_storage(catalog, mesh_guid, bytes, false),
+                "same FBX mesh GUID loads full-width indices when optimization is disabled"))
+    {
+        return 1;
+    }
     const auto generated_meta = "normals = \"generate\"\n" + original_meta;
     if (!expect(write(skeleton_meta, generated_meta), "choose generated normals") ||
         !expect(pipeline.build_assets(project.root), pipeline.last_error()) ||
@@ -850,7 +880,8 @@ int main()
     };
     constexpr InvalidSetting invalid_settings[] = {
         {"normals", "\"unknown\""}, {"normals", "true"}, {"sample_rate", "\"60\""},
-        {"sample_rate", "true"},    {"skeleton", "123"}, {"skeleton", "false"}};
+        {"sample_rate", "true"}, {"skeleton", "123"}, {"skeleton", "false"},
+        {"optimize_mesh", "\"false\""}};
     for (const auto& invalid_setting : invalid_settings)
     {
         const auto key = std::string(invalid_setting.key) + " = ";

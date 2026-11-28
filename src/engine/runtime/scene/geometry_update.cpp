@@ -1,4 +1,5 @@
 #include "runtime/scene/geometry_update.hpp"
+#include "runtime/resource/mesh_storage.hpp"
 #include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 
@@ -307,8 +308,8 @@ bool GeometryUpdate::begin(const GeometryUpdateSpec& spec)
         }
         if (change.mesh)
         {
-            candidate->snapshot.staging_bytes +=
-                change.mesh->vertices.size() * 96ULL + change.mesh->indices.size() * 4ULL;
+            candidate->snapshot.staging_bytes += change.mesh->vertices.size() * 96ULL +
+                                                 mesh_storage::indices(*change.mesh).size() * 4ULL;
         }
         candidate->renders.push_back(std::move(record));
     }
@@ -355,7 +356,7 @@ bool GeometryUpdate::begin(const GeometryUpdateSpec& spec)
                     include_mesh(change.target.node(), part.get());
                 }
                 candidate->snapshot.staging_bytes +=
-                    part->vertices.size() * 24ULL + part->indices.size() * 4ULL;
+                    part->vertices.size() * 24ULL + mesh_storage::indices(*part).size() * 4ULL;
             }
         }
         candidate->collisions.push_back(std::move(record));

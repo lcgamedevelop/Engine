@@ -3,6 +3,7 @@
 #include "runtime/engine_config.hpp"
 #include "runtime/physics/mesh_collision_data.hpp"
 #include "runtime/physics/physics_system.hpp"
+#include "runtime/resource/mesh_storage.hpp"
 #include "runtime/scene/character_motor.hpp"
 #include "runtime/scene/collider.hpp"
 #include "runtime/scene/rigid_body.hpp"
@@ -1124,7 +1125,8 @@ bool transient_mesh_collision()
         return fixture.physics.cast_sphere({x, 3, 0.25}, {0, -6, 0}, 0.1F, fraction) &&
                (should_hit ? fraction > 0.4F && fraction < 0.6F : fraction == 1.0F);
     };
-    if (!expect(fixture.physics.set_mesh_data(collider, mesh) &&
+    if (!expect(engine::mesh_storage::compact(mesh) && !mesh.indices16.empty() &&
+                    fixture.physics.set_mesh_data(collider, mesh) &&
                     fixture.physics.body_count() == 1 && cast(0.25, true),
                 "transient mesh commits immediately without resource system or extra tick"))
     {
