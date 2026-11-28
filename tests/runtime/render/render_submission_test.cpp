@@ -773,6 +773,29 @@ bool cross_mesh_indices(WindowSystem& window, RenderSystem& renderer, WorldSyste
         {
             return false;
         }
+        GpuMemorySnapshot filtered;
+        if (!expect(renderer.memory_snapshot("missing-guid", 1, filtered) && filtered.live.empty(),
+                    "a GUID without matches returns no live allocation details"))
+        {
+            return false;
+        }
+        GpuMemoryKindUsage all;
+        for (const auto& usage : filtered.live_by_kind)
+        {
+            all.count += usage.count;
+            all.logical_bytes += usage.logical_bytes;
+            all.shared_backing_bytes += usage.shared_backing_bytes;
+        }
+        const auto& page_usage =
+            filtered.live_by_kind[static_cast<std::size_t>(GpuMemoryKind::static_vertex_page)];
+        if (!expect(all.count == memory.totals.live_count &&
+                        all.logical_bytes == memory.totals.live_logical_bytes &&
+                        all.shared_backing_bytes == memory.totals.live_shared_backing_bytes &&
+                        page_usage.shared_backing_bytes == backing_bytes,
+                    "all-kind totals are independent of the GUID filter and detail limit"))
+        {
+            return false;
+        }
         std::printf("GPU memory counts %llu shared backing bytes for the vertex page.\n",
                     static_cast<unsigned long long>(backing_bytes));
     }

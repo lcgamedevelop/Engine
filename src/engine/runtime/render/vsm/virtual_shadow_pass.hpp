@@ -39,6 +39,12 @@ public:
     void reset_scene() noexcept;
     void release_gpu() noexcept;
     [[nodiscard]] std::uint32_t resource_count() const noexcept;
+#if defined(ENGINE_ENABLE_MEMORY_PROFILING)
+    [[nodiscard]] std::uint64_t feedback_readback_bytes_total() const noexcept
+    {
+        return feedback_readback_bytes_total_;
+    }
+#endif
 
 private:
     void release_depth_ranges() noexcept;
@@ -55,6 +61,9 @@ private:
     std::size_t planned_pages_ = 0, planned_local_faces_ = 0;
     bool planned_ranges_ = false;
     std::array<Readback, 3> readbacks_;
+#if defined(ENGINE_ENABLE_MEMORY_PROFILING)
+    std::uint64_t feedback_readback_bytes_total_ = 0;
+#endif
     std::deque<VsmPageDemand> completed_;
     VsmView feedback_view_;
     std::vector<std::uint64_t> feedback_inputs_;

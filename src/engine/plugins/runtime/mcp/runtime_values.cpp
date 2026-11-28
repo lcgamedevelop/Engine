@@ -299,6 +299,18 @@ bool resource_memory_observation(RuntimeHost& host, const Json& args, Json& resu
     {
         entries.push_back(resource_memory_entry_value(entry));
     }
+    Json by_kind = Json::object();
+    for (const auto kind : schema::EnumValuesAssetKind())
+    {
+        const auto& usage = sample.kinds[static_cast<std::size_t>(kind)];
+        if (usage.measured_payloads || usage.unmeasured_payloads)
+        {
+            by_kind[schema::EnumNameAssetKind(kind)] = {
+                {"measuredCpuPayloadBytes", std::to_string(usage.measured_cpu_payload_bytes)},
+                {"measuredPayloads", std::to_string(usage.measured_payloads)},
+                {"unmeasuredPayloads", std::to_string(usage.unmeasured_payloads)}};
+        }
+    }
     result = {{"totals",
                {{"sessionId", session},
                 {"sequence", std::to_string(sample.sequence)},
@@ -308,6 +320,7 @@ bool resource_memory_observation(RuntimeHost& host, const Json& args, Json& resu
               {"sampledAtNs", std::to_string(sample.timestamp_ns)},
               {"catalogGeneration", std::to_string(sample.catalog_generation)},
               {"matchingEntries", std::to_string(sample.matching_entries)},
+              {"byKind", std::move(by_kind)},
               {"truncated", sample.entries.size() < sample.matching_entries},
               {"entries", std::move(entries)},
               {"delta", std::move(delta)},

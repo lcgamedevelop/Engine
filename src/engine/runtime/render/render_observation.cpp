@@ -7,6 +7,7 @@
 #include "runtime/render/render_system.hpp"
 #include "runtime/render/renderer_callbacks.hpp"
 #include "runtime/render/scene_gpu_resources.hpp"
+#include "runtime/render/vsm/virtual_shadow_pass.hpp"
 #include "runtime/scene/ecs_scene.hpp"
 #include "runtime/scene/mesh_renderer.hpp"
 #include "runtime/scene/scene.hpp"
@@ -43,11 +44,30 @@ bool RenderSystem::memory_snapshot(std::string_view guid, std::uint32_t limit,
     {
         return false;
     }
+#if defined(ENGINE_ENABLE_MEMORY_PROFILING)
+    if (vsm_pass_)
+    {
+        output.vsm_feedback_readback_bytes_total = vsm_pass_->feedback_readback_bytes_total();
+    }
+#endif
     if (renderer_initialized_)
     {
-        if (const auto* stats = bgfx::getStats(); stats && stats->gpuMemoryUsed >= 0)
+        if (const auto* stats = bgfx::getStats())
         {
-            output.driver_bytes = static_cast<std::uint64_t>(stats->gpuMemoryUsed);
+            if (stats->gpuMemoryUsed >= 0)
+            {
+                output.driver_bytes = static_cast<std::uint64_t>(stats->gpuMemoryUsed);
+            }
+            if (stats->textureMemoryUsed >= 0)
+            {
+                output.bgfx_texture_estimated_bytes =
+                    static_cast<std::uint64_t>(stats->textureMemoryUsed);
+            }
+            if (stats->rtMemoryUsed >= 0)
+            {
+                output.bgfx_render_target_estimated_bytes =
+                    static_cast<std::uint64_t>(stats->rtMemoryUsed);
+            }
         }
     }
     if (preparation_)

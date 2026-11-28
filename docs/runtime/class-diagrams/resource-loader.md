@@ -40,6 +40,11 @@ classDiagram
     class ResourceMemoryQuery
     class ResourceMemoryOwner
     class ResourceMemorySnapshot
+    class ResourceMemoryKindUsage {
+        +uint64_t measured_cpu_payload_bytes
+        +uint64_t measured_payloads
+        +uint64_t unmeasured_payloads
+    }
     class ResourceMemoryEntry
     class ResourceMemoryHolder
     ResourceLoader <|-- ResourceGraphSystem
@@ -50,6 +55,7 @@ classDiagram
     ResourceLoader ..> ResourceMemoryOwner : 接收已有引用所属身份
     ResourceLoader ..> ResourceMemoryQuery : 只读筛选
     ResourceLoader ..> ResourceMemorySnapshot : 输出独立值
+    ResourceMemorySnapshot *-- ResourceMemoryKindUsage : 按资源类型汇总
     ResourceMemorySnapshot *-- ResourceMemoryEntry
     ResourceMemoryEntry *-- ResourceMemoryHolder
     ResourceMemoryHolder *-- ResourceMemoryOwner

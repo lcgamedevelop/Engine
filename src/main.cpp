@@ -1,5 +1,9 @@
-#include "runtime_entry.hpp"
 #include "runtime/performance/profiling.hpp"
+#include "runtime_entry.hpp"
+
+#if defined(ENGINE_HAS_ANDROID_MEMORY_COUNTERS)
+#include "android/native/memory_counters.hpp"
+#endif
 
 #include <SDL3/SDL_main.h>
 #include <chrono>
@@ -18,6 +22,9 @@ int main(int argc, char* argv[])
         return state.exit_code;
     }
     auto previous = std::chrono::steady_clock::now();
+#if defined(ENGINE_HAS_ANDROID_MEMORY_COUNTERS)
+    auto next_memory_sample = previous;
+#endif
     for (;;)
     {
         const auto now = std::chrono::steady_clock::now();
@@ -28,6 +35,13 @@ int main(int argc, char* argv[])
         {
             break;
         }
+#if defined(ENGINE_HAS_ANDROID_MEMORY_COUNTERS)
+        if (now >= next_memory_sample)
+        {
+            engine::host_detail::publish_android_memory_counters(state.host);
+            next_memory_sample = now + std::chrono::seconds(1);
+        }
+#endif
         if (status == engine::FrameStatus::paused)
         {
             std::this_thread::sleep_for(std::chrono::milliseconds(16));

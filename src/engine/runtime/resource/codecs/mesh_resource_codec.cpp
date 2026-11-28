@@ -13,6 +13,32 @@
 
 namespace engine
 {
+std::uint64_t resource_detail::Payload<schema::AssetKind::mesh>::cpu_payload_capacity(
+    const schema::MeshDataT& mesh) noexcept
+{
+    ENGINE_PROFILE_FUNCTION_PROBE();
+    const auto bytes = []<typename T>(const std::vector<T>& values) -> std::uint64_t
+    {
+        return static_cast<std::uint64_t>(values.capacity()) * sizeof(T);
+    };
+    const auto meshlet_bytes = [&](const std::unique_ptr<schema::MeshletDataT>& data)
+        -> std::uint64_t
+    {
+        return data ? bytes(data->indices) + bytes(data->meshlets) + bytes(data->submeshes) : 0;
+    };
+    auto total = bytes(mesh.vertices) + bytes(mesh.indices) + bytes(mesh.texcoords) +
+                 bytes(mesh.tangents) + bytes(mesh.colors) + bytes(mesh.submeshes) +
+                 bytes(mesh.skin) + bytes(mesh.mesh_to_skeleton) + bytes(mesh.lightmap_texcoords) +
+                 bytes(mesh.lods) + meshlet_bytes(mesh.meshlets);
+    for (const auto& lod : mesh.lods)
+    {
+        if (lod)
+        {
+            total += bytes(lod->indices) + bytes(lod->submeshes) + meshlet_bytes(lod->meshlets);
+        }
+    }
+    return total;
+}
 
 bool MeshResourceCodec::validate(const schema::MeshDataT& data)
 {

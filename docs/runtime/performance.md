@@ -37,11 +37,19 @@
 
 QuickJS 的对象会在已取得的 arena 内复用空间，分配池只累计实际交给虚拟机的底层块。上传副本的释放由 bgfx 回调确认，GPU 完成和驱动回收由对应层提供。诊断构建的内存块包含少量追踪元数据，该开销由进程或 Wasm 总量观测。
 
-编辑器或测试运行端的 MCP 命令 `get_resource_memory` 可用 `guid` 查询指定资源，或用 `limit` 查询最大项，默认 32 项，上限 64 项。排序使用已测的 CPU 主载荷容量，未测项使用包内载荷大小。结果的 `totals` 汇总整个资源图，每份存活记录只计一次。把上次的 `totals` 传为 `baseline`，可以比较同一加载会话的已测容量和覆盖数量。每个记录列出获取、依赖和请求，超出 32 条时保留完整计数并标明截断。CPU 命名池、连接与采集缺口在 `cpuProfiler` 中单独报告。记录阶段与持有关系见[资源内存快照](../plugins/runtime/class-diagrams/resource-graph.md#资源内存快照)。
+编辑器或测试运行端的 MCP 命令 `get_resource_memory` 可用 `guid` 查询指定资源，或用 `limit` 查询最大项，默认 32 项，上限 64 项。排序使用已测的 CPU 主载荷容量，未测项使用包内载荷大小。结果的 `totals` 汇总整个资源图，每份存活记录只计一次。同一快照的 `byKind` 按资源类型列出实测主载荷字节数、已测和未测数量，均覆盖完整资源图。把上次的 `totals` 传为 `baseline`，可以比较同一加载会话的已测容量和覆盖数量。每个记录列出获取、依赖和请求，超出 32 条时保留完整计数并标明截断。CPU 命名池、连接与采集缺口在 `cpuProfiler` 中单独报告。记录阶段与持有关系见[资源内存快照](../plugins/runtime/class-diagrams/resource-graph.md#资源内存快照)。
 
 MCP 和 Web 的 `gpuMemory` 使用同一个渲染快照。当前覆盖场景纹理、网格基础几何、共享顶点页、呈现目标与截图回读。Tracy 的 `Render.gpuLogicalLiveBytes`、`Render.gpuLogicalRetiringBytes` 和同组 `gpuSharedBacking` 曲线与快照使用相同口径。网格逻辑量含页内子范围，顶点页容量以独立记录计一次。驱动报告量在 `driverBytes` 独立提供，可用性随平台变化。这三组数值存在重叠。
 
+`gpuMemory.vsmFeedbackReadbackBytesTotal` 从设备初始化起累计虚拟阴影反馈成功提交的回读区间字节数，复用已有反馈或跳过回读时保持原值。取同一设备代次两次快照的差值除以采样间隔，可得到该项的有效载荷速率。GPU 总内存带宽另由硬件计数器测量。
+
 `pending` 报告等待回读、渲染退役或后端销毁处理的记录，`recentReclaims` 从最近的 128 条回收记录中返回匹配项。各列表有总匹配数，`overwrittenHistory` 表示超出历史容量的记录数。纹理退役的各时点以及截图回读实际完成由 [RenderSystem](class-diagrams/render-system.md#渲染内存快照) 定义。常规纹理、网格的后端确认表示 bgfx 已处理销毁命令，驱动内的物理释放仍依赖平台工具。
+
+Android 的 `totals` 和 `detailed` 构建在 API 29 及以上支持 Perfetto 计数器。采集时在 `linux.ftrace` 数据源的 `ftrace_config` 中设置 `ftrace_events: "ftrace/print"`、`atrace_categories: "gfx"` 和 `atrace_apps: "<application-id>"`。宿主在启用应用跟踪期间每秒最多查询一次，`Engine.Memory.Sample` 区间记录查询本身的耗时。
+
+- `Engine.CPU.PoolBytes.*` 是命名池的当前请求量，`Engine.CPU.PayloadBytes.*` 是按资源类型统计的已知 CPU 载荷容量。两者可能覆盖同一块内存。`Engine.CPU.UnmeasuredPayloadCount` 给出尚未报告容量的载荷个数。
+- `Engine.GPU.LogicalBytes.*` 和 `Engine.GPU.SharedBackingBytes.*` 分别统计逻辑资源和共享后备页。`Engine.GPU.BgfxTextureBytes`、`Engine.GPU.BgfxRenderTargetBytes` 来自后端存储估算。RVT 和 VSM 的容量估算单列，与上述类别可能重合。
+- `Engine.Transfer.VsmFeedbackReadbackBytesTotal` 累计已提交的回读字节。比较相邻样本可定位虚拟阴影反馈流量；设备物理读写带宽需要同步采集硬件计数器。
 
 Web 的 `totals` 构建从 `bootstrap.mjs` 提供只读异步函数 `memory_snapshot()`，返回当前场景、分配池计数、序号、时间戳、采集连接与缺口状态，以及 `linearBytes`、`allocatorLiveBytes` 和 `allocatorFreeBytes`。Wasm 线性容量包含分配器保留空间、栈及其他内存，分配池是存活分配的已覆盖部分。默认的 `off` 构建不导出原生查询入口。结合 `Engine.web.bootstrap.module`、`Engine.web.bootstrap.callMain` 和 `Engine.web.bootstrap.onEngineReady` 可以对齐模块初始化、宿主启动及首帧。浏览器进程 RSS 与 Wasm 容量需要分别从平台和引擎读取。
 

@@ -2,6 +2,8 @@
 
 #include "runtime/schema/asset_catalog_generated.h"
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -78,6 +80,13 @@ struct ResourceMemoryQuery
     std::uint32_t limit = 32;
 };
 
+struct ResourceMemoryKindUsage
+{
+    std::uint64_t measured_cpu_payload_bytes = 0;
+    std::uint64_t measured_payloads = 0;
+    std::uint64_t unmeasured_payloads = 0;
+};
+
 struct ResourceMemorySnapshot
 {
     std::uint64_t loader_id = 0;
@@ -88,6 +97,8 @@ struct ResourceMemorySnapshot
     std::uint64_t measured_cpu_payload_bytes = 0;
     std::uint64_t measured_payloads = 0;
     std::uint64_t unmeasured_payloads = 0;
+    std::array<ResourceMemoryKindUsage, static_cast<std::size_t>(schema::AssetKind::MAX) + 1>
+        kinds{};
     std::uint64_t matching_entries = 0;
     std::vector<ResourceMemoryEntry> entries;
 };

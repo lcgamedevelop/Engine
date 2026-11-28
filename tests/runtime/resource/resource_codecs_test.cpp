@@ -112,6 +112,25 @@ bool codec_tests()
     }
     schema::MeshDataT mesh(*builtin_mesh);
     mesh.path = "cube.mesh";
+    schema::MeshDataT mesh_storage;
+    mesh_storage.texcoords.reserve(13);
+    mesh_storage.meshlets = std::make_unique<schema::MeshletDataT>();
+    mesh_storage.meshlets->indices.reserve(31);
+    auto lod = std::make_unique<schema::MeshLodDataT>();
+    lod->meshlets = std::make_unique<schema::MeshletDataT>();
+    lod->meshlets->meshlets.reserve(7);
+    mesh_storage.lods.push_back(std::move(lod));
+    const auto capacity = mesh_storage.texcoords.capacity() * sizeof(schema::Vec2) +
+                          mesh_storage.meshlets->indices.capacity() * sizeof(std::uint32_t) +
+                          mesh_storage.lods.capacity() * sizeof(mesh_storage.lods.front()) +
+                          mesh_storage.lods.front()->meshlets->meshlets.capacity() *
+                              sizeof(schema::Meshlet);
+    const MeshResource storage_probe({}, std::move(mesh_storage));
+    if (!expect(storage_probe.cpu_payload_capacity() == capacity,
+                "mesh payload counts allocated stream, meshlet and LOD capacities"))
+    {
+        return false;
+    }
     schema::TextureDataT texture(*builtin_texture);
     texture.path = "white.png";
     auto array_texture = texture;

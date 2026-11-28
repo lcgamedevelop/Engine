@@ -295,6 +295,12 @@ bool VirtualShadowPass::submit_feedback(const VsmView& view, bgfx::TextureHandle
                 bgfx::BufferRegion region;
                 region.init(demands_, 0, word_count_ * sizeof(std::uint32_t));
                 slot.pending = slot.completion.submit(region, slot.bits.data());
+#if defined(ENGINE_ENABLE_MEMORY_PROFILING)
+                if (slot.pending)
+                {
+                    feedback_readback_bytes_total_ += region.size;
+                }
+#endif
                 return slot.pending;
             }
             }

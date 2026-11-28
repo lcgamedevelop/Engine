@@ -944,7 +944,18 @@ classDiagram
         +readback_ready()
         +reset()
     }
-    class GpuMemorySnapshot
+    class GpuMemorySnapshot {
+        +live_by_kind : array~GpuMemoryKindUsage~
+        +vsm_feedback_readback_bytes_total : uint64
+        +bgfx_texture_estimated_bytes : optional~uint64~
+        +bgfx_render_target_estimated_bytes : optional~uint64~
+    }
+    class GpuMemoryKindUsage {
+        +count : uint64
+        +logical_bytes : uint64
+        +shared_backing_bytes : uint64
+    }
+    GpuMemorySnapshot *-- GpuMemoryKindUsage : 按对象类型汇总
     class GpuTexture
     class GpuGeometry
     class StaticVertexPage
@@ -959,6 +970,6 @@ classDiagram
     GpuMemoryTracker ..> GpuMemorySnapshot : 按请求复制
 ```
 
-`memory_snapshot` 在渲染 API 线程按请求读取，关闭内存采集时返回不可用。一个会话跨场景，设备重建开启新会话。资源记录包含独立的分配 ID、类型、可用的资源 GUID、创建场景与范围以及估算容量。创建范围记录最先申请的场景，共享关系以资源图或顶点页 ID 为准。几何记录自己的逻辑大小，顶点页只汇总一次实际申请容量，驱动上报的设备用量独立读取。
+`memory_snapshot` 在渲染 API 线程按请求读取，关闭内存采集时返回不可用。一个会话跨场景，设备重建开启新会话。资源记录包含独立的分配 ID、类型、可用的资源 GUID、创建场景与范围以及估算容量。创建范围记录最先申请的场景，共享关系以资源图或顶点页 ID 为准。几何记录自己的逻辑大小，顶点页只汇总一次实际申请容量，驱动上报的设备用量独立读取。快照的 live_by_kind 按对象类型汇总尚未提交销毁的记录，合计与 live 总量一致。列表筛选 GUID 和数量上限只作用于明细。bgfx 单独上报普通纹理和渲染目标的逻辑存储估算，字段缺失表示没有读数。该渲染目标估算使用纹理格式和尺寸，未计入 MSAA 样本倍率。
 
 纹理最后一个渲染使用者离开时记业务释放，重新使用会撤销待退役状态。拥有者提交销毁后经过 bgfx 的命令消费边界才计入观测到的渲染端回收。普通截图明确记录正在等待读回和确认完成的时点。通用资源的驱动内部物理释放时点尚不可见。设备关闭时按实际后端排空完成记录。只保留有限的最近回收记录，快照报告已覆盖的数量及被覆盖的历史数。
