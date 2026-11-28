@@ -41,7 +41,7 @@ classDiagram
 - 不保留集中 store(SceneDataT)/store(MeshDataT)… 重载和 BinaryResourceCodec 包办所有类型的分支。通用字节复制可作为私有函数复用，语义校验仍归对应类型。
 - 错误通过 bool 与独立字符串输出，不用异常。核心将本项失败归 invalid_data、跨实体失败归 dependency_failed，并补充 GUID/路径上下文。
 
-贴图校验只读取元数据与校验和。首次转码 Basis 贴图时初始化共享解码表。XUASTC LDR 专用表仅在首次解码该编码或初始化离线编码器时建立；ASTC LDR 权重网格矩阵由离线编码器独占使用。
+原生纹理校验按各子资源的 GPU 格式和 mip 尺寸核对逻辑偏移及大小。有分块表时，处理器还核对块的存储范围和 Zstd 帧声明的解压大小，具体块在上传或 CPU 读取所需范围时解压。首次转码 Basis 贴图时初始化共享解码表。XUASTC LDR 专用表仅在首次解码该编码或初始化离线编码器时建立；ASTC LDR 权重网格矩阵由离线编码器独占使用。
 
 ## 全类型承载与登记
 

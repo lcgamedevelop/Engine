@@ -29,7 +29,7 @@
 optimize_mesh = false
 ```
 
-开启时，运行时按实际索引范围选用 16 或 32 位索引，完全相同的 Meshlet 索引与所属级别共享存储。UV、光照 UV 和切线仅在逐个分量均可逐位还原时使用单精度。此项控制 CPU 网格常驻内存，三角形数量、顺序以及场景的 LOD 和 Meshlet 设置各自保留原值。具体规则见[网格工具](../../runtime/class-diagrams/mesh-utils.md)。
+开启时，运行时按实际索引范围选用 16 或 32 位索引，完全相同的 Meshlet 索引与所属级别共享存储。UV、光照 UV 和切线仅在逐个分量均可逐位还原时使用单精度。此项控制 CPU 网格常驻内存，保留三角形数量和顺序。静态 LOD 由源 `.meta` 的 `[lod].enabled` 生成各级索引，再由实例的 MeshRenderer 开关选用。见[网格存储规则](../../runtime/class-diagrams/mesh-utils.md)和[静态模型 LOD](../../editor/static-model-lod.md)。
 
 ## 模型坐标与材质映射
 

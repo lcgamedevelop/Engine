@@ -248,6 +248,28 @@ Android Vulkan 缓冲区回读另在 2560×1440 模拟器上做同机配对。Bi
 
 Release 回归覆盖渲染图依赖、HDR 和透明、实窗、天空及材质表面提交。相机或材质变化、镜头外虚拟纹理写入、诊断切换、跨网格 Meshlet 压紧和实例缓冲不足均在所属用例检验。[渲染图架构](runtime/class-diagrams/render-graph.md)
 
+### Android 全效果外景的模型与纹理
+
+在 M1 Max 上的 Android 14 arm64 模拟器使用 Vulkan、2560×1440、4× MSAA、各向异性过滤和垂直同步。以下三项使用同一外景，各自与本项基准包比较。
+
+- **网格常驻存储。** 两个 APK 的 3,551 个资源文件逐字节相同。固定与移动镜头各采样 60 秒，CPU 网格载荷从 267.55 降至 154.75 MiB，GPU 网格逻辑量均为 183.45 MiB。[模型导入设置](plugins/editor/model-import.md)
+- **静态 LOD。** 原模、3 级、4 级各测相同镜头。移动镜头的引擎提交帧率分别为 31.76、32.65、32.58 FPS。3 级和 4 级均减少约两成主视图几何，两者的帧率差处于基线波动范围内。[静态模型 LOD](editor/static-model-lod.md)
+- **纹理存储。** 正式包与实验包按 A → B → A → B 交替冷启动进程。实验组在项目副本中将材质指向等价纹理，并启用不透明 ETC2 颜色块保留和分块 Zstd。逐项核对 604 张原纹理及其全部 mip、210 份材质的纹理槽与参数，另有 2,752 份场景、网格等资源内容逐字节相同。[资源构建设置](plugins/editor/resource-build.md)
+
+| 纹理实验指标 | 正式包 | 实验包 |
+| --- | ---: | ---: |
+| 签名 APK | 555.34 MiB | 408.56 MiB |
+| 运行时进程 PSS | 1,508.33 MiB | 491.00 MiB |
+| 外景 GPU 原生纹理逻辑载荷 | 1,199.07 MiB | 497.65 MiB |
+| 进程启动至玩法就绪 | 28.02 s | 18.08 s |
+| 固定镜头／移动镜头提交帧率 | 46.94／32.48 FPS | 45.50／33.65 FPS |
+
+每次先取三份稳态 PSS 的中位数，表中进程指标取同一版本两次运行的均值。每个镜头计时约 6 秒，固定镜头两组帧率区间重叠。固定图的 3,686,400 个像素中有 198 个 RGB 不同，其中 2 个的最大通道差值超过 5/255。同版本两次截图分别有 172 个和 211 个像素不同。两版切回前台均恢复完整场景。上述帧率和内存读数仅覆盖该模拟器，GPU 载荷按原生纹理格式计算。
+
+运行 `editor.texture_pipeline`、`editor.asset_build`、`resource.codecs` 可复核导入、打包和分块解码。静帧原图、逐资源校验、签名包和设备原始数据按实验分类保存在独立记录根目录的 `records/performance/experiments/render-lab/`，从 `records/notes/render-optimization-log.md` 进入对应报告。
+
+### 渲染提交与性能采样
+
 当前性能采样与中文报告入口见[性能采样](runtime/performance.md)。macOS arm64 / Metal 的受影响 Debug（Tracy OFF）和 Release（Tracy ON）目标编译、链接通过；Release `engine.render_submission` 及性能分析工具检查通过。工具检查覆盖父子／跨线程计时、缺失自身时间、异步 GPU 源帧、旧结果去重、非法时间戳与中文单文件报告。代表场景实窗采集验证了宿主、资源准备、各提交阶段、bgfx 内部回调及原生视图记录；这不等于首帧加载、独占 GPU Shader 成本或其他平台已测。具体项目资源、截图和采样结果留在各自忽略目录。
 
 无损顶点索引生成、普通阴影按 atlas 共用投影物准备，以及没有角色标记时的镜头过滤优化，完成受影响 Debug／Release 构建。Release `editor.fbx_pipeline`、`editor.fbx_bind_pose`、`engine.character_controller`、`engine.character_host`、`engine.render_submission` 通过；复用用例检查重复角点去重与 UV／切线／蒙皮接缝、材质分区和索引属性、旧镜头过滤清理、阴影／反射／Meshlet 的严格 HDR 对照。中文报告脚本的标签转义及输入数量检查通过。实窗只重测本次代表场景，没有重跑全量场景或其他平台；没有把局部 CPU 降幅宣称为 5–6 ms 的完整帧率验收。
