@@ -86,7 +86,7 @@ Node 只保存 WorldSystem 借用、世界生命周期代次及完整实体 ID�
 | Component 状态 | 保留 enabled/active/visible/visible_in_hierarchy/transient 查询；对应 setter 改为 bool。`get_data(ComponentDataT&) -> bool` 返回独立存储快照，`build_data(ComponentDataT&) -> bool` 另完成资源引用和运行状态的保存转换。 |
 | 具名组件 | 配置读取提供 `get_settings(GeneratedData& output) -> bool` 与返回独立值的 `settings()`，写入仍校验后提交；失败读取输出恢复为默认安全值，失败写入保持原状态。其他逐类型方法在迁移其所属类图时对应调整。 |
 | 原生资源借用 | 当前 Material、UI 文档、动画和动态网格的裸地址/引用逐项改为领域已有安全句柄、共享资源引用或显式复制；不能把搬移前的组件地址继续返回给调用者。 |
-| Scene 实例化 | `instantiate_model(path, name, vector<Node>* created = nullptr) -> Node` 和 `instantiate_prefab(...) -> Node`；可选输出精确记录本次创建集合，失败清空。编辑撤销不再用 nodes 数组长度差推算。 |
+| Scene 实例化 | `instantiate_model(path, name, vector<Node>* created = nullptr, bool static_lod_enabled = false) -> Node` 和 `instantiate_prefab(...) -> Node`；可选输出精确记录本次创建集合，失败清空。编辑撤销不再用 nodes 数组长度差推算。 |
 | Scene 遍历 | 删除 `nodes()` 的对象容器借用，使用 `collect_nodes(vector<Node>& output) -> bool`；按明确创建/恢复顺序输出，供编辑、保存、诊断使用，游戏系统不走这条快照遍历。 |
 | 活动相机 | `active_camera() -> Camera`；`set_active_camera(Camera) -> bool`；空句柄清除选择，其他场景或已过期非空句柄拒绝。 |
 | Prefab 查询 | `collect_prefab_instances(vector<PrefabInstanceDataT>& output) -> bool` 返回独立快照；现有来源登记/解除方法保持语义，从根实体读写数据。 |

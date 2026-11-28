@@ -46,9 +46,9 @@ export class Scene {
         const node = native.NodeCreate(scene, name);
         return node === null ? null : new Node(key, scene, node);
     }
-    InstantiateModel(path, name) {
+    InstantiateModel(path, name, staticLodEnabled = false) {
         const scene = handles.get(this).scene;
-        const node = native.SceneInstantiateModel(scene, path, name);
+        const node = native.SceneInstantiateModel(scene, path, name, staticLodEnabled);
         return node === null ? null : new Node(key, scene, node);
     }
     InstantiatePrefab(path, name) {
@@ -341,12 +341,12 @@ void instantiate_model(const Arguments& arguments)
     auto* scene = BindingContext::scene(arguments);
     std::string path;
     std::string name;
-    if (!scene || arguments.count() != 3 || !BindingContext::text(arguments, 1, path) ||
-        !BindingContext::text(arguments, 2, name))
+    if (!scene || arguments.count() != 4 || !BindingContext::text(arguments, 1, path) ||
+        !BindingContext::text(arguments, 2, name) || !arguments.is_boolean(3))
     {
         return;
     }
-    if (const auto root = scene->instantiate_model(path, name))
+    if (const auto root = scene->instantiate_model(path, name, nullptr, arguments.boolean(3)))
     {
         arguments.set_return(root.id());
     }

@@ -13,7 +13,7 @@ classDiagram
         +world() WorldSystem&
         +empty() bool
         +create_node(string_view name) Node
-        +instantiate_model(string_view path, string_view name, vector~Node~#42; created) Node
+        +instantiate_model(string_view path, string_view name, vector~Node~#42; created, bool static_lod_enabled) Node
         +instantiate_prefab(string_view path, string_view name, vector~Node~#42; created) Node
         +find_node(uint64_t id) Node
         +find_local_node(uint64_t local_id) Node
@@ -97,7 +97,7 @@ classDiagram
 
 ## 实例化、预制体与保存
 
-`instantiate_model` 加载独立 Model 及必要依赖，展开普通节点、Transform 与 MeshRenderer；动画由调用方另加。`instantiate_prefab` 恢复节点树并在实例根登记来源、稳定映射与显式覆盖；非空 name 是根名称覆盖。两者可选 `created` 输出精确本次创建集合，默认 nullptr，失败输出为空并回滚候选；编辑器撤销不按全场景数组长度推算新节点。
+`instantiate_model` 加载独立 Model 及必要依赖，展开普通节点、Transform 与 MeshRenderer；动画由调用方另加。传入 `static_lod_enabled = true` 时，在同一次实例化中为新建的每个 MeshRenderer 设置静态 LOD；省略时默认关闭。`instantiate_prefab` 恢复节点树并在实例根登记来源、稳定映射与显式覆盖；非空 name 是根名称覆盖。两者可选 `created` 输出精确本次创建集合，默认 nullptr，失败输出为空并回滚候选；编辑器撤销不按全场景数组长度推算新节点。
 
 `collect_prefab_instances()` 返回独立来源/覆盖快照，顺序由明确登记次序保持；解除再关联排到后面，不依赖 ECS 表行顺序。`set_prefab_instance()` 校验存在的节点及映射后替换元数据，不自动将运行时变化记录为覆盖。来源、修改与展开见[预制体](prefab.md)。
 

@@ -126,6 +126,7 @@ FBX 包内静态 Mesh 可以生成；带 skin 的 Mesh 保留 LOD0，并在导�
 使用 `MeshRenderer::static_lod_enabled()` / `set_static_lod_enabled(bool)` 读取与编辑。
 RenderSystem 只读组件，不保留平行全局开关。Camera 的视锥开关只控制可见性，
 MeshRenderer 的静态实例化开关只控制该网格是否参与合批，三者分别属于适当组件。
+调用 `Scene.InstantiateModel(path, name, true)` 可在实例化时为该实例的全部 MeshRenderer 开启选层，适用于首次载入和异步候选场景。省略第三个参数时组件默认关闭。
 该网格关闭时立即选 LOD0 并清理其历史；不删除离线资源，也不影响其他网格实例。
 源 `.meta` 的 `lod.enabled` 控制“是否生成”，网格组件属性控制“本实例是否使用”，两者都需可读回。
 
