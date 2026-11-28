@@ -45,7 +45,7 @@ MCP 和 Web 的 `gpuMemory` 使用同一个渲染快照。当前覆盖场景纹�
 
 `pending` 报告等待回读、渲染退役或后端销毁处理的记录，`recentReclaims` 从最近的 128 条回收记录中返回匹配项。各列表有总匹配数，`overwrittenHistory` 表示超出历史容量的记录数。纹理退役的各时点以及截图回读实际完成由 [RenderSystem](class-diagrams/render-system.md#渲染内存快照) 定义。常规纹理、网格的后端确认表示 bgfx 已处理销毁命令，驱动内的物理释放仍依赖平台工具。
 
-Android 的 `totals` 和 `detailed` 构建在 API 29 及以上支持 Perfetto 计数器。采集时在 `linux.ftrace` 数据源的 `ftrace_config` 中设置 `ftrace_events: "ftrace/print"`、`atrace_categories: "gfx"` 和 `atrace_apps: "<application-id>"`。宿主在启用应用跟踪期间每秒最多查询一次，`Engine.Memory.Sample` 区间记录查询本身的耗时。
+Android 的 `totals` 和 `detailed` 构建在 API 29 及以上支持 Perfetto 计数器。采集时在 `linux.ftrace` 数据源的 `ftrace_config` 中设置 `ftrace_events: "ftrace/print"` 和 `atrace_apps: "<application-id>"`。单独采集内存曲线时只选应用跟踪，并在顶层设置 `write_into_file: true` 和 `file_write_period_ms: 1000`，可持续保存整段样本。宿主在启用应用跟踪期间每秒最多查询一次，`Engine.Memory.Sample` 区间记录查询本身的耗时。
 
 - `Engine.CPU.PoolBytes.*` 是命名池的当前请求量，`Engine.CPU.PayloadBytes.*` 是按资源类型统计的已知 CPU 载荷容量。两者可能覆盖同一块内存。`Engine.CPU.UnmeasuredPayloadCount` 给出尚未报告容量的载荷个数。
 - `Engine.GPU.LogicalBytes.*` 和 `Engine.GPU.SharedBackingBytes.*` 分别统计逻辑资源和共享后备页。`Engine.GPU.BgfxTextureBytes`、`Engine.GPU.BgfxRenderTargetBytes` 来自后端存储估算。RVT 和 VSM 的容量估算单列，与上述类别可能重合。
