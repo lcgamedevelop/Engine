@@ -55,7 +55,7 @@ GraphDeclaration *-- GraphPassDesc : declares
 
 图随渲染设备创建和释放。当前切片支持一个输出根、每段至多两个采样输入和一次完整颜色写入。声明容量为 8 段、16 个资源版本，编译与稳定帧执行均使用定容量存储。Bloom 开启时执行 View 135、136、137，关闭时只执行 137，第二采样槽绑定既有黑色纹理。最终颜色写入 `FrameOutput` 的 BGRA8 目标，UI、呈现和捕获沿用原顺序。
 
-两份 HDR 声明在编译期生成，稳定帧以不可变声明的身份复用计划。动态声明按值比较。设备初始化时设置三个 HDR View 的名称、清除方式、恒等变换和排序模式，每次提交分别绑定本帧附件、尺寸与采样纹理。普通 Tracy 采样共用 `Render.hdrResolveSubmit` 标记，打开 `ENGINE_ENABLE_TRACY_FUNCTIONS` 后可进一步查看图声明、编译、绑定复核和执行阶段。
+两份 HDR 声明在编译期生成，稳定帧以不可变声明的身份复用计划。动态声明按值比较。设备初始化时设置三个 HDR View 的名称、清除方式、恒等变换和排序模式，每次提交分别绑定本帧附件、尺寸与采样纹理。各段只上传对应着色器使用的参数，连续的全屏绘制共用顶点流，最后一段恢复完整的 bgfx 丢弃语义。普通 Tracy 采样共用 `Render.hdrResolveSubmit` 标记，打开 `ENGINE_ENABLE_TRACY_FUNCTIONS` 后可进一步查看图声明、编译、绑定复核和执行阶段。
 
 编译检查读取是否有来源、环、View 保留区间及活跃资源的物理别名。设备内以尺寸、采样数、View 上限及声明结构复用最近一次成功计划，物理绑定改变时重新检查有效性和别名。开始第一条编码前再次核对绑定，每个编译结果仅执行一次。正式构建使用图路线。测试构建可通过启动环境变量 `ENGINE_TEST_LEGACY_HDR=1` 选择旧调度。同进程 A/B 启动时清除此环境变量，使用 SDL 同名 Hint 在采样窗口之间切换；每个场景帧在开始绘制时读取一次选择。[编译器](../../../src/engine/runtime/render/render_graph.cpp) · [HDR 声明](../../../src/engine/runtime/render/passes/hdr_graph.hpp)
 

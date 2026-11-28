@@ -452,26 +452,6 @@ bool HdrPostProcessPass::resolve(const RenderSettings& settings, const FrameOutp
     const Target bright{bloom_framebuffers_[0], bloom_widths_[0], bloom_heights_[0]};
     const Target blur{bloom_framebuffers_[1], bloom_widths_[1], bloom_heights_[1]};
     const Target output{display.target(), width_, height_};
-    const auto submit = [&](GraphPass pass, bgfx::ViewId view, bgfx::TextureHandle source,
-                            bgfx::TextureHandle bloom)
-    {
-        const float output_parameters[]{settings.hdr_enabled ? 1.0F : 0.0F, 0, 0, 0};
-        const auto texel = pass == HdrPass::bright
-                               ? std::array{1.0F / width_, 1.0F / height_, 0.0F, 0.0F}
-                               : bloom_texel;
-        bgfx::setUniform(output_, output_parameters);
-        bgfx::setUniform(parameters_, parameters);
-        bgfx::setUniform(texel_, texel.data());
-        bgfx::setTexture(0, samplers_[0], source, linear_clamp);
-        if (pass == HdrPass::resolve)
-        {
-            bgfx::setTexture(1, samplers_[1], bloom, linear_clamp);
-        }
-        bgfx::setVertexBuffer(0, fullscreen_);
-        bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A);
-        bgfx::submit(view, programs_[pass]);
-    };
-
 #if defined(ENGINE_ENABLE_TEST_SUPPORT)
     if (!graph)
     {
@@ -483,7 +463,21 @@ bool HdrPostProcessPass::resolve(const RenderSettings& settings, const FrameOutp
         {
             set_post_view(view, hdr_view_names[pass], target.framebuffer, target.width,
                           target.height);
-            submit(pass, view, source, bloom);
+            const float output_parameters[]{settings.hdr_enabled ? 1.0F : 0.0F, 0, 0, 0};
+            const auto texel = pass == HdrPass::bright
+                                   ? std::array{1.0F / width_, 1.0F / height_, 0.0F, 0.0F}
+                                   : bloom_texel;
+            bgfx::setUniform(output_, output_parameters);
+            bgfx::setUniform(parameters_, parameters);
+            bgfx::setUniform(texel_, texel.data());
+            bgfx::setTexture(0, samplers_[0], source, linear_clamp);
+            if (pass == HdrPass::resolve)
+            {
+                bgfx::setTexture(1, samplers_[1], bloom, linear_clamp);
+            }
+            bgfx::setVertexBuffer(0, fullscreen_);
+            bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A);
+            bgfx::submit(view, programs_[pass]);
         };
         if (settings.bloom_enabled)
         {
@@ -523,17 +517,40 @@ bool HdrPostProcessPass::resolve(const RenderSettings& settings, const FrameOutp
         ENGINE_PROFILE_ZONE("Render.graphExecute");
 #endif
         const std::array<Target, HdrSlot::count> targets{{{}, {}, bright, blur, output}};
+        const auto passes = graph->plan().passes();
         const auto encode = [&](const GraphPassDesc& segment)
         {
-            const auto source = bindings.textures[segment.reads[0]];
-            const auto bloom = segment.reads[1] == graph_invalid_id
-                                   ? bgfx::kInvalidHandle
-                                   : bindings.textures[segment.reads[1]];
             const auto& target = targets[segment.output];
             bgfx::setViewFrameBuffer(segment.view, target.framebuffer);
             bgfx::setViewRect(segment.view, 0, 0, target.width, target.height);
-            submit(segment.pass, segment.view, bgfx::TextureHandle{source},
-                   bgfx::TextureHandle{bloom});
+            const auto texel = segment.pass == HdrPass::bright
+                                   ? std::array{1.0F / width_, 1.0F / height_, 0.0F, 0.0F}
+                                   : bloom_texel;
+            bgfx::setUniform(texel_, texel.data());
+            if (segment.pass != HdrPass::blur)
+            {
+                bgfx::setUniform(parameters_, parameters);
+            }
+            const bgfx::TextureHandle source{bindings.textures[segment.reads[0]]};
+            bgfx::setTexture(0, samplers_[0], source, linear_clamp);
+            if (segment.pass == HdrPass::resolve)
+            {
+                const float output_parameters[]{settings.hdr_enabled ? 1.0F : 0.0F, 0, 0, 0};
+                bgfx::setUniform(output_, output_parameters);
+                const bgfx::TextureHandle bloom{bindings.textures[segment.reads[1]]};
+                bgfx::setTexture(1, samplers_[1], bloom, linear_clamp);
+            }
+            if (segment.pass == passes.front().pass)
+            {
+                bgfx::setVertexBuffer(0, fullscreen_);
+            }
+            // DISCARD_STATE also advances the per-draw uniform range. Keep only geometry
+            // between these draws so each shader gets exactly its own uniform commands.
+            constexpr std::uint8_t keep_geometry = BGFX_DISCARD_ALL & ~BGFX_DISCARD_VERTEX_STREAMS;
+            const auto discard =
+                segment.pass == passes.back().pass ? BGFX_DISCARD_ALL : keep_geometry;
+            bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A);
+            bgfx::submit(segment.view, programs_[segment.pass], 0, discard);
             return true;
         };
         if (graph->execute(bindings, encode, error))
