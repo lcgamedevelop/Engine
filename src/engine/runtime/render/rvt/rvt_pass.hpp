@@ -31,10 +31,11 @@ public:
         ENGINE_PROFILE_FUNCTION_PROBE();
         return reason_;
     }
-    void set_diagnostics(std::uint32_t flags) noexcept
+    void set_diagnostics(std::uint32_t flags) noexcept;
+    // Zero until the atlas and page table have been published together.
+    [[nodiscard]] std::uint64_t surface_revision() const noexcept
     {
-        ENGINE_PROFILE_FUNCTION_PROBE();
-        diagnostics_ = flags;
+        return surface_revision_;
     }
     [[nodiscard]] const schema::RvtSettingsT& settings() const noexcept
     {
@@ -56,10 +57,12 @@ private:
         std::uint64_t instance = 0, revision = 0, deformation = 0;
         std::array<double, 16> model{};
         std::vector<MaterialBinding> materials;
+        std::vector<std::uint64_t> texture_generations;
         Bounds3 bounds;
     };
     schema::RvtSettingsT settings_;
     std::uint64_t device_ = 0, source_revision_ = 0;
+    std::uint64_t published_cache_revision_ = 0, surface_revision_ = 0;
     std::uint32_t atlas_size_ = 0, slots_per_row_ = 0, diagnostics_ = 0;
     std::uint8_t minimum_mip_ = 0;
     std::map<std::uint64_t, Source> sources_;

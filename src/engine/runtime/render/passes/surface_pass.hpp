@@ -31,7 +31,16 @@ public:
     void begin(const float* view, const float* projection, bool combined_depth);
     [[nodiscard]] std::uint64_t identify_depth(const SceneDrawView& draw,
                                                const RenderFrameData& frame,
-                                               const ViewDrawList& list);
+                                               const ViewDrawList& list, bool include_surface);
+    [[nodiscard]] bool has_surface(std::uint64_t revision) const noexcept
+    {
+        return revision != 0 && revision == surface_revision_;
+    }
+    void publish_surface(std::uint64_t revision) noexcept
+    {
+        surface_revision_ = revision;
+    }
+    void reserve_cached_instances() const;
     [[nodiscard]] std::span<const std::uint64_t> depth_inputs() const noexcept
     {
         ENGINE_PROFILE_FUNCTION_PROBE();
@@ -48,7 +57,8 @@ private:
         {BGFX_INVALID_HANDLE, BGFX_INVALID_HANDLE, BGFX_INVALID_HANDLE}};
     bgfx::FrameBufferHandle framebuffer_ = BGFX_INVALID_HANDLE;
     std::vector<std::uint64_t> depth_inputs_, candidate_inputs_;
-    std::uint64_t depth_revision_ = 0;
+    std::uint64_t depth_revision_ = 0, surface_revision_ = 0;
+    std::uint32_t transient_instances_ = 0;
     std::uint16_t width_ = 0;
     std::uint16_t height_ = 0;
     bool material_surface_ = false;

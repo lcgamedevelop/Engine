@@ -5,6 +5,7 @@
 #include "runtime/render/render_constants.hpp"
 #include "runtime/render/render_submission.hpp"
 #include "runtime/render/resources/gpu_program.hpp"
+#include "runtime/render/rvt/rvt_pass.hpp"
 #include "runtime/render/scene_draw.hpp"
 #include "runtime/resource/resource.hpp"
 
@@ -88,6 +89,7 @@ bool SurfacePass::can_combine_depth(const RenderFrameData& frame, const ViewDraw
 void SurfacePass::begin(const float* view, const float* projection, bool combined_depth)
 {
     ENGINE_PROFILE_FUNCTION();
+    surface_revision_ = 0;
     for (auto id : {ambient_occlusion_depth_view, surface_view})
     {
         if ((id == surface_view && !material_surface_) ||
@@ -117,7 +119,7 @@ bgfx::TextureHandle SurfacePass::depth() const noexcept
 }
 
 std::uint64_t SurfacePass::identify_depth(const SceneDrawView& draw, const RenderFrameData& frame,
-                                          const ViewDrawList& list)
+                                          const ViewDrawList& list, bool include_surface)
 {
     ENGINE_PROFILE_ZONE("Render.sceneDepthInputs");
     auto& inputs = candidate_inputs_;
@@ -135,15 +137,44 @@ std::uint64_t SurfacePass::identify_depth(const SceneDrawView& draw, const Rende
         ENGINE_PROFILE_FUNCTION_PROBE();
         inputs.insert(inputs.end(), {handle.owner, handle.id, handle.generation});
     };
+    transient_instances_ = 0;
+    if (include_surface)
+    {
+        append_floats({draw.world, 16});
+    }
     append_floats({draw.view, 16});
     append_floats({draw.projection, 16});
-    inputs.insert(inputs.end(),
-                  {frame.world_epoch, depth().idx, width_, height_, draw.max_anisotropy,
-                   draw.frustum_culling_enabled, list.opaque.size(), list.batches.size()});
+    inputs.insert(inputs.end(), {include_surface, frame.world_epoch, depth().idx, width_, height_,
+                                 draw.max_anisotropy, draw.frustum_culling_enabled,
+                                 list.opaque.size(), list.batches.size()});
     for (const auto& batch : list.batches)
     {
         inputs.insert(inputs.end(), {bgfx::isValid(batch.meshlets.commands), batch.items.size()});
         inputs.insert(inputs.end(), batch.items.begin(), batch.items.end());
+        // The GPU compacts visible instances with atomics; a fresh dispatch may change
+        // their order, including which coplanar instance wins the depth test.
+        if (batch.items.size() > 1 && bgfx::isValid(batch.meshlets.commands))
+        {
+            inputs.push_back(list.meshlet_result_revision);
+        }
+        if (include_surface)
+        {
+            const auto& range = batch.meshlets;
+            inputs.insert(inputs.end(), {batch.key.state, range.first_command, range.command_count,
+                                         range.first_instance, range.instance_capacity,
+                                         bgfx::isValid(range.compacted_indices),
+                                         range.whole_vertex_page, range.merged_into_previous});
+            if (!range.merged_into_previous && !bgfx::isValid(range.commands) &&
+                batch.items.size() > 1)
+            {
+                const auto& first = list.opaque[batch.items.front()];
+                const auto* program = frame.meshes[first.mesh].gpu->materials[first.slot].program;
+                if (bgfx::isValid(program->instanced_surface_program))
+                {
+                    transient_instances_ += static_cast<std::uint32_t>(batch.items.size());
+                }
+            }
+        }
     }
     for (const auto& item : list.opaque)
     {
@@ -156,14 +187,37 @@ std::uint64_t SurfacePass::identify_depth(const SceneDrawView& draw, const Rende
             depth_inputs_.clear();
             return 0;
         }
+        if (include_surface)
+        {
+            // Virtual texture residency can change even when geometry and materials do not.
+            const bool reads_rvt = draw.rvt && bgfx::isValid(material.program->rvt_program) &&
+                                   (mesh.rvt_role == schema::RvtRole::reader ||
+                                    mesh.rvt_role == schema::RvtRole::writer_reader);
+            inputs.push_back(reads_rvt);
+            if (reads_rvt)
+            {
+                const auto revision = draw.rvt->surface_revision();
+                if (revision == 0)
+                {
+                    return 0;
+                }
+                inputs.insert(inputs.end(),
+                              {revision, std::bit_cast<std::uint64_t>(draw.world_origin.x()),
+                               std::bit_cast<std::uint64_t>(draw.world_origin.y()),
+                               std::bit_cast<std::uint64_t>(draw.world_origin.z())});
+            }
+            append_floats(mesh.normal);
+            inputs.insert(inputs.end(), {material.program->surface_program.idx,
+                                         material.program->instanced_surface_program.idx,
+                                         static_cast<std::uint64_t>(material.blend)});
+        }
         append_resource(item.geometry->resource.handle());
         append_resource(material.program->resource.handle());
         inputs.insert(inputs.end(),
                       {mesh.gpu->node_id, mesh.gpu->instance_id, mesh.gpu->revision,
                        item.geometry->position_buffer_index(), item.geometry->first_vertex(),
-                       item.geometry->index_buffer(item.lod).idx,
-                       item.slot, item.lod,
-                       item.first, item.count, item.instanced_transform,
+                       item.geometry->index_buffer(item.lod).idx, item.slot, item.lod, item.first,
+                       item.count, !include_surface && item.instanced_transform,
                        material.program->depth_program.idx,
                        static_cast<std::uint64_t>(material.cull), material.values.size(),
                        material.samplers.size(), mesh.gpu->textures.size()});
@@ -187,6 +241,17 @@ std::uint64_t SurfacePass::identify_depth(const SceneDrawView& draw, const Rende
         ++depth_revision_;
     }
     return depth_revision_;
+}
+
+void SurfacePass::reserve_cached_instances() const
+{
+    // Preserve later draws' transient capacity and hence their instanced vertex variant.
+    // can_combine_depth already checked space for both passes at this point in the frame.
+    if (transient_instances_)
+    {
+        bgfx::InstanceDataBuffer unused{};
+        bgfx::allocInstanceDataBuffer(&unused, transient_instances_, instance_stride);
+    }
 }
 
 bgfx::TextureHandle SurfacePass::normal_roughness() const noexcept
@@ -216,6 +281,7 @@ std::uint32_t SurfacePass::resource_count() const noexcept
 void SurfacePass::release() noexcept
 {
     ENGINE_PROFILE_FUNCTION();
+    surface_revision_ = 0;
     depth_inputs_.clear();
     candidate_inputs_.clear();
     if (bgfx::isValid(framebuffer_))

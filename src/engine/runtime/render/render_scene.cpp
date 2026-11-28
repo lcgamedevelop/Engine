@@ -381,7 +381,13 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
     auto& hdr = resources.targets().hdr_post_process;
     const bool msaa_depth = config_.msaa_samples > 1 && hdr.has_opaque_depth_target() &&
                             render_detail::can_submit_opaque_depth(resources.frame_data, list);
+    const auto surface_revision =
+        draw.surface_writes_depth ? surface.identify_depth(draw, resources.frame_data, list, true)
+                                  : 0;
+    const bool reuse_surface = surface.has_surface(surface_revision);
+    ENGINE_PROFILE_PLOT("Render.surfaceReused", static_cast<std::int64_t>(reuse_surface));
     const render_detail::SceneGraphKey key{draw.surface_writes_depth,
+                                           reuse_surface,
                                            rendering.ssr_enabled,
                                            rendering.ao_enabled,
                                            vsm_batch.generation != 0,
@@ -401,7 +407,7 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
         }
         resources.main_scene_key = key;
     }
-    std::uint64_t depth_revision = 0;
+    std::uint64_t depth_revision = surface_revision;
     const auto frozen_scene =
         key.ssr ? resources.targets().reflections.texture() : hdr.opaque_color();
     const auto encode = [&](engine::FramePassId id)
@@ -429,7 +435,14 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
         }
         case Stage::depth_identity:
         {
-            depth_revision = surface.identify_depth(draw, resources.frame_data, list);
+            if (key.reuse_surface)
+            {
+                surface.reserve_cached_instances();
+            }
+            if (!depth_revision)
+            {
+                depth_revision = surface.identify_depth(draw, resources.frame_data, list, false);
+            }
             return true;
         }
         case Stage::feedback:
@@ -576,6 +589,11 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
             return false;
         }
     };
-    return resources.main_scene_plan.perform(encode, error);
+    if (!resources.main_scene_plan.perform(encode, error))
+    {
+        return false;
+    }
+    surface.publish_surface(surface_revision);
+    return true;
 }
 } // namespace engine

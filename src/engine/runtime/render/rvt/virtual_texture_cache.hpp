@@ -55,6 +55,10 @@ public:
         ENGINE_PROFILE_FUNCTION_PROBE();
         return settings_;
     }
+    [[nodiscard]] std::uint64_t cache_revision() const noexcept
+    {
+        return cache_revision_;
+    }
     [[nodiscard]] const std::map<RvtPageKey, RvtPage>& pages() const noexcept
     {
         ENGINE_PROFILE_FUNCTION_PROBE();

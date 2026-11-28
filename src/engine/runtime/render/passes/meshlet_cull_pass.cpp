@@ -988,6 +988,11 @@ bool MeshletCullPass::dispatch(const RenderFrameData& frame, const SceneDrawView
     }
     result_planes_ = planes;
     result_flags_ = flags;
+    if (!reuse_result && used_groups != 0)
+    {
+        ++result_revision_;
+    }
+    draws.meshlet_result_revision = result_revision_;
     result_valid_ = !sample && used_groups != 0;
     return true;
 }

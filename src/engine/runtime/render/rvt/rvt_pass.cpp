@@ -4,8 +4,10 @@
 #include "runtime/render/render_constants.hpp"
 #include "runtime/render/render_math.hpp"
 #include "runtime/render/resources/gpu_program.hpp"
+#include "runtime/resource/resource.hpp"
 #include "runtime/utils/transform_math.hpp"
 #include <algorithm>
+#include <atomic>
 #include <bx/math.h>
 #include <cmath>
 #include <limits>
@@ -14,6 +16,13 @@ namespace engine::render_detail
 {
 namespace
 {
+std::uint64_t next_surface_revision() noexcept
+{
+    // Surface targets may outlive the RVT pass, including across disable and re-enable.
+    static std::atomic<std::uint64_t> next{1};
+    return next.fetch_add(1, std::memory_order_relaxed);
+}
+
 bool writer(schema::RvtRole role)
 {
     ENGINE_PROFILE_FUNCTION();
@@ -133,14 +142,24 @@ void RvtPass::invalidate_sources(VirtualTextureCache& cache, const RenderFrameDa
         {
             continue;
         }
-        Source value{
-            mesh.gpu->instance_id, mesh.gpu->revision, mesh.gpu->deformation_revision, mesh.world,
-            mesh.gpu->materials,   mesh_bounds(mesh)};
+        Source value{mesh.gpu->instance_id,
+                     mesh.gpu->revision,
+                     mesh.gpu->deformation_revision,
+                     mesh.world,
+                     mesh.gpu->materials,
+                     {},
+                     mesh_bounds(mesh)};
+        value.texture_generations.reserve(mesh.gpu->textures.size());
+        for (const auto* texture : mesh.gpu->textures)
+        {
+            value.texture_generations.push_back(texture ? texture->generation() : 0);
+        }
         const auto old = sources_.find(mesh.gpu->node_id);
         if (old == sources_.end() || old->second.instance != value.instance ||
             old->second.revision != value.revision ||
             old->second.deformation != value.deformation || old->second.model != value.model ||
-            old->second.materials != value.materials)
+            old->second.materials != value.materials ||
+            old->second.texture_generations != value.texture_generations)
         {
             if (old != sources_.end())
             {
@@ -197,7 +216,10 @@ bool RvtPass::prepare_pages(VirtualTextureCache& cache, const RenderFrameData& s
     {
         return false;
     }
-    const auto levels = static_cast<std::uint8_t>(cache.maximum_mip() + 1);
+    const bool update_table = !surface_revision_ || !batch.pages.empty() ||
+                              published_cache_revision_ != cache.cache_revision();
+    const std::uint8_t levels = update_table ? cache.maximum_mip() + 1 : 0;
+    ENGINE_PROFILE_PLOT("Rvt.pageTableMipUploads", static_cast<std::int64_t>(levels));
     if (!prepare_plan(static_cast<std::uint16_t>(batch.pages.size()), levels))
     {
         return false;
@@ -235,14 +257,25 @@ bool RvtPass::prepare_pages(VirtualTextureCache& cache, const RenderFrameData& s
         error);
     if (!success)
     {
+        // A preceding clear or page draw may already have been encoded.
+        surface_revision_ = 0;
         reason_ = error.reason;
         return false;
     }
     ENGINE_PROFILE_PLOT("Rvt.redrawnPages", static_cast<std::int64_t>(batch.pages.size()));
-    minimum_mip_ = cache.maximum_mip();
+    auto minimum_mip = cache.maximum_mip();
     for (const auto key : cache.demand())
     {
-        minimum_mip_ = std::min(minimum_mip_, key.mip);
+        minimum_mip = std::min(minimum_mip, key.mip);
+    }
+    // Cache revision changes on writes, publication, invalidation, and rollback.
+    // A change to the sampling mip also invalidates receivers of an unchanged page table.
+    if (!surface_revision_ || published_cache_revision_ != cache.cache_revision() ||
+        minimum_mip_ != minimum_mip)
+    {
+        surface_revision_ = next_surface_revision();
+        published_cache_revision_ = cache.cache_revision();
+        minimum_mip_ = minimum_mip;
     }
     reason_.clear();
     return true;
@@ -260,7 +293,7 @@ bool RvtPass::prepare_plan(std::uint16_t pages, std::uint8_t levels)
     constexpr FramePassId first_mip = publish + 1;
     constexpr unsigned max_levels =
         std::numeric_limits<decltype(settings_.virtual_resolution)>::digits;
-    if (pages > maximum_rvt_views || levels == 0 || levels > max_levels)
+    if (pages > maximum_rvt_views || levels > max_levels)
     {
         reason_ = "RVT page plan exceeds its declaration capacity";
         return false;
@@ -291,9 +324,9 @@ bool RvtPass::prepare_plan(std::uint16_t pages, std::uint8_t levels)
     }
     FramePlanError error;
     planned_pages_ = frame_invalid_id;
+    const auto roots = levels ? ids.subspan(first_mip, levels) : ids.subspan(publish, 1);
     if (!plan_.compile(std::span(passes).first(count),
-                       std::span(imports).first(initialize_atlas_ ? 1 : 2),
-                       ids.subspan(first_mip, levels), error))
+                       std::span(imports).first(initialize_atlas_ ? 1 : 2), roots, error))
     {
         reason_ = error.reason;
         return false;
@@ -388,6 +421,18 @@ void RvtPass::upload_table_level(const VirtualTextureCache& cache, std::uint8_t 
     bgfx::updateTexture2D(table_, 0, mip, 0, 0, count, count,
                           bgfx::copy(data.data(), std::uint32_t(data.size() * sizeof(data[0]))));
 }
+void RvtPass::set_diagnostics(std::uint32_t flags) noexcept
+{
+    if (diagnostics_ != flags)
+    {
+        diagnostics_ = flags;
+        if (surface_revision_)
+        {
+            surface_revision_ = next_surface_revision();
+        }
+    }
+}
+
 void RvtPass::bind(bool receiver, const Vec3& origin) const
 {
     ENGINE_PROFILE_FUNCTION();
@@ -462,6 +507,7 @@ void RvtPass::release_gpu() noexcept
     atlas_sampler_ = table_sampler_ = bounds_ = layout_ = parameters_ = height_ = normal_ =
         surface_ = BGFX_INVALID_HANDLE;
     sources_.clear();
+    surface_revision_ = published_cache_revision_ = 0;
     device_ = 0;
     atlas_size_ = slots_per_row_ = 0;
     reason_.clear();

@@ -70,6 +70,7 @@ private:
     std::array<std::array<float, 4>, 6> result_planes_{};
     std::uint32_t result_flags_ = 0;
     bool result_valid_ = false;
+    std::uint64_t result_revision_ = 0;
     bgfx::ProgramHandle program_ = BGFX_INVALID_HANDLE;
     bgfx::ProgramHandle clear_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle parameters_ = BGFX_INVALID_HANDLE;

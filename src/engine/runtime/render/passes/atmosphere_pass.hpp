@@ -6,6 +6,7 @@
 #include <bgfx/bgfx.h>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 
 namespace engine
 {
@@ -32,6 +33,18 @@ public:
     [[nodiscard]] bool submitted_for(std::uint64_t scene_id) const noexcept;
 
 private:
+    struct SkyViewInputs
+    {
+        std::array<float, 4> camera;
+        std::array<float, 4> radiance;
+        bool operator==(const SkyViewInputs&) const = default;
+    };
+    struct SkyView
+    {
+        bgfx::TextureHandle texture = BGFX_INVALID_HANDLE;
+        std::optional<SkyViewInputs> inputs;
+    };
+
     [[nodiscard]] bool initialize();
     void set_medium() const;
     std::array<bgfx::ProgramHandle, 4> programs_ = {
@@ -43,14 +56,13 @@ private:
     std::array<bgfx::UniformHandle, 3> samplers_ = {
         {BGFX_INVALID_HANDLE, BGFX_INVALID_HANDLE, BGFX_INVALID_HANDLE}};
     std::array<bgfx::TextureHandle, 2> medium_ = {{BGFX_INVALID_HANDLE, BGFX_INVALID_HANDLE}};
-    std::array<bgfx::TextureHandle, 4> skyview_ = {
-        {BGFX_INVALID_HANDLE, BGFX_INVALID_HANDLE, BGFX_INVALID_HANDLE, BGFX_INVALID_HANDLE}};
+    std::array<SkyView, 4> skyview_{};
     bgfx::VertexBufferHandle fullscreen_ = BGFX_INVALID_HANDLE;
     std::array<std::array<float, 4>, 5> physical_{};
     std::uint64_t scene_id_ = 0;
     std::uint64_t submitted_scene_id_ = 0;
     FrameGraphPlan plan_;
-    bool plan_updates_medium_ = false;
+    FramePassId plan_first_pass_ = frame_invalid_id;
     bool medium_valid_ = false;
 };
 } // namespace render_detail

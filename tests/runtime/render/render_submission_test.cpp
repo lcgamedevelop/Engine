@@ -722,8 +722,7 @@ bool cross_mesh_indices(WindowSystem& window, RenderSystem& renderer, WorldSyste
         return false;
     }
     lighting.meshlet_culling_enabled = true;
-    if (!environment.set_settings(lighting) || !capture(window, renderer, merged, merged_stats) ||
-        !pixels(direct, merged, "odd-length cross-mesh ranges preserve both triangles"))
+    if (!environment.set_settings(lighting) || !frames(window, renderer, 1))
     {
         return false;
     }
@@ -737,6 +736,11 @@ bool cross_mesh_indices(WindowSystem& window, RenderSystem& renderer, WorldSyste
         {
             return false;
         }
+    }
+    if (!capture(window, renderer, merged, merged_stats) ||
+        !pixels(direct, merged, "odd-length cross-mesh ranges preserve both triangles"))
+    {
+        return false;
     }
     GpuMemorySnapshot memory;
     if (renderer.memory_snapshot({}, 64, memory))
@@ -915,14 +919,83 @@ int test()
         return 1;
     }
     screen_effects.ssr_enabled = true;
-    if (!post.set_settings(screen_effects) || !capture(window, renderer, ssr_image, ssr_stats) ||
+    if (!post.set_settings(screen_effects) || !frames(window, renderer, 1) ||
         !expect(has_view(render_detail::surface_view) &&
                     !has_view(render_detail::ambient_occlusion_depth_view),
-                "Matching built-in coverage writes both surfaces and depth in one pass"))
+                "Matching built-in coverage writes both surfaces and depth in one pass") ||
+        !capture(window, renderer, ssr_image, ssr_stats) ||
+        !expect(
+            !has_view(render_detail::surface_view) &&
+                !has_view(render_detail::ambient_occlusion_depth_view),
+            "Static built-in surfaces import the retained depth and both material attachments") ||
+        !first_material.set_float("specularWorkflow", 1.0F) || !frames(window, renderer, 1) ||
+        !expect(has_view(render_detail::surface_view), "A material edit rebuilds the surface") ||
+        !first_material.set_float("specularWorkflow", 0.0F) || !frames(window, renderer, 1) ||
+        !expect(has_view(render_detail::surface_view),
+                "Restoring the material rebuilds the surface"))
     {
         return 1;
     }
     const auto& caps = *bgfx::getCaps();
+    if (caps.limits.maxFBAttachments >= 4 && caps.limits.maxTextureSamplers >= 10 &&
+        bgfx::isTextureValid(0, false, 3, bgfx::TextureFormat::RGBA16F, BGFX_TEXTURE_RT) &&
+        bgfx::isTextureValid(0, false, 1, bgfx::TextureFormat::RGBA32F, 0))
+    {
+        auto receiver = visible.front().node().get_component<Transform>();
+        const auto receiver_pose = test_support::read_settings(receiver);
+        auto sloped = receiver_pose;
+        sloped.rotation = {-45, 0, 0};
+        // The last mesh is outside the camera frustum but writes the same RVT root page.
+        auto writer = meshes.back().node().get_component<Transform>();
+        const auto writer_pose = test_support::read_settings(writer);
+        auto moved_writer = writer_pose;
+        moved_writer.position.mutate_x(writer_pose.position.x() + .25);
+        auto with_rvt = lighting;
+        with_rvt.rvt = std::make_unique<schema::RvtSettingsT>();
+        with_rvt.rvt->enabled = true;
+        with_rvt.rvt->bounds = {{-40, -8, -8}, {40, 8, 8}};
+        with_rvt.rvt->virtual_resolution = 256;
+        with_rvt.rvt->page_size = 128;
+        with_rvt.rvt->physical_pages = 16;
+        with_rvt.rvt->pages_per_frame = 1;
+        RvtStatus rvt;
+        SceneCaptureImage resident, diagnostic, restored;
+        if (!receiver.set_settings(sloped) ||
+            !visible.front().set_rvt_role(schema::RvtRole::writer_reader) ||
+            !meshes.back().set_rvt_role(schema::RvtRole::writer) ||
+            !environment.set_settings(with_rvt) || !frames(window, renderer, 8) ||
+            !capture(window, renderer, resident, ssr_stats) || !renderer.rvt_status(rvt) ||
+            !expect(rvt.effective && rvt.ready_pages > 1 && rvt.ready_pages == rvt.required_pages &&
+                        !has_view(render_detail::surface_view),
+                    "Resident RVT pages allow a stable reader to reuse the material surface"))
+        {
+            return 1;
+        }
+        const auto revision = rvt.cache_revision;
+        if (!writer.set_settings(moved_writer) || !frames(window, renderer, 1) ||
+            !renderer.rvt_status(rvt) ||
+            !expect(rvt.cache_revision != revision && has_view(render_detail::surface_view),
+                    "An offscreen writer invalidates the unchanged receiver surface") ||
+            !renderer.set_debug_feature(RenderFeature::rvt_residency, true) ||
+            !capture(window, renderer, diagnostic, ssr_stats) ||
+            !expect(resident.rgba != diagnostic.rgba,
+                    "The visible receiver samples the resident RVT diagnostic") ||
+            !renderer.set_debug_feature(RenderFeature::rvt_residency, false) ||
+            !frames(window, renderer, 1) ||
+            !expect(has_view(render_detail::surface_view),
+                    "Changing only the RVT receiver's diagnostic invalidates its surface") ||
+            !writer.set_settings(writer_pose) || !frames(window, renderer, 8) ||
+            !capture(window, renderer, restored, ssr_stats) ||
+            !expect(!has_view(render_detail::surface_view), "Restored RVT pages are reusable") ||
+            !pixels(resident, restored, "Restoring RVT state restores the exact HDR pixels") ||
+            !environment.set_settings(lighting) ||
+            !visible.front().set_rvt_role(schema::RvtRole::none) ||
+            !meshes.back().set_rvt_role(schema::RvtRole::none) ||
+            !receiver.set_settings(receiver_pose))
+        {
+            return 1;
+        }
+    }
     if ((caps.supported & BGFX_CAPS_COMPUTE) && caps.limits.maxComputeBindings >= 8 &&
         caps.limits.maxTextureLayers >= 4)
     {
@@ -952,7 +1025,9 @@ int test()
         for (unsigned frame = 0; frame < 4; ++frame)
         {
             if (!observer.set_settings(frame % 2 ? camera_pose : shifted_pose) ||
-                !frames(window, renderer, 1))
+                !frames(window, renderer, 1) ||
+                !expect(has_view(render_detail::surface_view),
+                        "Camera motion rebuilds the surface"))
             {
                 return 1;
             }

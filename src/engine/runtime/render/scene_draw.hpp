@@ -14,6 +14,7 @@ class RenderSystem;
 struct SceneCaptureRequest;
 namespace render_detail
 {
+inline constexpr std::uint16_t instance_stride = 7 * 4 * sizeof(float);
 class ClusteredLightingPass;
 class RvtPass;
 enum class SceneDrawMode : std::uint8_t

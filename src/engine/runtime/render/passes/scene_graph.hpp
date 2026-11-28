@@ -79,7 +79,7 @@ struct SceneResource
 
 struct SceneGraphKey
 {
-    bool combined_depth, ssr, ao, vsm, msaa_depth, text, extensions, capture;
+    bool combined_depth, reuse_surface, ssr, ao, vsm, msaa_depth, text, extensions, capture;
     std::array<bool, 2> mirrors{};
     bool operator==(const SceneGraphKey&) const = default;
 };
@@ -198,7 +198,14 @@ private:
     using R = SceneResource;
     const ScenePreparedInputs imported(key.mirrors);
     ScenePassDeclarations graph;
-    if (key.combined_depth)
+    std::array<FrameResourceId, 7> inputs{};
+    auto next_input = std::copy(imported.all().begin(), imported.all().end(), inputs.begin());
+    if (key.reuse_surface)
+    {
+        *next_input++ = R::surface_depth;
+        *next_input++ = R::material_surface;
+    }
+    else if (key.combined_depth)
     {
         graph.add(P::surface, {R::mesh_streams}, {R::surface_depth, R::material_surface});
     }
@@ -280,6 +287,6 @@ private:
         graph.add(P::linear_capture, {R::linear_color}, {}, true);
     }
     constexpr std::array<FrameResourceId, 1> roots{R::display_color};
-    return graph.compile(plan, imported.all(), roots, error);
+    return graph.compile(plan, {inputs.begin(), next_input}, roots, error);
 }
 } // namespace engine::render_detail

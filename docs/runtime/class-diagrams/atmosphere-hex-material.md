@@ -81,9 +81,10 @@ classDiagram
 `SceneDrawView` 仍是现有视图输入，包含各自 view/projection/world；私有 pass 不构成运行时公开 C++ 接口。
 
 场景停止、场景身份改变、关闭大气、设备丢失或初始化中途失败均释放大气 GPU 资源。
-LUT 缓存键包含场景代次与大气参数；相机高度、太阳方向、太阳颜色或强度改变使对应 Sky-view 失效。
-反射及烘焙视图不得误用主相机的高度、矩阵或太阳快照。相同物理参数可以共享 Transmittance/
-Multiscatter；Sky-view 按所用视图分配或在独立有序视图中更新后消费。
+主相机、平面反射和烘焙捕获共享 Transmittance 与 Multiscatter，各自持有 Sky-view。
+物理介质变化会重新积分共享查找表，同时使所有观察者的 Sky-view 失效。每个观察者按传给
+Shader 的观察半径、太阳天顶角余弦和 RGB 辐亮度精确比较，命中时渲染图直接导入其 Sky-view。
+水平平移、转向与太阳方位角变化仍使用当前逆视图投影矩阵和太阳方向逐帧绘制天空背景。
 
 ## 大气参数与太阳
 

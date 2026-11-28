@@ -16,11 +16,6 @@
 
 namespace engine::render_detail
 {
-namespace
-{
-constexpr std::uint16_t instance_stride = 7 * 4 * sizeof(float);
-}
-
 bool can_submit_opaque_depth(const RenderFrameData& frame_data, const ViewDrawList& list)
 {
     ENGINE_PROFILE_FUNCTION();
