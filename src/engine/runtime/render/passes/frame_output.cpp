@@ -101,7 +101,6 @@ void FrameOutput::present(std::uint32_t clear_color, bool movie)
     bgfx::setViewRect(output_clear_view, 0, 0, width_, height_);
     bgfx::setViewClear(output_clear_view, BGFX_CLEAR_COLOR, clear_color);
     bgfx::touch(output_clear_view);
-    bgfx::setViewFrameBuffer(hdr_resolve_view, target_);
     bgfx::setViewFrameBuffer(200, target_);
     if (movie)
     {

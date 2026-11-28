@@ -7,6 +7,7 @@
 #include "runtime/engine_config.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/render/gpu_memory.hpp"
+#include "runtime/render/passes/hdr_graph.hpp"
 #include "runtime/render/render_constants.hpp"
 #include "runtime/render/render_system.hpp"
 #include "runtime/scene/camera.hpp"
@@ -48,6 +49,83 @@ bool expect(bool value, const char* message)
         std::fprintf(stderr, "render submission: %s (SDL: %s)\n", message, SDL_GetError());
     }
     return value;
+}
+
+bool graph_contract()
+{
+    using namespace engine::render_detail;
+    constexpr FrameKey key{640, 360, 256, 4};
+    FrameBindings bindings;
+    for (std::uint16_t i = 0; i < HdrSlot::count; ++i)
+    {
+        bindings.textures[i] = i;
+    }
+    RenderGraph graph;
+    GraphError error;
+    const auto compile = [&](const GraphDeclaration& declaration)
+    { return graph.begin(key) && graph.compile(declaration, bindings, error); };
+    const auto bloom = declare_hdr_graph(true);
+    if (!expect(compile(bloom) && !graph.cache_hit(), "first Bloom plan compiles") ||
+        !expect(graph.plan().count == 3 && graph.plan().scheduled[0].view == hdr_bright_view &&
+                    graph.plan().scheduled[1].view == hdr_blur_view &&
+                    graph.plan().scheduled[2].view == hdr_resolve_view,
+                "Bloom retains all three physical views in GPU order"))
+    {
+        return false;
+    }
+    std::size_t submissions = 0;
+    const auto submit = [&](const GraphPassDesc& segment)
+    {
+        constexpr std::array<GraphPass, 3> expected{HdrPass::bright, HdrPass::blur,
+                                                    HdrPass::resolve};
+        return submissions < expected.size() && segment.pass == expected[submissions++];
+    };
+    if (!expect(graph.execute(bindings, submit, error) && submissions == 3 &&
+                    !graph.execute(bindings, submit, error) && submissions == 3,
+                "each compiled segment can run once per frame") ||
+        !expect(compile(bloom) && graph.cache_hit(), "identical topology reuses its plan"))
+    {
+        return false;
+    }
+    bindings.textures[HdrSlot::bright] = bindings.textures[HdrSlot::blur];
+    if (!expect(!graph.execute(bindings, submit, error) && submissions == 3,
+                "binding drift aborts before any submission") ||
+        !expect(!compile(bloom), "a cached plan rechecks changed live aliases") ||
+        !expect(compile(declare_hdr_graph(false)) && !graph.cache_hit() &&
+                    graph.plan().count == 1 && graph.plan().scheduled[0].pass == HdrPass::resolve &&
+                    graph.plan().intervals[HdrSlot::bright].first == GraphInterval::unused,
+                "disabled Bloom drops both draws and their physical bindings"))
+    {
+        return false;
+    }
+
+    // Independent two-stage effect declared in reverse dependency order.
+    GraphDeclaration effect;
+    effect.pass_count = 2;
+    effect.slot_count = 3;
+    effect.first_view = 10;
+    effect.last_view = 11;
+    effect.imports[0] = true;
+    effect.root = 2;
+    effect.passes[0] = {0, 11, 2, {1, graph_invalid_id}};
+    effect.passes[1] = {1, 10, 1, {0, graph_invalid_id}};
+    if (!expect(compile(effect) && graph.plan().count == 2 &&
+                    graph.plan().scheduled[0].pass == 1 && graph.plan().scheduled[1].pass == 0,
+                "an independent effect schedules producers before consumers") ||
+        !expect(graph.plan().intervals[1].first == 0 && graph.plan().intervals[1].last == 1,
+                "resource lifetime spans its write and last read"))
+    {
+        return false;
+    }
+    effect.passes[1].reads[0] = 2;
+    if (!expect(!compile(effect) && error.reason, "a reachable cycle fails compilation"))
+    {
+        return false;
+    }
+    effect.passes[1].reads[0] = 0;
+    std::swap(effect.passes[0].view, effect.passes[1].view);
+    return expect(!compile(effect) && error.reason,
+                  "a reserved View order cannot sample before the producer");
 }
 
 schema::MeshDataT grid()
@@ -1471,5 +1549,5 @@ int main(int argc, char** argv)
     {
         return std::string_view(argv[1]) == "--benchmark" ? benchmark(argc, argv) : 1;
     }
-    return test();
+    return graph_contract() ? test() : 1;
 }

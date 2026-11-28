@@ -4,7 +4,7 @@
 
 [按范围准备、首帧与截图](render-readiness.md)维护场景准备和观察的公开契约；本页维护渲染系统与内部绘制能力。
 
-准备预算和调用关系见[大场景准备关系](large-scene-preparation.md)。
+场景准备预算和调用关系见[大场景准备关系](large-scene-preparation.md)。设备创建时，`RenderSystem` 独占一份渲染图实例，供 HDR 和 Bloom 提交复用。[渲染图与后处理](render-graph.md)
 
 WebGPU 仅面向 [Web 运行产物](web-host.md#异步-webgpu-表面)。[异步表面准备](#异步表面准备)通过私有状态区分设备待就绪与失败；present_movie_frame 与 render 共用 RenderSubmitStatus。
 
@@ -406,7 +406,7 @@ classDiagram
 - 阴影和主通道使用同一 DrawBatchKey / DrawBatch 数据约定和游标分块规则，选择各自的实际 Program 和必要状态；不为普通分组函数创建新类。`draw_meshes` 只消费本次帧数据与视图列表，不再查询 ECS 或重新解析 Material。
 - 新 `bind_material` 消费已经解析的数值和采样器绑定。动态帧纹理仍由 view 传入，且必须检查 binding 的 Shader/纹理身份属于当前有效 GPU 资源。GpuMesh 在销毁程序/纹理之前清理其绑定；不把 bgfx 句柄的数字相等当作跨设备代次身份相等。
 - `RenderViewStats` 的字段与现有 scene mesh 统计口径保持；本批阴影和后处理的总提交变化另取 bgfx 统计与私有采样，不混入旧字段制造 draw 数变化。
-- `RenderPreparation` 用 `pending_materials` 跟踪待重建槽；`target_description / target_stage` 对比分辨率、MSAA、效果、反射与捕获描述并按预算推进十个既有目标步骤。没有新增通用任务或渲染图框架。
+- `RenderPreparation` 用 `pending_materials` 跟踪待重建槽；`target_description / target_stage` 对比分辨率、MSAA、效果、反射与捕获描述并按预算推进十个既有目标步骤。后处理图在目标准备成功后编译和提交。
 
 既有清理方法、不可复制的 GPU 所有权、设备能力处理和同步/分步资源准备契约保持。替换前已保存基线程序，现行图与调用方同步；完整基准见[测试方案](../../testing.md#渲染性能基线)。
 

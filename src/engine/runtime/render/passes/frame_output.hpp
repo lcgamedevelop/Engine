@@ -44,6 +44,11 @@ public:
         ENGINE_PROFILE_FUNCTION_PROBE();
         return capture_height_;
     }
+    [[nodiscard]] bgfx::TextureHandle color() const noexcept
+    {
+        ENGINE_PROFILE_FUNCTION_PROBE();
+        return color_;
+    }
     [[nodiscard]] bgfx::FrameBufferHandle target() const noexcept
     {
         ENGINE_PROFILE_FUNCTION_PROBE();

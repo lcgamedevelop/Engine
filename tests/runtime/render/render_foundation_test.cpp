@@ -9,8 +9,10 @@
 #endif
 
 #include "runtime/engine_config.hpp"
+#include "runtime/render/passes/hdr_graph.hpp"
 #include "runtime/render/render_submission.hpp"
 #include "runtime/render/render_system.hpp"
+#include "runtime/render/render_view_order.hpp"
 #include "runtime/render/vsm/virtual_shadow_cache.hpp"
 #include "runtime/scene/camera.hpp"
 #include "runtime/scene/environment_component.hpp"
@@ -37,6 +39,69 @@ bool expect(bool value, const char* message)
         std::fprintf(stderr, "render foundation test: %s\n", message);
     }
     return value;
+}
+
+// Contiguous ID ranges in the scene order before graph integration. Includes unused slots.
+static_assert(
+    []
+    {
+        using engine::render_detail::scene_view_order;
+        constexpr bgfx::ViewId ranges[][2] = {
+            {0, 2},     {215, 231}, {3, 32},    {34, 34},   {33, 33},   {35, 71},
+            {73, 73},   {72, 72},   {74, 78},   {80, 111},  {212, 213}, {192, 199},
+            {204, 211}, {191, 191}, {190, 190}, {112, 112}, {79, 79},   {113, 189},
+            {200, 201}, {214, 214}, {202, 203}, {232, 255}};
+        std::size_t position = 0;
+        for (const auto& [first, last] : ranges)
+        {
+            for (auto id = first; id <= last; ++id)
+            {
+                if (position == scene_view_order.size() || scene_view_order[position++] != id)
+                {
+                    return false;
+                }
+            }
+        }
+        return position == scene_view_order.size();
+    }(),
+    "The 256 scene views must preserve the complete pre-graph batch order");
+
+bool check_hdr_view_order()
+{
+    using namespace engine::render_detail;
+    // Zero-based positions in the existing batch: scene debug, three HDR slots, HDR readback.
+    constexpr std::size_t first_hdr = 172;
+    static_assert(scene_view_order[first_hdr - 1] == debug_view &&
+                  scene_view_order[first_hdr + 3] == hdr_capture_view);
+    RenderGraph graph;
+    FrameBindings bindings;
+    bindings.textures = {10, 11, 12, 13, 14};
+    GraphError error;
+    for (const bool bloom : {false, true})
+    {
+        if (!expect(graph.begin({160, 90, 256, 4}) &&
+                        graph.compile(declare_hdr_graph(bloom), bindings, error),
+                    "compile the HDR slice inside the complete scene batch"))
+        {
+            return false;
+        }
+        const auto passes = graph.plan().passes();
+        const auto expected_count = bloom ? 3U : 1U;
+        if (!expect(passes.size() == expected_count, "HDR consumes its expected view count"))
+        {
+            return false;
+        }
+        const auto first = bloom ? first_hdr : first_hdr + 2;
+        for (std::size_t i = 0; i < passes.size(); ++i)
+        {
+            if (!expect(passes[i].view == scene_view_order[first + i],
+                        "the compiled HDR segment uses its original physical view"))
+            {
+                return false;
+            }
+        }
+    }
+    return true;
 }
 
 engine::schema::MeshDataT quad()
@@ -1061,6 +1126,10 @@ bool check_textures(test_support::ResourceServices& services, engine::Scene& sce
 
 int main()
 {
+    if (!check_hdr_view_order())
+    {
+        return 1;
+    }
     const engine::EngineConfig config;
     test_support::ResourceServices services;
     engine::WorldSystem world(&services.loader);

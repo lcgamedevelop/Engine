@@ -1,8 +1,8 @@
-# 跨平台渲染图架构提案
+# 跨平台渲染图
 
 ## 决策与边界
 
-**本方案待评审。** 建议在运行时 `RenderSystem` 内增加一层 Render Graph。各效果声明它们读取和写入的资源版本，编译器从显示、回读和必须发布的结果反推活跃通道，生成可直接交给 bgfx 执行的顺序。现有前向着色、材质、资源插件和平台宿主继续承担各自职责。本文定义目标契约；实现从下文 M0 开始。评审后可先做 M0 的静态调度对照；M1a 仍须在相同 GPU 工作下通过像素、实际提交和调度成本验收。
+运行时 `RenderSystem` 已通过渲染图提交 HDR/Bloom 后处理。图从最终显示颜色反推活跃通道，校验资源依赖和固定 View 顺序，由现有 Pass 将计划编码到 bgfx。当前接管范围与后续整帧设计分列如下。
 
 **先用同样的 GPU 工作量测调度成本，再单独试普通帧直出。** 第一项交付是能追溯到实际 bgfx View 的帧计划。第一项性能候选是省去普通帧 View 202 的全屏呈现绘制。图负责通道间的资源；`MaterialBinding` 和绘制批次负责通道内的绑定组合。两项优化各自做 A/B，才能把帧耗变化归到正确的位置。
 
@@ -10,7 +10,7 @@ Render Lab 的 Android 样本来自 `8ed8602c`，使用 Vulkan 模拟器、1280�
 
 架构边界在每帧已准备的场景输入与 bgfx Views 之间。运行时图使用内部值类型，编辑器通过现有性能/诊断入口读取只读快照。场景持久属性仍由相机、环境和灯组件提供。GUID、catalog、资源插件、Shader 离线构建与 ECS 的所有权沿用原有契约。[现有渲染类图](render-system.md) · [提交与合批](render-submission.md) · [渲染扩展](render-extension.md)
 
-## 类与所有权
+## 已实现的类与所有权
 
 ```mermaid
 classDiagram
@@ -18,27 +18,48 @@ direction TB
 class RenderSystem
 class RenderGraph {
   +begin(FrameKey) bool
-  +compile(GraphCaps, FrameBindings, GraphError) bool
-  +execute(FrameBindings, GraphError) bool
+  +compile(GraphDeclaration, FrameBindings, GraphError) bool
+  +execute(FrameBindings, Submit, GraphError) bool
+  +plan() FramePlan
+  +cache_hit() bool
+  +reset() void
 }
 class FramePlan {
-  +scheduled_passes
-  +resource_intervals
-  +view_order
+  +scheduled
+  +intervals
+  +passes() span
 }
-class PassUse {
-  +version
-  +range
-  +access
+class GraphDeclaration {
+  +passes
+  +imports
+  +first_view
+  +last_view
+  +root
 }
-class FrameBindings
-RenderSystem *-- RenderGraph : owns
-RenderGraph *-- FramePlan : owns
-RenderGraph *-- PassUse : records
-RenderGraph ..> FrameBindings : borrows per frame
+class GraphPassDesc {
+  +pass
+  +view
+  +reads
+  +output
+}
+class FrameBindings {
+  +textures
+}
+RenderSystem *-- RenderGraph : owns per device
+RenderGraph *-- FramePlan : caches
+RenderGraph *-- GraphDeclaration : caches structure
+RenderGraph ..> FrameBindings : validates this frame
+FramePlan *-- GraphPassDesc : scheduled segments
+GraphDeclaration *-- GraphPassDesc : declares
 ```
 
-运行时新增一个具有行为的私有类型 `engine::render_detail::RenderGraph`，由 `RenderSystem` 独占。图中其余新增项均为值记录。既有 Pass 拥有着色程序、持久目标和执行方法。通用编译部分只处理逻辑记录，执行部分在 runtime/render 内把记录落实为 bgfx 操作，首版共用一个执行实现。下表是拟议的模块内签名，输出参数用引用，带状态的操作均为 `[[nodiscard]]`。
+图随渲染设备创建和释放。当前切片支持一个输出根、每段至多两个采样输入和一次完整颜色写入。声明容量为 8 段、16 个资源版本，编译与稳定帧执行均使用定容量存储。Bloom 开启时执行 View 135、136、137，关闭时只执行 137，第二采样槽绑定既有黑色纹理。最终颜色写入 `FrameOutput` 的 BGRA8 目标，UI、呈现和捕获沿用原顺序。
+
+编译检查读取是否有来源、环、View 保留区间及活跃资源的物理别名。设备内以尺寸、采样数、View 上限及声明结构复用最近一次成功计划，物理绑定改变时重新检查有效性和别名。开始第一条编码前再次核对绑定，每个编译结果仅执行一次。正式构建使用图路线。测试构建可通过启动环境变量 `ENGINE_TEST_LEGACY_HDR=1` 选择旧调度。同进程 A/B 启动时清除此环境变量，使用 SDL 同名 Hint 在采样窗口之间切换；每个场景帧在开始绘制时读取一次选择。[编译器](../../../src/engine/runtime/render/render_graph.cpp) · [HDR 声明](../../../src/engine/runtime/render/passes/hdr_graph.hpp)
+
+## 整帧扩展的目标契约
+
+下表及后文描述拟议的整帧接口，包含子资源范围、多个输出、外部副作用及异步队列等后续能力。既有 Pass 保有着色程序、持久目标和执行方法，通用编译部分处理逻辑记录，执行部分在 runtime/render 内把记录落实为 bgfx 操作。
 
 | 阶段 | 最小调用契约 | 所有权与失败状态 |
 | --- | --- | --- |

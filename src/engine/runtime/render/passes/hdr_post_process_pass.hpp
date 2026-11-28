@@ -15,6 +15,9 @@ struct RenderSettings;
 namespace engine::render_detail
 {
 
+class RenderGraph;
+class FrameOutput;
+
 // RenderSystem 私有通道；GPU 操作在其所属线程、bgfx 初始化期间执行。
 class HdrPostProcessPass final
 {
@@ -49,7 +52,8 @@ public:
     }
     void begin_transparency(bgfx::TextureHandle frozen_scene, const float* view,
                             const float* projection);
-    [[nodiscard]] bool resolve(const RenderSettings& settings);
+    [[nodiscard]] bool resolve(const RenderSettings& settings, const FrameOutput& display,
+                               RenderGraph* graph);
     [[nodiscard]] std::uint32_t resource_count() const noexcept;
     void release() noexcept;
 

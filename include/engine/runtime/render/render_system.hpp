@@ -36,6 +36,7 @@ struct GpuMemorySnapshot;
 namespace render_detail
 {
 class FrameOutput;
+class RenderGraph;
 class GpuMemoryTracker;
 class RenderSurface;
 class MoviePass;
@@ -194,7 +195,8 @@ private:
     [[nodiscard]] bool draw_diffuse_capture(const RenderSettings& settings);
     void release_draw_resources() noexcept;
     void collect_preparation(bool wait) noexcept;
-    [[nodiscard]] bool draw_scene(Camera camera, const RenderSettings& settings);
+    [[nodiscard]] bool draw_scene(Camera camera, const RenderSettings& settings,
+                                  render_detail::RenderGraph* hdr_scheduler);
     [[nodiscard]] bool draw_debug_overlay(Camera camera, const float* view,
                                           const float* projection);
     void publish_features() noexcept;
@@ -231,6 +233,7 @@ private:
     void submit_screenshot(RenderFrameKind kind);
     std::unique_ptr<render_detail::GpuMemoryTracker> gpu_memory_;
     std::unique_ptr<render_detail::FrameOutput> frame_output_;
+    std::unique_ptr<render_detail::RenderGraph> render_graph_;
     void prepare_rvt(const RenderSettings& settings, const render_detail::RenderFrameData& frame,
                      const render_detail::SceneDrawView& draw);
     void draw_rvt_viewer();

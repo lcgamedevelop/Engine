@@ -17,8 +17,10 @@
 #include "runtime/render/movie_pass.hpp"
 #include "runtime/render/render_constants.hpp"
 #include "runtime/render/render_extension.hpp"
+#include "runtime/render/render_graph.hpp"
 #include "runtime/render/render_sampling.hpp"
 #include "runtime/render/render_surface.hpp"
+#include "runtime/render/render_view_order.hpp"
 #include "runtime/render/renderer_callbacks.hpp"
 #include "runtime/render/scene_gpu_resources.hpp"
 #include "runtime/task/task_system.hpp"
@@ -31,6 +33,9 @@
 #include <bx/allocator.h>
 
 #include <algorithm>
+#if defined(ENGINE_ENABLE_TEST_SUPPORT)
+#include <atomic>
+#endif
 #include <array>
 #include <cmath>
 #include <cstdio>
@@ -46,6 +51,19 @@ namespace engine
 namespace
 {
 RenderSystem* active_renderer = nullptr;
+
+#if defined(ENGINE_ENABLE_TEST_SUPPORT)
+constexpr char legacy_hdr_hint[] = "ENGINE_TEST_LEGACY_HDR";
+std::atomic_bool legacy_hdr_requested{false};
+
+void SDLCALL update_hdr_scheduler(void*, const char*, const char*, const char* value)
+{
+    // The SDL callback may run on the thread setting the hint. Only the render thread
+    // accesses the graph. Match SDL_GetHintBoolean(value, false) for the supplied value.
+    const bool legacy = value && *value && *value != '0' && SDL_strcasecmp(value, "false") != 0;
+    legacy_hdr_requested.store(legacy, std::memory_order_relaxed);
+}
+#endif
 
 #if defined(ENGINE_ENABLE_MEMORY_PROFILING)
 class BgfxCpuAllocator final : public bx::AllocatorI
@@ -544,6 +562,19 @@ bool RenderSystem::initialize_renderer()
     }
     renderer_initialized_ = true;
     ++device_generation_;
+#if defined(ENGINE_ENABLE_TEST_SUPPORT)
+    if (!SDL_AddHintCallback(legacy_hdr_hint, update_hdr_scheduler, nullptr))
+    {
+        SDL_LogError(SDL_LOG_CATEGORY_RENDER, "Cannot watch HDR scheduler hint: %s", SDL_GetError());
+        return false;
+    }
+    const bool legacy_hdr = legacy_hdr_requested.load(std::memory_order_relaxed);
+    SDL_Log("HDR scheduler: %s", legacy_hdr ? "legacy" : "render graph");
+    if (!legacy_hdr)
+#endif
+    {
+        render_graph_ = std::make_unique<render_detail::RenderGraph>();
+    }
 #if defined(ENGINE_ENABLE_MEMORY_PROFILING)
     const bool threaded = (bgfx::getCaps()->supported & BGFX_CAPS_RENDERER_MULTITHREADED) != 0;
     gpu_memory_ = std::make_unique<render_detail::GpuMemoryTracker>(device_generation_, threaded);
@@ -850,62 +881,8 @@ RenderSubmitStatus RenderSystem::render(Camera camera)
             return RenderSubmitStatus::failed;
         }
     }
-    // Explicit GPU dependencies: deformation -> RVT -> depth -> VSM -> opaque -> UI -> capture.
-    std::array<bgfx::ViewId, 256> order{};
-    std::array<bool, 256> used{};
-    std::size_t next_view = 0;
-    const auto append = [&](bgfx::ViewId id)
-    {
-        ENGINE_PROFILE_FUNCTION_PROBE();
-        if (!used[id])
-        {
-            order[next_view++] = id;
-            used[id] = true;
-        }
-    };
-    for (bgfx::ViewId id = 0; id < 3; ++id)
-    {
-        append(id);
-    }
-    for (bgfx::ViewId id = render_detail::rvt_page_view - 1;
-         id < render_detail::rvt_page_view + render_detail::maximum_rvt_views; ++id)
-    {
-        append(id);
-    }
-    for (bgfx::ViewId id = 3; id <= render_detail::surface_view; ++id)
-    {
-        const auto planar_depth = static_cast<bgfx::ViewId>(id + 1);
-        if (std::ranges::find(render_detail::planar_depth_views, planar_depth) !=
-            render_detail::planar_depth_views.end())
-        {
-            append(planar_depth);
-        }
-        if (id != render_detail::opaque_depth_view)
-        {
-            append(id);
-        }
-    }
-    append(render_detail::vsm_feedback_clear_view);
-    append(render_detail::vsm_feedback_view);
-    for (auto id : render_detail::vsm_page_views)
-    {
-        append(id);
-    }
-    append(render_detail::vsm_depth_ranges_view);
-    append(render_detail::local_shadow_depth_ranges_view);
-    for (bgfx::ViewId id = render_detail::surface_view + 1; id < 256; ++id)
-    {
-        if (id == render_detail::main_view)
-        {
-            append(render_detail::opaque_depth_view);
-        }
-        if (id == render_detail::output_present_view)
-        {
-            append(render_detail::vsm_debug_view);
-        }
-        append(id);
-    }
-    bgfx::setViewOrder(0, 256, order.data());
+    bgfx::setViewOrder(0, render_detail::scene_view_order.size(),
+                       render_detail::scene_view_order.data());
     if (!world_ || !world_->scene())
     {
         release_vsm();
@@ -928,7 +905,20 @@ RenderSubmitStatus RenderSystem::render(Camera camera)
         scene_resources_->lod_applied = false;
         scene_resources_->debug_draw.reset_frame();
     }
-    const bool drawn = draw_scene(camera, current_settings) &&
+    auto* hdr_scheduler = render_graph_.get();
+#if defined(ENGINE_ENABLE_TEST_SUPPORT)
+    // One selection for the entire frame; a concurrent hint change takes effect next frame.
+    if (legacy_hdr_requested.load(std::memory_order_relaxed))
+    {
+        hdr_scheduler = nullptr;
+    }
+    else if (!hdr_scheduler)
+    {
+        render_graph_ = std::make_unique<render_detail::RenderGraph>();
+        hdr_scheduler = render_graph_.get();
+    }
+#endif
+    const bool drawn = draw_scene(camera, current_settings, hdr_scheduler) &&
                        draw_diffuse_capture(current_settings) &&
                        (ui_ == nullptr || ui_->render(width_, height_));
     if (drawn)
@@ -1117,6 +1107,10 @@ void RenderSystem::shutdown_renderer(bool drain_screenshots) noexcept
     invoking_extensions_ = false;
     if (renderer_initialized_)
     {
+#if defined(ENGINE_ENABLE_TEST_SUPPORT)
+        SDL_RemoveHintCallback(legacy_hdr_hint, update_hdr_scheduler, nullptr);
+#endif
+        render_graph_.reset();
         movie_pass_.reset();
         release_rvt();
         rvt_viewer_.reset();

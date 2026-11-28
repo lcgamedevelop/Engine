@@ -99,7 +99,8 @@ reflection_scissor(const render_detail::PlanarReflectionPass& target,
 }
 } // namespace
 
-bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& rendering)
+bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& rendering,
+                              render_detail::RenderGraph* hdr_scheduler)
 {
     ENGINE_PROFILE_ZONE("Render.drawScene");
     if (hdr_capture_status_ == SceneCaptureStatus::pending &&
@@ -480,7 +481,7 @@ bool RenderSystem::draw_scene(Camera view_camera, const RenderSettings& renderin
             return false;
         }
     }
-    if (!resources.targets().hdr_post_process.resolve(rendering))
+    if (!resources.targets().hdr_post_process.resolve(rendering, *frame_output_, hdr_scheduler))
     {
         return false;
     }
