@@ -269,13 +269,12 @@ bool RenderSystem::SceneGpuResources::prepare_lighting(
         float farthest = lens.near_clip;
         for (const auto id : capture->node_ids)
         {
-            const auto found =
-                std::find_if(frame_data.meshes.begin(), frame_data.meshes.end(),
-                             [&](const auto& mesh)
-                             {
-                                 ENGINE_PROFILE_FUNCTION_PROBE();
-                                 return mesh.gpu->node_id == id;
-                             });
+            const auto found = std::find_if(frame_data.meshes.begin(), frame_data.meshes.end(),
+                                            [&](const auto& mesh)
+                                            {
+                                                ENGINE_PROFILE_FUNCTION_PROBE();
+                                                return mesh.gpu->node_id == id;
+                                            });
             if (found == frame_data.meshes.end())
             {
                 return fail("A capture mesh is absent from the prepared scene");
@@ -327,30 +326,48 @@ bool RenderSystem::SceneGpuResources::prepare_lighting(
             }
         }
     }
-    if (!targets().shadow.draw(frame_data, light_settings, frame, shadow_fallback, config,
-                               local_lights, lights, draw.world, base, atlas_view,
-                               capture ? &caster_ids : nullptr))
+    auto& targets_for_scene = targets();
+    auto& graph = targets_for_scene.lighting_graphs[cluster_index];
+    auto& cluster = targets_for_scene.clusters[cluster_index];
+    engine::FramePlanError error;
+    if (!graph.prepare(vsm != nullptr, error))
     {
-        return fail("Cannot submit the shadow atlas");
+        return fail(error.reason);
     }
-    auto& cluster = targets().clusters[cluster_index];
-    if (!cluster.prepare(config, draw.width, draw.height,
-                         vsm ? static_cast<std::uint32_t>(vsm->page_table.size()) : 0))
-    {
-        return fail("Cannot prepare clustered lighting buffers");
-    }
-    if (!cluster.cull(static_cast<bgfx::ViewId>(base + 28), lens, draw.view, draw.projection,
-                      lights, directional_count, frame.local_records, vsm))
-    {
-        return fail("Cannot submit clustered light culling");
-    }
-    draw.cluster = &cluster;
-    draw.shadow = &frame;
-    draw.shadow_light = shadow_light;
-    draw.shadow_bias = light_settings.shadow_bias;
-    draw.inverse_shadow_size = 1.0F / config.shadow_atlas_size;
-    draw.near_clip = lens.near_clip;
-    return true;
+    return graph.plan.perform(
+        [&](engine::FramePassId id)
+        {
+            using Stage = render_detail::LightStage;
+            switch (static_cast<Stage>(id))
+            {
+            case Stage::shadow:
+                return targets_for_scene.shadow.draw(frame_data, light_settings, frame,
+                                                     shadow_fallback, config, local_lights, lights,
+                                                     draw.world, base, atlas_view, cluster_index,
+                                                     capture ? &caster_ids : nullptr) ||
+                       fail("Cannot submit the shadow atlas");
+            case Stage::cluster_buffers:
+                return cluster.prepare(config, draw.width, draw.height,
+                                       vsm ? static_cast<std::uint32_t>(vsm->page_table.size())
+                                           : 0) ||
+                       fail("Cannot prepare clustered lighting buffers");
+            case Stage::cluster_cull:
+                return cluster.cull(static_cast<bgfx::ViewId>(base + 28), lens, draw.view,
+                                    draw.projection, lights, directional_count, frame.local_records,
+                                    vsm) ||
+                       fail("Cannot submit clustered light culling");
+            case Stage::publish:
+                draw.cluster = &cluster;
+                draw.shadow = &frame;
+                draw.shadow_light = shadow_light;
+                draw.shadow_bias = light_settings.shadow_bias;
+                draw.inverse_shadow_size = 1.0F / config.shadow_atlas_size;
+                draw.near_clip = lens.near_clip;
+                return true;
+            }
+            return false;
+        },
+        error);
 }
 
 bool RenderSystem::SceneGpuResources::draw_meshes(const render_detail::RenderFrameData& frame_data,
@@ -385,14 +402,13 @@ bool RenderSystem::SceneGpuResources::draw_meshes(const render_detail::RenderFra
     const bool capture = mode == SceneDrawMode::capture;
     const bool transparent = mode == SceneDrawMode::transparent;
     const bool surface_writes_depth = mode == SceneDrawMode::surface && draw.surface_writes_depth;
-    const bool ibl_ready =
-        settings.ibl_enabled &&
-        std::all_of(targets().ibl_textures.begin(), targets().ibl_textures.end(),
-                    [](const auto* texture)
-                    {
-                        ENGINE_PROFILE_FUNCTION_PROBE();
-                        return texture && bgfx::isValid(texture->handle);
-                    });
+    const bool ibl_ready = settings.ibl_enabled &&
+                           std::all_of(targets().ibl_textures.begin(), targets().ibl_textures.end(),
+                                       [](const auto* texture)
+                                       {
+                                           ENGINE_PROFILE_FUNCTION_PROBE();
+                                           return texture && bgfx::isValid(texture->handle);
+                                       });
     const float camera_position_value[]{draw.world[12], draw.world[13], draw.world[14], 1};
     const float ambient_value[]{settings.ambient_color[0], settings.ambient_color[1],
                                 settings.ambient_color[2], settings.ambient_intensity};
@@ -504,10 +520,10 @@ bool RenderSystem::SceneGpuResources::draw_meshes(const render_detail::RenderFra
                                                 : program->instanced_depth_program;
                 ++coverage_draws;
                 solid_depth_draws += solid_depth;
-                position_stream_draws +=
-                    solid_depth && !bgfx::isValid(mesh.gpu->deformed_vertices) &&
-                    item.geometry->position_stride_bytes() ==
-                        sizeof(render_detail::GpuVertex::position);
+                position_stream_draws += solid_depth &&
+                                         !bgfx::isValid(mesh.gpu->deformed_vertices) &&
+                                         item.geometry->position_stride_bytes() ==
+                                             sizeof(render_detail::GpuVertex::position);
             }
             auto frame_textures = draw.textures;
             if (forward_inputs && !pbr_opaque)
@@ -762,13 +778,12 @@ bool RenderSystem::SceneGpuResources::draw_meshes(const render_detail::RenderFra
         ENGINE_PROFILE_PLOT("Render.sceneDepthCoverageDraws",
                             static_cast<std::int64_t>(coverage_draws));
     }
-    const auto previous =
-        std::find_if(view_stats.begin(), view_stats.end(),
-                     [&stats](const auto& row)
-                     {
-                         ENGINE_PROFILE_FUNCTION_PROBE();
-                         return row.view_id == stats.view_id;
-                     });
+    const auto previous = std::find_if(view_stats.begin(), view_stats.end(),
+                                       [&stats](const auto& row)
+                                       {
+                                           ENGINE_PROFILE_FUNCTION_PROBE();
+                                           return row.view_id == stats.view_id;
+                                       });
     if (previous == view_stats.end())
     {
         view_stats.push_back(stats);

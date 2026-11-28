@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/render/passes/ssr_graph.hpp"
+
 #include <array>
 #include <bgfx/bgfx.h>
 #include <cstdint>
@@ -36,12 +38,17 @@ private:
     std::array<bgfx::UniformHandle, 8> uniforms_;
     // Each chain starts at its first reduced level. Level zero is the borrowed scene depth.
     std::array<bgfx::TextureHandle, 2> hierarchy_;
-    std::array<bgfx::FrameBufferHandle, 11> hierarchy_frames_;
+    std::array<bgfx::FrameBufferHandle, ssr_max_reductions> hierarchy_frames_;
     bgfx::TextureHandle reflection_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle color_ = BGFX_INVALID_HANDLE;
     bgfx::FrameBufferHandle reflection_frame_ = BGFX_INVALID_HANDLE;
     bgfx::FrameBufferHandle color_frame_ = BGFX_INVALID_HANDLE;
     bgfx::VertexBufferHandle fullscreen_ = BGFX_INVALID_HANDLE;
+    FrameGraphPlan plan_;
+    std::uint16_t planned_levels_ = 0;
+    bool planned_reuse_ = false;
+    bool planned_lut_ = false;
+    bgfx::TextureHandle cached_depth_ = BGFX_INVALID_HANDLE;
     std::uint64_t cached_depth_revision_ = 0;
     std::uint16_t width_ = 0;
     std::uint16_t height_ = 0;

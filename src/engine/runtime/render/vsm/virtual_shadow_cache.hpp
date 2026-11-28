@@ -3,6 +3,7 @@
 #include "runtime/render/vsm/vsm_types.hpp"
 
 #include <map>
+#include <optional>
 
 namespace engine
 {
@@ -18,9 +19,11 @@ public:
     [[nodiscard]] bool begin_frame(const VsmView& view, const RenderFrameData& frame);
     [[nodiscard]] bool request(const VsmPageDemand& demand);
     [[nodiscard]] bool plan(std::uint32_t budget, VsmPageBatch& output);
+    [[nodiscard]] bool begin_page_write(std::uint64_t batch_id, const VsmPageDraw& draw);
     [[nodiscard]] bool publish(const VsmPageBatch& batch, std::uint64_t submission_id);
     void cancel_batch() noexcept;
-    [[nodiscard]] bool status(VsmStatus& output) const;
+    void finish_frame(bool success, VsmStatus& output);
+    [[nodiscard]] bool status(VsmStatus& output, bool preview = false) const;
     void reset_scene() noexcept;
 
 private:
@@ -28,7 +31,15 @@ private:
     {
         std::uint32_t slot = 0;
         std::uint64_t version = 1, last_used = 0;
-        bool valid = false, planned = false;
+        bool valid = false;
+    };
+    struct Reservation
+    {
+        VsmPageKey key{};
+        std::optional<VsmPageKey> previous;
+        std::uint32_t slot = 0;
+        std::uint64_t version = 0;
+        bool started = false;
     };
     struct Source
     {
@@ -48,6 +59,9 @@ private:
     std::map<std::uint64_t, Source> sources_;
     std::vector<VsmPageKey> demand_;
     std::uint64_t generation_ = 0, batch_id_ = 0, pending_batch_ = 0, frame_ = 0;
+    std::array<Reservation, 16> reserved_{};
+    std::size_t pending_pages_ = 0;
+    std::uint64_t pending_submission_ = 0;
     std::uint64_t demand_submission_ = 0;
     double depth_min_ = 0, depth_max_ = 0;
 };

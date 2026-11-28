@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/render/frame_graph_plan.hpp"
+
 #include <array>
 #include <bgfx/bgfx.h>
 #include <cstddef>
@@ -47,6 +49,8 @@ private:
     std::array<std::array<float, 4>, 5> physical_{};
     std::uint64_t scene_id_ = 0;
     std::uint64_t submitted_scene_id_ = 0;
+    FrameGraphPlan plan_;
+    bool plan_updates_medium_ = false;
     bool medium_valid_ = false;
 };
 } // namespace render_detail

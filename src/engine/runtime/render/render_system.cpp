@@ -1,6 +1,7 @@
 #include "runtime/render/render_system.hpp"
 #include "runtime/render/rvt/rvt_debug_view.hpp"
 #include "runtime/render/rvt/rvt_pass.hpp"
+#include "runtime/render/rvt/virtual_texture_cache.hpp"
 #include "runtime/render/vsm/virtual_shadow_cache.hpp"
 #include "runtime/render/vsm/virtual_shadow_pass.hpp"
 #include "runtime/render/vsm/vsm_debug_view.hpp"
@@ -31,11 +32,11 @@
 #include "runtime/world/world_system.hpp"
 
 #include <SDL3/SDL.h>
+#include <optional>
 #include <bx/allocator.h>
 
 #include <algorithm>
 #if defined(ENGINE_ENABLE_TEST_SUPPORT)
-#include <atomic>
 #endif
 #include <array>
 #include <cmath>
@@ -52,19 +53,6 @@ namespace engine
 namespace
 {
 RenderSystem* active_renderer = nullptr;
-
-#if defined(ENGINE_ENABLE_TEST_SUPPORT)
-constexpr char legacy_hdr_hint[] = "ENGINE_TEST_LEGACY_HDR";
-std::atomic_bool legacy_hdr_requested{false};
-
-void SDLCALL update_hdr_scheduler(void*, const char*, const char*, const char* value)
-{
-    // The SDL callback may run on the thread setting the hint. Only the render thread
-    // accesses the graph. Match SDL_GetHintBoolean(value, false) for the supplied value.
-    const bool legacy = value && *value && *value != '0' && SDL_strcasecmp(value, "false") != 0;
-    legacy_hdr_requested.store(legacy, std::memory_order_relaxed);
-}
-#endif
 
 #if defined(ENGINE_ENABLE_MEMORY_PROFILING)
 class BgfxCpuAllocator final : public bx::AllocatorI
@@ -563,19 +551,20 @@ bool RenderSystem::initialize_renderer()
     }
     renderer_initialized_ = true;
     ++device_generation_;
-#if defined(ENGINE_ENABLE_TEST_SUPPORT)
-    if (!SDL_AddHintCallback(legacy_hdr_hint, update_hdr_scheduler, nullptr))
+    device_view_plan_ = std::make_unique<engine::FrameGraphPlan>();
+    engine::FramePlanError view_error;
+    if (!render_detail::compile_device_views(*device_view_plan_, bgfx::getCaps()->limits.maxViews,
+                                             view_error))
     {
-        SDL_LogError(SDL_LOG_CATEGORY_RENDER, "Cannot watch HDR scheduler hint: %s", SDL_GetError());
+        SDL_LogError(SDL_LOG_CATEGORY_RENDER, "Device View plan failed at %u (predecessor %u): %s",
+                     static_cast<unsigned>(view_error.pass),
+                     static_cast<unsigned>(view_error.predecessor), view_error.reason);
+        device_view_plan_.reset();
+        bgfx::shutdown();
+        renderer_initialized_ = false;
         return false;
     }
-    const bool legacy_hdr = legacy_hdr_requested.load(std::memory_order_relaxed);
-    SDL_Log("HDR scheduler: %s", legacy_hdr ? "legacy" : "render graph");
-    if (!legacy_hdr)
-#endif
-    {
-        render_graph_ = std::make_unique<render_detail::RenderGraph>();
-    }
+    render_graph_ = std::make_unique<render_detail::RenderGraph>();
 #if defined(ENGINE_ENABLE_MEMORY_PROFILING)
     const bool threaded = (bgfx::getCaps()->supported & BGFX_CAPS_RENDERER_MULTITHREADED) != 0;
     gpu_memory_ = std::make_unique<render_detail::GpuMemoryTracker>(device_generation_, threaded);
@@ -847,6 +836,106 @@ render_detail::FramePrepareStatus RenderSystem::prepare_frame()
     return Status::ready;
 }
 
+bool RenderSystem::encode_output(Camera camera, const RenderSettings& settings,
+                                 const MovieFrame* movie)
+{
+    using render_detail::OutputPass;
+    render_detail::OutputGraphKey key;
+    key.kind = movie
+                   ? RenderFrameKind::movie
+                   : (world_ && world_->scene() ? RenderFrameKind::scene : RenderFrameKind::clear);
+    std::optional<render_detail::PreparedMovieFrame> prepared_movie;
+    if (movie)
+    {
+        if (!render_detail::MoviePass::validate(*movie, *frame_output_, prepared_movie.emplace()))
+        {
+            return false;
+        }
+        key.separate_chroma = movie->format == schema::MoviePixelFormat::yuv420p8;
+    }
+    else
+    {
+        key.ui = ui_ != nullptr;
+        key.rvt_overlay = rvt_viewer_ || debug_requests_[std::size_t(RenderFeature::rvt_viewer)];
+        key.vsm_overlay = vsm_viewer_ || debug_requests_[std::size_t(RenderFeature::vsm_viewer)];
+        key.diffuse_capture = capture_status_ == SceneCaptureStatus::pending;
+    }
+    const auto last_request = screenshot_sequence_;
+    key.screenshot = !active_screenshot_ &&
+                     std::ranges::any_of(
+                         screenshots_, [](const auto& entry)
+                         { return entry.second.snapshot.state == ScreenshotState::waiting_frame; });
+    bool drawn = true;
+    const auto encode = [&](OutputPass pass)
+    {
+        // A failed scene still presents and flushes its already encoded work. Never publish a
+        // screenshot or issue dependent draws for a partially rendered frame.
+        if (!drawn && pass != OutputPass::present)
+        {
+            return true;
+        }
+        switch (pass)
+        {
+        case OutputPass::upload_y:
+            return movie_pass_->upload_plane(*movie, 0, *prepared_movie);
+        case OutputPass::upload_chroma:
+            return movie_pass_->upload_plane(*movie, 1, *prepared_movie);
+        case OutputPass::upload_v:
+            return movie_pass_->upload_plane(*movie, 2, *prepared_movie);
+        case OutputPass::clear:
+            bgfx::setViewOrder(0, static_cast<std::uint16_t>(device_view_plan_->passes().size()),
+                               device_view_plan_->passes().data());
+            frame_output_->clear(movie ? 0x000000ff : settings.clear_color);
+            break;
+        case OutputPass::scene:
+            bgfx::setViewFrameBuffer(render_detail::main_view, BGFX_INVALID_HANDLE);
+            bgfx::setViewClear(render_detail::main_view, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
+                               settings.clear_color, 1.0F, 0);
+            bgfx::setViewRect(render_detail::main_view, 0, 0, static_cast<std::uint16_t>(width_),
+                              static_cast<std::uint16_t>(height_));
+            bgfx::touch(render_detail::main_view);
+            drawn = draw_scene(camera, settings);
+            break;
+        case OutputPass::diffuse_capture:
+            drawn = draw_diffuse_capture(settings);
+            break;
+        case OutputPass::movie:
+            movie_pass_->draw(*prepared_movie, *frame_output_);
+            break;
+        case OutputPass::ui:
+            frame_output_->bind_ui();
+            drawn = ui_->render(width_, height_);
+            break;
+        case OutputPass::rvt_overlay:
+            draw_rvt_viewer();
+            break;
+        case OutputPass::vsm_overlay:
+            draw_vsm_viewer();
+            break;
+        case OutputPass::present:
+        {
+            ENGINE_PROFILE_ZONE("Render.outputPresentSubmit");
+            frame_output_->present();
+            break;
+        }
+        case OutputPass::capture:
+            submit_screenshot(key.kind, last_request);
+            break;
+        default:
+            return false;
+        }
+        return true;
+    };
+    engine::FramePlanError error;
+    if (!render_graph_->execute_output(key, encode, error))
+    {
+        SDL_LogError(SDL_LOG_CATEGORY_RENDER, "Output graph failed at pass %u: %s",
+                     static_cast<unsigned>(error.pass), error.reason);
+        return false;
+    }
+    return drawn;
+}
+
 RenderSubmitStatus RenderSystem::render(Camera camera)
 {
     render_detail::ui_draws = 0;
@@ -883,8 +972,6 @@ RenderSubmitStatus RenderSystem::render(Camera camera)
             return RenderSubmitStatus::failed;
         }
     }
-    bgfx::setViewOrder(0, render_detail::scene_view_order.size(),
-                       render_detail::scene_view_order.data());
     if (!world_ || !world_->scene())
     {
         release_vsm();
@@ -894,12 +981,6 @@ RenderSubmitStatus RenderSystem::render(Camera camera)
     {
         release_rvt();
     }
-    bgfx::setViewFrameBuffer(render_detail::main_view, BGFX_INVALID_HANDLE);
-    bgfx::setViewClear(render_detail::main_view, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
-                       current_settings.clear_color, 1.0F, 0);
-    bgfx::setViewRect(render_detail::main_view, 0, 0, static_cast<std::uint16_t>(width_),
-                      static_cast<std::uint16_t>(height_));
-    bgfx::touch(render_detail::main_view);
     if (scene_resources_ != nullptr)
     {
         scene_resources_->view_stats.clear();
@@ -907,26 +988,20 @@ RenderSubmitStatus RenderSystem::render(Camera camera)
         scene_resources_->lod_applied = false;
         scene_resources_->debug_draw.reset_frame();
     }
-    auto* hdr_scheduler = render_graph_.get();
-#if defined(ENGINE_ENABLE_TEST_SUPPORT)
-    // One selection for the entire frame; a concurrent hint change takes effect next frame.
-    if (legacy_hdr_requested.load(std::memory_order_relaxed))
+    const bool drawn = encode_output(camera, current_settings, nullptr);
+    if (rvt_cache_)
     {
-        hdr_scheduler = nullptr;
+        rvt_cache_->finish_frame(drawn);
+        if (!drawn && rvt_status_.effective)
+        {
+            (void)rvt_cache_->status(rvt_status_);
+            rvt_status_.supported = true;
+            rvt_status_.reason = "RVT frame submission failed";
+        }
     }
-    else if (!hdr_scheduler)
+    if (vsm_cache_)
     {
-        render_graph_ = std::make_unique<render_detail::RenderGraph>();
-        hdr_scheduler = render_graph_.get();
-    }
-#endif
-    const bool drawn = draw_scene(camera, current_settings, hdr_scheduler) &&
-                       draw_diffuse_capture(current_settings) &&
-                       (ui_ == nullptr || ui_->render(width_, height_));
-    if (drawn)
-    {
-        draw_rvt_viewer();
-        draw_vsm_viewer();
+        vsm_cache_->finish_frame(drawn, vsm_status_);
     }
     if (scene_resources_)
     {
@@ -950,15 +1025,6 @@ RenderSubmitStatus RenderSystem::render(Camera camera)
     }
     {
         ENGINE_PROFILE_ZONE("Render.frameSubmit");
-        {
-            ENGINE_PROFILE_ZONE("Render.outputPresentSubmit");
-            frame_output_->present(current_settings.clear_color, false);
-        }
-        if (drawn)
-        {
-            submit_screenshot(world_ && world_->scene() ? RenderFrameKind::scene
-                                                        : RenderFrameKind::clear);
-        }
         submit_frame();
         if (meshlet_culling_)
         {
@@ -1012,13 +1078,10 @@ RenderSubmitStatus RenderSystem::present_movie_frame(const MovieFrame& frame)
     {
         movie_pass_ = std::make_unique<render_detail::MoviePass>();
     }
-    if (!movie_pass_->draw(frame, static_cast<std::uint16_t>(width_),
-                           static_cast<std::uint16_t>(height_)))
+    if (!encode_output({}, RenderSettings{}, &frame))
     {
         return RenderSubmitStatus::failed;
     }
-    frame_output_->present(0x000000ff, true);
-    submit_screenshot(RenderFrameKind::movie);
     submit_frame();
     if (meshlet_culling_)
     {
@@ -1109,9 +1172,7 @@ void RenderSystem::shutdown_renderer(bool drain_screenshots) noexcept
     invoking_extensions_ = false;
     if (renderer_initialized_)
     {
-#if defined(ENGINE_ENABLE_TEST_SUPPORT)
-        SDL_RemoveHintCallback(legacy_hdr_hint, update_hdr_scheduler, nullptr);
-#endif
+        device_view_plan_.reset();
         render_graph_.reset();
         movie_pass_.reset();
         release_rvt();

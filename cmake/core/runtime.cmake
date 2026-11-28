@@ -62,6 +62,8 @@ if(ENGINE_ENABLE_RUNTIME_DEPS)
                 src/engine/runtime/render/rvt/rvt_pass.cpp
                 src/engine/runtime/render/rvt/rvt_debug_view.cpp
                 src/engine/runtime/render/renderer_callbacks.cpp
+                src/engine/runtime/render/render_view_order.cpp
+                src/engine/runtime/render/frame_graph_plan.cpp
                 src/engine/runtime/render/render_graph.cpp
                 src/engine/runtime/render/render_scene.cpp
                 src/engine/runtime/render/scene_draw.cpp

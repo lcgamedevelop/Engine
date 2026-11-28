@@ -11,6 +11,8 @@
 #include <cmath>
 #include <limits>
 #include <set>
+#include <span>
+#include <utility>
 
 namespace engine::render_detail
 {
@@ -332,6 +334,7 @@ bool VirtualShadowCache::plan(std::uint32_t budget, VsmPageBatch& output)
     output.batch_id = pending_batch_ = ++batch_id_;
     output.view = view_;
     const auto columns = vsm_atlas_columns(capacity_);
+    auto next_free = static_cast<std::uint32_t>(pages_.size());
     for (const auto& key : demand_)
     {
         if (!inside(key, view_))
@@ -344,44 +347,49 @@ bool VirtualShadowCache::plan(std::uint32_t budget, VsmPageBatch& output)
             found->second.last_used = frame_;
             continue;
         }
-        if (output.pages.size() == budget)
+        if (pending_pages_ == budget)
         {
             continue;
         }
-        if (found == pages_.end())
+        Reservation candidate;
+        candidate.key = key;
+        if (found == pages_.end() && next_free < capacity_)
         {
-            std::uint32_t slot = static_cast<std::uint32_t>(pages_.size());
-            if (pages_.size() == capacity_)
+            candidate.slot = next_free++;
+            candidate.version = 1;
+        }
+        else
+        {
+            if (found == pages_.end())
             {
-                auto victim = pages_.end();
+                const auto reserved = std::span(reserved_).first(pending_pages_);
                 for (auto it = pages_.begin(); it != pages_.end(); ++it)
                 {
-                    if (!it->second.planned &&
-                        !std::binary_search(demand_.begin(), demand_.end(), it->first) &&
-                        (victim == pages_.end() || it->second.last_used < victim->second.last_used))
+                    if (!std::binary_search(demand_.begin(), demand_.end(), it->first) &&
+                        !std::ranges::any_of(reserved, [&](const auto& r)
+                                             { return r.slot == it->second.slot; }) &&
+                        (found == pages_.end() || it->second.last_used < found->second.last_used))
                     {
-                        victim = it;
+                        found = it;
                     }
                 }
-                if (victim == pages_.end())
+                if (found == pages_.end())
                 {
                     continue;
                 }
-                slot = victim->second.slot;
-                pages_.erase(victim);
             }
-            found = pages_.emplace(key, Page{slot}).first;
+            candidate.previous = found->first;
+            candidate.slot = found->second.slot;
+            candidate.version = found->second.version + (found->first != key);
         }
-        auto& page = found->second;
-        page.planned = true;
-        page.last_used = frame_;
+        reserved_[pending_pages_++] = candidate;
         VsmPageDraw draw;
         draw.key = key;
-        draw.slot = page.slot;
-        draw.version = page.version;
+        draw.slot = candidate.slot;
+        draw.version = candidate.version;
         draw.view_id = vsm_page_views[output.pages.size()];
-        draw.x = static_cast<std::uint16_t>((page.slot % columns) * vsm_tile_size);
-        draw.y = static_cast<std::uint16_t>((page.slot / columns) * vsm_tile_size);
+        draw.x = static_cast<std::uint16_t>((draw.slot % columns) * vsm_tile_size);
+        draw.y = static_cast<std::uint16_t>((draw.slot / columns) * vsm_tile_size);
         draw.size = vsm_tile_size;
         bx::mtxIdentity(draw.view.data());
         for (unsigned axis = 0; axis < 3; ++axis)
@@ -404,28 +412,36 @@ bool VirtualShadowCache::plan(std::uint32_t budget, VsmPageBatch& output)
     }
     const auto count = view_.pages_per_axis * view_.pages_per_axis * view_.level_count;
     output.page_table.resize((count + 3) / 4);
-    for (const auto& [key, page] : pages_)
+    const auto table_entry = [&](const VsmPageKey& key, std::uint32_t slot, std::uint32_t flags)
     {
         if (!inside(key, view_))
         {
-            continue;
+            return;
         }
         const auto& level = view_.levels[key.level];
         const auto index =
             static_cast<std::uint32_t>(key.level * view_.pages_per_axis * view_.pages_per_axis +
                                        (key.y - level.y) * view_.pages_per_axis + key.x - level.x);
-        auto entry = vsm_page_dirty;
-        if (page.valid || page.planned)
+        if (flags & vsm_page_resident)
         {
-            const auto column = page.slot % columns;
-            const auto row = page.slot / columns;
+            const auto row = slot / columns;
             const auto sample_row = view_.origin_bottom_left ? columns - 1U - row : row;
-            const auto x = column * vsm_tile_size;
-            const auto y = sample_row * vsm_tile_size;
-            entry = vsm_page_resident | (page.planned ? vsm_page_planned : 0U) |
-                    (y << vsm_atlas_origin_bits) | x;
+            flags |= ((sample_row * vsm_tile_size) << vsm_atlas_origin_bits) |
+                     ((slot % columns) * vsm_tile_size);
         }
-        output.page_table[index / 4][index % 4] = std::bit_cast<float>(entry);
+        output.page_table[index / 4][index % 4] = std::bit_cast<float>(flags);
+    };
+    for (const auto& [key, page] : pages_)
+    {
+        table_entry(key, page.slot, page.valid ? vsm_page_resident : vsm_page_dirty);
+    }
+    for (const auto& candidate : std::span(reserved_).first(pending_pages_))
+    {
+        if (candidate.previous && *candidate.previous != candidate.key)
+        {
+            table_entry(*candidate.previous, 0, 0);
+        }
+        table_entry(candidate.key, candidate.slot, vsm_page_resident | vsm_page_planned);
     }
     std::array<std::uint32_t, vsm_max_levels> level_demand{};
     for (const auto& key : demand_)
@@ -441,49 +457,99 @@ bool VirtualShadowCache::plan(std::uint32_t budget, VsmPageBatch& output)
     return true;
 }
 
-bool VirtualShadowCache::publish(const VsmPageBatch& batch, std::uint64_t submission_id)
+bool VirtualShadowCache::begin_page_write(std::uint64_t batch_id, const VsmPageDraw& draw)
 {
-    ENGINE_PROFILE_FUNCTION();
-    if (!pending_batch_ || batch.batch_id != pending_batch_ || batch.generation != generation_)
+    const auto candidates = std::span(reserved_).first(pending_pages_);
+    const auto candidate = std::ranges::find(candidates, draw.slot, &Reservation::slot);
+    if (!pending_batch_ || batch_id != pending_batch_ || pending_submission_ ||
+        candidate == candidates.end() || candidate->key != draw.key ||
+        candidate->version != draw.version || candidate->started)
     {
         return false;
     }
-    for (const auto& draw : batch.pages)
+    if (candidate->previous)
     {
-        const auto it = pages_.find(draw.key);
-        if (it == pages_.end() || !it->second.planned || it->second.version != draw.version ||
-            it->second.slot != draw.slot)
+        const auto old = pages_.find(*candidate->previous);
+        if (old == pages_.end() || old->second.slot != draw.slot)
         {
             return false;
         }
+        if (std::exchange(old->second.valid, false))
+        {
+            ++status_.cache_revision;
+        }
     }
-    for (const auto& draw : batch.pages)
-    {
-        auto& page = pages_.at(draw.key);
-        page.valid = true;
-        page.planned = false;
-    }
-    status_.redrawn_pages = static_cast<std::uint32_t>(batch.pages.size());
-    status_.submission_id = submission_id;
-    if (!batch.pages.empty())
-    {
-        ++status_.cache_revision;
-    }
-    pending_batch_ = 0;
+    candidate->started = true;
     return true;
 }
+
+bool VirtualShadowCache::publish(const VsmPageBatch& batch, std::uint64_t submission_id)
+{
+    ENGINE_PROFILE_FUNCTION();
+    if (!pending_batch_ || pending_submission_ || batch.batch_id != pending_batch_ ||
+        batch.generation != generation_)
+    {
+        return false;
+    }
+    if (!submission_id || batch.pages.size() != pending_pages_)
+    {
+        cancel_batch();
+        return false;
+    }
+    for (std::size_t i = 0; i < batch.pages.size(); ++i)
+    {
+        const auto& draw = batch.pages[i];
+        const auto& candidate = reserved_[i];
+        if (!candidate.started || draw.key != candidate.key || draw.version != candidate.version ||
+            draw.slot != candidate.slot)
+        {
+            cancel_batch();
+            return false;
+        }
+    }
+    pending_submission_ = submission_id;
+    return true;
+}
+
+void VirtualShadowCache::finish_frame(bool success, VsmStatus& output)
+{
+    if (!pending_batch_)
+    {
+        return;
+    }
+    if (success && pending_submission_)
+    {
+        for (const auto& candidate : std::span(reserved_).first(pending_pages_))
+        {
+            if (candidate.previous && *candidate.previous != candidate.key)
+            {
+                pages_.erase(*candidate.previous);
+            }
+            pages_[candidate.key] = {candidate.slot, candidate.version, frame_, true};
+        }
+        status_.submission_id = pending_submission_;
+        status_.redrawn_pages = static_cast<std::uint32_t>(pending_pages_);
+        status_.cache_revision += pending_pages_ != 0;
+    }
+    cancel_batch();
+    const auto bytes = output.resident_bytes;
+    (void)status(output);
+    output.resident_bytes = bytes;
+}
+
 void VirtualShadowCache::cancel_batch() noexcept
 {
-    ENGINE_PROFILE_FUNCTION();
-    for (auto& [key, page] : pages_)
-    {
-        page.planned = false;
-    }
-    pending_batch_ = 0;
+    pending_pages_ = 0;
+    pending_submission_ = pending_batch_ = 0;
 }
-bool VirtualShadowCache::status(VsmStatus& output) const
+
+bool VirtualShadowCache::status(VsmStatus& output, bool preview) const
 {
     ENGINE_PROFILE_FUNCTION();
+    if (preview && !pending_submission_)
+    {
+        return false;
+    }
     output = status_;
     output.resident_pages = output.ready_pages = output.dirty_pages = 0;
     output.demanded_pages = static_cast<std::uint32_t>(demand_.size());
@@ -496,6 +562,20 @@ bool VirtualShadowCache::status(VsmStatus& output) const
     {
         const auto it = pages_.find(key);
         output.ready_pages += it != pages_.end() && it->second.valid;
+    }
+    // The overlay describes this frame's encoded table. Public status is confirmed at frame end.
+    if (preview)
+    {
+        const auto count = static_cast<std::uint32_t>(pending_pages_);
+        output.resident_pages += count;
+        output.ready_pages += count;
+        output.redrawn_pages = count;
+        output.submission_id = pending_submission_;
+        output.cache_revision += count != 0;
+        for (const auto& candidate : std::span(reserved_).first(pending_pages_))
+        {
+            output.dirty_pages -= candidate.previous.has_value();
+        }
     }
     output.fallback_pages = output.demanded_pages - output.ready_pages;
     output.state = generation_ == 0             ? VsmState::disabled
@@ -514,7 +594,8 @@ void VirtualShadowCache::reset_scene() noexcept
     demand_.clear();
     status_ = {};
     view_ = {};
-    generation_ = pending_batch_ = demand_submission_ = 0;
+    cancel_batch();
+    generation_ = demand_submission_ = 0;
     depth_min_ = depth_max_ = 0;
 }
 } // namespace engine::render_detail

@@ -53,6 +53,7 @@ bool expect(bool value, const char* message)
 
 bool graph_contract()
 {
+    using namespace engine;
     using namespace engine::render_detail;
     constexpr FrameKey key{640, 360, 256, 4};
     FrameBindings bindings;
@@ -125,8 +126,30 @@ bool graph_contract()
     }
     effect.passes[1].reads[0] = 0;
     std::swap(effect.passes[0].view, effect.passes[1].view);
-    return expect(!compile(effect) && error.reason,
-                  "a reserved View order cannot sample before the producer");
+    if (!expect(!compile(effect) && error.pass == 0 && error.slot == 1,
+                "a reserved View order identifies the reader and unscheduled input"))
+    {
+        return false;
+    }
+    effect.root = 0;
+    if (!expect(!compile(effect) && error.pass == graph_invalid_id && error.slot == 0,
+                "the HDR slice requires an actual writer for its external output"))
+    {
+        return false;
+    }
+    // Both producer segments are immediately ready, but their physical Views fix their order.
+    bindings.textures[HdrSlot::bright] = HdrSlot::bright;
+    effect.root = 3;
+    effect.slot_count = 4;
+    effect.pass_count = 3;
+    effect.last_view = 12;
+    effect.passes[0] = {0, 11, 1, {0, graph_invalid_id}};
+    effect.passes[1] = {1, 10, 2, {0, graph_invalid_id}};
+    effect.passes[2] = {2, 12, 3, {1, 2}};
+    return expect(compile(effect) && graph.plan().count == 3 &&
+                      graph.plan().scheduled[0].view == 10 &&
+                      graph.plan().scheduled[1].view == 11 && graph.plan().scheduled[2].view == 12,
+                  "independent ready frame passes preserve reserved GPU order");
 }
 
 schema::MeshDataT grid()

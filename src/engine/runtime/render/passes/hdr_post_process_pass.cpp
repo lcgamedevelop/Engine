@@ -416,7 +416,7 @@ void HdrPostProcessPass::begin_transparency(bgfx::TextureHandle frozen_scene, co
 }
 
 bool HdrPostProcessPass::resolve(const RenderSettings& settings, const FrameOutput& display,
-                                 RenderGraph* graph)
+                                 RenderGraph& graph)
 {
     ENGINE_PROFILE_ZONE("Render.hdrResolveSubmit");
     if (!valid_settings(settings) || width_ == 0 || height_ == 0 || !bgfx::isValid(framebuffer_) ||
@@ -452,45 +452,6 @@ bool HdrPostProcessPass::resolve(const RenderSettings& settings, const FrameOutp
     const Target bright{bloom_framebuffers_[0], bloom_widths_[0], bloom_heights_[0]};
     const Target blur{bloom_framebuffers_[1], bloom_widths_[1], bloom_heights_[1]};
     const Target output{display.target(), width_, height_};
-#if defined(ENGINE_ENABLE_TEST_SUPPORT)
-    if (!graph)
-    {
-#if defined(ENGINE_ENABLE_TRACY_FUNCTIONS)
-        ENGINE_PROFILE_ZONE("Render.hdrLegacySubmit");
-#endif
-        const auto submit_legacy = [&](GraphPass pass, bgfx::ViewId view, const Target& target,
-                                       bgfx::TextureHandle source, bgfx::TextureHandle bloom)
-        {
-            set_post_view(view, hdr_view_names[pass], target.framebuffer, target.width,
-                          target.height);
-            const float output_parameters[]{settings.hdr_enabled ? 1.0F : 0.0F, 0, 0, 0};
-            const auto texel = pass == HdrPass::bright
-                                   ? std::array{1.0F / width_, 1.0F / height_, 0.0F, 0.0F}
-                                   : bloom_texel;
-            bgfx::setUniform(output_, output_parameters);
-            bgfx::setUniform(parameters_, parameters);
-            bgfx::setUniform(texel_, texel.data());
-            bgfx::setTexture(0, samplers_[0], source, linear_clamp);
-            if (pass == HdrPass::resolve)
-            {
-                bgfx::setTexture(1, samplers_[1], bloom, linear_clamp);
-            }
-            bgfx::setVertexBuffer(0, fullscreen_);
-            bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A);
-            bgfx::submit(view, programs_[pass]);
-        };
-        if (settings.bloom_enabled)
-        {
-            submit_legacy(HdrPass::bright, hdr_bright_view, bright, scene_color(),
-                          BGFX_INVALID_HANDLE);
-            submit_legacy(HdrPass::blur, hdr_blur_view, blur, bloom_colors_[0],
-                          BGFX_INVALID_HANDLE);
-        }
-        submit_legacy(HdrPass::resolve, hdr_resolve_view, output, scene_color(),
-                      settings.bloom_enabled ? bloom_colors_[1] : black_);
-        return true;
-    }
-#endif
     FrameBindings bindings;
     {
 #if defined(ENGINE_ENABLE_TRACY_FUNCTIONS)
@@ -499,7 +460,7 @@ bool HdrPostProcessPass::resolve(const RenderSettings& settings, const FrameOutp
         // The device-wide order in RenderSystem contains 256 physical views.
         const auto max_views = static_cast<std::uint16_t>(
             std::min(bgfx::getCaps()->limits.maxViews, std::uint32_t{256}));
-        if (!graph->begin({width_, height_, max_views, samples_}))
+        if (!graph.begin({width_, height_, max_views, samples_}))
         {
             SDL_LogError(SDL_LOG_CATEGORY_RENDER, "Cannot start the HDR render graph");
             return false;
@@ -511,13 +472,13 @@ bool HdrPostProcessPass::resolve(const RenderSettings& settings, const FrameOutp
         bindings.textures[HdrSlot::output] = display.color().idx;
     }
     GraphError error;
-    if (compile_hdr_graph(*graph, settings.bloom_enabled, bindings, error))
+    if (compile_hdr_graph(graph, settings.bloom_enabled, bindings, error))
     {
 #if defined(ENGINE_ENABLE_TRACY_FUNCTIONS)
         ENGINE_PROFILE_ZONE("Render.graphExecute");
 #endif
         const std::array<Target, HdrSlot::count> targets{{{}, {}, bright, blur, output}};
-        const auto passes = graph->plan().passes();
+        const auto passes = graph.plan().passes();
         const auto encode = [&](const GraphPassDesc& segment)
         {
             const auto& target = targets[segment.output];
@@ -553,7 +514,7 @@ bool HdrPostProcessPass::resolve(const RenderSettings& settings, const FrameOutp
             bgfx::submit(segment.view, programs_[segment.pass], 0, discard);
             return true;
         };
-        if (graph->execute(bindings, encode, error))
+        if (graph.execute(bindings, encode, error))
         {
             return true;
         }

@@ -2,6 +2,8 @@
 #include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 
+#include "runtime/render/frame_graph_plan.hpp"
+#include "runtime/render/render_constants.hpp"
 #include "runtime/resource/codecs/texture_resource_codec.hpp"
 
 #include <basisu/transcoder/basisu_transcoder.h>
@@ -21,14 +23,15 @@
 #include <cstdio>
 #include <cstring>
 #include <limits>
+#include <optional>
 #include <span>
 
 namespace engine::plugins::scene_bake
 {
 namespace
 {
-constexpr bgfx::ViewId compute_view = 240;
-constexpr bgfx::ViewId copy_view = 241;
+using render_detail::bake_compute_view;
+using render_detail::bake_copy_view;
 constexpr std::uint64_t clamp_sampler =
     BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP | BGFX_SAMPLER_W_CLAMP;
 
@@ -223,6 +226,9 @@ struct IblBakeJob::State
         std::uint8_t face = 0;
         std::uint8_t mip = 0;
     };
+    enum class Step { sample, lut, cube_copy, readback };
+    FrameGraphPlan plan;
+    std::optional<Step> planned_step;
     std::vector<Work> work;
     std::size_t index = 0;
     std::array<bgfx::ProgramHandle, 4> programs{
@@ -406,9 +412,9 @@ bool IblBakeJob::start(const schema::TextureDataT& source, std::uint16_t resolut
     add(State::Pass::irradiance, s.irradiance_size, false);
     add(State::Pass::prefilter, resolution, true);
     add(State::Pass::lut, lut_size, false);
-    bgfx::setViewName(compute_view, "Scene Bake Compute");
-    bgfx::setViewName(copy_view, "Scene Bake Readback");
-    bgfx::setViewMode(compute_view, bgfx::ViewMode::Sequential);
+    bgfx::setViewName(bake_compute_view, "Scene Bake Compute");
+    bgfx::setViewName(bake_copy_view, "Scene Bake Readback");
+    bgfx::setViewMode(bake_compute_view, bgfx::ViewMode::Sequential);
     return true;
 }
 
@@ -483,15 +489,131 @@ BakeProgress IblBakeJob::tick(std::uint32_t frame, std::string& error)
         return BakeProgress::complete;
     }
     const auto& task = s.work[s.index];
-    constexpr auto format = bgfx::TextureFormat::RGBA16F;
-    if (s.submitted)
+    using Step = State::Step;
+    const auto step = s.submitted
+                          ? (task.pass == State::Pass::panorama ? Step::cube_copy : Step::readback)
+                          : (task.pass == State::Pass::lut ? Step::lut : Step::sample);
+    if (s.submitted && frame == s.submitted_frame)
     {
-        if (frame == s.submitted_frame)
+        return BakeProgress::running;
+    }
+    enum Stage : FramePassId
+    {
+        allocate_scratch,
+        compute,
+        copy_face,
+        allocate_staging,
+        blit_staging,
+        request_read
+    };
+    enum Resource : FrameResourceId
+    {
+        source,
+        target,
+        result,
+        cube_face,
+        staging,
+        pixels
+    };
+    static constexpr FrameResourceId sampled[]{source}, writable[]{target}, computed[]{result},
+        face[]{cube_face};
+    static constexpr FrameResourceId compute_inputs[]{source, target},
+        read_inputs[]{result, staging};
+    static constexpr FrameResourceId transfer[]{staging}, copied[]{pixels};
+    FramePlanError detail;
+    if (s.planned_step != step)
+    {
+        std::array<FramePassDeclaration, 3> passes{};
+        std::size_t count = 0;
+        std::span<const FrameResourceId> imports, roots;
+        if (step == Step::cube_copy || step == Step::readback)
         {
-            return BakeProgress::running;
+            imports = computed;
+            if (step == Step::cube_copy)
+            {
+                passes[count++] = {copy_face, computed, face};
+                roots = face;
+            }
+            else
+            {
+                passes[count++] = {allocate_staging, {}, transfer};
+                passes[count++] = {blit_staging, read_inputs, copied};
+                passes[count++] = {request_read, copied, {}, {}, true};
+            }
         }
-        s.submitted = false;
-        if (task.pass == State::Pass::panorama)
+        else
+        {
+            const bool lut = step == Step::lut;
+            if (!lut)
+            {
+                imports = sampled;
+            }
+            passes[count++] = {allocate_scratch, {}, writable};
+            passes[count++] = {compute,
+                               lut ? std::span<const FrameResourceId>(writable)
+                                   : std::span<const FrameResourceId>(compute_inputs),
+                               computed};
+            roots = computed;
+        }
+        if (!s.plan.compile(std::span(passes).first(count), imports, roots, detail))
+        {
+            error = detail.reason;
+            s.release();
+            return BakeProgress::failed;
+        }
+        s.planned_step = step;
+    }
+    else if (!s.plan.begin_cached_frame())
+    {
+        error = "Cannot restart the IBL frame plan";
+        s.release();
+        return BakeProgress::failed;
+    }
+    constexpr auto format = bgfx::TextureFormat::RGBA16F;
+    const auto encode = [&](FramePassId pass)
+    {
+        switch (pass)
+        {
+        case allocate_scratch:
+            s.scratch = bgfx::createTexture2D(task.size, task.size, false, 1, format,
+                                              BGFX_TEXTURE_COMPUTE_WRITE | clamp_sampler);
+            if (!bgfx::isValid(s.scratch))
+            {
+                error = "Cannot allocate an IBL compute output texture";
+                return false;
+            }
+            return true;
+        case compute:
+        {
+            const bool lut = task.pass == State::Pass::lut;
+            const std::array<float, 4> parameters{
+                static_cast<float>(s.samples), 0, static_cast<float>(s.cube_size),
+                static_cast<float>(task.mip) / std::max(1, mip_count(s.resolution) - 1)};
+            const auto previous_size =
+                task.mip == 0 ? s.cube_size : std::max(1, s.cube_size >> (task.mip - 1));
+            const std::array<float, 4> face{static_cast<float>(task.face),
+                                            static_cast<float>(task.mip),
+                                            static_cast<float>(previous_size), 0};
+            bgfx::setUniform(s.parameters, parameters.data());
+            bgfx::setUniform(s.face_uniform, face.data());
+            if (!lut)
+            {
+                const auto texture = task.pass == State::Pass::panorama
+                                         ? (task.mip == 0 ? s.input : s.cube)
+                                         : (s.build_cube ? s.cube : s.input);
+                bgfx::setTexture(0, s.sampler, texture);
+            }
+            bgfx::setImage(lut ? 0 : 1, s.scratch, 0, bgfx::Access::Write, format);
+            const auto shader =
+                task.pass == State::Pass::panorama && (task.mip != 0 || s.input_is_cube)
+                    ? s.cube_mip_program
+                    : s.programs[static_cast<std::size_t>(task.pass)];
+            bgfx::dispatch(bake_compute_view, shader, (task.size + 7) / 8, (task.size + 7) / 8, 1);
+            s.submitted_frame = frame;
+            s.submitted = true;
+            return true;
+        }
+        case copy_face:
         {
             // TextureRegion 的零 depth 表示剩余全部面；这里仅复制当前 cubemap 面。
             const bgfx::TextureRegion destination{.handle = s.cube,
@@ -502,60 +624,50 @@ BakeProgress IblBakeJob::tick(std::uint32_t frame, std::string& error)
                                                   .depth = 1};
             const bgfx::TextureRegion source{
                 .handle = s.scratch, .width = task.size, .height = task.size, .depth = 1};
-            bgfx::blit(copy_view, destination, source);
+            bgfx::blit(bake_copy_view, destination, source);
             destroy_handle(s.scratch);
             s.submitted_frame = frame;
             s.blit_pending = true;
             ++s.index;
-            return BakeProgress::running;
+            s.submitted = false;
+            return true;
         }
-        s.staging = bgfx::createTexture2D(task.size, task.size, false, 1, format,
-                                          BGFX_TEXTURE_BLIT_DST | BGFX_TEXTURE_READ_BACK);
-        if (!bgfx::isValid(s.staging))
+        case allocate_staging:
+            s.staging = bgfx::createTexture2D(task.size, task.size, false, 1, format,
+                                              BGFX_TEXTURE_BLIT_DST | BGFX_TEXTURE_READ_BACK);
+            if (!bgfx::isValid(s.staging))
+            {
+                error = "Cannot allocate the 2D IBL readback texture";
+                return false;
+            }
+            s.readback.resize(std::size_t(task.size) * task.size * 8);
+            return true;
+        case blit_staging:
+            bgfx::blit(bake_copy_view, bgfx::TextureRegion{.handle = s.staging},
+                       bgfx::TextureRegion{.handle = s.scratch});
+            return true;
+        case request_read:
         {
-            error = "Cannot allocate the 2D IBL readback texture";
-            s.release();
-            return BakeProgress::failed;
+            const bgfx::TextureRegion readback{.handle = s.staging};
+            s.readback_frame = bgfx::read(readback, s.readback.data());
+            s.reading = true;
+            destroy_handle(s.scratch);
+            s.submitted = false;
+            return true;
         }
-        s.readback.resize(std::size_t(task.size) * task.size * 8);
-        const bgfx::TextureRegion readback{.handle = s.staging};
-        bgfx::blit(copy_view, readback, bgfx::TextureRegion{.handle = s.scratch});
-        s.readback_frame = bgfx::read(readback, s.readback.data());
-        s.reading = true;
-        destroy_handle(s.scratch);
-        return BakeProgress::running;
-    }
-    s.scratch = bgfx::createTexture2D(task.size, task.size, false, 1, format,
-                                      BGFX_TEXTURE_COMPUTE_WRITE | clamp_sampler);
-    if (!bgfx::isValid(s.scratch))
+        default:
+            return false;
+        }
+    };
+    if (!s.plan.perform(encode, detail))
     {
-        error = "Cannot allocate an IBL compute output texture";
+        if (error.empty())
+        {
+            error = detail.reason;
+        }
         s.release();
         return BakeProgress::failed;
     }
-    const bool lut = task.pass == State::Pass::lut;
-    const std::array<float, 4> parameters{
-        static_cast<float>(s.samples), 0, static_cast<float>(s.cube_size),
-        static_cast<float>(task.mip) / std::max(1, mip_count(s.resolution) - 1)};
-    const auto previous_size =
-        task.mip == 0 ? s.cube_size : std::max(1, s.cube_size >> (task.mip - 1));
-    const std::array<float, 4> face{static_cast<float>(task.face), static_cast<float>(task.mip),
-                                    static_cast<float>(previous_size), 0};
-    bgfx::setUniform(s.parameters, parameters.data());
-    bgfx::setUniform(s.face_uniform, face.data());
-    if (!lut)
-    {
-        const auto texture = task.pass == State::Pass::panorama ? (task.mip == 0 ? s.input : s.cube)
-                                                                : (s.build_cube ? s.cube : s.input);
-        bgfx::setTexture(0, s.sampler, texture);
-    }
-    bgfx::setImage(lut ? 0 : 1, s.scratch, 0, bgfx::Access::Write, format);
-    const auto shader = task.pass == State::Pass::panorama && (task.mip != 0 || s.input_is_cube)
-                            ? s.cube_mip_program
-                            : s.programs[static_cast<std::size_t>(task.pass)];
-    bgfx::dispatch(compute_view, shader, (task.size + 7) / 8, (task.size + 7) / 8, 1);
-    s.submitted_frame = frame;
-    s.submitted = true;
     return BakeProgress::running;
 }
 

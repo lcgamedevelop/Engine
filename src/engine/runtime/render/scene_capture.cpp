@@ -474,35 +474,96 @@ bool RenderSystem::draw_diffuse_capture(const RenderSettings& rendering)
             return fail("Cannot read the capture projection");
         }
         render_detail::ShadowFrame capture_shadow;
-        if (!resources.prepare_lighting(resources.frame_data, rendering, config_, draw, lens,
-                                        capture_shadow, 3, render_detail::capture_shadow_view,
-                                        &request, nullptr))
+        using namespace render_detail;
+        enum Stage : FramePassId
         {
-            return fail("Cannot prepare capture lighting");
-        }
-        bgfx::setViewName(draw.id, "Diffuse lighting capture");
-        bgfx::setViewFrameBuffer(draw.id, resources.capture_framebuffer);
-        bgfx::setViewRect(draw.id, 0, 0, draw.width, draw.height);
-        bgfx::setViewMode(draw.id, bgfx::ViewMode::Sequential);
-        bgfx::setViewTransform(draw.id, draw.view, draw.projection);
-        bgfx::setViewClear(draw.id, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, std::uint32_t{0x000000ff},
-                           1.0F, std::uint8_t{0});
-        bgfx::touch(draw.id);
-        if (!resources.collect_view(resources.frame_data, draw, resources.draw_lists[3]) ||
-            !resources.draw_capture_sky(request, rendering) ||
-            !resources.draw_meshes(resources.frame_data, resources.draw_lists[3], rendering, draw,
-                                   render_detail::SceneDrawMode::capture))
+            lighting,
+            clear,
+            visible,
+            sky,
+            geometry,
+            copy,
+            readback_request
+        };
+        enum Version : FrameResourceId
         {
-            return fail("Cannot submit capture geometry or sky");
+            scene,
+            matrices,
+            lighting_data,
+            cleared_color,
+            cleared_depth,
+            visible_meshes,
+            sky_color,
+            face_color,
+            face_depth,
+            staging
+        };
+        static constexpr FrameResourceId imports[]{scene, matrices};
+        static constexpr FrameResourceId light_output[]{lighting_data};
+        static constexpr FrameResourceId clear_output[]{cleared_color, cleared_depth};
+        static constexpr FrameResourceId cull_output[]{visible_meshes};
+        static constexpr FrameResourceId sky_inputs[]{matrices, lighting_data, cleared_color};
+        static constexpr FrameResourceId sky_output[]{sky_color};
+        static constexpr FrameResourceId draw_inputs[]{sky_color, cleared_depth, lighting_data,
+                                                       visible_meshes};
+        static constexpr FrameResourceId draw_outputs[]{face_color, face_depth};
+        static constexpr FrameResourceId rendered[]{face_color};
+        static constexpr FrameResourceId copied[]{staging};
+        static constexpr FramePassDeclaration passes[]{
+            {lighting, imports, light_output},       {clear, {}, clear_output},
+            {visible, imports, cull_output},         {sky, sky_inputs, sky_output},
+            {geometry, draw_inputs, draw_outputs},   {copy, rendered, copied},
+            {readback_request, copied, {}, {}, true}};
+        FramePlanError error;
+        auto& plan = resources.capture_plan;
+        if (plan.passes().empty() ? !plan.compile(passes, imports, {}, error)
+                                  : !plan.begin_cached_frame())
+        {
+            return fail("Cannot compile diffuse capture plan");
         }
         const bgfx::TextureRegion readback{.handle = resources.capture_readback};
-        bgfx::blit(render_detail::capture_copy_view, readback,
-                   bgfx::TextureRegion{.handle = resources.capture_color});
-        resources.capture_pending =
-            resources.capture_completion.submit(readback, resources.capture_pixels.data());
-        if (!resources.capture_pending)
+        const auto encode = [&](FramePassId pass)
         {
-            return fail("Cannot submit diffuse lighting readback");
+            switch (pass)
+            {
+            case lighting:
+                return resources.prepare_lighting(resources.frame_data, rendering, config_, draw,
+                                                  lens, capture_shadow, 3, capture_shadow_view,
+                                                  &request, nullptr);
+            case clear:
+                bgfx::setViewName(draw.id, "Diffuse lighting capture");
+                bgfx::setViewFrameBuffer(draw.id, resources.capture_framebuffer);
+                bgfx::setViewRect(draw.id, 0, 0, draw.width, draw.height);
+                bgfx::setViewMode(draw.id, bgfx::ViewMode::Sequential);
+                bgfx::setViewTransform(draw.id, draw.view, draw.projection);
+                bgfx::setViewClear(draw.id, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
+                                   std::uint32_t{0x000000ff}, 1.0F, std::uint8_t{0});
+                bgfx::touch(draw.id);
+                return true;
+            case visible:
+                return resources.collect_view(resources.frame_data, draw, resources.draw_lists[3]);
+            case sky:
+                return resources.draw_capture_sky(request, rendering);
+            case geometry:
+                return resources.draw_meshes(resources.frame_data, resources.draw_lists[3],
+                                             rendering, draw, SceneDrawMode::capture);
+            case copy:
+                bgfx::blit(render_detail::capture_copy_view, readback,
+                           bgfx::TextureRegion{.handle = resources.capture_color});
+                return true;
+            case readback_request:
+                resources.capture_pending =
+                    resources.capture_completion.submit(readback, resources.capture_pixels.data());
+                return resources.capture_pending;
+            default:
+                return false;
+            }
+        };
+        if (!plan.perform(encode, error))
+        {
+            SDL_LogError(SDL_LOG_CATEGORY_RENDER, "Diffuse capture graph stage %u failed",
+                         unsigned(error.pass));
+            return fail("Cannot submit diffuse capture plan");
         }
     }
     return true;

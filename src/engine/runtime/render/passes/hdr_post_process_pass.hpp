@@ -32,6 +32,10 @@ public:
     static void initialize_views();
     [[nodiscard]] bool prepare(std::uint16_t width, std::uint16_t height, bool bloom_enabled,
                                std::uint8_t samples, bool ssr_enabled);
+    [[nodiscard]] bool has_opaque_depth_target() const noexcept
+    {
+        return bgfx::isValid(depth_framebuffer_);
+    }
     [[nodiscard]] bool begin_opaque_depth(const float* view, const float* projection);
     // clear_color 沿用显示空间 RGBA8 语义，解码为线性值后参与统一曝光和色调映射。
     void begin_scene(std::uint32_t clear_color, bool depth_prepared);
@@ -54,7 +58,7 @@ public:
     void begin_transparency(bgfx::TextureHandle frozen_scene, const float* view,
                             const float* projection);
     [[nodiscard]] bool resolve(const RenderSettings& settings, const FrameOutput& display,
-                               RenderGraph* graph);
+                               RenderGraph& graph);
     [[nodiscard]] std::uint32_t resource_count() const noexcept;
     void release() noexcept;
 

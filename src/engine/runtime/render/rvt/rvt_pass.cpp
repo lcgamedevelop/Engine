@@ -120,13 +120,7 @@ bool RvtPass::configure(const schema::RvtSettingsT& settings, std::uint64_t devi
         reason_ = "RVT GPU initialization failed";
         return false;
     }
-    // A separate clear precedes all page rectangles; untouched atlas slots stay deterministic.
-    const auto clear_view = bgfx::ViewId(rvt_page_view - 1);
-    bgfx::setViewName(clear_view, "RVT atlas initialize");
-    bgfx::setViewFrameBuffer(clear_view, target_);
-    bgfx::setViewRect(clear_view, 0, 0, std::uint16_t(atlas_size_), std::uint16_t(atlas_size_));
-    bgfx::setViewClear(clear_view, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, std::uint32_t{0}, 1.F);
-    bgfx::touch(clear_view);
+    initialize_atlas_ = true;
     return true;
 }
 void RvtPass::invalidate_sources(VirtualTextureCache& cache, const RenderFrameData& frame)
@@ -203,77 +197,45 @@ bool RvtPass::prepare_pages(VirtualTextureCache& cache, const RenderFrameData& s
     {
         return false;
     }
-    const auto tile = std::uint16_t(settings_.page_size + 2 * settings_.page_border);
-    std::uint16_t page_index = 0;
-    for (const auto& page : batch.pages)
+    const auto levels = static_cast<std::uint8_t>(cache.maximum_mip() + 1);
+    if (!prepare_plan(static_cast<std::uint16_t>(batch.pages.size()), levels))
     {
-        const auto area = cache.bounds(page.key);
-        const auto& a = area.minimum();
-        const auto& b = area.maximum();
-        const float border_x = float((b.x() - a.x()) * settings_.page_border / settings_.page_size);
-        const float border_z = float((b.z() - a.z()) * settings_.page_border / settings_.page_size);
-        const Vec3 origin{(a.x() + b.x()) * .5, b.y() + 1, (a.z() + b.z()) * .5};
-        const bx::Vec3 eye{0, 0, 0};
-        const bx::Vec3 at{0, float(a.y() - origin.y()), 0};
-        float view[16], projection[16];
-        // X increases right, Z increases down in page-table texture coordinates.
-        bx::mtxLookAt(view, eye, at, {0, 0, -1}, bx::Handedness::Right);
-        const float half_x = float((b.x() - a.x()) * .5) + border_x,
-                    half_z = float((b.z() - a.z()) * .5) + border_z;
-        bx::mtxOrtho(projection, -half_x, half_x, -half_z, half_z, .1F, float(b.y() - a.y() + 2), 0,
-                     bgfx::getCaps()->homogeneousDepth, bx::Handedness::Right);
-        const auto id = bgfx::ViewId(rvt_page_view + page_index++);
-        bgfx::setViewName(id, "RVT material page");
-        bgfx::setViewFrameBuffer(id, target_);
-        bgfx::setViewRect(id, std::uint16_t(page.slot % slots_per_row_ * tile),
-                          std::uint16_t(page.slot / slots_per_row_ * tile), tile, tile);
-        bgfx::setViewClear(id, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, std::uint32_t{0}, 1.F);
-        bgfx::setViewTransform(id, view, projection);
-        bgfx::setViewMode(id, bgfx::ViewMode::Sequential);
-        bgfx::touch(id);
-        for (const auto* mesh : writers)
-        {
-            const Bounds3 expanded{{a.x() - border_x, a.y(), a.z() - border_z},
-                                   {b.x() + border_x, b.y(), b.z() + border_z}};
-            if (!overlap(mesh_bounds(*mesh), expanded))
-            {
-                continue;
-            }
-            const auto& geometry = *mesh->gpu->geometry;
-            const auto submeshes = geometry.submeshes();
-            const auto count = submeshes.empty() ? 1 : submeshes.size();
-            for (std::size_t slot = 0; slot < count; ++slot)
-            {
-                const auto& material =
-                    mesh->gpu->materials[submeshes.empty() ? 0 : submeshes[slot].material_slot()];
-                if (!material.program->bind_material(material, {}, false))
-                {
-                    return false;
-                }
-                const float height[]{
-                    float(settings_.bounds.minimum().y() - origin.y()),
-                    float(1 / (settings_.bounds.maximum().y() - settings_.bounds.minimum().y())), 0,
-                    0};
-                const float surface[]{0, 0, 0, 0};
-                bgfx::setUniform(height_, height);
-                bgfx::setUniform(surface_, surface);
-                float model[16];
-                transform_math::relative(mesh->world.data(), origin, model);
-                bgfx::setTransform(model);
-                bgfx::setUniform(normal_, mesh->normal.data());
-                mesh->gpu->bind_vertices();
-                const auto first = submeshes.empty() ? 0 : submeshes[slot].first_index();
-                const auto indices =
-                    submeshes.empty() ? geometry.index_count() : submeshes[slot].index_count();
-                bgfx::setIndexBuffer(geometry.index_buffer(), first, indices);
-                bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_WRITE_Z |
-                               BGFX_STATE_DEPTH_TEST_LESS | cull_state(material.cull, model));
-                bgfx::submit(id, material.program->rvt_program);
-            }
-        }
+        return false;
     }
-    if (!cache.publish(batch))
+    FramePlanError error;
+    const bool success = plan_.perform(
+        [&](FramePassId pass)
+        {
+            if (pass == 0)
+            {
+                const auto clear_view = bgfx::ViewId(rvt_page_view - 1);
+                bgfx::setViewName(clear_view, "RVT atlas initialize");
+                bgfx::setViewFrameBuffer(clear_view, target_);
+                bgfx::setViewRect(clear_view, 0, 0, std::uint16_t(atlas_size_),
+                                  std::uint16_t(atlas_size_));
+                bgfx::setViewClear(clear_view, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
+                                   std::uint32_t{0}, 1.F);
+                bgfx::touch(clear_view);
+                initialize_atlas_ = false;
+                return true;
+            }
+            if (pass <= maximum_rvt_views)
+            {
+                const auto& page = batch.pages[pass - 1];
+                return cache.begin_page_write(page) &&
+                       draw_page(page, cache.bounds(page.key), rvt_page_view + pass - 1, writers);
+            }
+            if (pass == maximum_rvt_views + 1)
+            {
+                return cache.publish(batch);
+            }
+            upload_table_level(cache, static_cast<std::uint8_t>(pass - maximum_rvt_views - 2));
+            return true;
+        },
+        error);
+    if (!success)
     {
+        reason_ = error.reason;
         return false;
     }
     ENGINE_PROFILE_PLOT("Rvt.redrawnPages", static_cast<std::int64_t>(batch.pages.size()));
@@ -282,27 +244,149 @@ bool RvtPass::prepare_pages(VirtualTextureCache& cache, const RenderFrameData& s
     {
         minimum_mip_ = std::min(minimum_mip_, key.mip);
     }
-    // Texture updates precede GPU views. Page passes execute before every consumer view.
-    for (std::uint8_t mip = 0; mip <= cache.maximum_mip(); ++mip)
-    {
-        const auto count =
-            std::uint16_t((settings_.virtual_resolution / settings_.page_size) >> mip);
-        std::vector<std::array<float, 4>> data(std::size_t(count) * count);
-        for (const auto& [key, page] : cache.pages())
-        {
-            if (key.mip == mip)
-            {
-                data[std::size_t(key.y) * count + key.x] = {float(page.slot % slots_per_row_),
-                                                            float(page.slot / slots_per_row_),
-                                                            float(mip), 1};
-            }
-        }
-        bgfx::updateTexture2D(
-            table_, 0, mip, 0, 0, count, count,
-            bgfx::copy(data.data(), std::uint32_t(data.size() * sizeof(data[0]))));
-    }
     reason_.clear();
     return true;
+}
+
+bool RvtPass::prepare_plan(std::uint16_t pages, std::uint8_t levels)
+{
+    if (pages == planned_pages_ && levels == planned_levels_ && planned_clear_ == initialize_atlas_)
+    {
+        return plan_.begin_cached_frame();
+    }
+    // Each candidate slot is distinct. Its tile and the imported or cleared atlas are inputs
+    // to publication. Each table mip is a separate upload; bgfx applies uploads before views.
+    constexpr FramePassId publish = maximum_rvt_views + 1;
+    constexpr FramePassId first_mip = publish + 1;
+    constexpr unsigned max_levels =
+        std::numeric_limits<decltype(settings_.virtual_resolution)>::digits;
+    if (pages > maximum_rvt_views || levels == 0 || levels > max_levels)
+    {
+        reason_ = "RVT page plan exceeds its declaration capacity";
+        return false;
+    }
+    std::array<FrameResourceId, first_mip + max_levels> versions{};
+    std::array<FramePassDeclaration, first_mip + max_levels> passes{};
+    for (FrameResourceId i = 0; i < versions.size(); ++i)
+    {
+        versions[i] = i;
+    }
+    const std::span ids{versions};
+    constexpr FrameResourceId writer_stream = first_mip + max_levels;
+    constexpr std::array<FrameResourceId, 2> page_inputs{0, writer_stream};
+    const std::array imports{writer_stream, FrameResourceId{0}};
+    std::size_t count = 0;
+    if (initialize_atlas_)
+    {
+        passes[count++] = {0, {}, ids.first(1)};
+    }
+    for (FramePassId i = 1; i <= pages; ++i)
+    {
+        passes[count++] = {i, page_inputs, ids.subspan(i, 1)};
+    }
+    passes[count++] = {publish, ids.first(pages + 1), ids.subspan(publish, 1)};
+    for (FramePassId i = first_mip; i < first_mip + levels; ++i)
+    {
+        passes[count++] = {i, ids.subspan(publish, 1), ids.subspan(i, 1)};
+    }
+    FramePlanError error;
+    planned_pages_ = frame_invalid_id;
+    if (!plan_.compile(std::span(passes).first(count),
+                       std::span(imports).first(initialize_atlas_ ? 1 : 2),
+                       ids.subspan(first_mip, levels), error))
+    {
+        reason_ = error.reason;
+        return false;
+    }
+    planned_pages_ = pages;
+    planned_levels_ = levels;
+    planned_clear_ = initialize_atlas_;
+    return true;
+}
+
+bool RvtPass::draw_page(const RvtPage& page, const Bounds3& area, bgfx::ViewId id,
+                        std::span<const RenderFrameData::Mesh* const> writers)
+{
+    const auto tile = std::uint16_t(settings_.page_size + 2 * settings_.page_border);
+    const auto& a = area.minimum();
+    const auto& b = area.maximum();
+    const float border_x = float((b.x() - a.x()) * settings_.page_border / settings_.page_size);
+    const float border_z = float((b.z() - a.z()) * settings_.page_border / settings_.page_size);
+    const Vec3 origin{(a.x() + b.x()) * .5, b.y() + 1, (a.z() + b.z()) * .5};
+    const bx::Vec3 eye{0, 0, 0};
+    const bx::Vec3 at{0, float(a.y() - origin.y()), 0};
+    float view[16], projection[16];
+    // X increases right, Z increases down in page-table texture coordinates.
+    bx::mtxLookAt(view, eye, at, {0, 0, -1}, bx::Handedness::Right);
+    const float half_x = float((b.x() - a.x()) * .5) + border_x,
+                half_z = float((b.z() - a.z()) * .5) + border_z;
+    bx::mtxOrtho(projection, -half_x, half_x, -half_z, half_z, .1F, float(b.y() - a.y() + 2), 0,
+                 bgfx::getCaps()->homogeneousDepth, bx::Handedness::Right);
+    bgfx::setViewName(id, "RVT material page");
+    bgfx::setViewFrameBuffer(id, target_);
+    bgfx::setViewRect(id, std::uint16_t(page.slot % slots_per_row_ * tile),
+                      std::uint16_t(page.slot / slots_per_row_ * tile), tile, tile);
+    bgfx::setViewClear(id, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, std::uint32_t{0}, 1.F);
+    bgfx::setViewTransform(id, view, projection);
+    bgfx::setViewMode(id, bgfx::ViewMode::Sequential);
+    bgfx::touch(id);
+    for (const auto* mesh : writers)
+    {
+        const Bounds3 expanded{{a.x() - border_x, a.y(), a.z() - border_z},
+                               {b.x() + border_x, b.y(), b.z() + border_z}};
+        if (!overlap(mesh_bounds(*mesh), expanded))
+        {
+            continue;
+        }
+        const auto& geometry = *mesh->gpu->geometry;
+        const auto submeshes = geometry.submeshes();
+        const auto count = submeshes.empty() ? 1 : submeshes.size();
+        for (std::size_t slot = 0; slot < count; ++slot)
+        {
+            const auto& material =
+                mesh->gpu->materials[submeshes.empty() ? 0 : submeshes[slot].material_slot()];
+            if (!material.program->bind_material(material, {}, false))
+            {
+                return false;
+            }
+            const float height[]{
+                float(settings_.bounds.minimum().y() - origin.y()),
+                float(1 / (settings_.bounds.maximum().y() - settings_.bounds.minimum().y())), 0, 0};
+            const float surface[]{0, 0, 0, 0};
+            bgfx::setUniform(height_, height);
+            bgfx::setUniform(surface_, surface);
+            float model[16];
+            transform_math::relative(mesh->world.data(), origin, model);
+            bgfx::setTransform(model);
+            bgfx::setUniform(normal_, mesh->normal.data());
+            mesh->gpu->bind_vertices();
+            const auto first = submeshes.empty() ? 0 : submeshes[slot].first_index();
+            const auto indices =
+                submeshes.empty() ? geometry.index_count() : submeshes[slot].index_count();
+            bgfx::setIndexBuffer(geometry.index_buffer(), first, indices);
+            bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_WRITE_Z |
+                           BGFX_STATE_DEPTH_TEST_LESS | cull_state(material.cull, model));
+            bgfx::submit(id, material.program->rvt_program);
+        }
+    }
+    return true;
+}
+
+void RvtPass::upload_table_level(const VirtualTextureCache& cache, std::uint8_t mip)
+{
+    const auto count = std::uint16_t((settings_.virtual_resolution / settings_.page_size) >> mip);
+    std::vector<std::array<float, 4>> data(std::size_t(count) * count);
+    for (const auto& [key, page] : cache.pages())
+    {
+        if (key.mip == mip)
+        {
+            data[std::size_t(key.y) * count + key.x] = {float(page.slot % slots_per_row_),
+                                                        float(page.slot / slots_per_row_),
+                                                        float(mip), 1};
+        }
+    }
+    bgfx::updateTexture2D(table_, 0, mip, 0, 0, count, count,
+                          bgfx::copy(data.data(), std::uint32_t(data.size() * sizeof(data[0]))));
 }
 void RvtPass::bind(bool receiver, const Vec3& origin) const
 {

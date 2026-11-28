@@ -2,6 +2,7 @@
 #include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/render/frame_counters.hpp"
+#include "runtime/render/render_constants.hpp"
 #include "runtime/resource/types/shader_resource.hpp"
 #include "runtime/resource/types/texture_resource.hpp"
 #include "runtime/resource/types/ui_resource.hpp"
@@ -28,7 +29,7 @@ namespace engine::ui_detail
 {
 namespace
 {
-constexpr bgfx::ViewId ui_view = 200;
+using render_detail::ui_view;
 constexpr auto sampler_flags = BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP;
 
 bool supported_texture(const Resource& resource)

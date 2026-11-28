@@ -1,5 +1,7 @@
 #pragma once
 
+#include "runtime/render/passes/output_graph.hpp"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -90,6 +92,18 @@ class RenderGraph final
 {
 public:
     RenderGraph() = default;
+
+    template <typename Submit>
+    [[nodiscard]] bool execute_output(const OutputGraphKey& key, Submit&& encode,
+                                      FramePlanError& error)
+    {
+        if (!prepare_output(key, error))
+        {
+            return false;
+        }
+        return output_plan_.perform(
+            [&](FramePassId pass) { return encode(static_cast<OutputPass>(pass)); }, error);
+    }
     RenderGraph(const RenderGraph&) = delete;
     RenderGraph& operator=(const RenderGraph&) = delete;
 
@@ -137,6 +151,11 @@ public:
     void reset() noexcept;
 
 private:
+    [[nodiscard]] bool prepare_output(const OutputGraphKey& key, FramePlanError& error) noexcept;
+    FrameGraphPlan output_plan_;
+    OutputGraphKey output_key_{};
+    bool output_cached_ = false;
+
     [[nodiscard]] bool compile_frame(const GraphDeclaration& declaration, bool immutable,
                                      const FrameBindings& bindings, GraphError& error) noexcept;
     [[nodiscard]] bool consume(const FrameBindings& bindings, GraphError& error) noexcept;

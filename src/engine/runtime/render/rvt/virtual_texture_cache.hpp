@@ -40,6 +40,8 @@ public:
     [[nodiscard]] bool request(const RvtPageDemand& demand);
     void invalidate(const Bounds3& bounds, std::uint64_t revision);
     [[nodiscard]] SceneWorkState prepare(const SceneWorkBudget& budget);
+    [[nodiscard]] bool begin_page_write(const RvtPage& page);
+    void finish_frame(bool success);
     [[nodiscard]] bool publish(const RvtPageBatch& batch);
     [[nodiscard]] bool status(RvtStatus& output) const;
     void release() noexcept;
@@ -76,6 +78,6 @@ private:
     RvtPageBatch batch_;
     std::uint64_t device_ = 0, demand_revision_ = 0, cache_revision_ = 0, view_ = 0;
     std::uint32_t frame_ = 0;
-    bool configured_ = false;
+    bool configured_ = false, published_this_frame_ = false;
 };
 } // namespace engine::render_detail

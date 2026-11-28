@@ -25,7 +25,9 @@ public:
     FrameOutput(const FrameOutput&) = delete;
     FrameOutput& operator=(const FrameOutput&) = delete;
     [[nodiscard]] bool prepare(std::uint16_t width, std::uint16_t height);
-    void present(std::uint32_t clear_color, bool movie);
+    void clear(std::uint32_t clear_color) const;
+    void bind_ui() const;
+    void present() const;
     [[nodiscard]] bool capture(SceneScopeId scope, std::uint64_t scene);
     void retire_capture() noexcept;
     [[nodiscard]] GpuReadbackStatus collect(std::uint32_t frame);

@@ -4,7 +4,7 @@
 
 [按范围准备、首帧与截图](render-readiness.md)维护场景准备和观察的公开契约；本页维护渲染系统与内部绘制能力。
 
-场景准备预算和调用关系见[大场景准备关系](large-scene-preparation.md)。设备创建时，`RenderSystem` 独占一份渲染图实例，供 HDR 和 Bloom 提交复用。[渲染图与后处理](render-graph.md)
+场景准备预算和调用关系见[大场景准备关系](large-scene-preparation.md)。设备创建时，`RenderSystem` 独占设备 View 计划以及帧输出与 HDR 调度器。场景资源和各效果拥有各自的计划，共用资源依赖编译器。[渲染图与提交范围](render-graph.md)
 
 WebGPU 仅面向 [Web 运行产物](web-host.md#异步-webgpu-表面)。[异步表面准备](#异步表面准备)通过私有状态区分设备待就绪与失败；present_movie_frame 与 render 共用 RenderSubmitStatus。
 
@@ -151,7 +151,8 @@ classDiagram
     }
     class SkinningPass {
         +prepare() bool
-        +dispatch(...) bool
+        +deform(geometry, matrices, palette, output) bool
+        +upload_vertices(vertices, output) bool
         +release() void
         +resource_count() uint32_t
     }
@@ -183,7 +184,7 @@ classDiagram
     GpuGeometry o-- Resource : 保留当前CPU资源版本
     GpuGeometry ..> MeshRenderer : 创建期间借用
     GpuMesh ..> SkinningPass : 提交本实例蒙皮
-    SkinningPass ..> GpuGeometry : dispatch期间借用源几何
+    SkinningPass ..> GpuGeometry : 蒙皮期间借用源几何
     SceneGpuResources *-- PassTargets : 按场景拥有目标
     PassTargets *-- ShadowPass
     PassTargets *-- AmbientOcclusionPass
@@ -209,9 +210,10 @@ classDiagram
                                    std::array<float, 3>& minimum,
                                    std::array<float, 3>& maximum) const noexcept;
 // SkinningPass
-[[nodiscard]] bool dispatch(const GpuGeometry& geometry,
-                            bgfx::DynamicVertexBufferHandle palette,
-                            bgfx::DynamicVertexBufferHandle output, std::uint32_t joint_count);
+[[nodiscard]] bool deform(const GpuGeometry& geometry, std::span<const std::array<float, 16>> matrices,
+                          bgfx::DynamicVertexBufferHandle& palette, bgfx::DynamicVertexBufferHandle& output);
+[[nodiscard]] bool upload_vertices(std::span<const GpuVertex> vertices,
+                                   bgfx::DynamicVertexBufferHandle& output);
 ```
 
 - `resources/` 保存逐类型 GPU 上传、绑定和释放；`passes/` 保存蒙皮、阴影、AO、HDR/Bloom。渲染私有辅助类型置于 `engine::render_detail`，不导出到核心根命名空间。

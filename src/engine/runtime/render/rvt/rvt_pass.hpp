@@ -1,6 +1,7 @@
 #pragma once
 
 #include "runtime/performance/function_profile.hpp"
+#include "runtime/render/frame_graph_plan.hpp"
 #include "runtime/render/render_submission.hpp"
 #include "runtime/render/rvt/virtual_texture_cache.hpp"
 #include <bgfx/bgfx.h>
@@ -42,6 +43,14 @@ public:
     }
 
 private:
+    [[nodiscard]] bool prepare_plan(std::uint16_t pages, std::uint8_t levels);
+    [[nodiscard]] bool draw_page(const RvtPage& page, const Bounds3& area, bgfx::ViewId view,
+                                 std::span<const RenderFrameData::Mesh* const> writers);
+    void upload_table_level(const VirtualTextureCache& cache, std::uint8_t mip);
+    FrameGraphPlan plan_;
+    std::uint16_t planned_pages_ = frame_invalid_id;
+    std::uint8_t planned_levels_ = 0;
+    bool initialize_atlas_ = true, planned_clear_ = false;
     struct Source
     {
         std::uint64_t instance = 0, revision = 0, deformation = 0;

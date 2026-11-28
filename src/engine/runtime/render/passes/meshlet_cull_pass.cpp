@@ -213,38 +213,6 @@ bool MeshletCullPass::prepare_index_compaction()
     return true;
 }
 
-std::optional<std::uint32_t> MeshletCullPass::cache_index_source(const GpuGeometry& geometry,
-                                                                 std::size_t lod,
-                                                                 std::uint32_t first,
-                                                                 std::uint32_t count,
-                                                                 std::uint32_t& remaining_copies)
-{
-    ENGINE_PROFILE_FUNCTION();
-    const auto key = index_source_key(geometry, lod, first);
-    const auto existing = index_sources_.find(key);
-    if (existing != index_sources_.end())
-    {
-        return existing->second;
-    }
-    // Buffer blits take four-byte aligned regions. Include the adjacent halfword as needed.
-    const auto aligned_first = first & ~1U;
-    const auto size = (count + (first - aligned_first) + 1U) & ~1U;
-    if (remaining_copies == 0 || size > index_region_capacity_ - index_source_count_)
-    {
-        return std::nullopt;
-    }
-    bgfx::BufferRegion source;
-    bgfx::BufferRegion destination;
-    source.init(geometry.meshlet_indices(lod), aligned_first * 2U, size * 2U);
-    destination.init(index_arena_, index_source_count_ * 2U, size * 2U);
-    bgfx::blit(meshlet_index_upload_view, destination, source);
-    const auto arena_first = index_source_count_ + (first - aligned_first);
-    index_source_count_ += size;
-    --remaining_copies;
-    index_sources_.emplace(key, arena_first);
-    return arena_first;
-}
-
 bool MeshletCullPass::dispatch(const RenderFrameData& frame, const SceneDrawView& view,
                                ViewDrawList& draws, bool sample)
 {
@@ -521,6 +489,38 @@ bool MeshletCullPass::dispatch(const RenderFrameData& frame, const SceneDrawView
     [[maybe_unused]] std::uint32_t cross_mesh_batches = 0, cross_mesh_draws_avoided = 0;
     const auto copy_limit = std::min(32U, bgfx::getCaps()->limits.maxBlits / 8U);
     auto remaining_copies = copy_limit;
+    decltype(index_sources_) staged_sources;
+    std::vector<std::pair<bgfx::BufferRegion, bgfx::BufferRegion>> source_copies;
+    auto next_source = index_source_count_;
+    const auto reserve_index_source = [&](const GpuGeometry& geometry, std::size_t lod,
+                                          std::uint32_t first,
+                                          std::uint32_t count) -> std::optional<std::uint32_t>
+    {
+        const auto key = index_source_key(geometry, lod, first);
+        for (const auto* table : {&index_sources_, &staged_sources})
+        {
+            const auto found = table->find(key);
+            if (found != table->end())
+            {
+                return found->second;
+            }
+        }
+        // Buffer blits require four-byte alignment, including for a halfword source offset.
+        const auto aligned_first = first & ~1U;
+        const auto size = (count + (first - aligned_first) + 1U) & ~1U;
+        if (remaining_copies == 0 || size > index_region_capacity_ - next_source)
+        {
+            return std::nullopt;
+        }
+        auto& [source, destination] = source_copies.emplace_back();
+        source.init(geometry.meshlet_indices(lod), aligned_first * 2U, size * 2U);
+        destination.init(index_arena_, next_source * 2U, size * 2U);
+        const auto arena_first = next_source + (first - aligned_first);
+        staged_sources.emplace(key, arena_first);
+        next_source += size;
+        --remaining_copies;
+        return arena_first;
+    };
     std::vector<std::uint64_t> layout;
     layout.reserve(work.size() * 10);
     std::uint32_t next_singleton = 0;
@@ -582,12 +582,13 @@ bool MeshletCullPass::dispatch(const RenderFrameData& frame, const SceneDrawView
         if (merged)
         {
             // Reserve the whole source job before issuing any copies.
-            auto space = index_region_capacity_ - index_source_count_;
+            auto space = index_region_capacity_ - next_source;
             auto copies = remaining_copies;
             for (const auto& batch : batches)
             {
                 const auto first = batch.source->meshlets[batch.first_cluster].first_index();
-                if (!index_sources_.contains(index_source_key(*batch.geometry, batch.lod, first)))
+                const auto key = index_source_key(*batch.geometry, batch.lod, first);
+                if (!index_sources_.contains(key) && !staged_sources.contains(key))
                 {
                     const auto aligned_count =
                         (batch.compact_index_count + (first & 1U) + 1U) & ~1U;
@@ -606,8 +607,8 @@ bool MeshletCullPass::dispatch(const RenderFrameData& frame, const SceneDrawView
         {
             const auto& batch = batches[i];
             const auto first = batch.source->meshlets[batch.first_cluster].first_index();
-            const auto cached = cache_index_source(*batch.geometry, batch.lod, first,
-                                                   batch.compact_index_count, remaining_copies);
+            const auto cached =
+                reserve_index_source(*batch.geometry, batch.lod, first, batch.compact_index_count);
             if (!cached)
             {
                 return false;
@@ -710,7 +711,7 @@ bool MeshletCullPass::dispatch(const RenderFrameData& frame, const SceneDrawView
             }
             index_arena_ = arena;
             index_region_capacity_ = capacity;
-            index_source_count_ = 0;
+            index_source_count_ = next_source = 0;
             index_sources_.clear();
             uploaded_index_jobs_.clear();
             previous_result = false;
@@ -735,7 +736,7 @@ bool MeshletCullPass::dispatch(const RenderFrameData& frame, const SceneDrawView
     ENGINE_PROFILE_PLOT("Meshlet.indexCompactionBatches", static_cast<double>(index_jobs.size()));
     ENGINE_PROFILE_PLOT("Meshlet.indexSourceCopies",
                         static_cast<double>(copy_limit - remaining_copies));
-    ENGINE_PROFILE_PLOT("Meshlet.indexSourceBytes", static_cast<double>(index_source_count_) * 2);
+    ENGINE_PROFILE_PLOT("Meshlet.indexSourceBytes", static_cast<double>(next_source) * 2);
     ENGINE_PROFILE_PLOT("Meshlet.indexCompactionReservedBytes",
                         static_cast<double>(output_indices) * 2);
     const auto command_count = used_commands + static_cast<std::uint32_t>(index_jobs.size());
@@ -770,7 +771,7 @@ bool MeshletCullPass::dispatch(const RenderFrameData& frame, const SceneDrawView
     {
         batch.output->commands = commands_;
     }
-    if (layout_changed)
+    const auto upload_descriptors = [&]
     {
         ENGINE_PROFILE_ZONE("Render.meshletPrepareDescriptors");
         // A command header points at the first of its contiguous three-vector cluster records.
@@ -813,7 +814,7 @@ bool MeshletCullPass::dispatch(const RenderFrameData& frame, const SceneDrawView
                                                                           sizeof(descriptors[0]))));
         }
         descriptor_layout_ = std::move(layout);
-    }
+    };
     ENGINE_PROFILE_PLOT("Meshlet.workspaceGpuBytes",
                         static_cast<double>(input_capacity_ + descriptor_capacity_) * 16 +
                             static_cast<double>(instance_capacity_) * 112 +
@@ -829,7 +830,7 @@ bool MeshletCullPass::dispatch(const RenderFrameData& frame, const SceneDrawView
     const auto flags = (frustum ? 1U : 0U) | (orthographic ? 2U : 0U) | (readback ? 4U : 0U);
     const bool reuse_result =
         previous_result && !sample && !layout_changed && !upload_inputs && !upload_jobs &&
-        flags == result_flags_ &&
+        source_copies.empty() && flags == result_flags_ &&
         std::memcmp(planes.data(), result_planes_.data(), planes.size() * sizeof(planes[0])) == 0;
     ENGINE_PROFILE_PLOT("Meshlet.resultReused", static_cast<std::int64_t>(reuse_result));
     ENGINE_PROFILE_PLOT("Meshlet.indexCompactionDispatches",
@@ -842,60 +843,79 @@ bool MeshletCullPass::dispatch(const RenderFrameData& frame, const SceneDrawView
     ENGINE_PROFILE_PLOT("Meshlet.inputBytes", static_cast<double>(input_bytes));
     ENGINE_PROFILE_PLOT("Meshlet.inputsUploadedBytes",
                         static_cast<double>(upload_inputs ? input_bytes : 0));
-    if (upload_inputs)
+    const auto count = static_cast<std::uint32_t>(index_jobs.size());
+    const auto bytes = static_cast<std::uint32_t>(job_inputs.size() * sizeof(job_inputs[0]));
+    ENGINE_PROFILE_PLOT("Meshlet.indexJobsUploadedBytes",
+                        static_cast<double>(upload_jobs ? bytes : 0));
+    const MeshletGraphShape shape{.copy_indices = !source_copies.empty(),
+                                  .upload_descriptors = layout_changed && !work.empty(),
+                                  .upload_inputs = upload_inputs,
+                                  .upload_jobs = upload_jobs && count != 0,
+                                  .draws = used_groups != 0,
+                                  .instances = used_instances != 0,
+                                  .compact = count != 0,
+                                  .sample = readback != nullptr,
+                                  .reuse = reuse_result};
+    FramePlanError error;
+    if (submission_shape_ != shape || !submission_plan_.begin_cached_frame())
     {
-        bgfx::update(inputs_, 0,
-                     bgfx::copy(inputs.data(), static_cast<std::uint32_t>(input_bytes)));
-        uploaded_inputs_ = std::move(inputs);
-    }
-    // A separate ordered dispatch clears global counters before any culling workgroup.
-    if (readback)
-    {
-        bgfx::setBuffer(4, counters_, bgfx::Access::Write);
-        bgfx::dispatch(meshlet_clear_view, clear_, 1);
-    }
-    for (std::uint32_t first = 0; first < dispatch_groups; first += maximum_groups)
-    {
-        const auto groups = std::min(maximum_groups, dispatch_groups - first);
-        const std::array<float, 4> parameters{std::bit_cast<float>(first),
-                                              std::bit_cast<float>(singleton_commands),
-                                              static_cast<float>(flags), 0};
-        bgfx::setUniform(parameters_, parameters.data());
-        bgfx::setUniform(planes_, planes.data(), 6);
-        bgfx::setBuffer(0, descriptors_, bgfx::Access::Read);
-        bgfx::setBuffer(1, inputs_, bgfx::Access::Read);
-        bgfx::setBuffer(2, instances_, bgfx::Access::Write);
-        bgfx::setBuffer(3, commands_, bgfx::Access::Write);
-        bgfx::setBuffer(4, counters_, bgfx::Access::ReadWrite);
-        bgfx::dispatch(meshlet_cull_view, program_, groups);
-    }
-    if (!index_jobs.empty())
-    {
-        ENGINE_PROFILE_ZONE("Render.meshletCompactIndices");
-        const auto count = static_cast<std::uint32_t>(index_jobs.size());
-        const auto bytes = static_cast<std::uint32_t>(job_inputs.size() * sizeof(job_inputs[0]));
-        ENGINE_PROFILE_PLOT("Meshlet.indexJobsUploadedBytes",
-                            static_cast<double>(upload_jobs ? bytes : 0));
-        if (upload_jobs)
+        if (!compile_meshlet_graph(submission_plan_, shape, error))
         {
+            submission_shape_.reset();
+            return fail();
+        }
+        submission_shape_ = shape;
+    }
+    const auto submit = [&](FramePassId pass)
+    {
+        switch (static_cast<MeshletStage>(pass))
+        {
+        case MeshletStage::copy_indices:
+            for (const auto& [source, destination] : source_copies)
+            {
+                bgfx::blit(meshlet_index_upload_view, destination, source);
+            }
+            index_sources_.merge(staged_sources);
+            index_source_count_ = next_source;
+            return true;
+        case MeshletStage::upload_descriptors:
+            upload_descriptors();
+            return true;
+        case MeshletStage::upload_inputs:
+            bgfx::update(inputs_, 0,
+                         bgfx::copy(inputs.data(), static_cast<std::uint32_t>(input_bytes)));
+            uploaded_inputs_ = std::move(inputs);
+            return true;
+        case MeshletStage::upload_jobs:
             uploaded_index_jobs_ = std::move(job_inputs);
             bgfx::update(index_compaction_jobs_, 0, bgfx::copy(uploaded_index_jobs_.data(), bytes));
-        }
-        for (std::uint32_t index = 0; index < count; ++index)
+            return true;
+        case MeshletStage::clear_counters:
+            bgfx::setBuffer(4, counters_, bgfx::Access::Write);
+            bgfx::dispatch(meshlet_clear_view, clear_, 1);
+            return true;
+        case MeshletStage::cull:
         {
-            const auto& job = index_jobs[index];
-            auto& output = *job.batches.front().output;
-            output.first_command = used_commands + index;
-            output.command_count = 1;
-            output.compacted_indices = index_arena_;
-            output.whole_vertex_page = job.batches.size() > 1;
-            for (const auto& batch : job.batches.subspan(1))
+            for (std::uint32_t first = 0; first < dispatch_groups; first += maximum_groups)
             {
-                batch.output->merged_into_previous = true;
+                const auto groups = std::min(maximum_groups, dispatch_groups - first);
+                const std::array<float, 4> parameters{std::bit_cast<float>(first),
+                                                      std::bit_cast<float>(singleton_commands),
+                                                      static_cast<float>(flags), 0};
+                bgfx::setUniform(parameters_, parameters.data());
+                bgfx::setUniform(planes_, planes.data(), 6);
+                bgfx::setBuffer(0, descriptors_, bgfx::Access::Read);
+                bgfx::setBuffer(1, inputs_, bgfx::Access::Read);
+                bgfx::setBuffer(2, instances_, bgfx::Access::Write);
+                bgfx::setBuffer(3, commands_, bgfx::Access::Write);
+                bgfx::setBuffer(4, counters_, bgfx::Access::ReadWrite);
+                bgfx::dispatch(meshlet_cull_view, program_, groups);
             }
+            return true;
         }
-        if (!reuse_result)
+        case MeshletStage::compact:
         {
+            ENGINE_PROFILE_ZONE("Render.meshletCompactIndices");
             const float parameters[]{std::bit_cast<float>(used_commands), readback ? 1.0F : 0.0F, 0,
                                      0};
             bgfx::setUniform(index_compaction_parameters_, parameters);
@@ -904,31 +924,59 @@ bool MeshletCullPass::dispatch(const RenderFrameData& frame, const SceneDrawView
             bgfx::setBuffer(2, index_arena_, bgfx::Access::ReadWrite);
             bgfx::setBuffer(3, counters_, bgfx::Access::ReadWrite);
             bgfx::dispatch(meshlet_index_compact_view, index_compaction_, count);
+            return true;
         }
+        case MeshletStage::read_counters:
+        {
+            readback->stats = {};
+            readback->stats.state = MeshletSampleState::pending;
+            readback->stats.world_epoch = frame.world_epoch;
+            readback->stats.observer = draws.observer;
+            readback->stats.frame_number = view.renderer->frame_number() + 1;
+            readback->stats.candidate_pairs = counters.meshlet_candidate_pairs;
+            readback->stats.candidate_triangles = counters.meshlet_candidate_triangles;
+            readback->counters.fill(UINT32_MAX);
+            readback->generation = generation_;
+            bgfx::BufferRegion region;
+            region.init(counters_, 0, sizeof(readback->counters));
+            readback->pending = readback->completion.submit(region, readback->counters.data());
+            if (!readback->pending)
+            {
+                stats_.state = MeshletSampleState::failed;
+            }
+            sampled_at_ = now;
+            // Statistics are optional. A failed diagnostic read does not invalidate indirect draws.
+            return true;
+        }
+        case MeshletStage::count:
+            break;
+        }
+        return false;
+    };
+    if (!submission_plan_.perform(submit, error))
+    {
+        return fail();
     }
-    else
+    if (work.empty())
+    {
+        descriptor_layout_.clear();
+    }
+    if (index_jobs.empty())
     {
         uploaded_index_jobs_.clear();
     }
-    if (readback)
+    for (std::uint32_t index = 0; index < count; ++index)
     {
-        readback->stats = {};
-        readback->stats.state = MeshletSampleState::pending;
-        readback->stats.world_epoch = frame.world_epoch;
-        readback->stats.observer = draws.observer;
-        readback->stats.frame_number = view.renderer->frame_number() + 1;
-        readback->stats.candidate_pairs = counters.meshlet_candidate_pairs;
-        readback->stats.candidate_triangles = counters.meshlet_candidate_triangles;
-        readback->counters.fill(UINT32_MAX);
-        readback->generation = generation_;
-        bgfx::BufferRegion region;
-        region.init(counters_, 0, sizeof(readback->counters));
-        readback->pending = readback->completion.submit(region, readback->counters.data());
-        if (!readback->pending)
+        const auto& job = index_jobs[index];
+        auto& output = *job.batches.front().output;
+        output.first_command = used_commands + index;
+        output.command_count = 1;
+        output.compacted_indices = index_arena_;
+        output.whole_vertex_page = job.batches.size() > 1;
+        for (const auto& batch : job.batches.subspan(1))
         {
-            stats_.state = MeshletSampleState::failed;
+            batch.output->merged_into_previous = true;
         }
-        sampled_at_ = now;
     }
     result_planes_ = planes;
     result_flags_ = flags;

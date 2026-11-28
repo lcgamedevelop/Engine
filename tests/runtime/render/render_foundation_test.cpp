@@ -9,11 +9,18 @@
 #endif
 
 #include "runtime/engine_config.hpp"
+#include "runtime/render/passes/ambient_occlusion_graph.hpp"
 #include "runtime/render/passes/hdr_graph.hpp"
+#include "runtime/render/passes/meshlet_graph.hpp"
+#include "runtime/render/passes/output_graph.hpp"
+#include "runtime/render/passes/ssr_graph.hpp"
+#include "runtime/render/render_constants.hpp"
 #include "runtime/render/render_submission.hpp"
 #include "runtime/render/render_system.hpp"
 #include "runtime/render/render_view_order.hpp"
+#include "runtime/render/rvt/virtual_texture_cache.hpp"
 #include "runtime/render/vsm/virtual_shadow_cache.hpp"
+#include "runtime/render/vsm/virtual_shadow_graph.hpp"
 #include "runtime/scene/camera.hpp"
 #include "runtime/scene/environment_component.hpp"
 #include "runtime/scene/light.hpp"
@@ -24,9 +31,11 @@
 #include "runtime/window/window_system.hpp"
 #include "runtime/world/world_system.hpp"
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cstdio>
+#include <initializer_list>
 #include <limits>
 
 namespace
@@ -42,37 +51,124 @@ bool expect(bool value, const char* message)
 }
 
 // Contiguous ID ranges in the scene order before graph integration. Includes unused slots.
-static_assert(
-    []
+bool check_complete_view_order(std::span<const engine::FramePassId> scene_view_order)
+{
+    constexpr bgfx::ViewId ranges[][2] = {
+        {0, 2},     {215, 231}, {3, 32},    {34, 34},   {33, 33},   {35, 71},
+        {73, 73},   {72, 72},   {74, 78},   {80, 111},  {212, 213}, {192, 199},
+        {204, 211}, {191, 191}, {190, 190}, {112, 112}, {79, 79},   {113, 189},
+        {200, 201}, {214, 214}, {202, 203}, {232, 255}};
+    std::size_t position = 0;
+    for (const auto& [first, last] : ranges)
     {
-        using engine::render_detail::scene_view_order;
-        constexpr bgfx::ViewId ranges[][2] = {
-            {0, 2},     {215, 231}, {3, 32},    {34, 34},   {33, 33},   {35, 71},
-            {73, 73},   {72, 72},   {74, 78},   {80, 111},  {212, 213}, {192, 199},
-            {204, 211}, {191, 191}, {190, 190}, {112, 112}, {79, 79},   {113, 189},
-            {200, 201}, {214, 214}, {202, 203}, {232, 255}};
-        std::size_t position = 0;
-        for (const auto& [first, last] : ranges)
+        for (auto id = first; id <= last; ++id)
         {
-            for (auto id = first; id <= last; ++id)
+            if (position == scene_view_order.size() || scene_view_order[position++] != id)
             {
-                if (position == scene_view_order.size() || scene_view_order[position++] != id)
+                return false;
+            }
+        }
+    }
+    return position == scene_view_order.size();
+}
+
+bool check_rvt_page_publication()
+{
+    using namespace engine;
+    using namespace engine::render_detail;
+    schema::RvtSettingsT settings;
+    settings.enabled = true;
+    settings.virtual_resolution = 256;
+    settings.page_size = 32;
+    settings.physical_pages = 16;
+    settings.pages_per_frame = 8;
+    settings.bounds = {{0, 0, 0}, {8, 1, 8}};
+    VirtualTextureCache cache;
+    if (!cache.configure(settings))
+    {
+        return false;
+    }
+    // Fill the cache across different views so that reserving a new slot requires eviction.
+    for (unsigned frame = 0; frame < 26; ++frame)
+    {
+        cache.begin_frame(1, frame * 4 + 1);
+        const double x = (frame % 8) + .5, z = (frame / 8) + .5;
+        if (!cache.request({{{x, 0, z}, {x, 1, z}}, 0, frame}) ||
+            cache.prepare({}) == SceneWorkState::failed)
+        {
+            return false;
+        }
+        const auto& batch = cache.batch();
+        for (const auto& page : batch.pages)
+        {
+            const auto old = std::ranges::find_if(cache.pages(), [&](const auto& entry)
+                                                  { return entry.second.slot == page.slot; });
+            if (old != cache.pages().end())
+            {
+                const auto old_key = old->first;
+                if (!expect(!cache.publish(batch), "an unencoded reservation cannot publish") ||
+                    !expect(cache.pages().contains(old_key),
+                            "the previous RVT mapping survives reservation"))
                 {
                     return false;
                 }
+                for (const auto& candidate : batch.pages)
+                {
+                    if (!cache.begin_page_write(candidate))
+                    {
+                        return false;
+                    }
+                }
+                if (!expect(!cache.pages().contains(old_key) && cache.publish(batch),
+                            "an encoded tile replaces its old mapping"))
+                {
+                    return false;
+                }
+                cache.finish_frame(false);
+                return expect(!cache.pages().contains(old_key) && !cache.pages().contains(page.key),
+                              "a failed frame leaves overwritten and candidate mappings invalid");
             }
         }
-        return position == scene_view_order.size();
-    }(),
-    "The 256 scene views must preserve the complete pre-graph batch order");
+        for (const auto& page : batch.pages)
+        {
+            if (!cache.begin_page_write(page))
+            {
+                return false;
+            }
+        }
+        if (!cache.publish(batch))
+        {
+            return false;
+        }
+        cache.finish_frame(true);
+    }
+    return expect(false, "the RVT fixture must exercise a resident slot replacement");
+}
 
 bool check_hdr_view_order()
 {
+    using namespace engine;
     using namespace engine::render_detail;
     // Zero-based positions in the existing batch: scene debug, three HDR slots, HDR readback.
     constexpr std::size_t first_hdr = 172;
-    static_assert(scene_view_order[first_hdr - 1] == debug_view &&
-                  scene_view_order[first_hdr + 3] == hdr_capture_view);
+    FrameGraphPlan device;
+    FramePlanError device_error;
+    if (!expect(!compile_device_views(device, 255, device_error) && device_error.reason,
+                "insufficient GPU Views fails before submission") ||
+        !expect(compile_device_views(device, 256, device_error),
+                "the reserved GPU View graph compiles"))
+    {
+        return false;
+    }
+    const auto scene_view_order = device.passes();
+    if (!expect(check_complete_view_order(scene_view_order),
+                "all 256 device Views match the complete pre-graph batch") ||
+        !expect(scene_view_order[first_hdr - 1] == debug_view &&
+                scene_view_order[first_hdr + 3] == hdr_capture_view,
+                "debug and capture surround the original HDR slice"))
+    {
+        return false;
+    }
     RenderGraph graph;
     FrameBindings bindings;
     bindings.textures = {10, 11, 12, 13, 14};
@@ -102,6 +198,210 @@ bool check_hdr_view_order()
         }
     }
     return true;
+}
+
+// Verify actual execution as well as the planned order. A failed encoder must not call the
+// following segment, and a successful zero-pass frame must not enter the callback.
+bool execute_order(engine::FrameGraphPlan& plan,
+                   std::initializer_list<engine::FramePassId> expected)
+{
+    using namespace engine;
+    using namespace engine::render_detail;
+    FramePlanError error;
+    auto next = expected.begin();
+    const auto submit = [&](FramePassId pass) { return next != expected.end() && *next++ == pass; };
+    return std::ranges::equal(plan.passes(), expected) && plan.perform(submit, error) &&
+           next == expected.end();
+}
+
+bool check_frame_graph()
+{
+    using namespace engine;
+    using namespace engine::render_detail;
+    constexpr std::array<FrameResourceId, 2> pair{2, 3}, roots{4, 5};
+    constexpr std::array<FrameResourceId, 1> input{1}, display{4}, archive{5}, missing{6};
+    constexpr std::array<FramePassId, 1> bridge{7}, commit{40}, present{21};
+    // The bridge has an undefined input. It exists only for ordering and must stay culled.
+    std::array<FramePassDeclaration, 5> passes{{{21, pair, display, bridge},
+                                                {9, input, archive},
+                                                {7, missing, {}, commit},
+                                                {64, input, pair},
+                                                {40, {}, {}, {}, true}}};
+    FrameGraphPlan plan;
+    FramePlanError error;
+    const auto compile = [&] { return plan.compile(passes, input, roots, error); };
+    unsigned attempts = 0;
+    const auto fail = [&](FramePassId id)
+    {
+        ++attempts;
+        return id != 64;
+    };
+    if (!expect(compile() && !plan.begin_cached_frame() && execute_order(plan, {9, 64, 40, 21}),
+                "two output roots share a multi-write pass and a culled bridge orders live work") ||
+        !expect(!plan.perform(fail, error) && attempts == 0, "an executed frame is consumed") ||
+        !expect(plan.begin_cached_frame() && !plan.perform(fail, error) && attempts == 2 &&
+                    error.pass == 64 && !plan.perform(fail, error) && attempts == 2,
+                "submission failure stops encoding and consumes the cached frame"))
+    {
+        return false;
+    }
+    passes[4].after = present;
+    if (!expect(
+            !compile() && error.cycle.size() == 3 && error.cycle.front() == error.cycle.back() &&
+                std::ranges::find(error.cycle, 40) != error.cycle.end() &&
+                std::ranges::find(error.cycle, 21) != error.cycle.end() && plan.passes().empty() &&
+                !plan.begin_cached_frame() && !plan.perform(fail, error) && attempts == 2,
+            "a projected cycle exposes a closed chain and invalidates the old plan"))
+    {
+        return false;
+    }
+    passes[4].after = {};
+    passes[3].reads = display;
+    if (!expect(!compile() && error.resource != frame_invalid_id && !error.cycle.empty(),
+                "a resource cycle reports a version on the closing edge"))
+    {
+        return false;
+    }
+    passes[3].reads = input;
+    passes[1].reads = missing;
+    if (!expect(!compile() && error.pass == 9 && error.resource == missing[0],
+                "a live undefined input identifies reader and version"))
+    {
+        return false;
+    }
+    passes[1].reads = input;
+    passes[1].writes = display;
+    if (!expect(!compile() && error.pass == 9 && error.resource == display[0] &&
+                    error.predecessor == 21,
+                "a version cannot have two writers"))
+    {
+        return false;
+    }
+    passes[1].writes = archive;
+    return expect(compile() && execute_order(plan, {9, 64, 40, 21}),
+                  "failure can be followed by a clean recompile") &&
+           expect(plan.compile({}, input, input, error) && execute_order(plan, {}),
+                  "exporting only an existing import requires no synthetic pass");
+}
+
+bool check_meshlet_graph()
+{
+    using namespace engine;
+    using namespace engine::render_detail;
+    using enum MeshletStage;
+    FrameGraphPlan plan;
+    FramePlanError error;
+    const auto check = [&](MeshletGraphShape shape, std::initializer_list<MeshletStage> expected)
+    {
+        if (!compile_meshlet_graph(plan, shape, error))
+        {
+            return false;
+        }
+        auto next = expected.begin();
+        const auto submit = [&](FramePassId pass)
+        { return next != expected.end() && static_cast<MeshletStage>(pass) == *next++; };
+        return plan.perform(submit, error) && next == expected.end();
+    };
+    const MeshletGraphShape fresh{.copy_indices = true,
+                                  .upload_descriptors = true,
+                                  .upload_inputs = true,
+                                  .upload_jobs = true,
+                                  .draws = true,
+                                  .instances = true,
+                                  .compact = true,
+                                  .sample = true};
+    return expect(check(fresh, {copy_indices, upload_descriptors, upload_inputs, upload_jobs,
+                                clear_counters, cull, compact, read_counters}),
+                  "fresh sampled meshlets retain uploads, clear, cull, compact and readback") &&
+           expect(check({.draws = true, .compact = true}, {cull, compact}),
+                  "resident meshlet inputs skip uploads and diagnostics") &&
+           expect(check({.draws = true, .instances = true, .compact = true, .reuse = true}, {}),
+                  "cached meshlet draws import GPU results without dispatching") &&
+           expect(check({.sample = true}, {clear_counters, read_counters}),
+                  "an empty meshlet sample reads newly cleared counters") &&
+           expect(check({.draws = true, .sample = true}, {clear_counters, cull, read_counters}),
+                  "sampling without compaction reads the cull counters");
+}
+
+bool check_effect_graphs()
+{
+    using namespace engine;
+    using namespace engine::render_detail;
+    FrameGraphPlan plan;
+    FramePlanError error;
+    const auto ao = [&](FrameResourceId root)
+    { return plan.compile(ao_graph::declarations, {&ao_graph::source, 1}, {&root, 1}, error); };
+    if (!expect(ao(ao_graph::result) && execute_order(plan, {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10}),
+                "ASSAO output retains prepare, three mips, four layers, two blurs and apply") ||
+        !expect(ao(ao_graph::first_generated + 2) && execute_order(plan, {0, 1, 2, 3, 6}),
+                "a single ASSAO generated layer retains its four depth mips and omits siblings"))
+    {
+        return false;
+    }
+    for (FramePassId layer = 0; layer < 4; ++layer)
+    {
+        const auto& generate = ao_graph::declarations[ao_graph::first_generate + layer];
+        const auto reads = generate.reads;
+        if (!expect(reads.size() == 5 && reads.front() == ao_graph::normal &&
+                        generate.writes.size() == 1 &&
+                        generate.writes[0] == ao_graph::first_generated + layer,
+                    "ASSAO generate reads normals and writes only its own array slice"))
+        {
+            return false;
+        }
+        for (FramePassId mip = 0; mip < 4; ++mip)
+        {
+            if (!expect(reads[mip + 1] == ao_graph::first_depth + 4 * mip + layer,
+                        "each generated slice samples only its matching depth phase"))
+            {
+                return false;
+            }
+        }
+    }
+    const auto ssr = [&](std::uint16_t levels, bool cached, bool lut)
+    {
+        SsrGraphDeclaration declarations(ssr_local_versions, levels, cached, lut);
+        return plan.compile(declarations.passes(), declarations.imports(),
+                            {&ssr_local_versions.color, 1}, error);
+    };
+    if (!expect(ssr(4, false, true) &&
+                    execute_order(plan, {ssr_hiz_view + 1, ssr_hiz_view + 2, ssr_hiz_view + 3,
+                                         ssr_trace_view, ssr_composite_view}),
+                "cold SSR reduces each mip before tracing and compositing") ||
+        !expect(ssr(4, true, false) && execute_order(plan, {ssr_trace_view, ssr_composite_view}),
+                "cached SSR imports its existing levels and skips all reductions") ||
+        !expect(!ssr(0, false, false) && plan.passes().empty(),
+                "an invalid SSR mip chain cannot publish a previous plan"))
+    {
+        return false;
+    }
+
+    using P = OutputPass;
+    const auto output = [&](OutputGraphKey key, std::initializer_list<P> ids)
+    {
+        if (!compile_output_graph(plan, key, error))
+        {
+            return false;
+        }
+        auto next = ids.begin();
+        return plan.perform(
+                   [&](FramePassId id)
+                   { return next != ids.end() && static_cast<FramePassId>(*next++) == id; },
+                   error) &&
+               next == ids.end();
+    };
+    return expect(output({engine::RenderFrameKind::scene, true, true, true, true, true},
+                         {P::clear, P::scene, P::diffuse_capture, P::ui, P::rvt_overlay,
+                          P::vsm_overlay, P::present, P::capture}),
+                  "display composites all requested layers and readback follows presentation") &&
+           expect(output({.kind = engine::RenderFrameKind::movie, .separate_chroma = true},
+                         {P::upload_y, P::upload_chroma, P::upload_v, P::clear, P::movie, P::present}),
+                  "I420 uploads all three planes before touching the frame") &&
+           expect(output({engine::RenderFrameKind::movie, true, true, true, true, true},
+                         {P::upload_y, P::upload_chroma, P::clear, P::movie, P::present, P::capture}),
+                  "a captured movie uses its own output sequence") &&
+           expect(output({}, {P::clear, P::scene, P::present}),
+                  "a clear frame checks scene collection and submits only its presentation");
 }
 
 engine::schema::MeshDataT quad()
@@ -153,6 +453,25 @@ bool check_virtual_shadow_cache()
 {
     using namespace engine;
     using namespace engine::render_detail;
+    FrameGraphPlan plan;
+    FramePlanError error;
+    if (!expect(vsm_graph::compile_feedback(plan, error) &&
+                    execute_order(plan, {vsm_feedback_clear_view, vsm_feedback_view,
+                                         vsm_graph::feedback_readback}),
+                "VSM readback keeps the ordered clear and demand writes") ||
+        !expect(vsm_graph::compile_pages(plan, 0, true, error) && execute_order(plan, {}) &&
+                    vsm_graph::compile_pages(plan, 16, false, error) &&
+                    execute_order(plan, {vsm_graph::page_draws}) &&
+                    vsm_graph::compile_pages(plan, 16, true, error) &&
+                    execute_order(plan, {vsm_graph::page_draws, vsm_depth_ranges_view}) &&
+                    !vsm_graph::compile_pages(plan, 17, true, error),
+                "VSM depth ranges depend on this batch's written tiles") ||
+        !expect(vsm_graph::compile_local_ranges(plan, 16, error) && execute_order(plan, {0}) &&
+                    vsm_graph::compile_local_ranges(plan, 17, error) && execute_order(plan, {0, 1}),
+                "local shadow ranges use one dispatch per sixteen faces"))
+    {
+        return false;
+    }
     VirtualShadowCache cache;
     schema::VsmSettingsT settings;
     settings.virtual_resolution = 4096;
@@ -183,6 +502,30 @@ bool check_virtual_shadow_cache()
     }
     VsmPageDemand demand{batch.view, 1, 0, {{0, 0, 0}, {0, 3, 0}}};
     cache.cancel_batch();
+    if (!cache.request(demand) || !cache.plan(2, batch) || batch.pages.size() != 2)
+    {
+        return false;
+    }
+    const auto stale_batch = batch;
+    batch.pages.pop_back();
+    if (!expect(!cache.publish(batch, 1) && cache.plan(2, batch) &&
+                    !cache.publish(stale_batch, 1) && batch.pages.size() == 2 &&
+                    !cache.begin_page_write(stale_batch.batch_id, stale_batch.pages.front()),
+                "partial page batches are cancelled and stale publication preserves the retry"))
+    {
+        return false;
+    }
+    if (!std::ranges::all_of(batch.pages, [&](const auto& page)
+                             { return cache.begin_page_write(batch.batch_id, page); }))
+    {
+        return false;
+    }
+    batch.pages.back() = batch.pages.front();
+    if (!expect(!cache.publish(batch, 1) && cache.status(status) && status.ready_pages == 0,
+                "duplicate drawn tiles never publish a partial atlas"))
+    {
+        return false;
+    }
     const auto matches_atlas_origin = [](const VsmPageBatch& planned)
     {
         const auto& page = planned.pages.front();
@@ -199,13 +542,24 @@ bool check_virtual_shadow_cache()
                ((value >> vsm_atlas_origin_bits) & vsm_atlas_origin_mask) ==
                    atlas_size - page.y - page.size;
     };
-    if (!cache.request(demand) || !cache.plan(1, batch) ||
+    const auto commit_frame = [&](std::uint64_t submission)
+    {
+        if (!std::ranges::all_of(batch.pages, [&](const auto& page)
+                                 { return cache.begin_page_write(batch.batch_id, page); }) ||
+            !cache.publish(batch, submission))
+        {
+            return false;
+        }
+        cache.finish_frame(true, status);
+        return true;
+    };
+    if (!cache.plan(1, batch) ||
         !expect(batch.pages.size() == 1, "VSM honors the per-frame page budget") ||
         !expect(matches_atlas_origin(batch), "VSM page table encodes bottom-left atlas sampling") ||
-        !cache.publish(batch, 1) || !cache.status(status) ||
+        !commit_frame(1) || !cache.status(status) ||
         !expect(status.fallback_pages == 1 && status.state == VsmState::warming,
                 "unrendered pages stay on complete ordinary shadows") ||
-        !cache.begin_frame(view, frame) || !cache.plan(1, batch) || !cache.publish(batch, 2) ||
+        !cache.begin_frame(view, frame) || !cache.plan(1, batch) || !commit_frame(2) ||
         !cache.status(status) ||
         !expect(status.state == VsmState::ready, "all current receiver pages become ready"))
     {
@@ -214,7 +568,7 @@ bool check_virtual_shadow_cache()
     if (!cache.begin_frame(view, frame) || !cache.plan(1, batch) ||
         !expect(batch.pages.empty() && !batch.page_table.empty(),
                 "cached pages retain the full page table without redraw") ||
-        !cache.publish(batch, 3))
+        !commit_frame(3))
     {
         return false;
     }
@@ -230,8 +584,8 @@ bool check_virtual_shadow_cache()
     cache.cancel_batch();
     if (!cache.status(status) ||
         !expect(status.ready_pages == 0, "cancelled draws cannot publish valid pages") ||
-        !cache.plan(1, batch) || !cache.publish(batch, 4) || !cache.begin_frame(view, frame) ||
-        !cache.plan(1, batch) || !cache.publish(batch, 5))
+        !cache.plan(1, batch) || !commit_frame(4) || !cache.begin_frame(view, frame) ||
+        !cache.plan(1, batch) || !commit_frame(5))
     {
         return false;
     }
@@ -243,7 +597,7 @@ bool check_virtual_shadow_cache()
     }
     demand.view = batch.view;
     demand.submission_id = 6;
-    if (!cache.publish(batch, 6) || !cache.request(demand) || !cache.status(status) ||
+    if (!commit_frame(6) || !cache.request(demand) || !cache.status(status) ||
         !expect(status.state == VsmState::ready, "fresh observer feedback completes readiness"))
     {
         return false;
@@ -256,7 +610,7 @@ bool check_virtual_shadow_cache()
     }
     demand.pages.push_back({0, 7, 0});
     ++demand.submission_id;
-    if (!cache.request(demand) || !cache.plan(1, batch) || !cache.publish(batch, 7) ||
+    if (!cache.request(demand) || !cache.plan(1, batch) || !commit_frame(7) ||
         !cache.status(status) ||
         !expect(status.state == VsmState::budget_limited && status.fallback_pages == 1 &&
                     status.resident_pages == 2,
@@ -267,6 +621,53 @@ bool check_virtual_shadow_cache()
     frame.meshes.clear();
     if (!cache.begin_frame(view, frame) || !cache.status(status) ||
         !expect(status.dirty_pages == 1, "caster removal invalidates its last shadow bounds"))
+    {
+        return false;
+    }
+    // Two resident tiles are both selected for replacement. Rejecting a candidate before
+    // its GPU clear preserves the previous tile, even after earlier pages began writing.
+    demand.pages = {{0, 0, 0}, {0, 3, 0}};
+    demand.view = batch.view;
+    ++demand.submission_id;
+    if (!cache.request(demand) || !cache.plan(2, batch) || !commit_frame(8))
+    {
+        return false;
+    }
+    auto replace = demand;
+    replace.pages = {{0, 4, 0}, {0, 5, 0}};
+    if (!cache.request(replace) || !cache.plan(2, batch) || batch.pages.size() != 2)
+    {
+        return false;
+    }
+    cache.cancel_batch();
+    if (!expect(cache.request(demand) && cache.status(status) && status.ready_pages == 2,
+                "cancelling before either GPU clear preserves both previous pages"))
+    {
+        return false;
+    }
+    if (!cache.request(replace) || !cache.plan(2, batch) || batch.pages.size() != 2 ||
+        !cache.begin_page_write(batch.batch_id, batch.pages.front()))
+    {
+        return false;
+    }
+    cache.finish_frame(false, status);
+    if (!expect(cache.request(demand) && cache.status(status) && status.ready_pages == 1,
+                "after a partial submission only the physically touched slot is invalidated"))
+    {
+        return false;
+    }
+    if (!cache.request(replace) || !cache.plan(2, batch) || batch.pages.size() != 2 ||
+        !std::ranges::all_of(batch.pages, [&](const auto& page)
+                             { return cache.begin_page_write(batch.batch_id, page); }) ||
+        !cache.publish(batch, 9) || !cache.status(status) || status.ready_pages != 0)
+    {
+        return false;
+    }
+    cache.finish_frame(false, status);
+    if (!expect(status.submission_id == 8 && status.ready_pages == 0 &&
+                    cache.plan(2, batch) && batch.pages.size() == 2 && commit_frame(10) &&
+                    status.ready_pages == 2 && status.submission_id == 10,
+                "a later frame failure discards encoded replacements and a retry publishes them"))
     {
         return false;
     }
@@ -1126,7 +1527,8 @@ bool check_textures(test_support::ResourceServices& services, engine::Scene& sce
 
 int main()
 {
-    if (!check_hdr_view_order())
+    if (!check_rvt_page_publication() || !check_frame_graph() || !check_meshlet_graph() || !check_effect_graphs() ||
+        !check_hdr_view_order())
     {
         return 1;
     }

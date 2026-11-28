@@ -1,6 +1,7 @@
 #include "runtime/render/render_graph.hpp"
 
 #include "runtime/performance/profiling.hpp"
+#include "runtime/render/frame_graph_plan.hpp"
 
 #include <algorithm>
 #include <array>
@@ -9,77 +10,6 @@ namespace engine::render_detail
 {
 namespace
 {
-using Producers = std::array<const GraphPassDesc*, graph_slot_count>;
-
-bool collect_producers(const GraphDeclaration& declaration, Producers& producers,
-                       GraphError& error) noexcept
-{
-    std::array<bool, graph_pass_count> registered{};
-    for (const auto& pass : std::span(declaration.passes).first(declaration.pass_count))
-    {
-        if (pass.pass >= registered.size() || registered[pass.pass] ||
-            pass.output >= declaration.slot_count)
-        {
-            error = {"Invalid or duplicate render graph pass declaration", pass.pass, pass.output};
-            return false;
-        }
-        if (producers[pass.output] || declaration.imports[pass.output])
-        {
-            error = {"Render graph resource version has multiple producers", pass.pass,
-                     pass.output};
-            return false;
-        }
-        registered[pass.pass] = true;
-        producers[pass.output] = &pass;
-    }
-    return true;
-}
-
-enum class Visit : std::uint8_t
-{
-    unseen,
-    active,
-    finished
-};
-
-// There is one visit per version and no more stack frames than there are resource slots.
-bool visit(GraphSlot slot, GraphPass reader, const GraphDeclaration& declaration,
-           const Producers& producers, std::array<Visit, graph_slot_count>& visited,
-           GraphError& error) noexcept
-{
-    if (slot >= declaration.slot_count)
-    {
-        error = {"Required render graph input or output is missing", reader, slot};
-        return false;
-    }
-    if (visited[slot] == Visit::active)
-    {
-        error = {"Cycle in render graph resource dependencies", reader, slot};
-        return false;
-    }
-    if (visited[slot] == Visit::finished || declaration.imports[slot])
-    {
-        return true;
-    }
-    const auto* pass = producers[slot];
-    if (pass == nullptr)
-    {
-        error = {"Render graph resource version has no producer or defined import", reader, slot};
-        return false;
-    }
-    visited[slot] = Visit::active;
-    for (const auto input : pass->reads)
-    {
-        if (input != graph_invalid_id &&
-            !visit(input, pass->pass, declaration, producers, visited, error))
-        {
-            return false;
-        }
-    }
-    visited[slot] = Visit::finished;
-    return true;
-}
-
 void record_use(FramePlan& plan, GraphSlot slot, std::uint8_t position) noexcept
 {
     auto& interval = plan.intervals[slot];
@@ -102,43 +32,78 @@ bool build_plan(const FrameKey& key, const GraphDeclaration& declaration, FrameP
         error.reason = "Invalid render graph slice size or view reservation";
         return false;
     }
-    Producers producers{};
-    std::array<Visit, graph_slot_count> visited{};
-    if (!collect_producers(declaration, producers, error) ||
-        !visit(declaration.root, graph_invalid_id, declaration, producers, visited, error))
-    {
-        return false;
-    }
-    if (producers[declaration.root] == nullptr)
+    if (declaration.root >= declaration.slot_count || declaration.imports[declaration.root])
     {
         error = {"Render graph slice requires a written output", graph_invalid_id,
                  declaration.root};
         return false;
     }
-    // The surrounding batch owns View order. A fixed View can only occur once in this
-    // slice, and every live producer must precede its consumer in that physical order.
-    for (const auto& pass : std::span(declaration.passes).first(declaration.pass_count))
+
+    // Widen the compact per-effect declaration for the frame compiler. Only the resulting
+    // segment order and lifetimes survive this cache miss.
+    std::array<FrameResourceId, graph_slot_count> imports;
+    std::size_t import_count = 0;
+    for (GraphSlot slot = 0; slot < declaration.slot_count; ++slot)
     {
-        if (visited[pass.output] == Visit::finished)
+        if (declaration.imports[slot])
         {
-            if (pass.view < declaration.first_view || pass.view > declaration.last_view ||
-                pass.view >= key.max_views)
-            {
-                error = {"Render graph pass conflicts with fixed view ownership or device limit",
-                         pass.pass, pass.output};
-                return false;
-            }
-            plan.scheduled[plan.count++] = pass;
+            imports[import_count++] = slot;
         }
     }
-    const auto end = plan.scheduled.begin() + plan.count;
-    std::sort(plan.scheduled.begin(), end,
-              [](const auto& left, const auto& right) { return left.view < right.view; });
-    auto available = declaration.imports;
-    for (std::uint8_t position = 0; position < plan.count; ++position)
+    std::array<FramePassDeclaration, graph_pass_count> records{};
+    std::array<std::array<FrameResourceId, 2>, graph_pass_count> reads{};
+    std::array<FrameResourceId, graph_pass_count> writes{};
+    std::array<const GraphPassDesc*, graph_pass_count> by_id{};
+    std::array<std::uint16_t, graph_slot_count> writer_views{};
+    const auto passes = std::span(records).first(declaration.pass_count);
+    for (std::size_t i = 0; i < passes.size(); ++i)
     {
-        const auto& pass = plan.scheduled[position];
-        if (position && plan.scheduled[position - 1].view == pass.view)
+        const auto& pass = declaration.passes[i];
+        if (pass.pass >= graph_pass_count || pass.output >= declaration.slot_count)
+        {
+            error = {"Invalid render graph pass declaration", pass.pass, pass.output};
+            return false;
+        }
+        by_id[pass.pass] = &pass;
+        writer_views[pass.output] = pass.view;
+        std::size_t count = 0;
+        for (const auto slot : pass.reads)
+        {
+            if (slot != graph_invalid_id)
+            {
+                reads[i][count++] = slot;
+            }
+        }
+        writes[i] = pass.output;
+        passes[i] = {pass.pass, std::span(reads[i]).first(count), {&writes[i], 1}};
+    }
+    // Independent ready segments must follow their fixed GPU View order. The frame compiler
+    // retains declaration order between ready passes and validates the version dependency graph.
+    std::ranges::sort(passes, {},
+                      [&](const FramePassDeclaration& pass) { return by_id[pass.id]->view; });
+    FrameGraphPlan compiled;
+    FramePlanError problem;
+    const FrameResourceId root = declaration.root;
+    if (!compiled.compile(passes, std::span(imports).first(import_count), {&root, 1}, problem))
+    {
+        const auto pass = static_cast<GraphPass>(problem.pass);
+        const auto slot = problem.resource == frame_invalid_id && pass < by_id.size() && by_id[pass]
+                              ? by_id[pass]->output
+                              : static_cast<GraphSlot>(problem.resource);
+        error = {problem.reason, pass, slot};
+        return false;
+    }
+    for (const auto id : compiled.passes())
+    {
+        const auto& pass = *by_id[id];
+        if (pass.view < declaration.first_view || pass.view > declaration.last_view ||
+            pass.view >= key.max_views)
+        {
+            error = {"Render graph pass conflicts with fixed view ownership or device limit",
+                     pass.pass, pass.output};
+            return false;
+        }
+        if (plan.count && plan.scheduled[plan.count - 1].view == pass.view)
         {
             error = {"Render graph segments share a fixed view", pass.pass, pass.output};
             return false;
@@ -149,16 +114,16 @@ bool build_plan(const FrameKey& key, const GraphDeclaration& declaration, FrameP
             {
                 continue;
             }
-            if (!available[slot])
+            if (!declaration.imports[slot] && writer_views[slot] >= pass.view)
             {
                 error = {"Fixed render graph view order would sample before its producer",
                          pass.pass, slot};
                 return false;
             }
-            record_use(plan, slot, position);
+            record_use(plan, slot, plan.count);
         }
-        record_use(plan, pass.output, position);
-        available[pass.output] = true;
+        record_use(plan, pass.output, plan.count);
+        plan.scheduled[plan.count++] = pass;
     }
     return true;
 }
@@ -199,6 +164,20 @@ bool validate_bindings(const FramePlan& plan, std::size_t slots, const FrameBind
     return true;
 }
 } // namespace
+
+bool RenderGraph::prepare_output(const OutputGraphKey& key, FramePlanError& error) noexcept
+{
+    if (output_cached_ && output_key_ == key && output_plan_.begin_cached_frame())
+    {
+        return true;
+    }
+    output_cached_ = compile_output_graph(output_plan_, key, error);
+    if (output_cached_)
+    {
+        output_key_ = key;
+    }
+    return output_cached_;
+}
 
 bool RenderGraph::begin(const FrameKey& key) noexcept
 {
@@ -290,6 +269,7 @@ bool RenderGraph::consume(const FrameBindings& bindings, GraphError& error) noex
 
 void RenderGraph::reset() noexcept
 {
+    output_cached_ = false;
     phase_ = Phase::idle;
     cached_ = false;
     cached_immutable_ = nullptr;

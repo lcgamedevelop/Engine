@@ -101,24 +101,7 @@ bool GpuMesh::update_deformation(const MeshRendererRuntime& runtime, SkinningPas
         }
         std::vector<std::array<float, 16>> matrices(transforms.begin(), transforms.end());
         matrices.insert(matrices.end(), normal_transforms.begin(), normal_transforms.end());
-        const auto* memory = bgfx::copy(
-            matrices.data(), static_cast<std::uint32_t>(matrices.size() * sizeof(matrices[0])));
-        if (bgfx::isValid(palette))
-        {
-            bgfx::update(palette, 0, memory);
-        }
-        else
-        {
-            palette = bgfx::createDynamicVertexBuffer(memory, GpuGeometry::vector_layout(),
-                                                      BGFX_BUFFER_COMPUTE_READ);
-        }
-        if (!bgfx::isValid(deformed_vertices))
-        {
-            deformed_vertices = bgfx::createDynamicVertexBuffer(geometry->vertex_count,
-                                                                GpuGeometry::vertex_layout(),
-                                                                BGFX_BUFFER_COMPUTE_READ_WRITE);
-        }
-        if (!skinning.dispatch(*geometry, palette, deformed_vertices, joint_count_))
+        if (!skinning.deform(*geometry, matrices, palette, deformed_vertices))
         {
             return false;
         }
@@ -145,22 +128,9 @@ bool GpuMesh::update_deformation(const MeshRendererRuntime& runtime, SkinningPas
         {
             release_deformation();
         }
-        // bgfx examples/35-dynamic: keep topology and update only the vertex stream.
-        // Copyright 2011-2025 Branimir Karadzic; third_party/notices/bgfx.txt.
-        const auto* memory = bgfx::copy(
-            packed.data(), static_cast<std::uint32_t>(packed.size() * sizeof(GpuVertex)));
-        if (bgfx::isValid(deformed_vertices))
+        if (!skinning.upload_vertices(packed, deformed_vertices))
         {
-            bgfx::update(deformed_vertices, 0, memory);
-        }
-        else
-        {
-            deformed_vertices = bgfx::createDynamicVertexBuffer(
-                memory, GpuGeometry::vertex_layout(), BGFX_BUFFER_COMPUTE_READ);
-            if (!bgfx::isValid(deformed_vertices))
-            {
-                return false;
-            }
+            return false;
         }
     }
     deformation_revision = runtime.deformation_revision_;

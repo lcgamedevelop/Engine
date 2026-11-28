@@ -52,6 +52,110 @@ bool SkinningPass::prepare()
     return true;
 }
 
+bool SkinningPass::deform(const GpuGeometry& geometry,
+                          std::span<const std::array<float, 16>> matrices,
+                          bgfx::DynamicVertexBufferHandle& palette,
+                          bgfx::DynamicVertexBufferHandle& output)
+{
+    enum Stage : FramePassId
+    {
+        upload_palette,
+        ensure_output,
+        deform_vertices
+    };
+    enum Resource : FrameResourceId
+    {
+        matrices_cpu,
+        source_vertices,
+        influences,
+        layout,
+        gpu_palette,
+        buffer,
+        vertices
+    };
+    static constexpr FrameResourceId imports[]{matrices_cpu, source_vertices, influences, layout};
+    static constexpr FrameResourceId palette_input[]{matrices_cpu}, palette_output[]{gpu_palette};
+    static constexpr FrameResourceId layout_input[]{layout}, allocated[]{buffer};
+    static constexpr FrameResourceId compute_inputs[]{source_vertices, influences, gpu_palette,
+                                                      buffer};
+    static constexpr FrameResourceId roots[]{vertices};
+    static constexpr FramePassDeclaration passes[]{{upload_palette, palette_input, palette_output},
+                                                   {ensure_output, layout_input, allocated},
+                                                   {deform_vertices, compute_inputs, roots}};
+    FramePlanError error;
+    if (matrices.empty() || matrices.size() % 2 != 0 || matrices.size() / 2 > 65536 ||
+        !(compute_plan_.passes().empty() ? compute_plan_.compile(passes, imports, roots, error)
+                                         : compute_plan_.begin_cached_frame()))
+    {
+        return false;
+    }
+    return compute_plan_.perform(
+        [&](FramePassId pass)
+        {
+            if (pass == upload_palette)
+            {
+                const auto* memory =
+                    bgfx::copy(matrices.data(), static_cast<std::uint32_t>(matrices.size_bytes()));
+                if (bgfx::isValid(palette))
+                {
+                    bgfx::update(palette, 0, memory);
+                }
+                else
+                {
+                    palette = bgfx::createDynamicVertexBuffer(memory, GpuGeometry::vector_layout(),
+                                                              BGFX_BUFFER_COMPUTE_READ);
+                }
+                return bgfx::isValid(palette);
+            }
+            if (pass == ensure_output)
+            {
+                if (!bgfx::isValid(output))
+                {
+                    output = bgfx::createDynamicVertexBuffer(geometry.vertex_count,
+                                                             GpuGeometry::vertex_layout(),
+                                                             BGFX_BUFFER_COMPUTE_READ_WRITE);
+                }
+                return bgfx::isValid(output);
+            }
+            return dispatch(geometry, palette, output,
+                            static_cast<std::uint32_t>(matrices.size() / 2));
+        },
+        error);
+}
+
+bool SkinningPass::upload_vertices(std::span<const GpuVertex> vertices,
+                                   bgfx::DynamicVertexBufferHandle& output)
+{
+    static constexpr FrameResourceId packed[]{0}, uploaded[]{1};
+    static constexpr FramePassDeclaration passes[]{{0, packed, uploaded}};
+    FramePlanError error;
+    if (vertices.empty() || vertices.size_bytes() > UINT32_MAX ||
+        !(upload_plan_.passes().empty() ? upload_plan_.compile(passes, packed, uploaded, error)
+                                        : upload_plan_.begin_cached_frame()))
+    {
+        return false;
+    }
+    // bgfx examples/35-dynamic: preserve the topology and update only the vertex stream.
+    // Copyright 2011-2025 Branimir Karadzic; third_party/notices/bgfx.txt.
+    return upload_plan_.perform(
+        [&](FramePassId)
+        {
+            const auto* memory =
+                bgfx::copy(vertices.data(), static_cast<std::uint32_t>(vertices.size_bytes()));
+            if (bgfx::isValid(output))
+            {
+                bgfx::update(output, 0, memory);
+            }
+            else
+            {
+                output = bgfx::createDynamicVertexBuffer(memory, GpuGeometry::vertex_layout(),
+                                                         BGFX_BUFFER_COMPUTE_READ);
+            }
+            return bgfx::isValid(output);
+        },
+        error);
+}
+
 bool SkinningPass::dispatch(const GpuGeometry& geometry, bgfx::DynamicVertexBufferHandle palette,
                             bgfx::DynamicVertexBufferHandle output, std::uint32_t joint_count)
 {

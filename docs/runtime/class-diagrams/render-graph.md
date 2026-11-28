@@ -2,13 +2,13 @@
 
 ## 决策与边界
 
-运行时 `RenderSystem` 已通过渲染图提交 HDR/Bloom 后处理。图从最终显示颜色反推活跃通道，校验资源依赖和固定 View 顺序，由现有 Pass 将计划编码到 bgfx。当前接管范围与后续整帧设计分列如下。
+运行时通过共享的依赖编译器组织普通场景、空场景和影片的输出。每个作用域声明读写的资源版本和对外可见的副作用，编译器从需要的结果反推活跃通道，再由拥有 GPU 资源的 Pass 编码。宿主仍在帧末统一调用 bgfx 提交。
 
 **先用同样的 GPU 工作量测调度成本，再单独试普通帧直出。** 第一项交付是能追溯到实际 bgfx View 的帧计划。第一项性能候选是省去普通帧 View 202 的全屏呈现绘制。图负责通道间的资源；`MaterialBinding` 和绘制批次负责通道内的绑定组合。两项优化各自做 A/B，才能把帧耗变化归到正确的位置。
 
 Render Lab 的 Android 样本来自 `8ed8602c`，使用 Vulkan 模拟器、1280×720、4× MSAA、效果全开。每个窗口约 6 秒，固定镜头 95 帧、移动镜头 82 帧，实际显示分别为 15.76 和 13.54 FPS，显示间隔 P95 为 67.78 和 84.06 ms。庭院材质纹理绑定减少 12.9% 后，另一个连续 19 帧的采样窗内，描述符集仍为 360 个/帧，其中不透明 PBR 228 个、SSR 材质表面 105 个。**Android 真机全效果 30 FPS 是第一档目标，33.33 ms 是预算，60 FPS 是后续目标。** 模拟器的 CPU 采样与 Metal 的 GPU 阶段时间分别保留，跨设备数据不作加减。
 
-架构边界在每帧已准备的场景输入与 bgfx Views 之间。运行时图使用内部值类型，编辑器通过现有性能/诊断入口读取只读快照。场景持久属性仍由相机、环境和灯组件提供。GUID、catalog、资源插件、Shader 离线构建与 ECS 的所有权沿用原有契约。[现有渲染类图](render-system.md) · [提交与合批](render-submission.md) · [渲染扩展](render-extension.md)
+架构边界在每帧已准备的场景输入与 bgfx Views 之间。运行时与编辑器 GPU 作业共用核心的计划类型，编辑器通过现有性能/诊断入口读取只读快照。场景持久属性仍由相机、环境和灯组件提供。GUID、catalog、资源插件、Shader 离线构建与 ECS 的所有权沿用原有契约。[现有渲染类图](render-system.md) · [提交与合批](render-submission.md) · [渲染扩展](render-extension.md)
 
 ## 已实现的类与所有权
 
@@ -16,52 +16,61 @@ Render Lab 的 Android 样本来自 `8ed8602c`，使用 Vulkan 模拟器、1280�
 classDiagram
 direction TB
 class RenderSystem
+class SceneGpuResources
 class RenderGraph {
-  +begin(FrameKey) bool
-  +compile(GraphDeclaration, FrameBindings, GraphError) bool
-  +execute(FrameBindings, Submit, GraphError) bool
-  +plan() FramePlan
-  +cache_hit() bool
-  +reset() void
+  +execute_output(key, encode, error) bool
+  +begin(key) bool
+  +compile(declaration, bindings, error) bool
+  +execute(bindings, submit, error) bool
 }
-class FramePlan {
-  +scheduled
-  +intervals
+class FrameGraphPlan {
+  +compile(passes, imports, roots, error) bool
+  +begin_cached_frame() bool
+  +perform(encode, error) bool
   +passes() span
 }
-class GraphDeclaration {
-  +passes
-  +imports
-  +first_view
-  +last_view
-  +root
-}
-class GraphPassDesc {
-  +pass
-  +view
+class FramePassDeclaration {
+  +id
   +reads
-  +output
+  +writes
+  +after
+  +side_effect
 }
-class FrameBindings {
-  +textures
-}
-RenderSystem *-- RenderGraph : owns per device
-RenderGraph *-- FramePlan : caches
-RenderGraph *-- GraphDeclaration : caches structure
-RenderGraph ..> FrameBindings : validates this frame
-FramePlan *-- GraphPassDesc : scheduled segments
-GraphDeclaration *-- GraphPassDesc : declares
+class FramePlan
+class IblBakeJob
+RenderSystem *-- RenderGraph : frame output and HDR
+RenderSystem *-- SceneGpuResources : scene
+RenderSystem *-- FrameGraphPlan : device View order
+RenderGraph *-- FrameGraphPlan : frame output
+RenderGraph *-- FramePlan : HDR targets and views
+SceneGpuResources *-- FrameGraphPlan : preparation, observers and capture
+IblBakeJob *-- FrameGraphPlan : editor GPU steps
+FrameGraphPlan ..> FramePassDeclaration : borrows during compile
 ```
 
-图随渲染设备创建和释放。当前切片支持一个输出根、每段至多两个采样输入和一次完整颜色写入。声明容量为 8 段、16 个资源版本，编译与稳定帧执行均使用定容量存储。Bloom 开启时执行 View 135、136、137，关闭时只执行 137，第二采样槽绑定既有黑色纹理。最终颜色写入 `FrameOutput` 的 BGRA8 目标，UI、呈现和捕获沿用原顺序。
+`FrameGraphPlan` 接受多个导入、多个输出根、单赋值的资源版本、只约束先后的边和副作用。编译时检查生产者、环和容量，输出确定性的顺序。声明的 span 只在编译时借用。每次执行只消费一份计划，复用前由拥有者核对结构；具体纹理、Framebuffer 和持久缓存的生命周期仍由对应模块管理。每个计划最多容纳 256 个阶段、512 个资源版本。AO、SSR、大气、蒙皮、Meshlet、阴影和 RVT 各自拥有与其 GPU 资源同寿命的计划。[声明接口](../../../include/engine/runtime/render/frame_graph_plan.hpp) · [公共编译器](../../../src/engine/runtime/render/frame_graph_plan.cpp)
+
+| 作用域 | 进入计划的实际工作 |
+| --- | --- |
+| 帧输出 | 影片 YUV 各平面上传、清屏、场景或影片绘制、漫反射捕获、UI、虚拟纹理与阴影调试窗口、呈现和截图。截图按封帧前的请求编号消费；中途失败时仍冲刷已提交工作。 |
+| 场景准备和主相机 | 镜面观察、RVT、光照和阴影准备、可见几何、Meshlet、材质表面与深度、AO、MSAA 深度、天空、不透明、反射、冻结、透明、文字、扩展、调试以及线性颜色回读。 |
+| AO、SSR 和大气 | ASSAO 的 11 个计算阶段各自声明版本。SSR 逐级声明深度，缓存命中时导入已有 mip，再追踪与合成。大气区分共享介质 LUT、观察者天空 LUT 和背景绘制。 |
+| 蒙皮与 Meshlet | 骨骼矩阵上传、变形输出准备和 GPU 蒙皮；直接变形顶点流上传。Meshlet 索引拷贝、三类数据上传、清零、剔除、压紧和可选回读按缓冲版本调度。 |
+| 光照与虚拟阴影 | 每个观察者单独生成阴影与分簇光照。各级联、点灯面和虚拟页可导入缓存或重画；VSM 反馈清零、需求计算、回读、深度范围和页表发布保留各自依赖。 |
+| 捕获和编辑器烘焙 | 漫反射捕获独立声明灯光、视图清除、可见集、天空、几何、拷贝和回读。IBL 在所属编辑器插件内复用相同编译器，每步只编码当前帧可用的计算、立方体面复制或回读。 |
+| RVT | 初始化图集，每个候选物理槽独立绘制，成功后发布映射并逐 mip 上传页表。预留槽位时旧映射仍可用，编码覆盖后或整帧失败时作废受影响的映射。 |
+
+设备初始化时从图形阶段之间的依赖编译全部 256 个保留 View。每帧向 bgfx 交付同一份物理计划，具体绘制和计算由当帧活跃的逻辑节点控制。同一 View 内按所属 Pass 的提交约定排序。bgfx 在运行 View 之前处理纹理更新等资源命令；烘焙与截图继续等待实际提交帧和回读完成。[帧输出](../../../src/engine/runtime/render/passes/output_graph.hpp) · [场景声明](../../../src/engine/runtime/render/passes/scene_graph.hpp) · [物理 View 编译](../../../src/engine/runtime/render/render_view_order.cpp)
+
+**HDR 和 Bloom。** 专用物理绑定计划支持一个输出根、每段至多两个采样输入和一次完整颜色写入。声明容量为 8 段、16 个资源版本，编译与稳定帧执行均使用定容量存储。Bloom 开启时执行 View 135、136、137，关闭时只执行 137，第二采样槽绑定既有黑色纹理。最终颜色写入 `FrameOutput` 的 BGRA8 目标，UI、呈现和捕获沿用原顺序。
 
 两份 HDR 声明在编译期生成，稳定帧以不可变声明的身份复用计划。动态声明按值比较。设备初始化时设置三个 HDR View 的名称、清除方式、恒等变换和排序模式，每次提交分别绑定本帧附件、尺寸与采样纹理。各段只上传对应着色器使用的参数，连续的全屏绘制共用顶点流，最后一段恢复完整的 bgfx 丢弃语义。普通 Tracy 采样共用 `Render.hdrResolveSubmit` 标记，打开 `ENGINE_ENABLE_TRACY_FUNCTIONS` 后可进一步查看图声明、编译、绑定复核和执行阶段。
 
-编译检查读取是否有来源、环、View 保留区间及活跃资源的物理别名。设备内以尺寸、采样数、View 上限及声明结构复用最近一次成功计划，物理绑定改变时重新检查有效性和别名。开始第一条编码前再次核对绑定，每个编译结果仅执行一次。正式构建使用图路线。测试构建可通过启动环境变量 `ENGINE_TEST_LEGACY_HDR=1` 选择旧调度。同进程 A/B 启动时清除此环境变量，使用 SDL 同名 Hint 在采样窗口之间切换；每个场景帧在开始绘制时读取一次选择。[编译器](../../../src/engine/runtime/render/render_graph.cpp) · [HDR 声明](../../../src/engine/runtime/render/passes/hdr_graph.hpp)
+编译检查读取是否有来源、环、View 保留区间及活跃资源的物理别名。HDR 在设备内以尺寸、采样数、View 上限及声明结构复用最近一次成功计划，物理绑定改变时重新检查有效性和别名。开始第一条编码前再次核对绑定，每个编译结果仅执行一次。所有构建通过同一条 HDR 图路线提交。回归对照使用独立构建的迁移前程序。[编译器](../../../src/engine/runtime/render/render_graph.cpp) · [HDR 声明](../../../src/engine/runtime/render/passes/hdr_graph.hpp)
 
 ## 整帧扩展的目标契约
 
-下表及后文描述拟议的整帧接口，包含子资源范围、多个输出、外部副作用及异步队列等后续能力。既有 Pass 保有着色程序、持久目标和执行方法，通用编译部分处理逻辑记录，执行部分在 runtime/render 内把记录落实为 bgfx 操作。
+下表及后文描述拟议的整帧接口，包含通用物理子资源描述、按活跃通道分配瞬态内存及异步队列等后续能力。既有 Pass 保有着色程序、持久目标和执行方法，通用编译部分处理逻辑记录，执行部分在 runtime/render 内把记录落实为 bgfx 操作。
 
 | 阶段 | 最小调用契约 | 所有权与失败状态 |
 | --- | --- | --- |
@@ -124,7 +133,7 @@ CPU 到帧末、连续若干帧或收到提交序号均不能单独证明 GPU �
 
 沿用 `PassTargets` 在场景作用域内按预算分十步准备的契约。整帧能否呈现沿用 `prepare_frame` 的宿主语义。窗口可呈现而候选场景或作用域目标尚未就绪时，照常绘制可用的已发布场景，或清屏并画 UI，成功呈现返回 `submitted`；本帧未收集的作用域截图继续等待。实际表面暂不可用才走相应的 `deferred`，宿主据此暂停音频。必需资源或契约故障返回 `failed`。[宿主呈现与音频](../../../src/engine/runtime/app/runtime_host.cpp)
 
-执行中途出错时，已编码 GPU 工作无法撤销；沿用现有帧收尾，标记部分写入的持久内容失效，取消受影响的发布/回读，下一帧显式重建。持久内容由原缓存拥有者负责确认或作废。RVT/VSM 用候选映射生成本帧页表，登记可能覆盖的物理页。编码前失败直接丢弃候选；已有覆盖命令时，即使宿主仍提交这帧，也须作废涉及的旧映射并把相应页标脏。`RenderSystem` 在统一收尾中通知拥有者，整帧成功才提交新映射。截图、烘焙等业务按请求身份去重。GPU 完成仅交付该步数据，原拥有者负责后续发布和业务终态。现有 RVT 准备会推进真实映射，迁移该域之前要先具备候选与取消语义。[页缓存](../../../src/engine/runtime/render/rvt/virtual_texture_cache.cpp) · [页表上传](../../../src/engine/runtime/render/rvt/rvt_pass.cpp)
+执行中途出错时，已编码 GPU 工作无法撤销；沿用现有帧收尾，标记部分写入的持久内容失效，取消受影响的发布/回读，下一帧显式重建。持久内容由原缓存拥有者负责确认或作废。RVT/VSM 用候选映射生成本帧页表，登记可能覆盖的物理页。编码前失败直接丢弃候选；已有覆盖命令时，即使宿主仍提交这帧，也须作废涉及的旧映射并把相应页标脏。`RenderSystem` 在统一收尾中通知拥有者，整帧成功才提交新映射。截图、烘焙等业务按请求身份去重。GPU 完成仅交付该步数据，原拥有者负责后续发布和业务终态。RVT 分配现在保留候选槽，实际编码时使旧映射失效，失败帧在收尾阶段撤销本批新映射。[页缓存](../../../src/engine/runtime/render/rvt/virtual_texture_cache.cpp) · [页表上传](../../../src/engine/runtime/render/rvt/rvt_pass.cpp)
 
 **编译及失败验收。** 同规格外部纹理从独立对象改为同一 mip 时应重编或明确报错，两个独立 mip 可分别导出。构造旧页表采样与预上传的冲突，裁掉旧读取后应能编译。在页覆盖已编码时令扩展返回失败，下一帧被覆盖的旧页必须重新生成。给截图设未来的提交序号，验证当前帧照常显示、请求继续等待；排队期间卸载目标，越过序号门槛后须得到 `scope_retired`。
 
@@ -198,7 +207,7 @@ flowchart TD
 | M3 · 多视图与持久状态 | 接入蒙皮、Meshlet、阴影、灯簇、双平面、大气、RVT/VSM、探针和外部有序节点。每迁一个域补齐其数据边，直到所有活跃工作可解释，才移除手工 View 重排，保留一个正式执行入口。 | 空场景、影片、编辑器、作用域切换、页更新失败、设备重建与在途回读通过；逐平台验证条件见上表。 |
 | Android 真机 30 / 60 FPS | M0 静态对照可在现有开发机开始。用资源插件构建同一 Bistro 全开 Release 包，在判断 Android 热点或宣布真机达标前取得同机热稳基线。显式选择手机及应用 Surface，固定分辨率、4× MSAA、资源摘要、相机轨迹和设备显示模式。记录该帧实际生效的效果与有效缓存输入，避免用效果未就绪的帧计算全开成绩。每次只切换一项。 | 先验 30，再用同一方法验 60。固定与移动分别记录至少一个 60 秒热稳窗口，含独立呈现 FPS、帧间隔 P50/P95、采样覆盖率、超预算比例和最长连续超预算段。 |
 
-**调度的 CPU 验收。** M1a 在同一 Release 包内、第一项图工作之前选择路线。旧路线跳过图声明、别名归组、结构查找与编译，也关闭 M0 的旁路构图。新路线计入从声明到提交的完整成本。用性能标记复核分流位置，保持两路公共测量开销、实际 GPU 工作及显示路径一致。固定与移动都关闭详细抓帧。分别记录声明及别名归组、命中查找与结构比较、未命中编译、绑定复核和提交的 CPU P50/P95，同时记命中率和每帧分配次数。相机矩阵变化但声明结构相同时应命中；截图切换或别名变化时单列首次编译尖峰。用同机相同条件的旧链波动判断回归；差异不清时追加一组配对数据。若常态提交关键路径或整帧出现可复现的退化，先减小重建范围再进 M2。
+**调度的 CPU 验收。** 迁移前后分别构建 Release 程序，使用相同资源、镜头和显示设置，新程序计入声明到提交的完整成本。固定与移动都关闭详细抓帧。分别记录声明及别名归组、命中查找与结构比较、未命中编译、绑定复核和提交的 CPU P50/P95，同时记命中率和每帧分配次数。相机矩阵变化但声明结构相同时应命中；截图切换或别名变化时单列首次编译尖峰。用同机相同条件的旧链波动判断回归；差异不清时追加一组配对数据。若常态提交关键路径或整帧出现可复现的退化，先减小重建范围再进 M2。
 
 **普通帧直出能省什么。** 在 1280×720，BGRA8 的一份图像为 3.52 MiB。与离屏基线相比，普通帧少一次中间颜色写和一次全屏采样，名义读写为 7.03 MiB/帧；交换链仍需写入，截图也仍可能持有离屏分配。确认工作量用物理 View 和实际命令，确认外存流量用设备计数器，确认整帧收益用真实呈现间隔。只有工作量下降时，只报告这一项。
 

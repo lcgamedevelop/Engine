@@ -181,11 +181,12 @@ SceneWorkState VirtualTextureCache::prepare(const SceneWorkBudget& budget)
             {
                 continue;
             }
-            const auto occupant = std::find_if(pages_.begin(), pages_.end(), [&](const auto& value)
+            const auto occupant = std::find_if(pages_.begin(), pages_.end(),
+                                               [&](const auto& value)
                                                {
-                ENGINE_PROFILE_FUNCTION_PROBE();
-                return value.second.slot == slot;
-            });
+                                                   ENGINE_PROFILE_FUNCTION_PROBE();
+                                                   return value.second.slot == slot;
+                                               });
             if (occupant != pages_.end() &&
                 std::find(demand_.begin(), demand_.end(), occupant->first) != demand_.end())
             {
@@ -205,23 +206,43 @@ SceneWorkState VirtualTextureCache::prepare(const SceneWorkBudget& budget)
         {
             break;
         }
-        std::erase_if(pages_, [&](const auto& value)
-        {
-            ENGINE_PROFILE_FUNCTION_PROBE();
-            return value.second.slot == selected;
-        });
-        ++cache_revision_;
         used.insert(selected);
-        batch_.pages.push_back({key, selected, ++versions_[selected]});
+        batch_.pages.push_back({key, selected, versions_[selected] + 1});
     }
-    const bool ready =
-        std::all_of(demand_.begin(), demand_.end(), [&](auto key)
-        {
-            ENGINE_PROFILE_FUNCTION_PROBE();
-            return pages_.contains(key);
-        });
+    const bool ready = std::all_of(demand_.begin(), demand_.end(),
+                                   [&](auto key)
+                                   {
+                                       ENGINE_PROFILE_FUNCTION_PROBE();
+                                       return pages_.contains(key);
+                                   });
     return ready ? SceneWorkState::ready : SceneWorkState::working;
 }
+// A reservation leaves the resident tile usable until its clear is actually encoded.
+bool VirtualTextureCache::begin_page_write(const RvtPage& page)
+{
+    if (page.slot >= versions_.size() || versions_[page.slot] + 1 != page.version)
+    {
+        return false;
+    }
+    std::erase_if(pages_, [&](const auto& entry) { return entry.second.slot == page.slot; });
+    versions_[page.slot] = page.version;
+    ++cache_revision_;
+    return true;
+}
+
+void VirtualTextureCache::finish_frame(bool success)
+{
+    if (published_this_frame_ && !success)
+    {
+        for (const auto& page : batch_.pages)
+        {
+            pages_.erase(page.key);
+        }
+        ++cache_revision_;
+    }
+    published_this_frame_ = false;
+}
+
 bool VirtualTextureCache::publish(const RvtPageBatch& batch)
 {
     ENGINE_PROFILE_FUNCTION();
@@ -243,6 +264,7 @@ bool VirtualTextureCache::publish(const RvtPageBatch& batch)
     }
     if (!batch.pages.empty())
     {
+        published_this_frame_ = true;
         ++cache_revision_;
     }
     return true;
@@ -274,6 +296,7 @@ void VirtualTextureCache::release() noexcept
     versions_.clear();
     batch_ = {};
     configured_ = false;
+    published_this_frame_ = false;
     ++demand_revision_;
     ++cache_revision_;
 }

@@ -82,11 +82,14 @@ struct VsmPageBatch
     std::vector<std::array<float, 4>> page_table;
     std::uint32_t dominant_level = 0;
 };
+class VirtualShadowCache;
 struct VsmPageTarget
 {
     bgfx::FrameBufferHandle framebuffer = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle fallback = BGFX_INVALID_HANDLE;
     const std::vector<std::uint64_t>* caster_ids = nullptr;
+    VirtualShadowCache* virtual_pages = nullptr;
+    std::uint64_t virtual_batch = 0;
 };
 struct VsmGpuBinding
 {

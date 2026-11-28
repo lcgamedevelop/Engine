@@ -550,7 +550,7 @@ bool RenderSystem::release_screenshot(ScreenshotId id)
     return true;
 }
 
-void RenderSystem::submit_screenshot(RenderFrameKind kind)
+void RenderSystem::submit_screenshot(RenderFrameKind kind, std::uint64_t last_request)
 {
     ENGINE_PROFILE_FUNCTION();
     if (active_screenshot_ || !frame_output_)
@@ -559,6 +559,10 @@ void RenderSystem::submit_screenshot(RenderFrameKind kind)
     }
     for (auto& [key, operation] : screenshots_)
     {
+        if (key > last_request)
+        {
+            break;
+        }
         if (operation.snapshot.state != ScreenshotState::waiting_frame)
         {
             continue;
