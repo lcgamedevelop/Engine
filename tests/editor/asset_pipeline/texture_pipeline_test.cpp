@@ -1,5 +1,6 @@
 #include "editor/asset_pipeline/asset_pipeline_system.hpp"
 #include "editor/asset_pipeline/scene_importer.hpp"
+#include "editor/asset_pipeline/texture_compaction.hpp"
 #include "file_text.hpp"
 #include "ktx_fixture.hpp"
 #include "resource_services.hpp"
@@ -1020,11 +1021,42 @@ bool ktx_tests()
     return expect(write(meta_path, default_meta), "restore KTX meta");
 }
 
+bool opaque_etc2_tests()
+{
+    schema::TextureDataT texture;
+    texture.schema_version = 3;
+    texture.path = "textures/test";
+    texture.width = 4;
+    texture.height = 4;
+    texture.mip_count = 3;
+    texture.encoding = schema::TextureEncoding::native;
+    texture.format = schema::TextureFormat::etc2;
+    std::vector<std::uint8_t> rgb;
+    for (std::uint32_t mip = 0; mip < 3; ++mip)
+    {
+        texture.subresources.emplace_back(mip, 0, texture.data.size(), 16);
+        texture.data.insert(texture.data.end(), {255, 0, 0, 0, 0, 0, 0, 0});
+        rgb.insert(rgb.end(), 8, static_cast<std::uint8_t>(mip + 1));
+        texture.data.insert(texture.data.end(), rgb.end() - 8, rgb.end());
+    }
+    auto masked = texture;
+    masked.data[32] = 254;
+    const auto masked_source = masked.data;
+    engine::editor::asset_pipeline::compact_opaque_etc2(masked);
+    engine::editor::asset_pipeline::compact_opaque_etc2(texture);
+    return expect(masked.data == masked_source && masked.format == schema::TextureFormat::etc2,
+                  "nonopaque texels in the smallest mip preserve every RGBA block") &&
+           expect(texture.data == rgb && texture.format == schema::TextureFormat::etc2_rgb &&
+                      texture.subresources[2].offset() == 16 &&
+                      engine::TextureResourceCodec::validate(texture),
+                  "opaque ETC2 retains the original RGB bits at every mip");
+}
+
 } // namespace
 
 int main()
 {
-    return expect(tests(), "validate color texture import") &&
+    return opaque_etc2_tests() && expect(tests(), "validate color texture import") &&
                    expect(additional_source_tests(), "validate HDR and other texture sources") &&
                    expect(ktx_tests(), "validate KTX import")
                ? 0 : 1;

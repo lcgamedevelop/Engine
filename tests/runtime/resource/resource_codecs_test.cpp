@@ -5,6 +5,7 @@
 #include "runtime/resource/codecs/material_resource_codec.hpp"
 #include "runtime/resource/codecs/mesh_resource_codec.hpp"
 #include "runtime/resource/codecs/shader_resource_codec.hpp"
+#include "runtime/resource/codecs/texture_chunks.hpp"
 #include "runtime/resource/codecs/texture_resource_codec.hpp"
 #include "runtime/resource/mesh_storage.hpp"
 #include "runtime/resource/resource_codec.hpp"
@@ -228,6 +229,63 @@ bool codec_tests()
     }
     schema::TextureDataT texture(*builtin_texture);
     texture.path = "white.png";
+    std::vector<std::uint8_t> scratch;
+    const auto borrowed = texture_storage::native_subresource(texture, texture.subresources.front(), scratch);
+    if (!expect(borrowed.data() == texture.data.data() && borrowed.size() == texture.data.size() &&
+                    scratch.empty(), "borrows an unpacked texture without a staging allocation"))
+    {
+        return false;
+    }
+    auto chunked = texture;
+    chunked.width = 4;
+    chunked.height = 2;
+    chunked.subresources = {schema::TextureSubresourceData(0, 0, 0, 32)};
+    // A Zstandard single-segment frame carrying a literal block of six shuffled RGBA texels.
+    chunked.data = {0, 1, 2, 3, 4, 5, 6, 7, 0x28, 0xb5, 0x2f, 0xfd, 0x20, 24, 193, 0, 0};
+    for (unsigned lane = 0; lane < 4; ++lane)
+    {
+        for (unsigned i = 0; i < 6; ++i)
+        {
+            chunked.data.push_back(static_cast<std::uint8_t>(8 + i * 4 + lane));
+        }
+    }
+    chunked.chunks.emplace_back(0, 8, 0, 8, schema::TextureChunkEncoding::raw);
+    chunked.chunks.emplace_back(8, 24, 8, 33, schema::TextureChunkEncoding::shuffled_zstd);
+    std::array<std::uint8_t, 16> subset{};
+    if (!expect(TextureResourceCodec::validate(chunked) &&
+                    texture_storage::read_native(chunked, 4, subset),
+                "reads portions of raw and shuffled chunks spanning an upload region"))
+    {
+        return false;
+    }
+    for (std::size_t i = 0; i < subset.size(); ++i)
+    {
+        if (!expect(subset[i] == i + 4, "restores every requested native byte in order"))
+        {
+            return false;
+        }
+    }
+    const auto saved_chunk = chunked.chunks.back();
+    chunked.chunks.back() = schema::TextureChunk(4, 24, 8, 33,
+                                                 schema::TextureChunkEncoding::shuffled_zstd);
+    if (!expect(!TextureResourceCodec::validate(chunked), "rejects overlapping native chunks"))
+    {
+        return false;
+    }
+    chunked.chunks.back() = saved_chunk;
+    // A reserved block type is an invalid frame even with an intact outer byte count.
+    chunked.data[14] = 199;
+    if (!expect(!texture_storage::read_native(chunked, 8, subset),
+                "propagates corrupt frame failures during partial reads"))
+    {
+        return false;
+    }
+    chunked.data[14] = 193;
+    chunked.data.pop_back();
+    if (!expect(!TextureResourceCodec::validate(chunked), "rejects a truncated native chunk"))
+    {
+        return false;
+    }
     auto array_texture = texture;
     array_texture.array_layers = 2;
     if (!expect(!TextureResourceCodec::validate(array_texture),

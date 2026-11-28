@@ -1510,7 +1510,7 @@ RenderPrepareStatus RenderSystem::prepare_resources(RenderPrepareProgress& outpu
             (void)source;
             if (const auto* data = texture.resource.data<TextureResource>())
             {
-                texture_cpu += bytes(data->data) + bytes(data->subresources);
+                texture_cpu += bytes(data->data) + bytes(data->subresources) + bytes(data->chunks);
             }
         }
         ENGINE_PROFILE_PLOT("Render.meshCpuArrayBytes", static_cast<double>(mesh_cpu));

@@ -135,6 +135,7 @@ if(ENGINE_ENABLE_RUNTIME_DEPS)
                 src/engine/runtime/resource/codecs/shader_resource_codec.cpp
                 src/engine/runtime/resource/codecs/material_resource_codec.cpp
                 src/engine/runtime/resource/codecs/texture_resource_codec.cpp
+                src/engine/runtime/resource/codecs/texture_chunks.cpp
                 src/engine/runtime/resource/codecs/audio_resource_codec.cpp
                 src/engine/runtime/resource/codecs/movie_resource_codec.cpp
                 src/engine/runtime/resource/codecs/font_resource_codec.cpp
@@ -154,6 +155,7 @@ if(ENGINE_ENABLE_RUNTIME_DEPS)
         engine_resource
         PUBLIC engine::scene_data
         PRIVATE engine::task engine::memory_profile flatbuffers::flatbuffers basisu::basisu_encoder
+                zstd::libzstd_static
                 SDL3::SDL3)
 
     engine_add_system(runtime world)

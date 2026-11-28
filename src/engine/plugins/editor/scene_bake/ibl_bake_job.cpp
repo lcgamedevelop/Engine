@@ -4,6 +4,7 @@
 
 #include "runtime/render/frame_graph_plan.hpp"
 #include "runtime/render/render_constants.hpp"
+#include "runtime/resource/codecs/texture_chunks.hpp"
 #include "runtime/resource/codecs/texture_resource_codec.hpp"
 
 #include <basisu/transcoder/basisu_transcoder.h>
@@ -96,6 +97,9 @@ bool source_texture(const schema::TextureDataT& data, bgfx::TextureHandle& outpu
         case schema::TextureFormat::astc4x4:
             format = bgfx::TextureFormat::ASTC4x4;
             break;
+        case schema::TextureFormat::etc2_rgb:
+            format = bgfx::TextureFormat::ETC2;
+            break;
         case schema::TextureFormat::etc2:
             format = bgfx::TextureFormat::ETC2A;
             break;
@@ -118,12 +122,20 @@ bool source_texture(const schema::TextureDataT& data, bgfx::TextureHandle& outpu
             error = "Cannot allocate the native IBL input texture";
             return false;
         }
+        std::vector<std::uint8_t> scratch;
         for (const auto& part : data.subresources)
         {
             const auto width = static_cast<std::uint16_t>(std::max(1U, data.width >> part.mip()));
             const auto height = static_cast<std::uint16_t>(std::max(1U, data.height >> part.mip()));
-            const auto* memory = bgfx::copy(data.data.data() + part.offset(),
-                                            static_cast<std::uint32_t>(part.size()));
+            const auto native = texture_storage::native_subresource(data, part, scratch);
+            if (native.empty())
+            {
+                bgfx::destroy(output);
+                output = BGFX_INVALID_HANDLE;
+                error = "Cannot decode the native IBL subresource";
+                return false;
+            }
+            const auto* memory = bgfx::copy(native.data(), static_cast<std::uint32_t>(native.size()));
             if (data.cube_map)
             {
                 bgfx::updateTextureCube(output, 0, static_cast<std::uint8_t>(part.face()),

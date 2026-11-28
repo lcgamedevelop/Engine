@@ -2,6 +2,7 @@
 #include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/resource/codecs/resource_decode.hpp"
+#include "runtime/resource/codecs/texture_chunks.hpp"
 
 #include "runtime/core/guid_map.hpp"
 #include <set>
@@ -48,6 +49,11 @@ bool TextureResourceCodec::validate(const schema::TextureDataT& data)
     {
         return false;
     }
+    std::uint64_t logical_bytes = 0;
+    if (!texture_storage::validate_chunks(data, logical_bytes))
+    {
+        return false;
+    }
     if (data.encoding == schema::TextureEncoding::native)
     {
         const auto faces = data.cube_map ? 6U : data.array_layers;
@@ -60,7 +66,9 @@ bool TextureResourceCodec::validate(const schema::TextureDataT& data)
         }
         const bool blocks = data.format == schema::TextureFormat::bc7 ||
                             data.format == schema::TextureFormat::astc4x4 ||
-                            data.format == schema::TextureFormat::etc2;
+                            data.format == schema::TextureFormat::etc2 ||
+                            data.format == schema::TextureFormat::etc2_rgb;
+        const auto block_bytes = data.format == schema::TextureFormat::etc2_rgb ? 8U : 16U;
         std::set<std::pair<std::uint32_t, std::uint32_t>> identities;
         std::vector<std::pair<std::uint64_t, std::uint64_t>> ranges;
         for (const auto& part : data.subresources)
@@ -73,11 +81,11 @@ bool TextureResourceCodec::validate(const schema::TextureDataT& data)
             const auto width = std::max(1U, data.width >> part.mip());
             const auto height = std::max(1U, data.height >> part.mip());
             const std::uint64_t expected =
-                blocks ? static_cast<std::uint64_t>((width + 3) / 4) * ((height + 3) / 4) * 16
+                blocks ? static_cast<std::uint64_t>((width + 3) / 4) * ((height + 3) / 4) * block_bytes
                        : static_cast<std::uint64_t>(width) * height *
                              (data.format == schema::TextureFormat::rgba16f ? 8 : 4);
-            if (part.size() != expected || part.offset() > data.data.size() ||
-                part.size() > data.data.size() - part.offset())
+            if (part.size() != expected || part.offset() > logical_bytes ||
+                part.size() > logical_bytes - part.offset())
             {
                 return false;
             }
@@ -93,11 +101,11 @@ bool TextureResourceCodec::validate(const schema::TextureDataT& data)
             }
             end = range.second;
         }
-        return end == data.data.size();
+        return end == logical_bytes;
     }
     if (data.encoding != schema::TextureEncoding::basis || data.cube_map ||
         data.array_layers != 1 || data.format == schema::TextureFormat::rg16f ||
-        !data.subresources.empty())
+        data.format == schema::TextureFormat::etc2_rgb || !data.subresources.empty())
     {
         return false;
     }

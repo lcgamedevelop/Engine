@@ -38,6 +38,7 @@ roots = ["scripts/game.ts", "scenes/main.scene"]
 keep = []
 ```
 
+- 可选的 `[common].texture_storage` 默认为 `"native"`。设为 `"zstd"` 时，构建插件对已选原生纹理按 mip、面和层分块，单块最多 256 KiB，并在原块、Zstd 和可逆字节重排后 Zstd 中选择较小结果。运行时保留包中的载荷，准备上传或读取像素时按需解压。对于全部 mip 的 Alpha 均为 255 的 ETC2 RGBA 纹理，导出时保留原始 ETC2 RGB 块；分辨率、mip 与色彩空间沿用导入设置。
 - 清单文件不存在、没有 `[common].items` 或 `items = []` 时，构建全部项目目录资源；默认以一个 `game` 合并包输出。这里的全量指经过导入的资源实体，不是复制项目的 `assets/`、`settings/` 和 `cache/` 源目录。
 - 显式 `[[common.items]]` 必须写 `roots` 数组。`roots = []` 表示有意不选择该项的项目入口；仍可用 `keep` 选择动态资源。空项目集合不会移除引擎必需的内置资源基线。
 - 普通资源逻辑路径相对项目资源根，例如 `scenes/main.scene`；不带 `project/`。`builtin://` 是引擎保留域，`editor://` 仅属于编辑器，不能作为运行构建入口。
@@ -45,6 +46,8 @@ keep = []
 - `storage = "files"` 保持 `gen/<完整GUID>` 散文件；`storage = "package"` 按 GUID 排序串联完整 `ERS2` 实体，输出为 `packs/<构建项名>-<指纹>`，无后缀。catalog 记录实体的包内偏移和长度，不增加包内目录。
 
 构建项名称只使用小写字母、数字、连字符或下划线；`builtin` 保留给引擎。未知字段、重复名称、错误类型、越界路径和项目子路径中的符号链接均拒绝。清单不接受 `target_platform`；平台只由调用参数指定，支持 `macos/ios/windows/android/linux`，省略时采用宿主平台。默认输出 `cache/build/<platform>`；高级配置可在 `[common]` 下选填 `output = "cache/build/<专用目录>"`，不能覆盖导入缓存或内置 Shader 工具缓存。
+
+可选的 `[common].texture_storage` 控制构建后的原生纹理存储。默认值 `"native"` 沿用导入载荷。`"zstd"` 会检查 ETC2 RGBA 的全部 mip，遇到全不透明纹理时保留原始 RGB 压缩块并省去 Alpha 块。构建器按子资源分块，每块至多 256 KiB，在原始字节、Zstd 9 和按字节通道重排后 Zstd 9 中选择最小形式，包含块表仍节省空间时写入。GPU 上传和 CPU 像素读取按需展开块，运行资源保留压缩载荷。资源 GUID、采样颜色空间和导入缓存由原有流程维护。
 
 一次 `build()` 可以选择一个或多个构建项；未指定名称时选择清单中的全部项。无已配置构建项时不能按名称选择。未知项、重复选择、缺失入口和不兼容的存储配置返回失败。所选项共同生成一份 `catalog.bin`，同一 GUID 只出现一次。同种存储方式的共享项目依赖归名称排序最前的选中项；同一项目资源同时要求散文件与合并包时明确报错。
 

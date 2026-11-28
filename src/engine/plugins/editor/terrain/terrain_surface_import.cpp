@@ -5,6 +5,7 @@
 #include "editor/asset_pipeline/importer_utils.hpp"
 #include "runtime/resource/builtin_resources.hpp"
 #include "runtime/resource/codecs/texture_resource_codec.hpp"
+#include "runtime/resource/codecs/texture_chunks.hpp"
 #include "runtime/scene/scene_types.hpp"
 #include "runtime/schema/material_generated.h"
 #include "runtime/schema/texture_generated.h"
@@ -204,11 +205,11 @@ bool decode(const schema::MaterialDataT& material, std::string_view name, const 
                              ENGINE_PROFILE_FUNCTION_PROBE();
                              return p.mip() == mip && p.face() == 0;
                          });
-        if (found == image->subresources.end() || found->size() != rgba.size())
+        if (found == image->subresources.end() || found->size() != rgba.size() ||
+            !texture_storage::read_native(*image, found->offset(), rgba))
         {
             return false;
         }
-        std::copy_n(image->data.data() + found->offset(), rgba.size(), rgba.data());
     }
     output.resize(resolution * resolution);
     auto sample = [&](int x, int y, unsigned c)

@@ -126,6 +126,7 @@ if(ENGINE_ENABLE_ASSET_PIPELINE_DEPS)
                 src/engine/editor/asset_pipeline/importers/material_importer.cpp
                 src/engine/editor/asset_pipeline/importers/scene_importer.cpp
                 src/engine/editor/asset_pipeline/importers/prefab_importer.cpp
+                src/engine/editor/asset_pipeline/texture_compaction.cpp
                 src/engine/editor/asset_pipeline/importers/texture_importer.cpp
                 src/engine/editor/asset_pipeline/importers/ktx_texture_importer.cpp
                 src/engine/editor/asset_pipeline/importers/light_probe_importer.cpp

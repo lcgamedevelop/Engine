@@ -8,6 +8,7 @@
 #include "runtime/resource/types/ui_resource.hpp"
 
 #include "fs_ui.bin.h"
+#include "runtime/resource/codecs/texture_chunks.hpp"
 #include "runtime/resource/codecs/texture_resource_codec.hpp"
 #include "runtime/scene/resource_binding.hpp"
 #include "runtime/ui/rml_font.hpp"
@@ -463,8 +464,7 @@ Rml::TextureHandle RmlRender::LoadTexture(Rml::Vector2i& dimensions, const Rml::
                              ENGINE_PROFILE_FUNCTION_PROBE();
                              return value.mip() == 0 && value.face() == 0;
                          });
-        if (part == data.subresources.end() || part->offset() > data.data.size() ||
-            part->size() > data.data.size() - part->offset())
+        if (part == data.subresources.end())
         {
             healthy_ = false;
             return 0;
@@ -481,6 +481,9 @@ Rml::TextureHandle RmlRender::LoadTexture(Rml::Vector2i& dimensions, const Rml::
         case schema::TextureFormat::astc4x4:
             format = bimg::TextureFormat::ASTC4x4;
             break;
+        case schema::TextureFormat::etc2_rgb:
+            format = bimg::TextureFormat::ETC2;
+            break;
         case schema::TextureFormat::etc2:
             format = bimg::TextureFormat::ETC2A;
             break;
@@ -488,8 +491,15 @@ Rml::TextureHandle RmlRender::LoadTexture(Rml::Vector2i& dimensions, const Rml::
             healthy_ = false;
             return 0;
         }
+        std::vector<std::uint8_t> scratch;
+        const auto native = texture_storage::native_subresource(data, *part, scratch);
+        if (native.empty())
+        {
+            healthy_ = false;
+            return 0;
+        }
         bx::DefaultAllocator allocator;
-        bimg::imageDecodeToRgba8(&allocator, pixels.data(), data.data.data() + part->offset(),
+        bimg::imageDecodeToRgba8(&allocator, pixels.data(), native.data(),
                                  data.width, data.height, data.width * 4, format);
     }
     else

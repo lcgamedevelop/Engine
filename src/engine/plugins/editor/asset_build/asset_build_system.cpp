@@ -4,6 +4,7 @@
 #include "editor/file_text.hpp"
 
 #include "plugins/editor/asset_build/builtin_resources.hpp"
+#include "plugins/editor/asset_build/texture_storage.hpp"
 
 #include "editor/asset_pipeline/asset_io.hpp"
 #include "editor/asset_pipeline/asset_pipeline_system.hpp"
@@ -46,6 +47,7 @@ struct BuildItem
 struct BuildManifest
 {
     bool all_resources = false;
+    bool compress_textures = false;
     std::string startup_movie;
     std::filesystem::path output;
     std::vector<BuildItem> items;
@@ -259,11 +261,21 @@ bool read_manifest(const std::filesystem::path& root, const std::filesystem::pat
     for (const auto& [key, value] : common)
     {
         (void)value;
-        if (key != "output" && key != "items")
+        if (key != "output" && key != "items" && key != "texture_storage")
         {
             error = "unknown resource build setting: " + std::string(key.str());
             return false;
         }
+    }
+    if (common.contains("texture_storage"))
+    {
+        const auto mode = common["texture_storage"].value<std::string>();
+        if (!mode || (*mode != "native" && *mode != "zstd"))
+        {
+            error = "texture_storage must be native or zstd";
+            return false;
+        }
+        output.compress_textures = *mode == "zstd";
     }
     if (common.contains("output"))
     {
@@ -729,6 +741,32 @@ bool AssetBuildSystem::build(const std::filesystem::path& project_root,
         !select_resources(source, manifest, last_error_))
     {
         return false;
+    }
+    if (manifest.compress_textures)
+    {
+        std::set<Guid> selected_textures;
+        for (const auto& item : manifest.items)
+        {
+            selected_textures.insert(item.resources.begin(), item.resources.end());
+        }
+        for (auto& entry : source_data.entries)
+        {
+            if (entry->kind != schema::AssetKind::texture || !selected_textures.contains(entry->guid))
+            {
+                continue;
+            }
+            auto [it, inserted] = builtin_entities.try_emplace(entry->guid);
+            if ((inserted && !read_entity(root / "cache", *entry, it->second, last_error_)) ||
+                !pack_texture(*entry, it->second, last_error_))
+            {
+                return false;
+            }
+        }
+        if (!source.assign(source_data))
+        {
+            last_error_ = "Invalid optimized texture catalog";
+            return false;
+        }
     }
     schema::AssetCatalogDataT data;
     data.schema_version = 4;
