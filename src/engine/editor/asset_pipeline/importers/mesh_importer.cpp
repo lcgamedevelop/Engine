@@ -41,6 +41,11 @@ schema::AssetKind MeshImporter::kind() const noexcept
     ENGINE_PROFILE_FUNCTION();
     return schema::AssetKind::mesh;
 }
+std::string_view MeshImporter::default_meta() const noexcept
+{
+    ENGINE_PROFILE_FUNCTION();
+    return mesh_optimization_default_meta;
+}
 bool MeshImporter::matches(const std::filesystem::path& source) const
 {
     ENGINE_PROFILE_FUNCTION();
@@ -241,7 +246,8 @@ bool MeshImporter::convert(const ImportAsset& asset, const ImportContext& contex
         }
         return false;
     }
-    if (!generate_mesh_lods(mesh, asset.source, error) ||
+    if (!read_mesh_optimization(asset.source, mesh.optimize_storage, error) ||
+        !generate_mesh_lods(mesh, asset.source, error) ||
         !generate_meshlets(mesh, asset.source, error))
     {
         return false;

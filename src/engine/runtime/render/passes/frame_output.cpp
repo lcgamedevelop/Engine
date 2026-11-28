@@ -93,7 +93,7 @@ bool FrameOutput::prepare(std::uint16_t width, std::uint16_t height)
     return bgfx::isValid(target_);
 }
 
-void FrameOutput::present(std::uint32_t clear_color, bool movie)
+void FrameOutput::clear(std::uint32_t clear_color) const
 {
     ENGINE_PROFILE_FUNCTION();
     bgfx::setViewName(output_clear_view, "Display output clear");
@@ -101,12 +101,17 @@ void FrameOutput::present(std::uint32_t clear_color, bool movie)
     bgfx::setViewRect(output_clear_view, 0, 0, width_, height_);
     bgfx::setViewClear(output_clear_view, BGFX_CLEAR_COLOR, clear_color);
     bgfx::touch(output_clear_view);
-    bgfx::setViewFrameBuffer(hdr_resolve_view, target_);
-    bgfx::setViewFrameBuffer(200, target_);
-    if (movie)
-    {
-        bgfx::setViewFrameBuffer(main_view + 1, target_);
-    }
+}
+
+void FrameOutput::bind_ui() const
+{
+    ENGINE_PROFILE_FUNCTION();
+    bgfx::setViewFrameBuffer(ui_view, target_);
+}
+
+void FrameOutput::present() const
+{
+    ENGINE_PROFILE_FUNCTION();
     bgfx::setViewName(output_present_view, "Present display output");
     bgfx::setViewFrameBuffer(output_present_view, BGFX_INVALID_HANDLE);
     bgfx::setViewRect(output_present_view, 0, 0, width_, height_);

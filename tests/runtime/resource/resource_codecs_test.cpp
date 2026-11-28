@@ -5,7 +5,9 @@
 #include "runtime/resource/codecs/material_resource_codec.hpp"
 #include "runtime/resource/codecs/mesh_resource_codec.hpp"
 #include "runtime/resource/codecs/shader_resource_codec.hpp"
+#include "runtime/resource/codecs/texture_chunks.hpp"
 #include "runtime/resource/codecs/texture_resource_codec.hpp"
+#include "runtime/resource/mesh_storage.hpp"
 #include "runtime/resource/resource_codec.hpp"
 #include "runtime/resource/resource_system.hpp"
 #include "runtime/schema/movie_generated.h"
@@ -15,6 +17,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <span>
 #include <string>
@@ -92,10 +95,103 @@ bool add_payload(test_support::ResourceFixture& fixture, std::string path, schem
     return true;
 }
 
+bool compact_mesh_tests()
+{
+    schema::MeshDataT source;
+    source.indices = {0, 65535, 1};
+    source.meshlets = std::make_unique<schema::MeshletDataT>();
+    source.meshlets->indices = source.indices;
+    auto lod = std::make_unique<schema::MeshLodDataT>();
+    lod->indices = {0, 65536, 2};
+    lod->meshlets = std::make_unique<schema::MeshletDataT>();
+    lod->meshlets->indices = {1, 2, 0};
+    source.lods.push_back(std::move(lod));
+    source.texcoords.emplace_back(-0.0, std::numeric_limits<float>::denorm_min());
+    source.tangents.emplace_back(1.0 + std::numeric_limits<double>::epsilon(), 0, 0, -1);
+    source.lightmap_texcoords.emplace_back(0.25, 1);
+    const auto original = pack(source, "EMS2");
+
+    if (!expect(mesh_storage::compact(source) && mesh_storage::compact(source) &&
+                    source.indices.capacity() == 0 && source.meshlets->indices.capacity() == 0 &&
+                    source.indices16.size() == 3 && source.meshlets->uses_parent_indices &&
+                    mesh_storage::meshlet_indices(*source.meshlets,
+                                                  mesh_storage::indices(source))[1] == 65535 &&
+                    source.lods[0]->indices.size() == 3 && source.lods[0]->indices16.empty() &&
+                    source.lods[0]->meshlets->indices16.size() == 3 &&
+                    !source.lods[0]->meshlets->uses_parent_indices &&
+                    source.texcoords.capacity() == 0 && source.texcoords32.size() == 1 &&
+                    source.lightmap_texcoords.capacity() == 0 &&
+                    source.lightmap_texcoords32.size() == 1 && source.tangents.size() == 1 &&
+                    source.tangents32.empty(),
+                "compact mesh preserves wide precision and independent LOD topology"))
+    {
+        return false;
+    }
+    auto invalid = source;
+    invalid.meshlets->indices16.push_back(0);
+    auto both = source;
+    both.indices.push_back(0);
+    auto uv_conflict = source;
+    uv_conflict.texcoords.emplace_back(0, 0);
+    const auto before = pack(invalid, "EMS2");
+    const auto conflicting_uv = pack(uv_conflict, "EMS2");
+    std::unique_ptr<Resource> rejected;
+    schema::AssetEntryT entry;
+    entry.kind = schema::AssetKind::mesh;
+    std::string error;
+    if (!expect(!mesh_storage::compact(invalid) && !mesh_storage::expand(invalid) &&
+                    pack(invalid, "EMS2") == before && !mesh_storage::valid_encoding(both) &&
+                    !mesh_storage::valid_encoding(uv_conflict) &&
+                    !MeshResourceCodec{}.decode(entry, conflicting_uv, rejected, error) &&
+                    !rejected && !error.empty(),
+                "conflicting compact mesh encodings are rejected atomically"))
+    {
+        return false;
+    }
+    const auto encoded = pack(source, "EMS2");
+    std::unique_ptr<Resource> decoded;
+    if (!MeshResourceCodec{}.decode(entry, encoded, decoded, error))
+    {
+        return false;
+    }
+    auto restored = *resource_detail::data<MeshResource>(decoded.get());
+    if (!expect(restored.optimize_storage && mesh_storage::expand(restored) &&
+                    mesh_storage::expand(restored) && !mesh_storage::is_compact(restored) &&
+                    pack(restored, "EMS2") == original,
+                "default mesh storage optimization exactly restores authored streams"))
+    {
+        return false;
+    }
+    restored.optimize_storage = false;
+    source.optimize_storage = false;
+    const auto wide = pack(restored, "EMS2");
+    const auto compact_disabled = pack(source, "EMS2");
+    for (const auto* disabled : {&wide, &compact_disabled})
+    {
+        std::unique_ptr<Resource> decoded_disabled;
+        if (!MeshResourceCodec{}.decode(entry, *disabled, decoded_disabled, error))
+        {
+            return false;
+        }
+        const auto* expanded = resource_detail::data<MeshResource>(decoded_disabled.get());
+        const auto wide_bytes = decoded_disabled->cpu_payload_capacity();
+        const auto optimized_bytes = decoded->cpu_payload_capacity();
+        if (!expect(expanded && !expanded->optimize_storage &&
+                        !mesh_storage::is_compact(*expanded) && pack(*expanded, "EMS2") == wide &&
+                        wide_bytes && optimized_bytes && *wide_bytes > *optimized_bytes,
+                    "per-resource disabled policy retains exact wide streams"))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool codec_tests()
 {
     ResourceSystem resources;
-    if (!test_support::register_resource_codecs(resources) || !resources.initialize({}))
+    if (!compact_mesh_tests() || !test_support::register_resource_codecs(resources) ||
+        !resources.initialize({}))
     {
         return false;
     }
@@ -112,8 +208,84 @@ bool codec_tests()
     }
     schema::MeshDataT mesh(*builtin_mesh);
     mesh.path = "cube.mesh";
+    schema::MeshDataT mesh_storage;
+    mesh_storage.texcoords.reserve(13);
+    mesh_storage.meshlets = std::make_unique<schema::MeshletDataT>();
+    mesh_storage.meshlets->indices.reserve(31);
+    auto lod = std::make_unique<schema::MeshLodDataT>();
+    lod->meshlets = std::make_unique<schema::MeshletDataT>();
+    lod->meshlets->meshlets.reserve(7);
+    mesh_storage.lods.push_back(std::move(lod));
+    const auto capacity =
+        mesh_storage.texcoords.capacity() * sizeof(schema::Vec2) +
+        mesh_storage.meshlets->indices.capacity() * sizeof(std::uint32_t) +
+        mesh_storage.lods.capacity() * sizeof(mesh_storage.lods.front()) +
+        mesh_storage.lods.front()->meshlets->meshlets.capacity() * sizeof(schema::Meshlet);
+    const MeshResource storage_probe({}, std::move(mesh_storage));
+    if (!expect(storage_probe.cpu_payload_capacity() == capacity,
+                "mesh payload counts allocated stream, meshlet and LOD capacities"))
+    {
+        return false;
+    }
     schema::TextureDataT texture(*builtin_texture);
     texture.path = "white.png";
+    std::vector<std::uint8_t> scratch;
+    const auto borrowed = texture_storage::native_subresource(texture, texture.subresources.front(), scratch);
+    if (!expect(borrowed.data() == texture.data.data() && borrowed.size() == texture.data.size() &&
+                    scratch.empty(), "borrows an unpacked texture without a staging allocation"))
+    {
+        return false;
+    }
+    auto chunked = texture;
+    chunked.width = 4;
+    chunked.height = 2;
+    chunked.subresources = {schema::TextureSubresourceData(0, 0, 0, 32)};
+    // A Zstandard single-segment frame carrying a literal block of six shuffled RGBA texels.
+    chunked.data = {0, 1, 2, 3, 4, 5, 6, 7, 0x28, 0xb5, 0x2f, 0xfd, 0x20, 24, 193, 0, 0};
+    for (unsigned lane = 0; lane < 4; ++lane)
+    {
+        for (unsigned i = 0; i < 6; ++i)
+        {
+            chunked.data.push_back(static_cast<std::uint8_t>(8 + i * 4 + lane));
+        }
+    }
+    chunked.chunks.emplace_back(0, 8, 0, 8, schema::TextureChunkEncoding::raw);
+    chunked.chunks.emplace_back(8, 24, 8, 33, schema::TextureChunkEncoding::shuffled_zstd);
+    std::array<std::uint8_t, 16> subset{};
+    if (!expect(TextureResourceCodec::validate(chunked) &&
+                    texture_storage::read_native(chunked, 4, subset),
+                "reads portions of raw and shuffled chunks spanning an upload region"))
+    {
+        return false;
+    }
+    for (std::size_t i = 0; i < subset.size(); ++i)
+    {
+        if (!expect(subset[i] == i + 4, "restores every requested native byte in order"))
+        {
+            return false;
+        }
+    }
+    const auto saved_chunk = chunked.chunks.back();
+    chunked.chunks.back() = schema::TextureChunk(4, 24, 8, 33,
+                                                 schema::TextureChunkEncoding::shuffled_zstd);
+    if (!expect(!TextureResourceCodec::validate(chunked), "rejects overlapping native chunks"))
+    {
+        return false;
+    }
+    chunked.chunks.back() = saved_chunk;
+    // A reserved block type is an invalid frame even with an intact outer byte count.
+    chunked.data[14] = 199;
+    if (!expect(!texture_storage::read_native(chunked, 8, subset),
+                "propagates corrupt frame failures during partial reads"))
+    {
+        return false;
+    }
+    chunked.data[14] = 193;
+    chunked.data.pop_back();
+    if (!expect(!TextureResourceCodec::validate(chunked), "rejects a truncated native chunk"))
+    {
+        return false;
+    }
     auto array_texture = texture;
     array_texture.array_layers = 2;
     if (!expect(!TextureResourceCodec::validate(array_texture),
@@ -201,9 +373,18 @@ bool codec_tests()
     std::unique_ptr<Resource> binary_resource;
     std::unique_ptr<Resource> script_resource;
     std::unique_ptr<Resource> json_resource;
-    if (!expect(fixture.read(resources, mesh.path, mesh_resource) &&
-                    resource_detail::data<MeshResource>(mesh_resource.get()) &&
-                    *resource_detail::data<MeshResource>(mesh_resource.get()) == mesh &&
+    if (!fixture.read(resources, mesh.path, mesh_resource))
+    {
+        return false;
+    }
+    const auto* loaded_mesh = resource_detail::data<MeshResource>(mesh_resource.get());
+    if (!expect(loaded_mesh && mesh_storage::is_compact(*loaded_mesh),
+                "file meshes use compact storage"))
+    {
+        return false;
+    }
+    auto expanded_mesh = *loaded_mesh;
+    if (!expect(mesh_storage::expand(expanded_mesh) && expanded_mesh == mesh &&
                     fixture.read(resources, texture.path, texture_resource) &&
                     resource_detail::data<TextureResource>(texture_resource.get()) &&
                     *resource_detail::data<TextureResource>(texture_resource.get()) == texture &&

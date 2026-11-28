@@ -17,6 +17,11 @@ namespace engine::editor::asset_pipeline
                                           std::vector<std::byte>& output, std::string& error);
 [[nodiscard]] bool read_table(const std::filesystem::path& path, toml::table& table,
                               std::string& error);
+inline constexpr std::string_view mesh_optimization_default_meta = "optimize_mesh = true\n";
+[[nodiscard]] bool read_mesh_optimization(const toml::table& meta, bool& enabled,
+                                          std::string& error);
+[[nodiscard]] bool read_mesh_optimization(const std::filesystem::path& source, bool& enabled,
+                                          std::string& error);
 [[nodiscard]] bool reference(const Guid& guid, schema::AssetKind kind, const ImportContext& context,
                              std::vector<Guid>& dependencies, std::string& error);
 [[nodiscard]] bool file_hash(const std::filesystem::path& path, std::string& hash,

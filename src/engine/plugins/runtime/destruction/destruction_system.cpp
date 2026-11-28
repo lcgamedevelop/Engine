@@ -6,6 +6,7 @@
 #include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/physics/physics_system.hpp"
+#include "runtime/resource/mesh_storage.hpp"
 #include "runtime/scene/collider.hpp"
 #include "runtime/scene/ecs_storage.hpp"
 #include "runtime/scene/mesh_renderer.hpp"
@@ -85,39 +86,48 @@ bool build_group_geometry(const schema::DestructionAssetDataT& asset,
         const auto& source = *asset.chunks[chunk_index]->mesh;
         // Generate missing frames per chunk, after applying the same fallback UVs used
         // by the rendered mesh. Never discard frames supplied by the source asset.
-        std::vector<schema::Vec4> tangents;
-        if (!source.tangents.empty())
+        const bool has_uv = mesh_storage::texcoord_count(source) != 0;
+        const bool has_tangents = mesh_storage::tangent_count(source) != 0;
+        if (!has_tangents)
         {
-            tangents = source.tangents;
-        }
-        else
-        {
-            schema::MeshDataT tangent_source = source;
-            if (tangent_source.texcoords.empty())
+            std::vector<schema::Vec4> generated;
+            if (has_uv)
             {
+                if (!MeshUtils::build_tangents(source, generated))
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                auto tangent_source = source;
                 for (const auto& vertex : source.vertices)
                 {
                     tangent_source.texcoords.emplace_back(vertex.x() * 0.2, vertex.y() * 0.2);
                 }
+                if (!MeshUtils::build_tangents(tangent_source, generated))
+                {
+                    return false;
+                }
             }
-            if (!MeshUtils::build_tangents(tangent_source, tangents))
-            {
-                return false;
-            }
+            mesh.tangents.insert(mesh.tangents.end(), generated.begin(), generated.end());
         }
         const auto offset = static_cast<std::uint32_t>(mesh.vertices.size());
         mesh.vertices.insert(mesh.vertices.end(), source.vertices.begin(), source.vertices.end());
-        mesh.tangents.insert(mesh.tangents.end(), tangents.begin(), tangents.end());
-        for (auto vertex_index : source.indices)
+        const auto indices = mesh_storage::indices(source);
+        for (std::size_t i = 0; i < indices.size(); ++i)
         {
-            mesh.indices.push_back(offset + vertex_index);
+            mesh.indices.push_back(offset + indices[i]);
         }
         for (std::size_t vertex_index = 0; vertex_index < source.vertices.size(); ++vertex_index)
         {
             const auto& vertex = source.vertices[vertex_index];
-            mesh.texcoords.push_back(source.texcoords.empty()
-                                         ? Vec2{vertex.x() * 0.2, vertex.y() * 0.2}
-                                         : source.texcoords[vertex_index]);
+            if (has_tangents)
+            {
+                mesh.tangents.push_back(mesh_storage::tangent(source, vertex_index));
+            }
+            mesh.texcoords.push_back(has_uv ? mesh_storage::texcoord(source, vertex_index)
+                                            : Vec2{vertex.x() * 0.2, vertex.y() * 0.2});
             mesh.colors.push_back(source.colors.empty() ? Color{1, 1, 1, 1}
                                                         : source.colors[vertex_index]);
         }
@@ -212,11 +222,12 @@ bool support_coverage(const schema::DestructionChunkDataT& chunk, const double* 
     const double length = max_gap + 2 * lift;
     double total_area = 0;
     double covered_area = 0;
-    for (std::size_t index = 0; index < mesh.indices.size(); index += 3)
+    const auto indices = mesh_storage::indices(mesh);
+    for (std::size_t index = 0; index < indices.size(); index += 3)
     {
-        const auto& first = mesh.vertices[mesh.indices[index]];
-        const auto& second = mesh.vertices[mesh.indices[index + 1]];
-        const auto& third = mesh.vertices[mesh.indices[index + 2]];
+        const auto& first = mesh.vertices[indices[index]];
+        const auto& second = mesh.vertices[indices[index + 1]];
+        const auto& third = mesh.vertices[indices[index + 2]];
         if (first.y() > bottom + plane_tolerance || second.y() > bottom + plane_tolerance ||
             third.y() > bottom + plane_tolerance)
         {

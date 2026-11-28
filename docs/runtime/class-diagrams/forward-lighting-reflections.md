@@ -26,7 +26,10 @@ classDiagram
         <<private final>>
         +can_combine_depth(frame, list) bool
         +begin(view, projection, combined_depth) void
-        +identify_depth(draw, frame, list) uint64_t
+        +identify_depth(draw, frame, list, include_surface) uint64_t
+        +has_surface(revision) bool
+        +reserve_cached_instances() void
+        +publish_surface(revision) void
         +depth_inputs() span~const uint64_t~
     }
     class ScreenSpaceReflectionPass {

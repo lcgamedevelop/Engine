@@ -1,4 +1,5 @@
 #include "plugins/editor/scene_bake/lighting_bake_job.hpp"
+#include "runtime/resource/mesh_storage.hpp"
 #include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "editor/resource_access.hpp"
@@ -401,6 +402,11 @@ bool LightingBakeJob::start(const schema::SceneDataT& scene, const Scene& active
             }
         }
         item.mesh = std::make_shared<schema::MeshDataT>(*resource.data<MeshResource>());
+        if (!mesh_storage::expand(*item.mesh))
+        {
+            error = "Invalid bake mesh storage";
+            return false;
+        }
         out.meshes.push_back(std::move(item));
     }
     if (!lights.empty() || out.meshes.size() > 4096 || settings.probes.size() > 64 ||

@@ -33,6 +33,7 @@
     "runtime": {
       "description": "Windows, macOS, Linux, and Android game runtime dependencies",
       "dependencies": [
+        "zstd",
         "basisu",
         "bgfx",
         {

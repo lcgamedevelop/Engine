@@ -285,9 +285,23 @@ bool test_movie_presentation(const EngineConfig& config, const RuntimeParallelCo
     {
         return false;
     }
+    const auto i420_frame = renderer->frame_number();
+    std::array<std::uint8_t, 8> uv{};
+    uv.fill(128);
+    frame.format = engine::schema::MoviePixelFormat::nv12;
+    frame.planes[1] = {uv, 2, 2, 4};
+    frame.planes[2] = {};
+    if (!expect(renderer->present_movie_frame(frame) == engine::RenderSubmitStatus::submitted &&
+                    renderer->frame_number() != i420_frame,
+                "interleaved NV12 uploads exactly two planes and presents"))
+    {
+        return false;
+    }
+    const auto valid_movie = renderer->frame_number();
     frame.planes[0].bytes = {};
-    return expect(renderer->present_movie_frame(frame) == engine::RenderSubmitStatus::failed,
-                  "truncated movie plane is rejected");
+    return expect(renderer->present_movie_frame(frame) == engine::RenderSubmitStatus::failed &&
+                      renderer->frame_number() == valid_movie,
+                  "invalid movie input cannot submit a partial output frame");
 }
 
 bool test_movie_clock_and_startup(const EngineConfig& config, const RuntimeParallelConfig& parallel)

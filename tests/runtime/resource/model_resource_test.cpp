@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <string_view>
+#include <vector>
 
 namespace
 {
@@ -215,8 +216,17 @@ bool loading_and_instantiation()
                           std::ios::binary | std::ios::trunc);
     corrupt << "corrupted mesh";
     corrupt.close();
-    return expect(scene.instantiate_model(model_path, "Loaded candidate") &&
-                      test_support::scene_nodes(scene).size() == count + 3 &&
+    std::vector<engine::Node> created;
+    const auto candidate = scene.instantiate_model(model_path, "Loaded candidate", &created, true);
+    if (!expect(candidate && created.size() == 3 && created.front() == candidate &&
+                    candidate.find_child("Assembly/Body").get_component<engine::MeshRenderer>()
+                        .static_lod_enabled() &&
+                    !renderer.static_lod_enabled(),
+                "model creation configures static LOD on only the requested instance"))
+    {
+        return false;
+    }
+    return expect(test_support::scene_nodes(scene).size() == count + 3 &&
                       scene.find_node(existing.id()) == existing,
                   "instantiation uses its loaded immutable closure without reading modified files");
 }

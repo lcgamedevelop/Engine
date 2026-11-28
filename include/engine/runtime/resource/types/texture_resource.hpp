@@ -15,7 +15,7 @@ template <> struct Payload<schema::AssetKind::texture>
     [[nodiscard]] static std::uint64_t cpu_payload_capacity(const Type& value) noexcept
     {
         ENGINE_PROFILE_FUNCTION_PROBE();
-        return value.data.capacity();
+        return value.data.capacity() + value.chunks.capacity() * sizeof(schema::TextureChunk);
     }
 };
 } // namespace resource_detail

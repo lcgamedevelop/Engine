@@ -4,6 +4,7 @@
 #include "runtime/performance/profiling.hpp"
 #include "runtime/render/mesh_lod_selection.hpp"
 #include "runtime/render/render_math.hpp"
+#include "runtime/resource/mesh_storage.hpp"
 #include "runtime/resource/types/light_probe_resource.hpp"
 #include "runtime/resource/types/mesh_resource.hpp"
 #include "runtime/scene/camera_runtime.hpp"
@@ -525,9 +526,10 @@ bool RenderSystem::SceneGpuResources::collect_view(const render_detail::RenderFr
             std::array<float, 3> low, high;
             low.fill(std::numeric_limits<float>::max());
             high.fill(std::numeric_limits<float>::lowest());
+            const auto indices = mesh_storage::indices(*data);
             for (std::uint32_t offset = first; offset < first + count; ++offset)
             {
-                const auto& vertex = data->vertices[data->indices[offset]];
+                const auto& vertex = data->vertices[indices[offset]];
                 const std::array point{vertex.x(), vertex.y(), vertex.z()};
                 for (std::size_t axis = 0; axis < 3; ++axis)
                 {
@@ -553,8 +555,9 @@ bool RenderSystem::SceneGpuResources::collect_view(const render_detail::RenderFr
                                          : item.geometry->submeshes(item.lod);
         if (ranges.empty())
         {
-            const auto count = draw.capture ? static_cast<std::uint32_t>(data->indices.size())
-                                            : item.geometry->index_count(item.lod);
+            const auto count = draw.capture
+                                   ? static_cast<std::uint32_t>(mesh_storage::indices(*data).size())
+                                   : item.geometry->index_count(item.lod);
             if (!collect(0, count, 0))
             {
                 return fail();

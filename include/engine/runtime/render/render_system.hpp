@@ -28,6 +28,7 @@ class WindowSystem;
 class WorldSystem;
 class FontSystem;
 class UiSystem;
+class FrameGraphPlan;
 class RenderExtension;
 class TaskSystem;
 struct MovieFrame;
@@ -36,6 +37,7 @@ struct GpuMemorySnapshot;
 namespace render_detail
 {
 class FrameOutput;
+class RenderGraph;
 class GpuMemoryTracker;
 class RenderSurface;
 class MoviePass;
@@ -228,9 +230,13 @@ private:
     std::uint64_t screenshot_owner_ = 0;
     std::uint64_t active_screenshot_ = 0;
     void advance_screenshots();
-    void submit_screenshot(RenderFrameKind kind);
+    void submit_screenshot(RenderFrameKind kind, std::uint64_t last_request);
+    [[nodiscard]] bool encode_output(Camera camera, const RenderSettings& settings,
+                                     const MovieFrame* movie);
     std::unique_ptr<render_detail::GpuMemoryTracker> gpu_memory_;
     std::unique_ptr<render_detail::FrameOutput> frame_output_;
+    std::unique_ptr<render_detail::RenderGraph> render_graph_;
+    std::unique_ptr<engine::FrameGraphPlan> device_view_plan_;
     void prepare_rvt(const RenderSettings& settings, const render_detail::RenderFrameData& frame,
                      const render_detail::SceneDrawView& draw);
     void draw_rvt_viewer();

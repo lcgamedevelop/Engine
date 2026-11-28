@@ -273,6 +273,37 @@ bool test()
     {
         return false;
     }
+    // First change only the bake observer's height, then let the main view replace the shared
+    // medium before sampling that same bake observer again. Compare both with a fresh LUT.
+    auto high_bake = bake;
+    high_bake.view[13] = -8000;
+    auto changed_sky = sky;
+    changed_sky.atmosphere_rayleigh_scale_height *= 1.5F;
+    engine::SceneCaptureImage high, updated, fresh_updated, fresh_high;
+    if (!diffuse_capture(window, renderer, high_bake, high) ||
+        !environment.set_settings(changed_sky) || !frames(window, renderer, 2) ||
+        !diffuse_capture(window, renderer, high_bake, updated))
+    {
+        return false;
+    }
+    changed_sky.atmosphere_enabled = false;
+    if (!environment.set_settings(changed_sky) || !frames(window, renderer, 2))
+    {
+        return false;
+    }
+    changed_sky.atmosphere_enabled = true;
+    if (!environment.set_settings(changed_sky) ||
+        !diffuse_capture(window, renderer, high_bake, fresh_updated) ||
+        !expect(difference(updated, fresh_updated) < 0.00001,
+                "shared medium edits invalidate previously rendered observers") ||
+        !environment.set_settings(sky) ||
+        !diffuse_capture(window, renderer, high_bake, fresh_high) ||
+        !expect(difference(high, fresh_high) < 0.00001,
+                "moving a capture vertically regenerates its sky-view LUT"))
+    {
+        return false;
+    }
+
     sun_settings.intensity = 2;
     if (!sun.set_settings(sun_settings) || !capture(window, renderer, main_after_bake) ||
         !expect(difference(exposed, main_after_bake) < 0.0001,

@@ -5,14 +5,43 @@
 
 #include "runtime/core/guid_map.hpp"
 #include "runtime/resource/codecs/model_value_utils.hpp"
+#include "runtime/resource/mesh_storage.hpp"
 #include "runtime/resource/types/skeleton_resource.hpp"
 #include "runtime/utils/mesh_utils.hpp"
-#include <set>
 
 #include <utility>
 
 namespace engine
 {
+std::uint64_t resource_detail::Payload<schema::AssetKind::mesh>::cpu_payload_capacity(
+    const schema::MeshDataT& mesh) noexcept
+{
+    ENGINE_PROFILE_FUNCTION_PROBE();
+    const auto bytes = []<typename T>(const std::vector<T>& values) -> std::uint64_t
+    { return static_cast<std::uint64_t>(values.capacity()) * sizeof(T); };
+    const auto meshlet_bytes =
+        [&](const std::unique_ptr<schema::MeshletDataT>& data) -> std::uint64_t
+    {
+        return data ? bytes(data->indices) + bytes(data->indices16) + bytes(data->meshlets) +
+                          bytes(data->submeshes)
+                    : 0;
+    };
+    auto total = bytes(mesh.vertices) + bytes(mesh.indices) + bytes(mesh.texcoords) +
+                 bytes(mesh.tangents) + bytes(mesh.colors) + bytes(mesh.submeshes) +
+                 bytes(mesh.skin) + bytes(mesh.mesh_to_skeleton) + bytes(mesh.lightmap_texcoords) +
+                 bytes(mesh.lods) + meshlet_bytes(mesh.meshlets) + bytes(mesh.indices16) +
+                 bytes(mesh.texcoords32) + bytes(mesh.tangents32) +
+                 bytes(mesh.lightmap_texcoords32);
+    for (const auto& lod : mesh.lods)
+    {
+        if (lod)
+        {
+            total += bytes(lod->indices) + bytes(lod->indices16) + bytes(lod->submeshes) +
+                     meshlet_bytes(lod->meshlets);
+        }
+    }
+    return total;
+}
 
 bool MeshResourceCodec::validate(const schema::MeshDataT& data)
 {
@@ -61,19 +90,33 @@ bool MeshResourceCodec::decode(const schema::AssetEntryT& entry, ByteView payloa
                                std::unique_ptr<Resource>& output, std::string& error) const
 {
     ENGINE_PROFILE_FUNCTION();
-    const auto validate = [](ByteView payload, std::string& error)
+    if (output)
     {
-        ENGINE_PROFILE_FUNCTION_PROBE();
-        return resource_decode_detail::verify_flatbuffer(payload, schema::VerifyMeshDataBuffer,
-                                                         "Invalid Mesh FlatBuffer", error);
-    };
-    return resource_decode_detail::decode_flatbuffer<ResourceType>(
-        entry, payload, 64U * 1024U * 1024U, validate,
-        [](const std::uint8_t* bytes)
-        {
-            ENGINE_PROFILE_FUNCTION_PROBE();
-            return schema::UnPackMeshData(bytes);
-        }, output, error);
+        error = "Resource output must be empty";
+        return false;
+    }
+    if (entry.kind != ResourceType::asset_kind || payload.empty() ||
+        payload.size() > 64U * 1024U * 1024U)
+    {
+        error = "Invalid resource kind or payload size";
+        return false;
+    }
+    if (!resource_decode_detail::verify_flatbuffer(payload, schema::VerifyMeshDataBuffer,
+                                                   "Invalid Mesh FlatBuffer", error))
+    {
+        return false;
+    }
+    auto mesh = schema::UnPackMeshData(reinterpret_cast<const std::uint8_t*>(payload.data()));
+    const bool prepared =
+        mesh->optimize_storage ? mesh_storage::compact(*mesh) : mesh_storage::expand(*mesh);
+    if (!prepared)
+    {
+        error = "Conflicting mesh stream encodings";
+        return false;
+    }
+    output = std::make_unique<MeshResource>(entry, std::move(*mesh));
+    error.clear();
+    return true;
 }
 
 bool MeshResourceCodec::validate_data(const Resource& resource, std::string& error) const

@@ -18,6 +18,28 @@ namespace engine::render_detail
 {
 namespace
 {
+bool shares_meshlet_indices(const schema::MeshletDataT& meshlets,
+                            mesh_storage::MeshIndexView regular)
+{
+    ENGINE_PROFILE_FUNCTION_PROBE();
+    if (meshlets.uses_parent_indices)
+    {
+        return true;
+    }
+    const auto view = mesh_storage::meshlet_indices(meshlets, regular);
+    if (view.size() != regular.size())
+    {
+        return false;
+    }
+    if (!view.narrow.empty())
+    {
+        return regular.narrow.empty() ? std::ranges::equal(view.narrow, regular.wide)
+                                      : std::ranges::equal(view.narrow, regular.narrow);
+    }
+    return regular.narrow.empty() ? std::ranges::equal(view.wide, regular.wide)
+                                  : std::ranges::equal(view.wide, regular.narrow);
+}
+
 enum class VertexStorage
 {
     aligned,
@@ -219,14 +241,15 @@ GpuGeometry::~GpuGeometry() noexcept
     release();
 }
 
-bool GpuGeometry::IndexBuffer::upload(std::span<const std::uint32_t> source)
+bool GpuGeometry::IndexBuffer::upload(mesh_storage::MeshIndexView source)
 {
     ENGINE_PROFILE_FUNCTION();
     if (source.empty() || source.size() > UINT32_MAX / sizeof(std::uint16_t))
     {
         return false;
     }
-    const bool compact = *std::ranges::max_element(source) <= UINT16_MAX;
+    const bool compact =
+        !source.narrow.empty() || *std::ranges::max_element(source.wide) <= UINT16_MAX;
     // Debug shaders read uint32 words, including the final pair of packed indices.
     const std::uint64_t padded_count = source.size() + (compact && source.size() % 2 != 0);
     const auto element_size = compact ? sizeof(std::uint16_t) : sizeof(std::uint32_t);
@@ -241,11 +264,19 @@ bool GpuGeometry::IndexBuffer::upload(std::span<const std::uint32_t> source)
     {
         memory = bgfx::alloc(size);
         auto* packed = reinterpret_cast<std::uint16_t*>(memory->data);
-        std::ranges::transform(source, packed, [](std::uint32_t index)
-                               {
-            ENGINE_PROFILE_FUNCTION_PROBE();
-            return static_cast<std::uint16_t>(index);
-        });
+        if (!source.narrow.empty())
+        {
+            std::memcpy(packed, source.narrow.data(), source.narrow.size_bytes());
+        }
+        else
+        {
+            std::ranges::transform(source.wide, packed,
+                                   [](std::uint32_t index)
+                                   {
+                                       ENGINE_PROFILE_FUNCTION_PROBE();
+                                       return static_cast<std::uint16_t>(index);
+                                   });
+        }
         if (padded_count != source.size())
         {
             packed[source.size()] = 0;
@@ -253,7 +284,7 @@ bool GpuGeometry::IndexBuffer::upload(std::span<const std::uint32_t> source)
     }
     else
     {
-        memory = bgfx::copy(source.data(), size);
+        memory = bgfx::copy(source.wide.data(), size);
     }
     handle = bgfx::createIndexBuffer(memory, BGFX_BUFFER_COMPUTE_READ |
                                                  (compact ? 0 : BGFX_BUFFER_INDEX32));
@@ -277,7 +308,7 @@ void GpuGeometry::IndexBuffer::release() noexcept
     *this = {};
 }
 
-bool GpuGeometry::create_base_indices(std::span<const std::uint32_t> source)
+bool GpuGeometry::create_base_indices(mesh_storage::MeshIndexView source)
 {
     ENGINE_PROFILE_FUNCTION();
     return !bgfx::isValid(indices_.handle) && indices_.upload(source);
@@ -350,13 +381,15 @@ bool GpuGeometry::pack_vertices(const schema::MeshDataT& data,
     packed.resize(positions.size());
     minimum.fill(std::numeric_limits<float>::max());
     maximum.fill(std::numeric_limits<float>::lowest());
+    const bool has_uv = mesh_storage::texcoord_count(data) != 0;
+    const bool has_lightmap_uv = mesh_storage::lightmap_texcoord_count(data) != 0;
     for (std::size_t index = 0; index < packed.size(); ++index)
     {
         const auto& source = positions[index];
         const auto& tangent = tangents[index];
-        const auto uv = data.texcoords.empty() ? schema::Vec2{} : data.texcoords[index];
+        const auto uv = has_uv ? mesh_storage::texcoord(data, index) : schema::Vec2{};
         const auto lightmap_uv =
-            data.lightmap_texcoords.empty() ? schema::Vec2{} : data.lightmap_texcoords[index];
+            has_lightmap_uv ? mesh_storage::lightmap_texcoord(data, index) : schema::Vec2{};
         const auto color = data.colors.empty() ? schema::Color{1, 1, 1, 1} : data.colors[index];
         const double normal_length =
             std::hypot(static_cast<double>(source.nx()), static_cast<double>(source.ny()),
@@ -558,7 +591,7 @@ bool GpuGeometry::create(const MeshRenderer& renderer, VertexPages* pages,
                 copy_vertex_data(packed, storage, stride, attribute_offset), layout,
                 BGFX_BUFFER_COMPUTE_READ);
         }
-        if (!vertices_ready() || !create_base_indices(data->indices))
+        if (!vertices_ready() || !create_base_indices(mesh_storage::indices(*data)))
         {
             release();
             return false;
@@ -569,7 +602,7 @@ bool GpuGeometry::create(const MeshRenderer& renderer, VertexPages* pages,
     {
         Lod lod;
         lod.submeshes = level->submeshes;
-        if (!lod.indices.upload(level->indices))
+        if (!lod.indices.upload(mesh_storage::indices(*level)))
         {
             release();
             return false;
@@ -777,24 +810,26 @@ std::uint64_t GpuGeometry::meshlet_upload_bytes(bool debug) const noexcept
     {
         return 0;
     }
-    const auto bytes = [&](const auto& regular, const schema::MeshletDataT* meshlets)
+    const auto bytes =
+        [&](mesh_storage::MeshIndexView regular, const schema::MeshletDataT* meshlets)
     {
         ENGINE_PROFILE_FUNCTION_PROBE();
         if (!meshlets)
         {
             return std::uint64_t{0};
         }
-        const auto index_bytes = meshlets_.empty() && meshlets->indices != regular
-                                     ? meshlets->indices.size() * sizeof(std::uint32_t)
-                                     : 0;
+        const auto index_bytes =
+            meshlets_.empty() && !shares_meshlet_indices(*meshlets, regular)
+                ? mesh_storage::meshlet_indices(*meshlets, regular).size() * sizeof(std::uint32_t)
+                : 0;
         const auto debug_bytes =
             debug && !meshlet_debug_ready_ ? meshlets->meshlets.size() * sizeof(std::uint32_t) : 0;
         return static_cast<std::uint64_t>(index_bytes) + debug_bytes;
     };
-    auto total = bytes(mesh->indices, mesh->meshlets.get());
+    auto total = bytes(mesh_storage::indices(*mesh), mesh->meshlets.get());
     for (const auto& lod : mesh->lods)
     {
-        total += bytes(lod->indices, lod->meshlets.get());
+        total += bytes(mesh_storage::indices(*lod), lod->meshlets.get());
     }
     return total;
 }
@@ -828,8 +863,10 @@ bool GpuGeometry::prepare_meshlets(bool debug)
             continue;
         }
         auto& buffers = meshlets_[level];
-        const auto& regular = level == 0 ? data->indices : data->lods[level - 1]->indices;
-        if (needs_indices && source->indices != regular && !buffers.indices.upload(source->indices))
+        const auto regular = level == 0 ? mesh_storage::indices(*data)
+                                        : mesh_storage::indices(*data->lods[level - 1]);
+        if (needs_indices && !shares_meshlet_indices(*source, regular) &&
+            !buffers.indices.upload(mesh_storage::meshlet_indices(*source, regular)))
         {
             release_meshlets();
             return false;

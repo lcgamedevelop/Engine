@@ -3,6 +3,7 @@
 #include "runtime/performance/profiling.hpp"
 #include "editor/mesh/mesh_lod_settings.hpp"
 
+#include "runtime/resource/mesh_storage.hpp"
 #include "runtime/utils/mesh_utils.hpp"
 
 #include <meshoptimizer.h>
@@ -136,20 +137,23 @@ bool generate_mesh_lods(schema::MeshDataT& mesh, const toml::table& meta, std::s
     // seam locks prevent collapses across independently shaded UV/normal/tangent charts.
     std::vector<float> attributes;
     std::vector<float> weights{0.5F, 0.5F, 0.5F};
+    const bool has_uv = mesh_storage::texcoord_count(mesh) != 0;
+    const bool has_lightmap_uv = mesh_storage::lightmap_texcoord_count(mesh) != 0;
+    const bool has_tangents = mesh_storage::tangent_count(mesh) != 0;
     const auto extend = [&](std::size_t count, float weight)
     {
         ENGINE_PROFILE_FUNCTION_PROBE();
         weights.insert(weights.end(), count, weight);
     };
-    if (!mesh.texcoords.empty())
+    if (has_uv)
     {
         extend(2, 1.0F);
     }
-    if (!mesh.lightmap_texcoords.empty())
+    if (has_lightmap_uv)
     {
         extend(2, 1.0F);
     }
-    if (!mesh.tangents.empty())
+    if (has_tangents)
     {
         extend(4, 0.25F);
     }
@@ -174,20 +178,23 @@ bool generate_mesh_lods(schema::MeshDataT& mesh, const toml::table& meta, std::s
         attributes.insert(attributes.end(), {static_cast<float>(vertex.nx() / length),
                                              static_cast<float>(vertex.ny() / length),
                                              static_cast<float>(vertex.nz() / length)});
-        const auto uv = [&](const auto& values)
+        const auto append_uv = [&](schema::Vec2 uv)
         {
             ENGINE_PROFILE_FUNCTION_PROBE();
-            if (!values.empty())
-            {
-                attributes.push_back(static_cast<float>(values[index].x()));
-                attributes.push_back(static_cast<float>(values[index].y()));
-            }
+            attributes.push_back(static_cast<float>(uv.x()));
+            attributes.push_back(static_cast<float>(uv.y()));
         };
-        uv(mesh.texcoords);
-        uv(mesh.lightmap_texcoords);
-        if (!mesh.tangents.empty())
+        if (has_uv)
         {
-            const auto& tangent = mesh.tangents[index];
+            append_uv(mesh_storage::texcoord(mesh, index));
+        }
+        if (has_lightmap_uv)
+        {
+            append_uv(mesh_storage::lightmap_texcoord(mesh, index));
+        }
+        if (has_tangents)
+        {
+            const auto tangent = mesh_storage::tangent(mesh, index);
             attributes.insert(attributes.end(),
                               {static_cast<float>(tangent.x()), static_cast<float>(tangent.y()),
                                static_cast<float>(tangent.z()), static_cast<float>(tangent.w())});
@@ -223,13 +230,21 @@ bool generate_mesh_lods(schema::MeshDataT& mesh, const toml::table& meta, std::s
             }
         }
     }
+    const auto topology = mesh_storage::indices(mesh);
+    std::vector<std::uint32_t> widened;
+    auto source_indices = topology.wide;
+    if (!topology.narrow.empty())
+    {
+        topology.copy_to(widened);
+        source_indices = widened;
+    }
     std::vector<schema::MeshSubmesh> parts = mesh.submeshes;
     if (parts.empty())
     {
-        parts.emplace_back(0, static_cast<std::uint32_t>(mesh.indices.size()), 0);
+        parts.emplace_back(0, static_cast<std::uint32_t>(source_indices.size()), 0);
     }
     std::vector<std::unique_ptr<schema::MeshLodDataT>> levels;
-    std::size_t previous_count = mesh.indices.size();
+    std::size_t previous_count = source_indices.size();
     for (std::size_t level = 0; level < settings.triangle_ratios.size(); ++level)
     {
         auto lod = std::make_unique<schema::MeshLodDataT>();
@@ -243,7 +258,7 @@ bool generate_mesh_lods(schema::MeshDataT& mesh, const toml::table& meta, std::s
                                                                settings.triangle_ratios[level])) *
                 3;
             const auto count = meshopt_simplifyWithAttributes(
-                indices.data(), mesh.indices.data() + part.first_index(), part.index_count(),
+                indices.data(), source_indices.data() + part.first_index(), part.index_count(),
                 vertex_positions.front().data(), mesh.vertices.size(), sizeof(vertex_positions[0]),
                 attributes.data(), attribute_count * sizeof(float), weights.data(), attribute_count,
                 locks.data(), target, settings.max_relative_error, meshopt_SimplifyLockBorder,
@@ -251,8 +266,8 @@ bool generate_mesh_lods(schema::MeshDataT& mesh, const toml::table& meta, std::s
             // Keep a material group intact if no useful simplification was possible.
             if (count == 0)
             {
-                indices.assign(mesh.indices.begin() + part.first_index(),
-                               mesh.indices.begin() + part.first_index() + part.index_count());
+                indices.assign(source_indices.begin() + part.first_index(),
+                               source_indices.begin() + part.first_index() + part.index_count());
             }
             else
             {

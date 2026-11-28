@@ -6,7 +6,9 @@
 #include "runtime/render/passes/ambient_occlusion_pass.hpp"
 #include "runtime/render/passes/atmosphere_pass.hpp"
 #include "runtime/render/passes/clustered_lighting_pass.hpp"
+#include "runtime/render/passes/lighting_graph.hpp"
 #include "runtime/render/passes/debug_draw_pass.hpp"
+#include "runtime/render/passes/scene_graph.hpp"
 #include "runtime/render/passes/hdr_post_process_pass.hpp"
 #include "runtime/render/passes/planar_reflection_pass.hpp"
 #include "runtime/render/passes/screen_space_reflection_pass.hpp"
@@ -26,6 +28,7 @@
 #include <future>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <vector>
 
@@ -84,6 +87,10 @@ struct TexturePrepareWork
 // 独占当前场景GPU资源；由RenderSystem在bgfx关闭前释放，组件借用不跨帧保存。
 struct RenderSystem::SceneGpuResources
 {
+    engine::FrameGraphPlan scene_preparation_plan;
+    std::optional<render_detail::ScenePreparationKey> scene_preparation_key;
+    engine::FrameGraphPlan main_scene_plan;
+    std::optional<render_detail::SceneGraphKey> main_scene_key;
     std::vector<RenderViewStats> view_stats;
     render_detail::RenderFrameData frame_data;
     bool frame_complete = false;
@@ -151,6 +158,7 @@ struct RenderSystem::SceneGpuResources
     std::vector<float> capture_pixels;
     render_detail::GpuReadback capture_completion;
     std::uint16_t capture_width = 0, capture_height = 0;
+    engine::FrameGraphPlan capture_plan;
     bool capture_pending = false;
     bool capture_prepared = false;
     bool capture_cancelled = false;
@@ -169,6 +177,8 @@ struct RenderSystem::SceneGpuResources
         std::uint64_t ibl_generation = 0;
         render_detail::ShadowPass shadow;
         std::array<render_detail::ClusteredLightingPass, 4> clusters;
+        std::array<render_detail::LightingGraph, 4> lighting_graphs;
+        std::array<render_detail::PlanarGraph, 2> planar_graphs;
         std::array<render_detail::PlanarReflectionPass, 2> planar;
         render_detail::SurfacePass surface_pass;
         render_detail::ScreenSpaceReflectionPass reflections;

@@ -14,6 +14,7 @@ class UsdImporter final : public editor::asset_pipeline::AssetImporter
 public:
     [[nodiscard]] std::string_view id() const noexcept override;
     [[nodiscard]] schema::AssetKind kind() const noexcept override;
+    [[nodiscard]] std::string_view default_meta() const noexcept override;
     [[nodiscard]] bool matches(const std::filesystem::path& source) const override;
     [[nodiscard]] bool discover(const editor::asset_pipeline::ImportAsset& source,
                                 std::vector<editor::asset_pipeline::ImportSubresource>& output,
@@ -30,6 +31,7 @@ public:
 private:
     struct ParsedModel
     {
+        bool optimize_mesh = true;
         std::string source_hash;
         schema::ModelDataT model;
         std::map<std::string, schema::MeshDataT> meshes;

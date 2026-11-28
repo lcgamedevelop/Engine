@@ -2,6 +2,7 @@
 #include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 
+#include "runtime/resource/mesh_storage.hpp"
 #include "runtime/utils/mesh_utils.hpp"
 
 #include <meshoptimizer.h>
@@ -162,7 +163,12 @@ bool generate_meshlets(schema::MeshDataT& mesh, const toml::table& meta, std::st
     }
     if (enabled && mesh.skin.empty() && mesh.skeleton_guid.empty())
     {
-        if (!build(mesh.vertices, mesh.indices, mesh.submeshes, candidate.meshlets))
+        if (!mesh_storage::expand(candidate))
+        {
+            error = "Cannot generate meshlets for an ambiguous mesh encoding";
+            return false;
+        }
+        if (!build(candidate.vertices, candidate.indices, candidate.submeshes, candidate.meshlets))
         {
             error = "Meshlet generation exceeds the index capacity";
             return false;

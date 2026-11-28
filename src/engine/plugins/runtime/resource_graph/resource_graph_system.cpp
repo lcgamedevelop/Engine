@@ -813,6 +813,7 @@ struct ResourceGraphSystem::State : std::enable_shared_from_this<State>
         ENGINE_PROFILE_FUNCTION();
         const auto& info = candidate.info();
         if (!GuidMap::valid_guid(info.guid) || !GuidMap::valid_path(info.path) ||
+            info.kind > schema::AssetKind::MAX ||
             info.path.starts_with("editor://") || info.location || info.kind != candidate.kind())
         {
             return fail(ResourceError::invalid_data, "Invalid memory resource identity");
@@ -886,14 +887,18 @@ bool ResourceGraphSystem::State::observe_memory(const ResourceMemoryQuery& query
         ENGINE_PROFILE_FUNCTION_PROBE();
         const auto* payload = record.value ? record.value.get() : record.candidate.get();
         const auto capacity = payload ? payload->cpu_payload_capacity() : std::nullopt;
+        auto& kind = output.kinds[static_cast<std::size_t>(record.info.kind)];
         if (capacity)
         {
             ++output.measured_payloads;
             output.measured_cpu_payload_bytes += *capacity;
+            ++kind.measured_payloads;
+            kind.measured_cpu_payload_bytes += *capacity;
         }
         else if (payload)
         {
             ++output.unmeasured_payloads;
+            ++kind.unmeasured_payloads;
         }
         if (query.guid.empty() || query.guid == record.info.guid)
         {

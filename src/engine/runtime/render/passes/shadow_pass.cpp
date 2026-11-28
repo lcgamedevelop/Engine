@@ -1,4 +1,5 @@
 #include "runtime/render/passes/shadow_pass.hpp"
+#include "runtime/render/vsm/virtual_shadow_cache.hpp"
 #include "runtime/render/vsm/vsm_types.hpp"
 
 #include "runtime/performance/function_profile.hpp"
@@ -7,6 +8,7 @@
 #include "runtime/render/render_submission.hpp"
 #include "runtime/render/render_system.hpp"
 #include "runtime/render/resources/gpu_program.hpp"
+#include "runtime/resource/mesh_storage.hpp"
 #include "runtime/schema/shader_generated.h"
 
 #include "fs_shadow.bin.h"
@@ -306,7 +308,7 @@ bool ShadowPass::draw(const RenderFrameData& frame_data, const RenderSettings& s
                       ShadowFrame& frame, bgfx::TextureHandle fallback, const RenderConfig& config,
                       std::span<const LocalShadowLight> local_lights,
                       std::span<ClusterLight> lights, const float* camera_world,
-                      bgfx::ViewId base_view, ShadowAtlasView atlas_view,
+                      bgfx::ViewId base_view, ShadowAtlasView atlas_view, std::size_t observer,
                       const std::span<const std::uint64_t>* caster_ids)
 {
     ENGINE_PROFILE_ZONE("Render.shadowSubmit");
@@ -324,6 +326,7 @@ bool ShadowPass::draw(const RenderFrameData& frame_data, const RenderSettings& s
         (cascade_count != 0 && settings.shadow_resolution > resolution_) ||
         config.local_shadow_tile_size == 0 || config.local_shadow_tile_size > resolution_ ||
         camera_world == nullptr || !finite_matrix(camera_world) ||
+        observer >= observer_tiles_.size() || maximum_views > tile_capacity ||
         atlas_view.index >= atlas_view.count ||
         std::uint32_t{base_view} + maximum_views > bgfx::getCaps()->limits.maxViews)
     {
@@ -665,8 +668,8 @@ bool ShadowPass::draw(const RenderFrameData& frame_data, const RenderSettings& s
         release_solid_batches();
     }
 
-    std::vector<VsmPageDraw> dirty_pages;
-    dirty_pages.reserve(pages.size());
+    std::uint32_t reused = 0;
+    std::size_t dirty_count = 0;
     std::vector<CachedPage> pending_cache;
     bool dirty_local_pages = false;
     [[maybe_unused]] std::int64_t shared_local_pages = 0;
@@ -696,15 +699,16 @@ bool ShadowPass::draw(const RenderFrameData& frame_data, const RenderSettings& s
                    prior.caster_clip_xy[2] >= page.caster_clip_xy[2] &&
                    prior.caster_clip_xy[3] >= page.caster_clip_xy[3];
         };
-        const auto cached = std::find_if(
-            cached_pages_.begin(), cached_pages_.end(), [&](const CachedPage& prior)
-            {
-                ENGINE_PROFILE_FUNCTION_PROBE();
-                return prior.x == page.x && prior.y == page.y && same_projection(prior);
-            });
+        const auto cached = std::find_if(cached_pages_.begin(), cached_pages_.end(),
+                                         [&](const CachedPage& prior)
+                                         {
+                                             ENGINE_PROFILE_FUNCTION_PROBE();
+                                             return prior.x == page.x && prior.y == page.y &&
+                                                    same_projection(prior);
+                                         });
         if (cached == cached_pages_.end())
         {
-            dirty_pages.push_back(page);
+            ++dirty_count;
             dirty_local_pages |= index >= cascade_count;
             if (cacheable)
             {
@@ -714,35 +718,31 @@ bool ShadowPass::draw(const RenderFrameData& frame_data, const RenderSettings& s
             }
             continue;
         }
+        reused |= std::uint32_t{1} << index;
         if (index >= cascade_count)
         {
             ++reused_local_pages;
             shared_local_pages += cached->producer_view != page.view_id;
         }
     }
-    ENGINE_PROFILE_PLOT("Render.shadowCacheHit", static_cast<std::int64_t>(dirty_pages.empty()));
-    ENGINE_PROFILE_PLOT("Render.shadowSubmittedPages",
-                        static_cast<std::int64_t>(dirty_pages.size()));
+    ENGINE_PROFILE_PLOT("Render.shadowCacheHit", static_cast<std::int64_t>(dirty_count == 0));
+    ENGINE_PROFILE_PLOT("Render.shadowSubmittedPages", static_cast<std::int64_t>(dirty_count));
     ENGINE_PROFILE_PLOT("Render.shadowSharedLocalPages", shared_local_pages);
     ENGINE_PROFILE_PLOT("Render.shadowReusedLocalPages", reused_local_pages);
     if (cacheable && !caster_ids && base_view == shadow_view)
     {
         // Reflections can see the same inputs earlier in one frame. Require the
         // signature to survive between two main-view submissions before uploading.
-        if (solid_inputs_seen_ && !dirty_pages.empty() && solid_sources_.empty() &&
+        if (solid_inputs_seen_ && dirty_count != 0 && solid_sources_.empty() &&
             bgfx::isValid(solid_batch_program_) && frame_data.meshes.size() > 1)
         {
             prepare_solid_batches(frame_data);
         }
         solid_inputs_seen_ = true;
     }
-    if (dirty_pages.empty())
-    {
-        return true;
-    }
-    // Prepare caster world bounds once for the whole atlas, preserving page/view order.
+    // A failed partial encode also invalidates reductions derived from the old local depth.
     local_depth_revision_ += dirty_local_pages;
-    if (!draw_pages(frame_data, dirty_pages, target))
+    if (!encode_pages(frame_data, pages, reused, target, observer_tiles_[observer]))
     {
         return false;
     }
@@ -783,10 +783,10 @@ void ShadowPass::prepare_solid_batches(const RenderFrameData& frame)
             continue;
         }
         const auto& data = *source.data;
+        const auto topology = mesh_storage::indices(data);
         // Use the cache for smaller draw-heavy participants. Large meshes keep their own buffers.
-        if (data.vertices.empty() || data.vertices.size() > vertex_limit / 16 ||
-            data.indices.empty() || data.indices.size() % 3 != 0 ||
-            data.indices.size() > memory_limit / sizeof(std::uint16_t))
+        if (data.vertices.empty() || data.vertices.size() > vertex_limit / 16 || topology.empty() ||
+            topology.size() % 3 != 0 || topology.size() > memory_limit / sizeof(std::uint16_t))
         {
             continue;
         }
@@ -809,31 +809,34 @@ void ShadowPass::prepare_solid_batches(const RenderFrameData& frame)
             continue;
         }
         std::size_t total_indices = 0;
-        const bool complete = std::ranges::all_of(data.submeshes, [&](const auto& range)
+        const bool complete = std::ranges::all_of(
+            data.submeshes,
+            [&](const auto& range)
+            {
+                ENGINE_PROFILE_FUNCTION_PROBE();
+                if (range.first_index() != total_indices || range.index_count() % 3 != 0 ||
+                    range.index_count() > topology.size() - total_indices ||
+                    !compatible(range.material_slot()))
+                {
+                    return false;
+                }
+                total_indices += range.index_count();
+                return true;
+            });
+        const auto valid_vertex = [&](std::uint32_t value)
         {
             ENGINE_PROFILE_FUNCTION_PROBE();
-            if (range.first_index() != total_indices || range.index_count() % 3 != 0 ||
-                range.index_count() > data.indices.size() - total_indices ||
-                !compatible(range.material_slot()))
-            {
-                return false;
-            }
-            total_indices += range.index_count();
-            return true;
-        });
-        if (!complete || (!data.submeshes.empty() && total_indices != data.indices.size()) ||
-            !std::ranges::all_of(data.indices,
-                                [&](auto value)
-                                {
-                                    ENGINE_PROFILE_FUNCTION_PROBE();
-                                    return value < data.vertices.size();
-                                }))
+            return value < data.vertices.size();
+        };
+        if (!complete || (!data.submeshes.empty() && total_indices != topology.size()) ||
+            !std::ranges::all_of(topology.wide, valid_vertex) ||
+            !std::ranges::all_of(topology.narrow, valid_vertex))
         {
             continue;
         }
         const auto matrix = std::bit_cast<std::array<std::uint64_t, 16>>(source.world);
-        const auto state = BGFX_STATE_WRITE_Z | BGFX_STATE_DEPTH_TEST_LESS |
-                           cull_state(cull, source.model.data());
+        const auto state =
+            BGFX_STATE_WRITE_Z | BGFX_STATE_DEPTH_TEST_LESS | cull_state(cull, source.model.data());
         groups[{matrix, state}].push_back(index);
     }
     bgfx::VertexLayout layout;
@@ -879,20 +882,22 @@ void ShadowPass::prepare_solid_batches(const RenderFrameData& frame)
         {
             continue;
         }
-        std::ranges::sort(group, {}, [&](std::size_t index)
-        {
-            ENGINE_PROFILE_FUNCTION_PROBE();
-            return frame.meshes[index].center;
-        });
+        std::ranges::sort(group, {},
+                          [&](std::size_t index)
+                          {
+                              ENGINE_PROFILE_FUNCTION_PROBE();
+                              return frame.meshes[index].center;
+                          });
         for (const auto source : group)
         {
             const auto& data = *frame.meshes[source].data;
+            const auto topology = mesh_storage::indices(data);
             if (positions.size() + data.vertices.size() > vertex_limit)
             {
                 upload(key.second);
             }
             const auto bytes = (positions.size() + data.vertices.size()) * sizeof(Position) +
-                               (indices.size() + data.indices.size()) * sizeof(std::uint16_t);
+                               (indices.size() + topology.size()) * sizeof(std::uint16_t);
             if (bytes > memory_limit - solid_batch_bytes_)
             {
                 continue;
@@ -900,36 +905,103 @@ void ShadowPass::prepare_solid_batches(const RenderFrameData& frame)
             const auto base = positions.size();
             const auto draws = std::max<std::size_t>(1, data.submeshes.size());
             ranges.push_back({source, static_cast<std::uint32_t>(indices.size()),
-                              static_cast<std::uint32_t>(data.indices.size()),
+                              static_cast<std::uint32_t>(topology.size()),
                               static_cast<std::uint32_t>(draws)});
             for (const auto& point : data.vertices)
             {
                 positions.push_back({point.x(), point.y(), point.z()});
             }
-            for (const auto index : data.indices)
+            for (std::size_t index = 0; index < topology.size(); ++index)
             {
-                indices.push_back(static_cast<std::uint16_t>(base + index));
+                indices.push_back(static_cast<std::uint16_t>(base + topology[index]));
             }
         }
         upload(key.second);
     }
 }
 
+bool ShadowPass::TileGraph::prepare(std::span<const VsmPageDraw> pages, std::uint32_t cached_mask)
+{
+    if (pages.size() > tile_capacity)
+    {
+        return false;
+    }
+    const auto tile = [](const VsmPageDraw& p) { return AtlasTile{p.view_id, p.x, p.y, p.size}; };
+    if (reused == cached_mask && count == pages.size() &&
+        std::equal(pages.begin(), pages.end(), layout.begin(),
+                   [&](const auto& draw, const auto& prior) { return tile(draw) == prior; }) &&
+        plan.begin_cached_frame())
+    {
+        return true;
+    }
+    // One version names one region of the atlas. The allocator gives each consumer a disjoint
+    // region; a cache hit imports that region from its preceding producer, even across observers.
+    constexpr FrameResourceId caster_streams = 0;
+    constexpr FrameResourceId reads[]{caster_streams};
+    std::array<FrameResourceId, tile_capacity + 1> imports{caster_streams};
+    std::array<FrameResourceId, tile_capacity> regions{};
+    std::array<FramePassDeclaration, tile_capacity> passes{};
+    std::size_t import_count = 1, writers = 0;
+    for (std::size_t i = 0; i < pages.size(); ++i)
+    {
+        const auto& page = pages[i];
+        if (page.view_id >= frame_pass_capacity || page.size == 0 ||
+            std::any_of(pages.begin(), pages.begin() + i, [&](const auto& prior)
+                        { return page.view_id == prior.view_id || overlaps(page, prior); }))
+        {
+            return false;
+        }
+        regions[i] = static_cast<FrameResourceId>(1 + page.view_id);
+        if ((cached_mask & (std::uint32_t{1} << i)) != 0)
+        {
+            imports[import_count++] = regions[i];
+        }
+        else
+        {
+            passes[writers++] = {static_cast<FramePassId>(i), reads,
+                                 std::span(regions).subspan(i, 1)};
+        }
+    }
+    FramePlanError error;
+    if (!plan.compile(std::span(passes).first(writers), std::span(imports).first(import_count),
+                      std::span(regions).first(pages.size()), error))
+    {
+        return false;
+    }
+    std::transform(pages.begin(), pages.end(), layout.begin(), tile);
+    reused = cached_mask;
+    count = pages.size();
+    return true;
+}
+
 bool ShadowPass::draw_pages(const RenderFrameData& frame_data, std::span<const VsmPageDraw> pages,
                             const VsmPageTarget& target)
 {
     ENGINE_PROFILE_FUNCTION();
+    return encode_pages(frame_data, pages, 0, target, virtual_tiles_);
+}
+
+bool ShadowPass::encode_pages(const RenderFrameData& frame_data, std::span<const VsmPageDraw> pages,
+                              std::uint32_t reused, const VsmPageTarget& target, TileGraph& graph)
+{
+    ENGINE_PROFILE_FUNCTION();
+    if (!graph.prepare(pages, reused))
+    {
+        return false;
+    }
+    FramePlanError error;
+    if (graph.plan.passes().empty())
+    {
+        return graph.plan.perform([](FramePassId) { return false; }, error);
+    }
     if (target.framebuffer.idx == framebuffer_.idx)
     {
         std::erase_if(cached_pages_,
                       [&](const CachedPage& cached)
                       {
-                          ENGINE_PROFILE_FUNCTION_PROBE();
-                          return std::any_of(pages.begin(), pages.end(), [&](const auto& page)
-                                             {
-                              ENGINE_PROFILE_FUNCTION_PROBE();
-                              return overlaps(page, cached);
-                          });
+                          return std::any_of(graph.plan.passes().begin(), graph.plan.passes().end(),
+                                             [&](FramePassId writer)
+                                             { return overlaps(pages[writer], cached); });
                       });
     }
     if (!bgfx::isValid(target.framebuffer) || !bgfx::isValid(program_) ||
@@ -1028,7 +1100,7 @@ bool ShadowPass::draw_pages(const RenderFrameData& frame_data, std::span<const V
             return true;
         };
         if (data->submeshes.empty() &&
-            !collect(0, static_cast<std::uint32_t>(data->indices.size()), 0))
+            !collect(0, static_cast<std::uint32_t>(mesh_storage::indices(*data).size()), 0))
         {
             return false;
         }
@@ -1041,8 +1113,8 @@ bool ShadowPass::draw_pages(const RenderFrameData& frame_data, std::span<const V
         }
         return true;
     };
-    const bool use_packed = target.framebuffer.idx == framebuffer_.idx && !target.caster_ids &&
-                            !solid_batches_.empty();
+    const bool use_packed =
+        target.framebuffer.idx == framebuffer_.idx && !target.caster_ids && !solid_batches_.empty();
     std::vector<std::uint8_t> packed_visible(use_packed ? solid_sources_.size() : 0);
     [[maybe_unused]] std::int64_t solid_draws = 0;
     [[maybe_unused]] std::int64_t packed_draws = 0;
@@ -1128,8 +1200,9 @@ bool ShadowPass::draw_pages(const RenderFrameData& frame_data, std::span<const V
         return true;
     };
 
-    for (const auto& page : pages)
+    const auto submit_page = [&](FramePassId writer)
     {
+        const auto& page = pages[writer];
         if (!page.size || page.view_id >= caps->limits.maxViews ||
             !finite_matrix(page.view.data()) || !finite_matrix(page.projection.data()))
         {
@@ -1140,6 +1213,10 @@ bool ShadowPass::draw_pages(const RenderFrameData& frame_data, std::span<const V
         bgfx::setViewRect(page.view_id, page.x, page.y, page.size, page.size);
         bgfx::setViewClear(page.view_id, BGFX_CLEAR_DEPTH, 0, 1.F, 0);
         bgfx::setViewTransform(page.view_id, page.view.data(), page.projection.data());
+        if (target.virtual_pages && !target.virtual_pages->begin_page_write(target.virtual_batch, page))
+        {
+            return false;
+        }
         bgfx::touch(page.view_id);
         if (target.framebuffer.idx == framebuffer_.idx &&
             std::find(attached_views_.begin(), attached_views_.end(), page.view_id) ==
@@ -1197,13 +1274,19 @@ bool ShadowPass::draw_pages(const RenderFrameData& frame_data, std::span<const V
         {
             submit_packed(page.view_id);
         }
+        return true;
+    };
+    if (!graph.plan.perform(submit_page, error))
+    {
+        return false;
     }
     ENGINE_PROFILE_PLOT("Render.shadowSolidDraws", solid_draws);
     if (use_packed)
     {
         ENGINE_PROFILE_PLOT("Render.shadowPackedDraws", packed_draws);
         ENGINE_PROFILE_PLOT("Render.shadowPackedOriginalDraws", packed_original_draws);
-        ENGINE_PROFILE_PLOT("Render.shadowPackedBytes", static_cast<std::int64_t>(solid_batch_bytes_));
+        ENGINE_PROFILE_PLOT("Render.shadowPackedBytes",
+                            static_cast<std::int64_t>(solid_batch_bytes_));
     }
     return true;
 }

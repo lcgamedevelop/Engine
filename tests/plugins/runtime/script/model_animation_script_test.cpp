@@ -47,13 +47,23 @@ export default class extends Gameplay {
             !first.Destroy() || first.IsValid() || !second.IsValid() || !second.Destroy())
             return false;
         const root = scene?.InstantiateModel('models/character.fbx', 'Character');
-        const otherRoot = scene?.InstantiateModel('models/character.fbx', 'Character');
+        const otherRoot = scene?.InstantiateModel('models/character.fbx', 'Character', true);
+        const fullDetail = scene?.InstantiateModel('models/character.fbx', 'Full detail', false);
         const body = root?.FindChild('Assembly/Body');
         const otherBody = otherRoot?.FindChild('Assembly/Body');
         if (!scene || !root || !otherRoot || !body || !otherBody || !root.IsValid() ||
             scene.InstantiateModel('builtin://meshes/cube', 'Wrong type') !== null ||
             scene.InstantiateModel('missing.fbx', 'Missing') !== null ||
             !(body.GetComponent(MeshRenderer) instanceof MeshRenderer)) return false;
+        const fullDetailBody = fullDetail?.FindChild('Assembly/Body');
+        if (body.GetComponent(MeshRenderer)?.staticLodEnabled !== false ||
+            otherBody.GetComponent(MeshRenderer)?.staticLodEnabled !== true ||
+            fullDetailBody?.GetComponent(MeshRenderer)?.staticLodEnabled !== false ||
+            !fullDetail.Destroy()) return false;
+        for (const invalid of [null, 1, 'false']) {
+            if (scene.InstantiateModel('models/character.fbx', 'Invalid LOD', invalid) !== null ||
+                scene.FindNode('Invalid LOD') !== null) return false;
+        }
         for (const path of ['', '.', '..', '/Assembly', 'Assembly/', 'Assembly//Body',
                             'Assembly/./Body', 'Assembly/../Body', 'Body', 'Missing/Body', 3, null]) {
             if (root.FindChild(path) !== null) return false;

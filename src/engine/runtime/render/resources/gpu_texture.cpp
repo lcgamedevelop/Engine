@@ -4,6 +4,7 @@
 #include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/resource/codecs/texture_resource_codec.hpp"
+#include "runtime/resource/codecs/texture_chunks.hpp"
 #include "runtime/resource/resource.hpp"
 
 #include <basisu/transcoder/basisu_transcoder.h>
@@ -79,12 +80,16 @@ bool block_format(bgfx::TextureFormat::Enum format) noexcept
 {
     ENGINE_PROFILE_FUNCTION();
     return format == bgfx::TextureFormat::BC7 || format == bgfx::TextureFormat::ASTC4x4 ||
-           format == bgfx::TextureFormat::ETC2A;
+           format == bgfx::TextureFormat::ETC2A || format == bgfx::TextureFormat::ETC2;
 }
 std::size_t unit_bytes(bgfx::TextureFormat::Enum format) noexcept
 {
     ENGINE_PROFILE_FUNCTION();
-    return block_format(format) ? 16 : format == bgfx::TextureFormat::RGBA16F ? 8 : 4;
+    if (format == bgfx::TextureFormat::ETC2 || format == bgfx::TextureFormat::RGBA16F)
+    {
+        return 8;
+    }
+    return block_format(format) ? 16 : 4;
 }
 basist::transcoder_texture_format transcode_format(bgfx::TextureFormat::Enum format)
 {
@@ -197,6 +202,9 @@ bool PreparedTexture::describe(ResourceLoader* loader, ResourceHandle source,
     case schema::TextureFormat::astc4x4:
         candidate.format = Format::ASTC4x4;
         break;
+    case schema::TextureFormat::etc2_rgb:
+        candidate.format = Format::ETC2;
+        break;
     case schema::TextureFormat::etc2:
         candidate.format = Format::ETC2A;
         break;
@@ -263,13 +271,12 @@ bool PreparedTexture::prepare()
                                             return part.mip() == mip && part.face() == face;
                                         });
         if (found == data->subresources.end() || byte_offset > found->size() ||
-            bytes > found->size() - byte_offset || found->offset() > data->data.size() ||
-            found->size() > data->data.size() - found->offset())
+            bytes > found->size() - byte_offset ||
+            !texture_storage::read_native(*data, found->offset() + byte_offset, data_bytes))
         {
             data_bytes.clear();
             return false;
         }
-        std::copy_n(data->data.data() + found->offset() + byte_offset, bytes, data_bytes.data());
     }
     else if (data->encoding == schema::TextureEncoding::basis)
     {

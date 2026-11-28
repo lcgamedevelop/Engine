@@ -21,6 +21,31 @@ namespace engine::render_detail
 {
 namespace
 {
+enum class SkyPass : FramePassId
+{
+    transmittance,
+    multiscatter,
+    skyview,
+    background
+};
+
+bool compile_sky(FrameGraphPlan& plan, FramePassId first_pass, FramePlanError& error)
+{
+    constexpr FrameResourceId transmittance = 0, multiscatter = 1, skyview = 2;
+    constexpr FrameResourceId loaded_color = 3, depth = 4, sky_color = 5;
+    constexpr std::array medium{transmittance, multiscatter};
+    constexpr std::array sky_inputs{skyview, transmittance, loaded_color, depth};
+    constexpr std::array imports{loaded_color, depth, transmittance, multiscatter, skyview};
+    const std::array<FramePassDeclaration, 4> stages{
+        {{static_cast<FramePassId>(SkyPass::transmittance), {}, {&transmittance, 1}},
+         {static_cast<FramePassId>(SkyPass::multiscatter), {&transmittance, 1}, {&multiscatter, 1}},
+         {static_cast<FramePassId>(SkyPass::skyview), medium, {&skyview, 1}},
+         {static_cast<FramePassId>(SkyPass::background), sky_inputs, {&sky_color, 1}}}};
+    // Each skipped producer contributes its persistent output after the two scene imports.
+    return plan.compile(std::span{stages}.subspan(first_pass),
+                        std::span{imports}.first(2 + first_pass), {&sky_color, 1}, error);
+}
+
 constexpr std::uint64_t lut_flags =
     BGFX_TEXTURE_COMPUTE_WRITE | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP;
 enum Uniform : std::size_t
@@ -165,13 +190,13 @@ bool AtmospherePass::draw(std::uint64_t scene_id, const RenderSettings& settings
         return false;
     }
     scene_id_ = scene_id;
-    if (!bgfx::isValid(skyview_[view_index]))
+    auto& observer = skyview_[view_index];
+    if (!bgfx::isValid(observer.texture))
     {
         // Longitude wraps; latitude clamps. Each mirror/capture has its own altitude-dependent LUT.
-        skyview_[view_index] =
-            bgfx::createTexture2D(192, 108, false, 1, bgfx::TextureFormat::RGBA16F,
-                                  BGFX_TEXTURE_COMPUTE_WRITE | BGFX_SAMPLER_V_CLAMP);
-        if (!bgfx::isValid(skyview_[view_index]))
+        observer.texture = bgfx::createTexture2D(192, 108, false, 1, bgfx::TextureFormat::RGBA16F,
+                                                 BGFX_TEXTURE_COMPUTE_WRITE | BGFX_SAMPLER_V_CLAMP);
+        if (!bgfx::isValid(observer.texture))
         {
             return false;
         }
@@ -193,20 +218,7 @@ bool AtmospherePass::draw(std::uint64_t scene_id, const RenderSettings& settings
          {static_cast<float>(data.atmosphere_ground_albedo.x()),
           static_cast<float>(data.atmosphere_ground_albedo.y()),
           static_cast<float>(data.atmosphere_ground_albedo.z()), 0}}};
-    if (!medium_valid_ || physical_ != parameters)
-    {
-        physical_ = parameters;
-        set_medium();
-        bgfx::setViewName(atmosphere_transmittance_view, "Atmosphere transmittance");
-        bgfx::setImage(0, medium_[0], 0, bgfx::Access::Write, bgfx::TextureFormat::RGBA16F);
-        bgfx::dispatch(atmosphere_transmittance_view, programs_[0], 32, 8);
-        set_medium();
-        bgfx::setViewName(atmosphere_multiscatter_view, "Atmosphere multiple scattering");
-        bgfx::setTexture(0, samplers_[0], medium_[0]);
-        bgfx::setImage(1, medium_[1], 0, bgfx::Access::Write, bgfx::TextureFormat::RGBA16F);
-        bgfx::dispatch(atmosphere_multiscatter_view, programs_[1], 4, 4);
-        medium_valid_ = true;
-    }
+    const bool update_medium = !medium_valid_ || physical_ != parameters;
     // The upstream model is near-ground, Y-up. Engine world distances are metres, LUT distances km.
     const float altitude = std::clamp(
         float((view.world_origin.y() + view.world[13] - data.atmosphere_ground_height) * 0.001),
@@ -215,42 +227,113 @@ bool AtmospherePass::draw(std::uint64_t scene_id, const RenderSettings& settings
         std::max(data.atmosphere_planet_radius + altitude,
                  std::nextafter(data.atmosphere_planet_radius,
                                 data.atmosphere_planet_radius + data.atmosphere_height));
-    const float lighting[]{settings.atmosphere_sun_radiance[0], settings.atmosphere_sun_radiance[1],
-                           settings.atmosphere_sun_radiance[2], 0};
-    const float view_params[]{-settings.atmosphere_sun_direction[1], radius, 192, 108};
-    set_medium();
-    bgfx::setUniform(uniforms_[radiance], lighting);
-    bgfx::setUniform(uniforms_[camera], view_params);
-    bgfx::setTexture(0, samplers_[0], medium_[0]);
-    bgfx::setTexture(2, samplers_[1], medium_[1]);
-    bgfx::setImage(1, skyview_[view_index], 0, bgfx::Access::Write, bgfx::TextureFormat::RGBA16F);
-    bgfx::setViewName(skyview_compute, "Atmosphere sky-view LUT");
-    bgfx::dispatch(skyview_compute, programs_[2], 24, 14);
-
-    float combined[16]{}, inverted[16]{};
-    bx::mtxMul(combined, view.view, view.projection);
-    bx::mtxInverse(inverted, combined);
-    constexpr float disc_cosine = 0.9999F, disc_scale = 60.0F; // bgfx 53-sky2 solar disc.
-    const float sky_params[]{radius, disc_cosine, disc_scale, 0};
-    const float direction[]{settings.atmosphere_sun_direction[0],
-                            settings.atmosphere_sun_direction[1],
-                            settings.atmosphere_sun_direction[2], 0};
-    // Physical sky participates in the same display exposure/tonemap as lit PBR surfaces.
-    const float clipping[]{bgfx::getCaps()->homogeneousDepth ? -1.0F : 0.0F, 1, 0, 0};
-    set_medium();
-    bgfx::setUniform(uniforms_[inverse], inverted);
-    bgfx::setUniform(uniforms_[sky], sky_params);
-    bgfx::setUniform(uniforms_[sun_direction], direction);
-    bgfx::setUniform(uniforms_[radiance], lighting);
-    bgfx::setUniform(uniforms_[clip], clipping);
-    bgfx::setTexture(0, samplers_[2], skyview_[view_index]);
-    bgfx::setTexture(1, samplers_[0], medium_[0]);
-    bgfx::setVertexBuffer(0, fullscreen_);
-    // Far-depth testing makes the background independent of opaque program sorting. No depth
-    // writes.
-    bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_DEPTH_TEST_LEQUAL |
-                   (view.multisampling ? BGFX_STATE_MSAA : 0));
-    bgfx::submit(view.id, programs_[3]);
+    const SkyViewInputs inputs{{-settings.atmosphere_sun_direction[1], radius, 192, 108},
+                               {settings.atmosphere_sun_radiance[0],
+                                settings.atmosphere_sun_radiance[1],
+                                settings.atmosphere_sun_radiance[2], 0}};
+    SkyPass first = SkyPass::background;
+    if (update_medium)
+    {
+        first = SkyPass::transmittance;
+    }
+    else if (observer.inputs != inputs)
+    {
+        first = SkyPass::skyview;
+    }
+    const auto first_pass = static_cast<FramePassId>(first);
+    FramePlanError error;
+    if (plan_first_pass_ != first_pass || !plan_.begin_cached_frame())
+    {
+        if (!compile_sky(plan_, first_pass, error))
+        {
+            SDL_LogError(SDL_LOG_CATEGORY_RENDER, "Atmosphere graph compilation failed: %s",
+                         error.reason);
+            return false;
+        }
+        plan_first_pass_ = first_pass;
+    }
+    if (update_medium)
+    {
+        physical_ = parameters;
+        for (auto& cached : skyview_)
+        {
+            cached.inputs.reset();
+        }
+    }
+    const auto encode = [&](FramePassId id)
+    {
+        switch (static_cast<SkyPass>(id))
+        {
+        case SkyPass::transmittance:
+            set_medium();
+            bgfx::setViewName(atmosphere_transmittance_view, "Atmosphere transmittance");
+            bgfx::setImage(0, medium_[0], 0, bgfx::Access::Write, bgfx::TextureFormat::RGBA16F);
+            bgfx::dispatch(atmosphere_transmittance_view, programs_[0], 32, 8);
+            break;
+        case SkyPass::multiscatter:
+            set_medium();
+            bgfx::setViewName(atmosphere_multiscatter_view, "Atmosphere multiple scattering");
+            bgfx::setTexture(0, samplers_[0], medium_[0]);
+            bgfx::setImage(1, medium_[1], 0, bgfx::Access::Write, bgfx::TextureFormat::RGBA16F);
+            bgfx::dispatch(atmosphere_multiscatter_view, programs_[1], 4, 4);
+            break;
+        case SkyPass::skyview:
+            set_medium();
+            bgfx::setUniform(uniforms_[radiance], inputs.radiance.data());
+            bgfx::setUniform(uniforms_[camera], inputs.camera.data());
+            bgfx::setTexture(0, samplers_[0], medium_[0]);
+            bgfx::setTexture(2, samplers_[1], medium_[1]);
+            bgfx::setImage(1, observer.texture, 0, bgfx::Access::Write,
+                           bgfx::TextureFormat::RGBA16F);
+            bgfx::setViewName(skyview_compute, "Atmosphere sky-view LUT");
+            bgfx::dispatch(skyview_compute, programs_[2], 24, 14);
+            break;
+        case SkyPass::background:
+        {
+            float combined[16]{}, inverted[16]{};
+            bx::mtxMul(combined, view.view, view.projection);
+            bx::mtxInverse(inverted, combined);
+            constexpr float disc_cosine = 0.9999F, disc_scale = 60.0F; // bgfx 53-sky2 solar disc.
+            const float sky_params[]{radius, disc_cosine, disc_scale, 0};
+            const float direction[]{settings.atmosphere_sun_direction[0],
+                                    settings.atmosphere_sun_direction[1],
+                                    settings.atmosphere_sun_direction[2], 0};
+            // Physical sky participates in the same display exposure/tonemap as lit PBR surfaces.
+            const float clipping[]{bgfx::getCaps()->homogeneousDepth ? -1.0F : 0.0F, 1, 0, 0};
+            set_medium();
+            bgfx::setUniform(uniforms_[inverse], inverted);
+            bgfx::setUniform(uniforms_[sky], sky_params);
+            bgfx::setUniform(uniforms_[sun_direction], direction);
+            bgfx::setUniform(uniforms_[radiance], inputs.radiance.data());
+            bgfx::setUniform(uniforms_[clip], clipping);
+            bgfx::setTexture(0, samplers_[2], observer.texture);
+            bgfx::setTexture(1, samplers_[0], medium_[0]);
+            bgfx::setVertexBuffer(0, fullscreen_);
+            // Far-depth testing makes the background independent of opaque program sorting. No
+            // depth writes.
+            bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A |
+                           BGFX_STATE_DEPTH_TEST_LEQUAL |
+                           (view.multisampling ? BGFX_STATE_MSAA : 0));
+            bgfx::submit(view.id, programs_[3]);
+            break;
+        }
+        default:
+            return false;
+        }
+        return true;
+    };
+    if (!plan_.perform(encode, error))
+    {
+        medium_valid_ = false;
+        SDL_LogError(SDL_LOG_CATEGORY_RENDER, "Atmosphere graph execution failed: %s",
+                     error.reason);
+        return false;
+    }
+    medium_valid_ = true;
+    if (first != SkyPass::background)
+    {
+        observer.inputs = inputs;
+    }
     if (view_index == 2)
     {
         submitted_scene_id_ = scene_id;
@@ -299,13 +382,13 @@ void AtmospherePass::release() noexcept
         }
         handle = BGFX_INVALID_HANDLE;
     }
-    for (auto& handle : skyview_)
+    for (auto& observer : skyview_)
     {
-        if (bgfx::isValid(handle))
+        if (bgfx::isValid(observer.texture))
         {
-            bgfx::destroy(handle);
+            bgfx::destroy(observer.texture);
         }
-        handle = BGFX_INVALID_HANDLE;
+        observer = {};
     }
     if (bgfx::isValid(fullscreen_))
     {
@@ -324,14 +407,18 @@ std::uint32_t AtmospherePass::resource_count() const noexcept
     const auto count = [](const auto& handles)
     {
         ENGINE_PROFILE_FUNCTION_PROBE();
-        return static_cast<std::uint32_t>(std::count_if(
-            handles.begin(), handles.end(), [](auto handle)
-            {
-                ENGINE_PROFILE_FUNCTION_PROBE();
-                return bgfx::isValid(handle);
-            }));
+        return static_cast<std::uint32_t>(std::count_if(handles.begin(), handles.end(),
+                                                        [](auto handle)
+                                                        {
+                                                            ENGINE_PROFILE_FUNCTION_PROBE();
+                                                            return bgfx::isValid(handle);
+                                                        }));
     };
+    const auto skyview_count =
+        std::count_if(skyview_.begin(), skyview_.end(),
+                      [](const SkyView& view) { return bgfx::isValid(view.texture); });
     return count(programs_) + count(uniforms_) + count(samplers_) + count(medium_) +
-           count(skyview_) + static_cast<std::uint32_t>(bgfx::isValid(fullscreen_));
+           static_cast<std::uint32_t>(skyview_count) +
+           static_cast<std::uint32_t>(bgfx::isValid(fullscreen_));
 }
 } // namespace engine::render_detail

@@ -258,6 +258,7 @@ class VirtualShadowPass {
     +poll(frame_number) void
     +take_demand(output) bool
     +submit_feedback(view, depth, depth_inputs, submission_id) bool
+    +feedback_readback_bytes_total() uint64_t
     +accept_feedback(receiver_revision) void
     +draw_pages(frame, batch, shadow) bool
     +submit_local_depth_ranges(atlas, records, depth_revision) float

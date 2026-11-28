@@ -9,12 +9,21 @@ vcpkg_download_distfile(
   SHA512 c4563a147e5aa734e24f43212e1e3c8a0e084799f2e6a7ff1fb078efdb6e209542c618277441a6026ddd3f518b52d11f9389fe302d7fa44ab8cffc083bed3a12
 )
 
+if(VCPKG_TARGET_IS_ANDROID)
+  set(bgfx_android_patches
+    android-descriptor-reuse.patch
+    android-uniform-arena.patch
+    android-buffer-readback.patch
+  )
+endif()
+
 vcpkg_extract_source_archive(
   SOURCE_PATH
   ARCHIVE "${ARCHIVE_FILE}"
   PATCHES
     fix-dependencies.patch
     android-link-libraries.patch
+    ${bgfx_android_patches}
     vulkan-shading-rate-properties.patch
     windows-tool-utf8.patch
     max-anisotropy-caps.patch

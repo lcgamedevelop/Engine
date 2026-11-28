@@ -2,6 +2,7 @@
 
 #include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
+#include "runtime/render/passes/ambient_occlusion_graph.hpp"
 #include "runtime/render/render_constants.hpp"
 #include "runtime/render/render_settings.hpp"
 
@@ -27,7 +28,6 @@ constexpr std::uint16_t uniform_count = 19;
 constexpr std::uint32_t point_clamp = BGFX_SAMPLER_POINT | BGFX_SAMPLER_UVW_CLAMP;
 constexpr std::uint32_t point_mirror = BGFX_SAMPLER_POINT | BGFX_SAMPLER_UVW_MIRROR;
 constexpr std::uint32_t linear_clamp = BGFX_SAMPLER_UVW_CLAMP;
-constexpr std::uint8_t depth_mip_levels = 4;
 constexpr std::size_t prepare_program = 0;
 constexpr std::size_t mip_program = 1;
 constexpr std::size_t generate_program = 2;
@@ -343,6 +343,7 @@ bool AmbientOcclusionPass::compute(const CameraSettings& camera, const RenderSet
         return false;
     }
     const bool reuse = depth_revision != 0 && depth_revision == cached_depth_revision_ &&
+                       source_depth.idx == cached_source_depth_ &&
                        std::equal(uniforms.begin(), uniforms.end(), cached_uniforms_.begin(),
                                   [](const auto& current, const auto& cached)
                                   {
@@ -355,6 +356,24 @@ bool AmbientOcclusionPass::compute(const CameraSettings& camera, const RenderSet
     {
         return true;
     }
+    FramePlanError error;
+    if (plan_.passes().empty())
+    {
+        if (!plan_.compile(ao_graph::declarations, {&ao_graph::source, 1}, {&ao_graph::result, 1},
+                           error))
+        {
+            SDL_LogError(SDL_LOG_CATEGORY_RENDER, "Cannot compile ASSAO frame plan: %s",
+                         error.reason);
+            return false;
+        }
+    }
+    else if (!plan_.begin_cached_frame())
+    {
+        SDL_LogError(SDL_LOG_CATEGORY_RENDER, "Cannot start cached ASSAO frame plan");
+        return false;
+    }
+    // A failed dispatch must never publish new inputs against an older result.
+    cached_depth_revision_ = 0;
     cached_uniforms_ = uniforms;
     const auto half_width = static_cast<std::uint16_t>(width_ / 2);
     const auto half_height = static_cast<std::uint16_t>(height_ / 2);
@@ -365,72 +384,91 @@ bool AmbientOcclusionPass::compute(const CameraSettings& camera, const RenderSet
     bgfx::setViewName(ambient_occlusion_compute_view, "ASSAO Q2");
     bgfx::setViewFrameBuffer(ambient_occlusion_compute_view, BGFX_INVALID_HANDLE);
     bgfx::setViewMode(ambient_occlusion_compute_view, bgfx::ViewMode::Sequential);
-    bgfx::setUniform(parameters_, uniforms.data(), uniform_count);
-    bgfx::setTexture(0, samplers_[depth_sampler], source_depth, point_clamp);
-    for (std::uint8_t index = 0; index < half_depths_.size(); ++index)
+    const auto submit = [&](FramePassId id)
     {
-        bgfx::setImage(static_cast<std::uint8_t>(index + 1), half_depths_[index], 0,
-                       bgfx::Access::Write, bgfx::TextureFormat::R16F);
-    }
-    bgfx::setImage(5, normals_, 0, bgfx::Access::Write, bgfx::TextureFormat::RGBA8);
-    bgfx::dispatch(ambient_occlusion_compute_view, programs_[prepare_program], half_groups_x,
-                   half_groups_y);
-
-    for (std::uint8_t mip = 1; mip < depth_mip_levels; ++mip)
-    {
-        const auto mip_width = static_cast<std::uint16_t>(half_width >> mip);
-        const auto mip_height = static_cast<std::uint16_t>(half_height >> mip);
-        for (std::uint8_t index = 0; index < half_depths_.size(); ++index)
+        if (id == ao_graph::prepare)
         {
-            bgfx::setImage(index, half_depths_[index], static_cast<std::uint8_t>(mip - 1),
-                           bgfx::Access::Read, bgfx::TextureFormat::R16F);
-            bgfx::setImage(static_cast<std::uint8_t>(index + 4), half_depths_[index], mip,
-                           bgfx::Access::Write, bgfx::TextureFormat::R16F);
+            bgfx::setUniform(parameters_, uniforms.data(), uniform_count);
+            bgfx::setTexture(0, samplers_[depth_sampler], source_depth, point_clamp);
+            for (std::uint8_t index = 0; index < half_depths_.size(); ++index)
+            {
+                bgfx::setImage(static_cast<std::uint8_t>(index + 1), half_depths_[index], 0,
+                               bgfx::Access::Write, bgfx::TextureFormat::R16F);
+            }
+            bgfx::setImage(5, normals_, 0, bgfx::Access::Write, bgfx::TextureFormat::RGBA8);
+            bgfx::dispatch(ambient_occlusion_compute_view, programs_[prepare_program],
+                           half_groups_x, half_groups_y);
+            return true;
         }
-        const float rect[] = {0.0F, 0.0F, static_cast<float>(mip_width),
-                              static_cast<float>(mip_height)};
+        if (id < ao_graph::first_generate)
+        {
+            const auto mip = static_cast<std::uint8_t>(id - ao_graph::first_mip + 1);
+            const auto mip_width = static_cast<std::uint16_t>(half_width >> mip);
+            const auto mip_height = static_cast<std::uint16_t>(half_height >> mip);
+            for (std::uint8_t index = 0; index < half_depths_.size(); ++index)
+            {
+                bgfx::setImage(index, half_depths_[index], static_cast<std::uint8_t>(mip - 1),
+                               bgfx::Access::Read, bgfx::TextureFormat::R16F);
+                bgfx::setImage(static_cast<std::uint8_t>(index + 4), half_depths_[index], mip,
+                               bgfx::Access::Write, bgfx::TextureFormat::R16F);
+            }
+            const float rect[] = {0.0F, 0.0F, static_cast<float>(mip_width),
+                                  static_cast<float>(mip_height)};
+            bgfx::setUniform(parameters_, uniforms.data(), uniform_count);
+            bgfx::setUniform(rectangle_, rect);
+            bgfx::dispatch(ambient_occlusion_compute_view, programs_[mip_program],
+                           (mip_width + 7U) / 8U, (mip_height + 7U) / 8U);
+            return true;
+        }
+        if (id < ao_graph::blur_out)
+        {
+            const auto pass = static_cast<std::uint16_t>(id - ao_graph::first_generate);
+            set_phase(uniforms, pass, bgfx::getCaps()->originBottomLeft);
+            uniforms[14][3] = static_cast<float>(pass);
+            bgfx::setUniform(parameters_, uniforms.data(), uniform_count);
+            bgfx::setUniform(rectangle_, half_rect);
+            bgfx::setTexture(0, samplers_[view_depth_sampler], half_depths_[pass], point_clamp);
+            bgfx::setTexture(1, samplers_[mirror_depth_sampler], half_depths_[pass], point_mirror);
+            bgfx::setImage(2, normals_, 0, bgfx::Access::Read, bgfx::TextureFormat::RGBA8);
+            bgfx::setImage(6, final_results_, 0, bgfx::Access::Write, bgfx::TextureFormat::RG8);
+            bgfx::dispatch(ambient_occlusion_compute_view, programs_[generate_program],
+                           half_groups_x, half_groups_y);
+            return true;
+        }
+        if (id == ao_graph::blur_out || id == ao_graph::blur_back)
+        {
+            const bool outward = id == ao_graph::blur_out;
+            bgfx::setUniform(parameters_, uniforms.data(), uniform_count);
+            bgfx::setUniform(rectangle_, half_rect);
+            bgfx::setTexture(1, samplers_[blur_sampler], outward ? final_results_ : blur_results_,
+                             point_mirror);
+            bgfx::setImage(0, outward ? blur_results_ : final_results_, 0, bgfx::Access::Write,
+                           bgfx::TextureFormat::RG8);
+            bgfx::dispatch(ambient_occlusion_compute_view, programs_[blur_program], half_groups_x,
+                           half_groups_y, ao_graph::layers);
+            return true;
+        }
+        if (id != ao_graph::apply)
+        {
+            return false;
+        }
+        const float full_rect[] = {0.0F, 0.0F, static_cast<float>(viewport_width_),
+                                   static_cast<float>(viewport_height_)};
         bgfx::setUniform(parameters_, uniforms.data(), uniform_count);
-        bgfx::setUniform(rectangle_, rect);
-        bgfx::dispatch(ambient_occlusion_compute_view, programs_[mip_program],
-                       (mip_width + 7U) / 8U, (mip_height + 7U) / 8U);
-    }
-
-    // Generate the independent layers first, then blur all layers with each dispatch.
-    for (std::uint16_t pass = 0; pass < 4; ++pass)
+        bgfx::setUniform(rectangle_, full_rect);
+        bgfx::setTexture(1, samplers_[final_sampler], final_results_, linear_clamp);
+        bgfx::setImage(0, ao_, 0, bgfx::Access::Write, bgfx::TextureFormat::R8);
+        bgfx::dispatch(ambient_occlusion_compute_view, programs_[apply_program],
+                       (viewport_width_ + 7U) / 8U, (viewport_height_ + 7U) / 8U);
+        return true;
+    };
+    if (!plan_.perform(submit, error))
     {
-        set_phase(uniforms, pass, bgfx::getCaps()->originBottomLeft);
-        uniforms[14][3] = static_cast<float>(pass);
-        bgfx::setUniform(parameters_, uniforms.data(), uniform_count);
-        bgfx::setUniform(rectangle_, half_rect);
-        bgfx::setTexture(0, samplers_[view_depth_sampler], half_depths_[pass], point_clamp);
-        bgfx::setTexture(1, samplers_[mirror_depth_sampler], half_depths_[pass], point_mirror);
-        bgfx::setImage(2, normals_, 0, bgfx::Access::Read, bgfx::TextureFormat::RGBA8);
-        bgfx::setImage(6, final_results_, 0, bgfx::Access::Write, bgfx::TextureFormat::RG8);
-        bgfx::dispatch(ambient_occlusion_compute_view, programs_[generate_program], half_groups_x,
-                       half_groups_y);
+        SDL_LogError(SDL_LOG_CATEGORY_RENDER, "ASSAO frame pass %u: %s",
+                     static_cast<unsigned>(error.pass), error.reason);
+        return false;
     }
-    bgfx::setUniform(parameters_, uniforms.data(), uniform_count);
-    bgfx::setUniform(rectangle_, half_rect);
-    bgfx::setTexture(1, samplers_[blur_sampler], final_results_, point_mirror);
-    bgfx::setImage(0, blur_results_, 0, bgfx::Access::Write, bgfx::TextureFormat::RG8);
-    bgfx::dispatch(ambient_occlusion_compute_view, programs_[blur_program], half_groups_x,
-                   half_groups_y, 4);
-
-    bgfx::setUniform(parameters_, uniforms.data(), uniform_count);
-    bgfx::setUniform(rectangle_, half_rect);
-    bgfx::setTexture(1, samplers_[blur_sampler], blur_results_, point_mirror);
-    bgfx::setImage(0, final_results_, 0, bgfx::Access::Write, bgfx::TextureFormat::RG8);
-    bgfx::dispatch(ambient_occlusion_compute_view, programs_[blur_program], half_groups_x,
-                   half_groups_y, 4);
-
-    const float full_rect[] = {0.0F, 0.0F, static_cast<float>(viewport_width_),
-                               static_cast<float>(viewport_height_)};
-    bgfx::setUniform(parameters_, uniforms.data(), uniform_count);
-    bgfx::setUniform(rectangle_, full_rect);
-    bgfx::setTexture(1, samplers_[final_sampler], final_results_, linear_clamp);
-    bgfx::setImage(0, ao_, 0, bgfx::Access::Write, bgfx::TextureFormat::R8);
-    bgfx::dispatch(ambient_occlusion_compute_view, programs_[apply_program],
-                   (viewport_width_ + 7U) / 8U, (viewport_height_ + 7U) / 8U);
+    cached_source_depth_ = source_depth.idx;
     cached_depth_revision_ = depth_revision;
     return true;
 }
@@ -469,6 +507,7 @@ void AmbientOcclusionPass::release_textures() noexcept
 {
     ENGINE_PROFILE_FUNCTION();
     cached_depth_revision_ = 0;
+    cached_source_depth_ = bgfx::kInvalidHandle;
     for (auto* handle : {&normals_, &blur_results_, &final_results_, &ao_})
     {
         if (bgfx::isValid(*handle))

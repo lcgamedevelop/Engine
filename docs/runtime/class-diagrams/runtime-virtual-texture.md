@@ -69,6 +69,7 @@ classDiagram
         +begin_frame(uint64 device, uint32 frame) void
         +batch() const RvtPageBatch&
         +settings() const RvtSettingsT&
+        +cache_revision() uint64
         +pages() const map~RvtPageKey, RvtPage~&
         +demand() const vector~RvtPageKey~&
         +bounds(RvtPageKey key) Bounds3
@@ -83,6 +84,7 @@ classDiagram
         +bind(bool receiver, const Vec3& origin) void
         +bind_disabled() void
         +available() bool
+        +surface_revision() uint64
         +resident_bytes() uint64
         +reason() const string&
         +set_diagnostics(uint32 flags) void
@@ -142,6 +144,7 @@ RVT 页绘制在主场景不透明着色之前，由现有 pass 调度分配 vie
   未准备页面才能产生需求。预算限制每帧页面和字节，粗级优先避免黑块。
 - 一个页面的边界 texel、所有必要通道和 mip 准备完后才替换页表；双缓冲/代次防止 atlas
   槽被旧帧继续采样。未就绪页采同版本有效父页，否则直接评估源 PBR，不读取脏旧槽。
+- 已发布的页表按驻留版本上传。连续帧复用同一映射时保留现有 GPU 页表。页面重绘、映射、最低采样 mip 或诊断参数变化会刷新接收材质依赖的版本；尚无完整发布结果时该版本为零。
 - 地形、道路、来源材质或实例变换变更时失效旧/新包围范围；LOD 变化若材质不变不全图失效。
   颜色/法线页不包含照明，因此普通光源变化无需重烘页。
 - 页面请求、source revision、device generation 参与校验，设备重建使 GPU cache 失效，

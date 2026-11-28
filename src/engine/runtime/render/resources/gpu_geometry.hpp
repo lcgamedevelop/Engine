@@ -3,6 +3,7 @@
 #include "runtime/performance/function_profile.hpp"
 
 #include "runtime/render/gpu_memory_tracker.hpp"
+#include "runtime/resource/mesh_storage.hpp"
 #include "runtime/resource/resource_reference.hpp"
 #include "runtime/resource/types/texture_resource.hpp"
 
@@ -68,7 +69,7 @@ struct GpuGeometry
 
     [[nodiscard]] bool create(const MeshRenderer& renderer, VertexPages* pages,
                               GpuMemoryTracker* tracker, SceneScopeId scope, std::uint64_t scene);
-    [[nodiscard]] bool create_base_indices(std::span<const std::uint32_t> source);
+    [[nodiscard]] bool create_base_indices(mesh_storage::MeshIndexView source);
     [[nodiscard]] bool skinning_bounds(std::span<const std::array<float, 16>> palette,
                                        std::array<float, 3>& minimum,
                                        std::array<float, 3>& maximum) const noexcept;
@@ -146,7 +147,7 @@ private:
         std::uint32_t count = 0;
         bool index16 = false;
 
-        [[nodiscard]] bool upload(std::span<const std::uint32_t> source);
+        [[nodiscard]] bool upload(mesh_storage::MeshIndexView source);
         void release() noexcept;
     };
     [[nodiscard]] const IndexBuffer* index_storage(std::size_t level) const noexcept;

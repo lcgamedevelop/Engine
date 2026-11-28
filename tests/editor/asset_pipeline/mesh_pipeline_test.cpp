@@ -168,7 +168,8 @@ bool mesh_tangent_tests()
         return true;
     };
     schema::MeshDataT result;
-    if (!expect(load_mesh(generated_guid, result) && result.vertices.size() > 7 &&
+    if (!expect(load_mesh(generated_guid, result) && result.optimize_storage &&
+                    result.vertices.size() > 7 &&
                     result.tangents.size() == result.vertices.size() &&
                     result.texcoords.size() == result.vertices.size() &&
                     result.lightmap_texcoords.size() == result.vertices.size() &&
@@ -221,7 +222,25 @@ bool mesh_tangent_tests()
     {
         return false;
     }
+    const auto meta_path = fixture.root / "assets/generated.mesh.meta";
+    const auto wide_meta = meta(generated_guid, "mesh") + "optimize_mesh = false\n";
+    if (!expect(write(meta_path, wide_meta) && build(pipeline, fixture) &&
+                    load_mesh(generated_guid, result) && !result.optimize_storage &&
+                    load_mesh(authored_guid, result) && result.optimize_storage,
+                "mesh optimization override rebuilds only the selected mesh policy"))
+    {
+        return false;
+    }
     const auto stable_catalog = read(fixture.root / "cache/catalog.bin");
+    if (!expect(write(meta_path, meta(generated_guid, "mesh") + "optimize_mesh = 1\n") &&
+                    !pipeline.build_assets(fixture.root) &&
+                    pipeline.last_error().find("optimize_mesh") != std::string::npos &&
+                    read(fixture.root / "cache/catalog.bin") == stable_catalog &&
+                    write(meta_path, wide_meta),
+                "non-boolean mesh optimization setting fails before publication"))
+    {
+        return false;
+    }
     return expect(write(fixture.root / "assets/generated.mesh",
                         "vertices=[[0,0,0,0,0,0]]\nindices=[0,0,0]\n") &&
                       !pipeline.build_assets(fixture.root) &&

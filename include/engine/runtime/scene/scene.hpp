@@ -25,7 +25,8 @@ public:
     [[nodiscard]] bool empty() const noexcept;
     [[nodiscard]] Node create_node(std::string_view name);
     [[nodiscard]] Node instantiate_model(std::string_view path, std::string_view name,
-                                         std::vector<Node>* created = nullptr);
+                                         std::vector<Node>* created = nullptr,
+                                         bool static_lod_enabled = false);
     [[nodiscard]] Node instantiate_prefab(std::string_view path, std::string_view name,
                                           std::vector<Node>* created = nullptr);
     [[nodiscard]] bool

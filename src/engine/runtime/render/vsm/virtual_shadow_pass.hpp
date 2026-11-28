@@ -1,5 +1,6 @@
 #pragma once
 
+#include "runtime/render/frame_graph_plan.hpp"
 #include "runtime/render/gpu_readback.hpp"
 #include "runtime/render/vsm/vsm_types.hpp"
 
@@ -30,7 +31,7 @@ public:
                                        std::uint64_t submission_id);
     void accept_feedback(std::uint64_t receiver_revision) noexcept;
     [[nodiscard]] bool draw_pages(const RenderFrameData& frame, const VsmPageBatch& batch,
-                                  ShadowPass& shadow);
+                                  ShadowPass& shadow, VirtualShadowCache& cache);
     [[nodiscard]] float submit_local_depth_ranges(bgfx::TextureHandle atlas,
                                                   std::span<const ShadowRecord> records,
                                                   std::uint64_t depth_revision);
@@ -38,6 +39,12 @@ public:
     void reset_scene() noexcept;
     void release_gpu() noexcept;
     [[nodiscard]] std::uint32_t resource_count() const noexcept;
+#if defined(ENGINE_ENABLE_MEMORY_PROFILING)
+    [[nodiscard]] std::uint64_t feedback_readback_bytes_total() const noexcept
+    {
+        return feedback_readback_bytes_total_;
+    }
+#endif
 
 private:
     void release_depth_ranges() noexcept;
@@ -50,7 +57,13 @@ private:
         std::uint64_t submission_id = 0, receiver_revision = 0;
         bool pending = false;
     };
+    FrameGraphPlan feedback_plan_, page_plan_, local_range_plan_;
+    std::size_t planned_pages_ = 0, planned_local_faces_ = 0;
+    bool planned_ranges_ = false;
     std::array<Readback, 3> readbacks_;
+#if defined(ENGINE_ENABLE_MEMORY_PROFILING)
+    std::uint64_t feedback_readback_bytes_total_ = 0;
+#endif
     std::deque<VsmPageDemand> completed_;
     VsmView feedback_view_;
     std::vector<std::uint64_t> feedback_inputs_;

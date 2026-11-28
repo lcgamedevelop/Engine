@@ -7,6 +7,7 @@
 #include "runtime/performance/profiling.hpp"
 #include "runtime/render/passes/shadow_pass.hpp"
 #include "runtime/render/render_system.hpp"
+#include "runtime/render/vsm/virtual_shadow_graph.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -254,27 +255,58 @@ bool VirtualShadowPass::submit_feedback(const VsmView& view, bgfx::TextureHandle
     const float dimensions[]{float(view.width), float(view.height),
                              view.homogeneous_depth ? 1.F : 0.F,
                              view.origin_bottom_left ? 1.F : 0.F};
-    bgfx::setViewName(vsm_feedback_clear_view, "VSM feedback clear");
-    bgfx::setBuffer(4, demands_, bgfx::Access::Write);
-    const float count[]{float(word_count_), 0, 0, 0};
-    bgfx::setUniform(dimensions_, count);
-    bgfx::dispatch(vsm_feedback_clear_view, clear_, (word_count_ + 63) / 64);
-    bgfx::setViewName(vsm_feedback_view, "VSM receiver demand");
-    bgfx::setViewUniform(vsm_feedback_view, view_uniform_, view_uniforms.data(), vsm_view_vectors);
-    bgfx::setUniform(dimensions_, dimensions);
-    bgfx::setUniform(inverse_, view.inverse_view_projection.data());
-    bgfx::setTexture(0, depth_sampler_, depth);
-    bgfx::setBuffer(4, demands_, bgfx::Access::ReadWrite);
-    // Eight threads per axis, with two receiver pixels per thread on each axis.
-    bgfx::dispatch(vsm_feedback_view, feedback_, (view.width + 15) / 16, (view.height + 15) / 16);
-    slot.view = view;
-    slot.submission_id = submission_id;
-    slot.receiver_revision = reusable ? receiver_revision_ : 0;
-    slot.bits.assign(word_count_, 0);
-    bgfx::BufferRegion region;
-    region.init(demands_, 0, word_count_ * sizeof(std::uint32_t));
-    slot.pending = slot.completion.submit(region, slot.bits.data());
-    return slot.pending;
+    FramePlanError error;
+    if (!feedback_plan_.begin_cached_frame() && !vsm_graph::compile_feedback(feedback_plan_, error))
+    {
+        return false;
+    }
+    return feedback_plan_.perform(
+        [&](FramePassId pass)
+        {
+            switch (pass)
+            {
+            case vsm_feedback_clear_view:
+            {
+                bgfx::setViewName(vsm_feedback_clear_view, "VSM feedback clear");
+                bgfx::setBuffer(4, demands_, bgfx::Access::Write);
+                const float count[]{float(word_count_), 0, 0, 0};
+                bgfx::setUniform(dimensions_, count);
+                bgfx::dispatch(vsm_feedback_clear_view, clear_, (word_count_ + 63) / 64);
+                return true;
+            }
+            case vsm_feedback_view:
+                bgfx::setViewName(vsm_feedback_view, "VSM receiver demand");
+                bgfx::setViewUniform(vsm_feedback_view, view_uniform_, view_uniforms.data(),
+                                     vsm_view_vectors);
+                bgfx::setUniform(dimensions_, dimensions);
+                bgfx::setUniform(inverse_, view.inverse_view_projection.data());
+                bgfx::setTexture(0, depth_sampler_, depth);
+                bgfx::setBuffer(4, demands_, bgfx::Access::ReadWrite);
+                // Eight threads per axis, with two receiver pixels per thread on each axis.
+                bgfx::dispatch(vsm_feedback_view, feedback_, (view.width + 15) / 16,
+                               (view.height + 15) / 16);
+                return true;
+            case vsm_graph::feedback_readback:
+            {
+                slot.view = view;
+                slot.submission_id = submission_id;
+                slot.receiver_revision = reusable ? receiver_revision_ : 0;
+                slot.bits.assign(word_count_, 0);
+                bgfx::BufferRegion region;
+                region.init(demands_, 0, word_count_ * sizeof(std::uint32_t));
+                slot.pending = slot.completion.submit(region, slot.bits.data());
+#if defined(ENGINE_ENABLE_MEMORY_PROFILING)
+                if (slot.pending)
+                {
+                    feedback_readback_bytes_total_ += region.size;
+                }
+#endif
+                return slot.pending;
+            }
+            }
+            return false;
+        },
+        error);
 }
 void VirtualShadowPass::accept_feedback(std::uint64_t receiver_revision) noexcept
 {
@@ -282,7 +314,7 @@ void VirtualShadowPass::accept_feedback(std::uint64_t receiver_revision) noexcep
     accepted_receiver_revision_ = receiver_revision;
 }
 bool VirtualShadowPass::draw_pages(const RenderFrameData& frame, const VsmPageBatch& batch,
-                                   ShadowPass& shadow)
+                                   ShadowPass& shadow, VirtualShadowCache& cache)
 {
     ENGINE_PROFILE_ZONE("Render.vsmPageSubmit");
     if (batch.generation != generation_ || !bgfx::isValid(framebuffer_))
@@ -292,56 +324,74 @@ bool VirtualShadowPass::draw_pages(const RenderFrameData& frame, const VsmPageBa
     VsmPageTarget target;
     target.framebuffer = framebuffer_;
     target.fallback = fallback_;
-    if (!shadow.draw_pages(frame, batch.pages, target))
+    target.virtual_pages = &cache;
+    target.virtual_batch = batch.batch_id;
+    const auto pages = batch.pages.size();
+    const bool ranges = bgfx::isValid(depth_ranges_);
+    FramePlanError error;
+    if (planned_pages_ != pages || planned_ranges_ != ranges || !page_plan_.begin_cached_frame())
     {
-        return false;
-    }
-    const auto pages = bgfx::isValid(depth_ranges_) ? batch.pages.size() : 0;
-    ENGINE_PROFILE_PLOT("Vsm.depthRangesUpdatedPages", static_cast<std::int64_t>(pages));
-    if (pages == 0)
-    {
-        return true;
-    }
-
-    {
-        ENGINE_PROFILE_ZONE("Render.vsmDepthRanges");
-        const auto side = vsm_atlas_columns(physical_pages_) * vsm_tile_size;
-        std::array<std::array<float, 4>, vsm_page_views.size()> tile_origins{};
-        for (std::size_t i = 0; i < pages; ++i)
+        if (!vsm_graph::compile_pages(page_plan_, pages, ranges, error))
         {
-            const auto& page = batch.pages[i];
-            const auto y = batch.view.origin_bottom_left ? side - page.y - vsm_tile_size : page.y;
-            tile_origins[i] = {float(page.x), float(y), float(page.x + vsm_tile_size - 1),
-                               float(y + vsm_tile_size - 1)};
+            return false;
         }
-        constexpr auto groups =
-            static_cast<std::uint16_t>(vsm_tile_size / vsm_depth_range_block_size);
-        const auto page_count = static_cast<std::uint16_t>(pages);
-        constexpr float output[4]{};
-        bgfx::setViewName(vsm_depth_ranges_view, "VSM page depth ranges");
-        bgfx::setUniform(range_tile_origins_, tile_origins.data(), page_count);
-        bgfx::setUniform(range_output_, output);
-        bgfx::setTexture(0, sampler_, atlas_);
-        bgfx::setImage(1, depth_ranges_, 0, bgfx::Access::Write);
-        bgfx::dispatch(vsm_depth_ranges_view, reduce_depth_ranges_, groups, groups, page_count);
+        planned_pages_ = pages;
+        planned_ranges_ = ranges;
     }
-    return true;
+    ENGINE_PROFILE_PLOT("Vsm.depthRangesUpdatedPages",
+                        static_cast<std::int64_t>(ranges ? pages : 0));
+    return page_plan_.perform(
+        [&](FramePassId pass)
+        {
+            if (pass == vsm_graph::page_draws)
+            {
+                return shadow.draw_pages(frame, batch.pages, target);
+            }
+            if (pass != vsm_depth_ranges_view)
+            {
+                return false;
+            }
+            ENGINE_PROFILE_ZONE("Render.vsmDepthRanges");
+            const auto side = vsm_atlas_columns(physical_pages_) * vsm_tile_size;
+            std::array<std::array<float, 4>, vsm_page_views.size()> tile_origins{};
+            for (std::size_t i = 0; i < pages; ++i)
+            {
+                const auto& page = batch.pages[i];
+                const auto y =
+                    batch.view.origin_bottom_left ? side - page.y - vsm_tile_size : page.y;
+                tile_origins[i] = {float(page.x), float(y), float(page.x + vsm_tile_size - 1),
+                                   float(y + vsm_tile_size - 1)};
+            }
+            constexpr auto groups =
+                static_cast<std::uint16_t>(vsm_tile_size / vsm_depth_range_block_size);
+            const auto page_count = static_cast<std::uint16_t>(pages);
+            constexpr float output[4]{};
+            bgfx::setViewName(vsm_depth_ranges_view, "VSM page depth ranges");
+            bgfx::setUniform(range_tile_origins_, tile_origins.data(), page_count);
+            bgfx::setUniform(range_output_, output);
+            bgfx::setTexture(0, sampler_, atlas_);
+            bgfx::setImage(1, depth_ranges_, 0, bgfx::Access::Write);
+            bgfx::dispatch(vsm_depth_ranges_view, reduce_depth_ranges_, groups, groups, page_count);
+            return true;
+        },
+        error);
 }
 float VirtualShadowPass::submit_local_depth_ranges(bgfx::TextureHandle atlas,
-                                                  std::span<const ShadowRecord> records,
-                                                  std::uint64_t depth_revision)
+                                                   std::span<const ShadowRecord> records,
+                                                   std::uint64_t depth_revision)
 {
     if (!local_range_stride_ || !bgfx::isValid(atlas) || records.empty() ||
-        records.size() > local_range_faces_)
+        records.size() > local_range_faces_ || records.size() > vsm_graph::maximum_local_faces)
     {
         return 0;
     }
 
     ENGINE_PROFILE_ZONE("Render.localShadowDepthRanges");
-    std::vector<std::array<float, 4>> tiles;
-    tiles.reserve(records.size());
-    for (const auto& record : records)
+    std::array<std::array<float, 4>, vsm_graph::maximum_local_faces> storage;
+    const auto tiles = std::span(storage).first(records.size());
+    for (std::size_t i = 0; i < records.size(); ++i)
     {
+        const auto& record = records[i];
         const auto& rectangle = record.rectangle;
         const auto texel = record.parameters[1];
         const auto x = std::round(rectangle[0] / texel);
@@ -353,13 +403,13 @@ float VirtualShadowPass::submit_local_depth_ranges(bgfx::TextureHandle atlas,
         {
             return 0;
         }
-        tiles.push_back({x, y, x + width - 1, y + height - 1});
+        tiles[i] = {x, y, x + width - 1, y + height - 1};
     }
 
-    const auto layout = (std::uint32_t{local_range_stride_} << local_range_row_bits) |
-                        local_range_first_row_;
-    if (atlas.idx == local_range_atlas_.idx && depth_revision == local_range_revision_ &&
-        tiles == local_range_tiles_)
+    const auto layout =
+        (std::uint32_t{local_range_stride_} << local_range_row_bits) | local_range_first_row_;
+    if (depth_revision != 0 && atlas.idx == local_range_atlas_.idx &&
+        depth_revision == local_range_revision_ && std::ranges::equal(tiles, local_range_tiles_))
     {
         ENGINE_PROFILE_PLOT("Render.localShadowDepthRangeFaces", std::int64_t{0});
         return static_cast<float>(layout);
@@ -367,11 +417,21 @@ float VirtualShadowPass::submit_local_depth_ranges(bgfx::TextureHandle atlas,
 
     ENGINE_PROFILE_PLOT("Render.localShadowDepthRangeFaces",
                         static_cast<std::int64_t>(tiles.size()));
-    bgfx::setViewName(local_shadow_depth_ranges_view, "Local shadow depth ranges");
-    for (std::size_t first = 0; first < tiles.size(); first += vsm_page_views.size())
+    FramePlanError error;
+    if (planned_local_faces_ != tiles.size() || !local_range_plan_.begin_cached_frame())
     {
-        const auto count = static_cast<std::uint16_t>(
-            std::min(vsm_page_views.size(), tiles.size() - first));
+        if (!vsm_graph::compile_local_ranges(local_range_plan_, tiles.size(), error))
+        {
+            return 0;
+        }
+        planned_local_faces_ = tiles.size();
+    }
+    const auto submit = [&](FramePassId group)
+    {
+        const auto first = group * vsm_page_views.size();
+        bgfx::setViewName(local_shadow_depth_ranges_view, "Local shadow depth ranges");
+        const auto count =
+            static_cast<std::uint16_t>(std::min(vsm_page_views.size(), tiles.size() - first));
         const float output[]{float(local_range_first_row_), float(local_range_stride_),
                              static_cast<float>(first), 0};
         bgfx::setUniform(range_tile_origins_, tiles.data() + first, count);
@@ -380,10 +440,15 @@ float VirtualShadowPass::submit_local_depth_ranges(bgfx::TextureHandle atlas,
         bgfx::setImage(1, depth_ranges_, 0, bgfx::Access::Write);
         bgfx::dispatch(local_shadow_depth_ranges_view, reduce_depth_ranges_, local_range_stride_,
                        local_range_stride_, count);
+        return true;
+    };
+    if (!local_range_plan_.perform(submit, error))
+    {
+        return 0;
     }
     local_range_atlas_ = atlas;
     local_range_revision_ = depth_revision;
-    local_range_tiles_ = std::move(tiles);
+    local_range_tiles_.assign(tiles.begin(), tiles.end());
     return static_cast<float>(layout);
 }
 

@@ -6,6 +6,9 @@
 
 #include <nlohmann/json.hpp>
 
+#include <iterator>
+#include <utility>
+
 namespace engine::render_detail
 {
 inline nlohmann::json gpu_memory_value(const RenderSystem* renderer, std::string_view guid,
@@ -59,6 +62,18 @@ inline nlohmann::json gpu_memory_value(const RenderSystem* renderer, std::string
         }
         return values;
     };
+    static_assert(std::size(kinds) == static_cast<std::size_t>(GpuMemoryKind::count));
+    auto live_by_kind = Json::object();
+    for (std::size_t index = 0; index < sample.live_by_kind.size(); ++index)
+    {
+        const auto& usage = sample.live_by_kind[index];
+        live_by_kind[kinds[index]] = {
+            {"count", std::to_string(usage.count)},
+            {"logicalBytes", std::to_string(usage.logical_bytes)},
+            {"sharedBackingBytes", std::to_string(usage.shared_backing_bytes)}};
+    }
+    const auto optional_bytes = [](std::optional<std::uint64_t> bytes) -> Json
+    { return bytes ? Json(std::to_string(*bytes)) : Json(nullptr); };
     const auto& totals = sample.totals;
     return {
         {"available", true},
@@ -82,11 +97,15 @@ inline nlohmann::json gpu_memory_value(const RenderSystem* renderer, std::string
           {"retiringSharedBackingBytes", std::to_string(totals.retiring_shared_backing_bytes)},
           {"peakLogicalBytes", std::to_string(totals.peak_logical_bytes)},
           {"peakSharedBackingBytes", std::to_string(totals.peak_shared_backing_bytes)},
-          {"driverBytes", sample.driver_bytes ? Json(std::to_string(*sample.driver_bytes))
-                                              : Json(nullptr)},
+          {"driverBytes", optional_bytes(sample.driver_bytes)},
+          {"bgfxTextureEstimatedBytes", optional_bytes(sample.bgfx_texture_estimated_bytes)},
+          {"bgfxRenderTargetEstimatedBytes",
+           optional_bytes(sample.bgfx_render_target_estimated_bytes)},
           {"textureStagingReservedBytes", std::to_string(sample.texture_staging_reserved_bytes)},
           {"retiredTextureStagingReservedBytes",
            std::to_string(sample.retired_texture_staging_reserved_bytes)}}},
+        {"vsmFeedbackReadbackBytesTotal", std::to_string(sample.vsm_feedback_readback_bytes_total)},
+        {"liveByKind", std::move(live_by_kind)},
         {"live", entries(sample.live)},
         {"pending", entries(sample.pending)},
         {"recentReclaims", entries(sample.recent_reclaims)},

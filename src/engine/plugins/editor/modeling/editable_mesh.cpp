@@ -1,4 +1,5 @@
 #include "plugins/editor/modeling/editable_mesh.hpp"
+#include "runtime/resource/mesh_storage.hpp"
 #include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 
@@ -553,7 +554,9 @@ bool mesh::from_mesh(const schema::MeshDataT& data, schema::EditableMeshDataT& o
         }
         ids.push_back(found->second);
     }
-    for (std::size_t i = 0; i < data.indices.size(); i += 3)
+    const auto indices = mesh_storage::indices(data);
+    const bool has_uv = mesh_storage::texcoord_count(data) != 0;
+    for (std::size_t i = 0; i < indices.size(); i += 3)
     {
         std::uint32_t material = 0;
         for (const auto& submesh : data.submeshes)
@@ -565,14 +568,13 @@ bool mesh::from_mesh(const schema::MeshDataT& data, schema::EditableMeshDataT& o
             }
         }
         auto& face = math::add_face(
-            result, {ids[data.indices[i]], ids[data.indices[i + 1]], ids[data.indices[i + 2]]},
-            material);
+            result, {ids[indices[i]], ids[indices[i + 1]], ids[indices[i + 2]]}, material);
         for (std::size_t j = i; j < i + 3; ++j)
         {
-            const auto index = data.indices[j];
-            if (!data.texcoords.empty())
+            const auto index = indices[j];
+            if (has_uv)
             {
-                face.texcoords.push_back(data.texcoords[index]);
+                face.texcoords.push_back(mesh_storage::texcoord(data, index));
             }
             if (!data.colors.empty())
             {
@@ -607,8 +609,8 @@ bool mesh::from_mesh(const schema::MeshDataT& data, schema::EditableMeshDataT& o
     {
         for (std::size_t corner = 0; corner < 3; ++corner)
         {
-            const auto first_index = data.indices[triangle * 3 + corner];
-            const auto second_index = data.indices[triangle * 3 + (corner + 1) % 3];
+            const auto first_index = indices[triangle * 3 + corner];
+            const auto second_index = indices[triangle * 3 + (corner + 1) % 3];
             const auto& first_vertex = data.vertices[first_index];
             const auto& second_vertex = data.vertices[second_index];
             const auto first_id = ids[first_index];

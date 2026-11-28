@@ -93,6 +93,7 @@ struct ViewDrawList
         bool instanced_transform = false;
     };
     std::array<std::uint64_t, 2> observer{};
+    std::uint64_t meshlet_result_revision = 0;
     std::vector<Item> opaque, transparent;
     RenderViewStats opaque_stats{}, transparent_stats{};
     std::vector<DrawBatch> batches;

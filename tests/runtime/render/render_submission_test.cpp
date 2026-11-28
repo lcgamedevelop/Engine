@@ -7,6 +7,7 @@
 #include "runtime/engine_config.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/render/gpu_memory.hpp"
+#include "runtime/render/passes/hdr_graph.hpp"
 #include "runtime/render/render_constants.hpp"
 #include "runtime/render/render_system.hpp"
 #include "runtime/scene/camera.hpp"
@@ -48,6 +49,107 @@ bool expect(bool value, const char* message)
         std::fprintf(stderr, "render submission: %s (SDL: %s)\n", message, SDL_GetError());
     }
     return value;
+}
+
+bool graph_contract()
+{
+    using namespace engine;
+    using namespace engine::render_detail;
+    constexpr FrameKey key{640, 360, 256, 4};
+    FrameBindings bindings;
+    for (std::uint16_t i = 0; i < HdrSlot::count; ++i)
+    {
+        bindings.textures[i] = i;
+    }
+    RenderGraph graph;
+    GraphError error;
+    const auto compile = [&](const GraphDeclaration& declaration)
+    { return graph.begin(key) && graph.compile(declaration, bindings, error); };
+    const auto compile_hdr = [&](bool bloom)
+    { return graph.begin(key) && compile_hdr_graph(graph, bloom, bindings, error); };
+    if (!expect(compile_hdr(true) && !graph.cache_hit(), "first Bloom plan compiles") ||
+        !expect(graph.plan().count == 3 && graph.plan().scheduled[0].view == hdr_bright_view &&
+                    graph.plan().scheduled[1].view == hdr_blur_view &&
+                    graph.plan().scheduled[2].view == hdr_resolve_view,
+                "Bloom retains all three physical views in GPU order"))
+    {
+        return false;
+    }
+    std::size_t submissions = 0;
+    const auto submit = [&](const GraphPassDesc& segment)
+    {
+        constexpr std::array<GraphPass, 3> expected{HdrPass::bright, HdrPass::blur,
+                                                    HdrPass::resolve};
+        return submissions < expected.size() && segment.pass == expected[submissions++];
+    };
+    if (!expect(graph.execute(bindings, submit, error) && submissions == 3 &&
+                    !graph.execute(bindings, submit, error) && submissions == 3,
+                "each compiled segment can run once per frame") ||
+        !expect(compile_hdr(true) && graph.cache_hit(), "identical topology reuses its plan"))
+    {
+        return false;
+    }
+    bindings.textures[HdrSlot::bright] = bindings.textures[HdrSlot::blur];
+    if (!expect(!graph.execute(bindings, submit, error) && submissions == 3,
+                "binding drift aborts before any submission") ||
+        !expect(!compile_hdr(true), "a cached plan rechecks changed live aliases") ||
+        !expect(compile_hdr(false) && !graph.cache_hit() &&
+                    graph.plan().count == 1 && graph.plan().scheduled[0].pass == HdrPass::resolve &&
+                    graph.plan().intervals[HdrSlot::bright].first == GraphInterval::unused,
+                "disabled Bloom drops both draws and their physical bindings"))
+    {
+        return false;
+    }
+
+    // Independent two-stage effect declared in reverse dependency order.
+    GraphDeclaration effect;
+    effect.pass_count = 2;
+    effect.slot_count = 3;
+    effect.first_view = 10;
+    effect.last_view = 11;
+    effect.imports[0] = true;
+    effect.root = 2;
+    effect.passes[0] = {0, 11, 2, {1, graph_invalid_id}};
+    effect.passes[1] = {1, 10, 1, {0, graph_invalid_id}};
+    if (!expect(compile(effect) && graph.plan().count == 2 &&
+                    graph.plan().scheduled[0].pass == 1 && graph.plan().scheduled[1].pass == 0,
+                "an independent effect schedules producers before consumers") ||
+        !expect(graph.plan().intervals[1].first == 0 && graph.plan().intervals[1].last == 1,
+                "resource lifetime spans its write and last read"))
+    {
+        return false;
+    }
+    effect.passes[1].reads[0] = 2;
+    if (!expect(!compile(effect) && error.reason, "a reachable cycle fails compilation"))
+    {
+        return false;
+    }
+    effect.passes[1].reads[0] = 0;
+    std::swap(effect.passes[0].view, effect.passes[1].view);
+    if (!expect(!compile(effect) && error.pass == 0 && error.slot == 1,
+                "a reserved View order identifies the reader and unscheduled input"))
+    {
+        return false;
+    }
+    effect.root = 0;
+    if (!expect(!compile(effect) && error.pass == graph_invalid_id && error.slot == 0,
+                "the HDR slice requires an actual writer for its external output"))
+    {
+        return false;
+    }
+    // Both producer segments are immediately ready, but their physical Views fix their order.
+    bindings.textures[HdrSlot::bright] = HdrSlot::bright;
+    effect.root = 3;
+    effect.slot_count = 4;
+    effect.pass_count = 3;
+    effect.last_view = 12;
+    effect.passes[0] = {0, 11, 1, {0, graph_invalid_id}};
+    effect.passes[1] = {1, 10, 2, {0, graph_invalid_id}};
+    effect.passes[2] = {2, 12, 3, {1, 2}};
+    return expect(compile(effect) && graph.plan().count == 3 &&
+                      graph.plan().scheduled[0].view == 10 &&
+                      graph.plan().scheduled[1].view == 11 && graph.plan().scheduled[2].view == 12,
+                  "independent ready frame passes preserve reserved GPU order");
 }
 
 schema::MeshDataT grid()
@@ -94,19 +196,28 @@ schema::MeshDataT grid()
     return mesh;
 }
 
-schema::MeshDataT triangle(const char* path, float center)
+schema::MeshDataT triangle(const char* path, float center, std::uint32_t clusters,
+                           std::uint32_t triangles_per_cluster)
 {
     schema::MeshDataT mesh;
     mesh.path = path;
     mesh.vertices.emplace_back(center - .375F, -.5F, 0, 0, 0, 1);
     mesh.vertices.emplace_back(center + .375F, -.5F, 0, 0, 0, 1);
     mesh.vertices.emplace_back(center, .5F, 0, 0, 0, 1);
-    mesh.indices = {0, 1, 2};
     mesh.meshlets = std::make_unique<schema::MeshletDataT>();
+    for (std::uint32_t cluster = 0; cluster < clusters; ++cluster)
+    {
+        const auto first = static_cast<std::uint32_t>(mesh.indices.size());
+        for (std::uint32_t i = 0; i < triangles_per_cluster; ++i)
+        {
+            mesh.indices.insert(mesh.indices.end(), {0, 1, 2});
+        }
+        mesh.meshlets->meshlets.emplace_back(first, triangles_per_cluster * 3,
+                                             schema::Vec3{center, 0, 0}, .7F,
+                                             schema::Vec3{0, 0, 1}, 0);
+    }
     mesh.meshlets->indices = mesh.indices;
-    mesh.meshlets->meshlets.emplace_back(0, 3, schema::Vec3{center, 0, 0}, .7F,
-                                         schema::Vec3{0, 0, 1}, 0);
-    mesh.meshlets->submeshes.emplace_back(0, 1);
+    mesh.meshlets->submeshes.emplace_back(0, clusters);
     return mesh;
 }
 
@@ -611,8 +722,7 @@ bool cross_mesh_indices(WindowSystem& window, RenderSystem& renderer, WorldSyste
         return false;
     }
     lighting.meshlet_culling_enabled = true;
-    if (!environment.set_settings(lighting) || !capture(window, renderer, merged, merged_stats) ||
-        !pixels(direct, merged, "odd-length cross-mesh ranges preserve both triangles"))
+    if (!environment.set_settings(lighting) || !frames(window, renderer, 1))
     {
         return false;
     }
@@ -626,6 +736,11 @@ bool cross_mesh_indices(WindowSystem& window, RenderSystem& renderer, WorldSyste
         {
             return false;
         }
+    }
+    if (!capture(window, renderer, merged, merged_stats) ||
+        !pixels(direct, merged, "odd-length cross-mesh ranges preserve both triangles"))
+    {
+        return false;
     }
     GpuMemorySnapshot memory;
     if (renderer.memory_snapshot({}, 64, memory))
@@ -658,11 +773,36 @@ bool cross_mesh_indices(WindowSystem& window, RenderSystem& renderer, WorldSyste
         {
             return false;
         }
+        GpuMemorySnapshot filtered;
+        if (!expect(renderer.memory_snapshot("missing-guid", 1, filtered) && filtered.live.empty(),
+                    "a GUID without matches returns no live allocation details"))
+        {
+            return false;
+        }
+        GpuMemoryKindUsage all;
+        for (const auto& usage : filtered.live_by_kind)
+        {
+            all.count += usage.count;
+            all.logical_bytes += usage.logical_bytes;
+            all.shared_backing_bytes += usage.shared_backing_bytes;
+        }
+        const auto& page_usage =
+            filtered.live_by_kind[static_cast<std::size_t>(GpuMemoryKind::static_vertex_page)];
+        if (!expect(all.count == memory.totals.live_count &&
+                        all.logical_bytes == memory.totals.live_logical_bytes &&
+                        all.shared_backing_bytes == memory.totals.live_shared_backing_bytes &&
+                        page_usage.shared_backing_bytes == backing_bytes,
+                    "all-kind totals are independent of the GUID filter and detail limit"))
+        {
+            return false;
+        }
         std::printf("GPU memory counts %llu shared backing bytes for the vertex page.\n",
                     static_cast<unsigned long long>(backing_bytes));
     }
-    return expect(direct_stats.draw_calls == 2 && merged_stats.meshlet_candidate_pairs == 2,
-                  "two distinct meshes and meshlet candidates share a submission");
+    const auto clusters = left.meshlets->meshlets.size() + right.meshlets->meshlets.size();
+    return expect(direct_stats.draw_calls == 2 && merged_stats.meshlet_candidate_pairs == clusters &&
+                      !merged_stats.meshlet_budget_fallbacks,
+                  "both meshes and every cluster enter the shared submission");
 }
 
 int test()
@@ -675,12 +815,15 @@ int test()
     engine::WorldSystem world(&services.loader);
     WindowSystem window;
     RenderConfig render_config;
-    render_config.maximum_meshlet_candidates = 16;
+    // The compaction fixture needs 26 pairs; the overflow fixture submits 28 in one batch.
+    render_config.maximum_meshlet_candidates = 26;
     RenderSystem renderer(window, &world, nullptr, nullptr, nullptr, render_config);
     test_support::ResourceFixture fixture;
     const auto geometry = grid();
-    const auto left_triangle = triangle("meshes/submission-left-triangle", -.625F);
-    const auto right_triangle = triangle("meshes/submission-right-triangle", .625F);
+    // The left mesh alone offers higher command savings per index. It must remain available
+    // for the cross-mesh draw with its adjacent right mesh on the same vertex page.
+    const auto left_triangle = triangle("meshes/submission-left-triangle", -.625F, 25, 1);
+    const auto right_triangle = triangle("meshes/submission-right-triangle", .625F, 1, 63);
     const auto left_probes = probes("lighting/submission-left", true);
     const auto right_probes = probes("lighting/submission-right", false);
     if (!(services.initialize(config) && services.prepare_builtins()) ||
@@ -799,14 +942,83 @@ int test()
         return 1;
     }
     screen_effects.ssr_enabled = true;
-    if (!post.set_settings(screen_effects) || !capture(window, renderer, ssr_image, ssr_stats) ||
+    if (!post.set_settings(screen_effects) || !frames(window, renderer, 1) ||
         !expect(has_view(render_detail::surface_view) &&
                     !has_view(render_detail::ambient_occlusion_depth_view),
-                "Matching built-in coverage writes both surfaces and depth in one pass"))
+                "Matching built-in coverage writes both surfaces and depth in one pass") ||
+        !capture(window, renderer, ssr_image, ssr_stats) ||
+        !expect(
+            !has_view(render_detail::surface_view) &&
+                !has_view(render_detail::ambient_occlusion_depth_view),
+            "Static built-in surfaces import the retained depth and both material attachments") ||
+        !first_material.set_float("specularWorkflow", 1.0F) || !frames(window, renderer, 1) ||
+        !expect(has_view(render_detail::surface_view), "A material edit rebuilds the surface") ||
+        !first_material.set_float("specularWorkflow", 0.0F) || !frames(window, renderer, 1) ||
+        !expect(has_view(render_detail::surface_view),
+                "Restoring the material rebuilds the surface"))
     {
         return 1;
     }
     const auto& caps = *bgfx::getCaps();
+    if (caps.limits.maxFBAttachments >= 4 && caps.limits.maxTextureSamplers >= 10 &&
+        bgfx::isTextureValid(0, false, 3, bgfx::TextureFormat::RGBA16F, BGFX_TEXTURE_RT) &&
+        bgfx::isTextureValid(0, false, 1, bgfx::TextureFormat::RGBA32F, 0))
+    {
+        auto receiver = visible.front().node().get_component<Transform>();
+        const auto receiver_pose = test_support::read_settings(receiver);
+        auto sloped = receiver_pose;
+        sloped.rotation = {-45, 0, 0};
+        // The last mesh is outside the camera frustum but writes the same RVT root page.
+        auto writer = meshes.back().node().get_component<Transform>();
+        const auto writer_pose = test_support::read_settings(writer);
+        auto moved_writer = writer_pose;
+        moved_writer.position.mutate_x(writer_pose.position.x() + .25);
+        auto with_rvt = lighting;
+        with_rvt.rvt = std::make_unique<schema::RvtSettingsT>();
+        with_rvt.rvt->enabled = true;
+        with_rvt.rvt->bounds = {{-40, -8, -8}, {40, 8, 8}};
+        with_rvt.rvt->virtual_resolution = 256;
+        with_rvt.rvt->page_size = 128;
+        with_rvt.rvt->physical_pages = 16;
+        with_rvt.rvt->pages_per_frame = 1;
+        RvtStatus rvt;
+        SceneCaptureImage resident, diagnostic, restored;
+        if (!receiver.set_settings(sloped) ||
+            !visible.front().set_rvt_role(schema::RvtRole::writer_reader) ||
+            !meshes.back().set_rvt_role(schema::RvtRole::writer) ||
+            !environment.set_settings(with_rvt) || !frames(window, renderer, 8) ||
+            !capture(window, renderer, resident, ssr_stats) || !renderer.rvt_status(rvt) ||
+            !expect(rvt.effective && rvt.ready_pages > 1 && rvt.ready_pages == rvt.required_pages &&
+                        !has_view(render_detail::surface_view),
+                    "Resident RVT pages allow a stable reader to reuse the material surface"))
+        {
+            return 1;
+        }
+        const auto revision = rvt.cache_revision;
+        if (!writer.set_settings(moved_writer) || !frames(window, renderer, 1) ||
+            !renderer.rvt_status(rvt) ||
+            !expect(rvt.cache_revision != revision && has_view(render_detail::surface_view),
+                    "An offscreen writer invalidates the unchanged receiver surface") ||
+            !renderer.set_debug_feature(RenderFeature::rvt_residency, true) ||
+            !capture(window, renderer, diagnostic, ssr_stats) ||
+            !expect(resident.rgba != diagnostic.rgba,
+                    "The visible receiver samples the resident RVT diagnostic") ||
+            !renderer.set_debug_feature(RenderFeature::rvt_residency, false) ||
+            !frames(window, renderer, 1) ||
+            !expect(has_view(render_detail::surface_view),
+                    "Changing only the RVT receiver's diagnostic invalidates its surface") ||
+            !writer.set_settings(writer_pose) || !frames(window, renderer, 8) ||
+            !capture(window, renderer, restored, ssr_stats) ||
+            !expect(!has_view(render_detail::surface_view), "Restored RVT pages are reusable") ||
+            !pixels(resident, restored, "Restoring RVT state restores the exact HDR pixels") ||
+            !environment.set_settings(lighting) ||
+            !visible.front().set_rvt_role(schema::RvtRole::none) ||
+            !meshes.back().set_rvt_role(schema::RvtRole::none) ||
+            !receiver.set_settings(receiver_pose))
+        {
+            return 1;
+        }
+    }
     if ((caps.supported & BGFX_CAPS_COMPUTE) && caps.limits.maxComputeBindings >= 8 &&
         caps.limits.maxTextureLayers >= 4)
     {
@@ -836,7 +1048,9 @@ int test()
         for (unsigned frame = 0; frame < 4; ++frame)
         {
             if (!observer.set_settings(frame % 2 ? camera_pose : shifted_pose) ||
-                !frames(window, renderer, 1))
+                !frames(window, renderer, 1) ||
+                !expect(has_view(render_detail::surface_view),
+                        "Camera motion rebuilds the surface"))
             {
                 return 1;
             }
@@ -1471,5 +1685,5 @@ int main(int argc, char** argv)
     {
         return std::string_view(argv[1]) == "--benchmark" ? benchmark(argc, argv) : 1;
     }
-    return test();
+    return graph_contract() ? test() : 1;
 }

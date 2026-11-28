@@ -20,6 +20,10 @@ public:
     [[nodiscard]] bool prepare(std::uint16_t width, std::uint16_t height, std::uint8_t samples);
     [[nodiscard]] bool mirror(const float* plane_world, const float* camera_world,
                               const float* camera_projection, float clip_bias);
+    [[nodiscard]] bool has_opaque_depth_target() const noexcept
+    {
+        return bgfx::isValid(depth_framebuffer_);
+    }
     [[nodiscard]] bool begin_opaque_depth(bgfx::ViewId view_id,
                                           const PlanarReflectionScissor& scissor);
     void begin(bgfx::ViewId view_id, std::uint32_t clear_color, bool depth_prepared,

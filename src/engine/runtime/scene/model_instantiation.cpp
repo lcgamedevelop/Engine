@@ -13,7 +13,7 @@
 namespace engine
 {
 Node Scene::instantiate_model(std::string_view path, std::string_view name,
-                              std::vector<Node>* created)
+                              std::vector<Node>* created, bool static_lod_enabled)
 {
     ENGINE_PROFILE_ZONE("Scene.instantiateModel");
     if (created)
@@ -76,7 +76,8 @@ Node Scene::instantiate_model(std::string_view path, std::string_view name,
             std::string mesh_path;
             auto renderer = node.add_component<MeshRenderer>();
             if (!renderer || !ecs_detail::resource_path(node, source->mesh_guid, mesh_path) ||
-                !renderer.set_mesh(mesh_path))
+                !renderer.set_mesh(mesh_path) ||
+                (static_lod_enabled && !renderer.set_static_lod_enabled(true)))
             {
                 return rollback();
             }

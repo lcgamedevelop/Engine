@@ -7,6 +7,7 @@
 #include "resource_fixture.hpp"
 #include "runtime/engine_config.hpp"
 #include "runtime/physics/physics_system.hpp"
+#include "runtime/resource/mesh_storage.hpp"
 #include "runtime/scene/collider.hpp"
 #include "runtime/scene/mesh_renderer.hpp"
 #include "runtime/scene/rigid_body.hpp"
@@ -110,6 +111,13 @@ bool add_asset(test_support::ResourceFixture& fixture, bool alternate_frames = f
         }
         asset.chunks[2]->mesh->texcoords.clear();
         asset.chunks[2]->mesh->tangents.clear();
+        for (auto& chunk : asset.chunks)
+        {
+            if (!mesh_storage::compact(*chunk->mesh) || chunk->mesh->indices16.empty())
+            {
+                return false;
+            }
+        }
     }
     flatbuffers::FlatBufferBuilder builder;
     schema::FinishDestructionAssetDataBuffer(builder,

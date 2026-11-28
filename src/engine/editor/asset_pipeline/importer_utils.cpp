@@ -76,6 +76,31 @@ bool read_table(const std::filesystem::path& path, toml::table& table, std::stri
     return true;
 }
 
+bool read_mesh_optimization(const toml::table& meta, bool& enabled, std::string& error)
+{
+    ENGINE_PROFILE_FUNCTION();
+    enabled = true;
+    if (const auto* option = meta.get("optimize_mesh"))
+    {
+        if (!option->is_boolean())
+        {
+            error = "optimize_mesh must be a boolean";
+            return false;
+        }
+        enabled = option->as_boolean()->get();
+    }
+    return true;
+}
+
+bool read_mesh_optimization(const std::filesystem::path& source, bool& enabled, std::string& error)
+{
+    ENGINE_PROFILE_FUNCTION();
+    auto path = source;
+    path += ".meta";
+    toml::table meta;
+    return read_table(path, meta, error) && read_mesh_optimization(meta, enabled, error);
+}
+
 bool reference(const Guid& guid, schema::AssetKind kind, const ImportContext& context,
                std::vector<Guid>& dependencies, std::string& error)
 {

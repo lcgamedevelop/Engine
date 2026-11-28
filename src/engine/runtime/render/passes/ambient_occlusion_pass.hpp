@@ -1,5 +1,6 @@
 #pragma once
 
+#include "runtime/render/frame_graph_plan.hpp"
 #include "runtime/scene/scene_types.hpp"
 
 #include <bgfx/bgfx.h>
@@ -53,7 +54,9 @@ private:
     bgfx::TextureHandle final_results_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle ao_ = BGFX_INVALID_HANDLE;
     std::array<std::array<float, 4>, 19> cached_uniforms_{};
+    FrameGraphPlan plan_;
     std::uint64_t cached_depth_revision_ = 0;
+    std::uint16_t cached_source_depth_ = bgfx::kInvalidHandle;
     std::uint16_t width_ = 0;
     std::uint16_t height_ = 0;
     std::uint16_t viewport_width_ = 0;

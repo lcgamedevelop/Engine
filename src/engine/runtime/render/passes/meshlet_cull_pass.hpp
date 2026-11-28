@@ -1,6 +1,7 @@
 #pragma once
 
 #include "runtime/render/gpu_readback.hpp"
+#include "runtime/render/passes/meshlet_graph.hpp"
 #include "runtime/render/render_features.hpp"
 
 #include <bgfx/bgfx.h>
@@ -20,7 +21,6 @@ struct RenderConfig;
 namespace engine::render_detail
 {
 struct RenderFrameData;
-struct GpuGeometry;
 struct SceneDrawView;
 struct ViewDrawList;
 
@@ -44,9 +44,8 @@ public:
 private:
     [[nodiscard]] bool prepare_index_compaction();
     void release_index_compaction() noexcept;
-    [[nodiscard]] std::optional<std::uint32_t>
-    cache_index_source(const GpuGeometry& geometry, std::size_t lod, std::uint32_t first,
-                       std::uint32_t count, std::uint32_t& remaining_copies);
+    FrameGraphPlan submission_plan_;
+    std::optional<MeshletGraphShape> submission_shape_;
 
     struct Readback
     {
@@ -71,6 +70,7 @@ private:
     std::array<std::array<float, 4>, 6> result_planes_{};
     std::uint32_t result_flags_ = 0;
     bool result_valid_ = false;
+    std::uint64_t result_revision_ = 0;
     bgfx::ProgramHandle program_ = BGFX_INVALID_HANDLE;
     bgfx::ProgramHandle clear_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle parameters_ = BGFX_INVALID_HANDLE;

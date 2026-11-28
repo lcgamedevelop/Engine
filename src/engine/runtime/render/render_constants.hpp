@@ -12,6 +12,7 @@ namespace engine::render_detail
 {
 
 inline constexpr std::uint16_t output_clear_view = 108;
+inline constexpr std::uint16_t ui_view = 200;
 inline constexpr std::uint16_t rvt_debug_view = 201;
 inline constexpr std::uint16_t output_present_view = 202;
 inline constexpr std::uint16_t output_capture_view = 203;
@@ -43,6 +44,7 @@ inline constexpr std::uint16_t maximum_shadow_cascades = 4;
 inline constexpr std::uint16_t ambient_occlusion_depth_view = 110;
 inline constexpr std::uint16_t surface_view = 111;
 inline constexpr std::uint16_t main_view = 113;
+inline constexpr std::uint16_t movie_view = main_view + 1;
 inline constexpr std::uint16_t ssr_hiz_view = 114;
 inline constexpr std::uint16_t ssr_trace_view = 126;
 inline constexpr std::uint16_t ssr_composite_view = 127;
@@ -66,6 +68,8 @@ inline constexpr std::uint16_t hdr_resolve_view = 137;
 inline constexpr std::uint16_t hdr_capture_view = 138;
 // Capture lighting runs after the main image, before UI (200) and bake IBL views (240/241).
 inline constexpr std::uint16_t capture_shadow_view = 144;
+inline constexpr bgfx::ViewId bake_compute_view = 240;
+inline constexpr bgfx::ViewId bake_copy_view = 241;
 inline constexpr std::uint16_t capture_view = 242;
 inline constexpr std::uint16_t capture_copy_view = 243;
 

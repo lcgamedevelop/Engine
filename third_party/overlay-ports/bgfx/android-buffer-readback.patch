@@ -1,0 +1,197 @@
+--- a/bgfx/src/bgfx.cpp
++++ b/bgfx/src/bgfx.cpp
+@@ -33,6 +33,10 @@
+ BX_ERROR_RESULT(BGFX_ERROR_FRAME_BUFFER_VALIDATION, BX_MAKEFOURCC('b', 'g', 0, 2) );
+ BX_ERROR_RESULT(BGFX_ERROR_IDENTIFIER_VALIDATION,   BX_MAKEFOURCC('b', 'g', 0, 3) );
+ BX_ERROR_RESULT(BGFX_ERROR_VIDEO_CODEC_VALIDATION,  BX_MAKEFOURCC('b', 'g', 0, 4) );
++
++#if BX_PLATFORM_ANDROID && BGFX_CONFIG_RENDERER_VULKAN
++namespace bgfx { namespace vk { void finishBufferReadAtPostBoundary(); } }
++#endif
+ 
+ namespace bgfx
+ {
+@@ -3497,6 +3501,10 @@
+ 
+ 			{
+ 				BGFX_PROFILER_SCOPE("bgfx/Exec commands post", kColorResource);
++#if BX_PLATFORM_ANDROID && BGFX_CONFIG_RENDERER_VULKAN
++				// Frame N reads are published before frame N+1 posts its render semaphore.
++				vk::finishBufferReadAtPostBoundary();
++#endif
+ 				rendererExecCommands(m_render->m_cmdPost);
+ 			}
+ 
+--- a/bgfx/src/renderer_vk.cpp
++++ b/bgfx/src/renderer_vk.cpp
+@@ -2814,7 +2814,19 @@
+ 
+ 		void shutdown()
+ 		{
++#if BX_PLATFORM_ANDROID
++			VkResult idle = vkDeviceWaitIdle(m_device);
++			if (VK_SUCCESS == idle)
++			{
++				finishBufferRead(true);
++			}
++			else if (NULL != m_pendingBufferRead.destination)
++			{
++				BGFX_FATAL(false, bgfx::Fatal::DeviceLost, "Device could not retire a pending readback: %s", getName(idle));
++			}
++#else
+ 			VK_CHECK(vkDeviceWaitIdle(m_device) );
++#endif // BX_PLATFORM_ANDROID
+ 
+ 			if (m_timerQuerySupport)
+ 			{
+@@ -3052,6 +3064,9 @@
+ 
+ 		void readTexture(TextureHandle _handle, void* _data, uint16_t _layer, uint8_t _mip) override
+ 		{
++#if BX_PLATFORM_ANDROID
++			finishBufferRead();
++#endif // BX_PLATFORM_ANDROID
+ 			TextureVK& texture = m_textures[_handle.idx];
+ 
+ 			const uint32_t size = texture.m_readback.stagingSize(texture.m_aspectFlags, _mip);
+@@ -3087,13 +3102,75 @@
+ 			return m_vertexBuffers[_handle.idx];
+ 		}
+ 
++#if BX_PLATFORM_ANDROID
++		struct PendingBufferRead
++		{
++			VkFence fence = VK_NULL_HANDLE;
++			VkBuffer buffer = VK_NULL_HANDLE;
++			DeviceMemoryAllocationVK memory = {};
++			void* destination = NULL;
++			uint32_t size = 0;
++		};
++
++		PendingBufferRead m_pendingBufferRead;
++
++		void finishBufferRead(bool _fenceRetired = false)
++		{
++			PendingBufferRead& read = m_pendingBufferRead;
++			if (NULL == read.destination)
++			{
++				return;
++			}
++
++			VkResult result = m_lost ? VK_ERROR_DEVICE_LOST : VK_SUCCESS;
++			if (VK_SUCCESS == result && !_fenceRetired)
++			{
++				result = vkWaitForFences(m_device, 1, &read.fence, VK_TRUE, UINT64_MAX);
++			}
++
++			void* mapped = NULL;
++			if (VK_SUCCESS == result)
++			{
++				result = vkMapMemory(m_device, read.memory.mem, read.memory.offset, read.size, 0, &mapped);
++			}
++			if (VK_SUCCESS == result)
++			{
++				bx::memCopy(read.destination, mapped, read.size);
++				vkUnmapMemory(m_device, read.memory.mem);
++			}
++			else
++			{
++				BGFX_FATAL(false, bgfx::Fatal::DeviceLost, "Readback completion failed: %s", getName(result));
++				return;
++			}
++
++			vkDestroy(read.buffer);
++			recycleMemory(read.memory);
++			read.destination = NULL;
++			read.fence = VK_NULL_HANDLE;
++		}
++
++#endif // BX_PLATFORM_ANDROID
+ 		void readBuffer(Handle _handle, void* _data, uint32_t _offset, uint32_t _size) override
+ 		{
++#if BX_PLATFORM_ANDROID
++			// Bound memory to one request and keep writes to repeated destinations ordered.
++			finishBufferRead();
++#endif // BX_PLATFORM_ANDROID
+ 			const BufferVK& buffer = getBuffer(_handle);
+ 
+ 			DeviceMemoryAllocationVK stagingMemory;
+ 			VkBuffer stagingBuffer;
++#if BX_PLATFORM_ANDROID
++			const VkResult allocated = createReadbackBuffer(_size, &stagingBuffer, &stagingMemory);
++			if (VK_SUCCESS != allocated)
++			{
++				BGFX_FATAL(false, bgfx::Fatal::UnableToInitialize, "Readback staging allocation failed: %s", getName(allocated));
++				return;
++			}
++#else
+ 			VK_CHECK(createReadbackBuffer(_size, &stagingBuffer, &stagingMemory) );
++#endif
+ 
+ 			setMemoryBarrier(
+ 				  m_commandBuffer
+@@ -3107,6 +3184,12 @@
+ 			region.size      = _size;
+ 			vkCmdCopyBuffer(m_commandBuffer, buffer.m_buffer, stagingBuffer, 1, &region);
+ 
++#if BX_PLATFORM_ANDROID
++			// bgfx::read returns submission frame + 2. Finish before the next
++			// renderer submission releases its API semaphore, preserving that deadline.
++			m_pendingBufferRead = {m_cmd.m_currentFence, stagingBuffer, stagingMemory, _data, _size};
++			kick();
++#else
+ 			kick(true);
+ 
+ 			void* dst = NULL;
+@@ -3116,6 +3199,7 @@
+ 
+ 			vkDestroy(stagingBuffer);
+ 			recycleMemory(stagingMemory);
++#endif // BX_PLATFORM_ANDROID
+ 		}
+ 
+ 		void resizeTexture(TextureHandle _handle, uint16_t _width, uint16_t _height, uint8_t _numMips, uint16_t _numLayers) override
+@@ -11275,6 +11359,13 @@
+ 				return result;
+ 			}
+ 
++#if BX_PLATFORM_ANDROID
++			// Finish before this command-list fence can be recycled for another transfer.
++			if (s_renderVK->m_pendingBufferRead.fence == commandList.m_fence)
++			{
++				s_renderVK->finishBufferRead(true);
++			}
++#endif // BX_PLATFORM_ANDROID
+ 			result = vkResetCommandPool(device, commandList.m_commandPool, 0);
+ 
+ 			if (VK_SUCCESS != result)
+@@ -11386,6 +11477,12 @@
+ 				BGFX_PROFILER_SCOPE("vkQueueSubmit", kColorDraw);
+ 
+ 				VkResult result = vkQueueSubmit(m_queue, 1, &si, m_completedFence);
++#if BX_PLATFORM_ANDROID
++				if (VK_SUCCESS != result && s_renderVK->m_pendingBufferRead.fence == m_completedFence)
++				{
++					BGFX_FATAL(false, bgfx::Fatal::DeviceLost, "Readback submission failed: %s", getName(result));
++				}
++#endif // BX_PLATFORM_ANDROID
+ 
+ 				if (!s_renderVK->handleDeviceLost(result) )
+ 				{
+@@ -13366,6 +13463,16 @@
+ 		kick();
+ 	}
+ 
++#if BX_PLATFORM_ANDROID
++	void finishBufferReadAtPostBoundary()
++	{
++		if (s_renderVK != NULL)
++		{
++			s_renderVK->finishBufferRead();
++		}
++	}
++#endif // BX_PLATFORM_ANDROID
++
+ } /* namespace vk */ } // namespace bgfx
+ 
+ #else

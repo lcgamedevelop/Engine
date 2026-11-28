@@ -1,6 +1,7 @@
 #include "runtime/render/movie_pass.hpp"
-#include "runtime/performance/profiling.hpp"
 #include "fs_movie.bin.h"
+#include "runtime/performance/profiling.hpp"
+#include "runtime/render/passes/frame_output.hpp"
 #include "runtime/render/render_constants.hpp"
 #include "vs_movie.bin.h"
 #include <algorithm>
@@ -53,6 +54,24 @@ bgfx::TextureHandle upload(const MoviePlane& plane, std::uint32_t channels)
         channels == 2 ? bgfx::TextureFormat::RG8 : bgfx::TextureFormat::R8, sampler_flags, memory);
 }
 } // namespace
+PreparedMovieFrame::~PreparedMovieFrame() noexcept
+{
+    release();
+}
+
+void PreparedMovieFrame::release() noexcept
+{
+    for (auto& plane : planes_)
+    {
+        if (bgfx::isValid(plane))
+        {
+            bgfx::destroy(plane);
+            plane = BGFX_INVALID_HANDLE;
+        }
+    }
+    width_ = height_ = 0;
+}
+
 MoviePass::~MoviePass() noexcept
 {
     ENGINE_PROFILE_FUNCTION();
@@ -110,9 +129,13 @@ bool MoviePass::initialize()
     }
     return true;
 }
-bool MoviePass::draw(const MovieFrame& frame, std::uint16_t width, std::uint16_t height)
+bool MoviePass::validate(const MovieFrame& frame, const FrameOutput& output,
+                         PreparedMovieFrame& prepared)
 {
     ENGINE_PROFILE_FUNCTION();
+    prepared.release();
+    const auto width = output.width();
+    const auto height = output.height();
     if (!frame.width || !frame.height || frame.width > 65535 || frame.height > 65535 || !width ||
         !height ||
         (frame.format != schema::MoviePixelFormat::nv12 &&
@@ -136,77 +159,69 @@ bool MoviePass::draw(const MovieFrame& frame, std::uint16_t width, std::uint16_t
         !valid_plane(frame.planes[1], cw, ch, nv12 ? 2 : 1) ||
         (!nv12 && !valid_plane(frame.planes[2], cw, ch, 1)) ||
         (nv12 && (!frame.planes[2].bytes.empty() || frame.planes[2].width != 0 ||
-                  frame.planes[2].height != 0 || frame.planes[2].stride_bytes != 0)) ||
-        !initialize())
+                  frame.planes[2].height != 0 || frame.planes[2].stride_bytes != 0)))
     {
         return false;
     }
-    std::array<bgfx::TextureHandle, 3> planes{
-        {upload(frame.planes[0], 1), upload(frame.planes[1], nv12 ? 2 : 1), BGFX_INVALID_HANDLE}};
-    if (!nv12)
-    {
-        planes[2] = upload(frame.planes[2], 1);
-    }
-    if (!bgfx::isValid(planes[0]) || !bgfx::isValid(planes[1]) ||
-        (!nv12 && !bgfx::isValid(planes[2])))
-    {
-        for (auto plane : planes)
-        {
-            if (bgfx::isValid(plane))
-            {
-                bgfx::destroy(plane);
-            }
-        }
-        return false;
-    }
-    const float params[4] = {frame.color.matrix() == schema::MovieColorMatrix::bt601 ? 1.0F : 0.0F,
-                             frame.color.range() == schema::MovieColorRange::limited ? 1.0F : 0.0F,
-                             frame.color.transfer() == schema::MovieTransfer::bt709 ? 1.0F : 0.0F,
-                             nv12 ? 1.0F : 0.0F};
-    const float chroma[4] = {frame.color.chroma_location() == schema::MovieChromaLocation::left
-                                 ? 0.25F / static_cast<float>(cw)
-                                 : 0.0F,
-                             0, 0, 0};
     const auto target_width = static_cast<std::uint16_t>(std::min<std::uint64_t>(
         width, static_cast<std::uint64_t>(height) * frame.width / frame.height));
     const auto target_height = static_cast<std::uint16_t>(std::min<std::uint64_t>(
         height, static_cast<std::uint64_t>(width) * frame.height / frame.width));
     if (!target_width || !target_height)
     {
-        for (auto plane : planes)
-        {
-            if (bgfx::isValid(plane))
-            {
-                bgfx::destroy(plane);
-            }
-        }
         return false;
     }
+
+    prepared.params_ = {frame.color.matrix() == schema::MovieColorMatrix::bt601 ? 1.0F : 0.0F,
+                        frame.color.range() == schema::MovieColorRange::limited ? 1.0F : 0.0F,
+                        frame.color.transfer() == schema::MovieTransfer::bt709 ? 1.0F : 0.0F,
+                        nv12 ? 1.0F : 0.0F};
+    prepared.chroma_ = {frame.color.chroma_location() == schema::MovieChromaLocation::left
+                            ? 0.25F / static_cast<float>(cw)
+                            : 0.0F,
+                        0, 0, 0};
+    prepared.width_ = target_width;
+    prepared.height_ = target_height;
+    return true;
+}
+
+bool MoviePass::upload_plane(const MovieFrame& frame, std::size_t index,
+                             PreparedMovieFrame& prepared)
+{
+    if (index >= prepared.planes_.size() || !initialize())
+    {
+        return false;
+    }
+    auto& plane = prepared.planes_[index];
+    plane = upload(frame.planes[index],
+                   index == 1 && frame.format == schema::MoviePixelFormat::nv12 ? 2 : 1);
+    return bgfx::isValid(plane);
+}
+
+void MoviePass::draw(const PreparedMovieFrame& prepared, const FrameOutput& output) const
+{
+    ENGINE_PROFILE_FUNCTION();
+    const auto width = output.width();
+    const auto height = output.height();
+    const auto target_width = prepared.width_;
+    const auto target_height = prepared.height_;
+    const auto& planes = prepared.planes_;
     bgfx::setViewFrameBuffer(main_view, BGFX_INVALID_HANDLE);
     bgfx::setViewRect(main_view, 0, 0, width, height);
     bgfx::setViewClear(main_view, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x000000ff, 1.0F, 0);
     bgfx::touch(main_view);
-    constexpr std::uint16_t movie_view = main_view + 1;
-    bgfx::setViewFrameBuffer(movie_view, BGFX_INVALID_HANDLE);
+    bgfx::setViewFrameBuffer(movie_view, output.target());
     bgfx::setViewRect(movie_view, (width - target_width) / 2, (height - target_height) / 2,
                       target_width, target_height);
     bgfx::setViewClear(movie_view, BGFX_CLEAR_NONE);
     bgfx::setTexture(0, samplers_[0], planes[0]);
     bgfx::setTexture(1, samplers_[1], planes[1]);
-    bgfx::setTexture(2, samplers_[2], nv12 ? planes[1] : planes[2]);
-    bgfx::setUniform(color_, params);
-    bgfx::setUniform(chroma_, chroma);
+    bgfx::setTexture(2, samplers_[2], bgfx::isValid(planes[2]) ? planes[2] : planes[1]);
+    bgfx::setUniform(color_, prepared.params_.data());
+    bgfx::setUniform(chroma_, prepared.chroma_.data());
     bgfx::setVertexBuffer(0, vertices_);
     bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A);
     bgfx::submit(movie_view, program_);
-    for (auto plane : planes)
-    {
-        if (bgfx::isValid(plane))
-        {
-            bgfx::destroy(plane);
-        }
-    }
-    return true;
 }
 void MoviePass::shutdown() noexcept
 {

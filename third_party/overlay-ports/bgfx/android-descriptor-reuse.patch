@@ -1,0 +1,384 @@
+--- a/bgfx/src/renderer_vk.cpp
++++ b/bgfx/src/renderer_vk.cpp
+@@ -2764,6 +2764,9 @@
+ 				for (uint32_t ii = 0; ii < m_maxFrameLatency; ++ii)
+ 				{
+ 					m_scratchStagingBuffer[ii].destroy();
++#if BX_PLATFORM_ANDROID
++					vkDestroy(m_cachedSets[ii].pool);
++#endif // BX_PLATFORM_ANDROID
+ 					for (uint32_t jj = 0; jj < m_numDescriptorPools[ii]; ++jj)
+ 					{
+ 						vkDestroy(m_descriptorPool[ii][jj]);
+@@ -2858,6 +2861,9 @@
+ 
+ 			for (uint32_t ii = 0; ii < m_maxFrameLatency; ++ii)
+ 			{
++#if BX_PLATFORM_ANDROID
++				vkDestroy(m_cachedSets[ii].pool);
++#endif // BX_PLATFORM_ANDROID
+ 				for (uint32_t jj = 0; jj < m_numDescriptorPools[ii]; ++jj)
+ 				{
+ 					vkDestroy(m_descriptorPool[ii][jj]);
+@@ -5236,9 +5242,38 @@
+ 
+ 			m_descriptorPoolIdx = 0;
+ 			m_descriptorSetMap.clear();
+-		}
+-
+-		VkDescriptorPool createDescriptorPool()
++#if BX_PLATFORM_ANDROID
++			// CommandQueueVK has retired this slot's fence. Keep a productive pool
++			// across frames, and give a changed working set a fresh pool after four
++			// populated slot visits where at least three quarters needed fallback.
++			DescriptorCache& cache = m_cachedSets[_frame];
++			if (cache.lookups != 0)
++			{
++				const bool stale = cache.full && uint64_t(cache.fallbacks) * 4 >= uint64_t(cache.lookups) * 3;
++				cache.staleVisits = stale ? cache.staleVisits + 1 : 0;
++			}
++			if (cache.staleVisits == 4)
++			{
++				cache.sets.clear();
++				if (VK_NULL_HANDLE != cache.pool && VK_SUCCESS != vkResetDescriptorPool(m_device, cache.pool, 0) )
++				{
++					vkDestroy(cache.pool);
++				}
++				cache.full = false;
++				cache.staleVisits = 0;
++			}
++			++cache.serial;
++			cache.freeGroups.clear();
++			for (const auto& it : cache.sets)
++			{
++				cache.freeGroups[it.second.group].push_back(it.first);
++			}
++			cache.lookups = 0;
++			cache.fallbacks = 0;
++#endif // BX_PLATFORM_ANDROID
++		}
++
++		VkDescriptorPool createDescriptorPool(bool _optional = false)
+ 		{
+ 			const VkDescriptorPoolSize dps[] =
+ 			{
+@@ -5258,7 +5293,15 @@
+ 			dpci.pPoolSizes    = dps;
+ 
+ 			VkDescriptorPool pool = VK_NULL_HANDLE;
+-			VK_CHECK(vkCreateDescriptorPool(m_device, &dpci, m_allocatorCb, &pool) );
++			VkResult result = vkCreateDescriptorPool(m_device, &dpci, m_allocatorCb, &pool);
++			if (!_optional)
++			{
++				VK_CHECK(result);
++			}
++			else if (VK_SUCCESS != result)
++			{
++				return VK_NULL_HANDLE;
++			}
+ 			return pool;
+ 		}
+ 
+@@ -5300,15 +5343,171 @@
+ 			return descriptorSet;
+ 		}
+ 
++#if BX_PLATFORM_ANDROID
++		VkDescriptorSet findOrWriteDescriptorSet(const VkDescriptorSetLayout& _layout, uint32_t _count, VkWriteDescriptorSet* _writes)
++		{
++			DescriptorCache& cache = m_cachedSets[m_cmd.m_currentFrameInFlight];
++			if (0 == _count || _count > kMaxDescriptorWrites || NULL == _writes || VK_NULL_HANDLE == _layout)
++			{
++				return VK_NULL_HANDLE;
++			}
++
++			uint64_t mask = 0;
++			DescriptorValue values[kMaxDescriptorWrites];
++			bx::HashMurmur2A hash;
++			hash.begin();
++			const uint64_t layoutId = descriptorObject(DescriptorLayout, uint64_t(_layout.vk));
++			hash.add(layoutId);
++			for (uint32_t ii = 0; ii < _count; ++ii)
++			{
++				const VkWriteDescriptorSet& write = _writes[ii];
++				if (write.sType != VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET || NULL != write.pNext
++				||  write.dstArrayElement != 0 || write.descriptorCount != 1 || write.dstBinding >= 64)
++				{
++					return VK_NULL_HANDLE;
++				}
++				const uint64_t bit = UINT64_C(1) << write.dstBinding;
++				if (0 != (mask & bit) )
++				{
++					return VK_NULL_HANDLE;
++				}
++				mask |= bit;
++				DescriptorValue& value = values[ii];
++				value = { write.dstBinding, uint32_t(write.descriptorType), 0, 0, 0 };
++				switch (write.descriptorType)
++				{
++				case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
++				case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
++					if (NULL == write.pBufferInfo || VK_NULL_HANDLE == write.pBufferInfo->buffer)
++					{
++						return VK_NULL_HANDLE;
++					}
++					value.object = descriptorObject(DescriptorBuffer, uint64_t(write.pBufferInfo->buffer));
++					value.offset = write.pBufferInfo->offset;
++					value.range  = write.pBufferInfo->range;
++					break;
++				case VK_DESCRIPTOR_TYPE_SAMPLER:
++					if (NULL == write.pImageInfo || VK_NULL_HANDLE == write.pImageInfo->sampler)
++					{
++						return VK_NULL_HANDLE;
++					}
++					value.object = descriptorObject(DescriptorSampler, uint64_t(write.pImageInfo->sampler));
++					break;
++				case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
++				case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
++					if (NULL == write.pImageInfo || VK_NULL_HANDLE == write.pImageInfo->imageView)
++					{
++						return VK_NULL_HANDLE;
++					}
++					value.object = descriptorObject(DescriptorImageView, uint64_t(write.pImageInfo->imageView));
++					value.offset = uint32_t(write.pImageInfo->imageLayout);
++					break;
++				default:
++					return VK_NULL_HANDLE;
++				}
++			}
++			++cache.lookups;
++			const uint32_t size = _count * sizeof(DescriptorValue);
++			hash.add(values, size);
++			const uint32_t key = hash.end();
++			auto it = cache.sets.find(key);
++			if (it != cache.sets.end() )
++			{
++				CachedSet& hit = it->second;
++				if (layoutId == hit.layout && _count == hit.values.size()
++				&&  0 == bx::memCmp(values, hit.values.data(), size) )
++				{
++					hit.used = cache.serial; // Protect all uses until the next slot fence.
++					return hit.set;
++				}
++				++cache.fallbacks; // Same digest, different writes.
++				return VK_NULL_HANDLE;
++			}
++			bx::HashMurmur2A groupHash;
++			groupHash.begin();
++			groupHash.add(layoutId);
++			groupHash.add(mask);
++			const uint32_t groupId = groupHash.end();
++			VkDescriptorSet set = VK_NULL_HANDLE;
++			// Only overwrite a retired set with exactly the same write mask. A
++			// binding omitted from these writes must never inherit an old resource.
++			auto group = cache.freeGroups.find(groupId);
++			if (group != cache.freeGroups.end() )
++			{
++				auto& keys = group->second;
++				while (!keys.empty() )
++				{
++					uint32_t oldKey = keys.back();
++					keys.pop_back();
++					auto old = cache.sets.find(oldKey);
++					if (old != cache.sets.end() && old->second.used != cache.serial
++					&&  old->second.layout == layoutId && old->second.mask == mask)
++					{
++						set = old->second.set;
++						cache.sets.erase(old);
++						break;
++					}
++				}
++			}
++			if (VK_NULL_HANDLE == set)
++			{
++				if (cache.full || cache.sets.size() >= kDescriptorPoolChunkSize)
++				{
++					cache.full = true;
++					++cache.fallbacks;
++					return VK_NULL_HANDLE;
++				}
++				if (VK_NULL_HANDLE == cache.pool)
++				{
++					cache.pool = createDescriptorPool(true);
++					if (VK_NULL_HANDLE == cache.pool)
++					{
++						cache.full = true;
++						++cache.fallbacks;
++						return VK_NULL_HANDLE;
++					}
++				}
++				VkDescriptorSetAllocateInfo dsai = {};
++				dsai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
++				dsai.descriptorPool = cache.pool;
++				dsai.descriptorSetCount = 1;
++				dsai.pSetLayouts = &_layout;
++				if (VK_SUCCESS != vkAllocateDescriptorSets(m_device, &dsai, &set) )
++				{
++					cache.full = true;
++					++cache.fallbacks;
++					return VK_NULL_HANDLE;
++				}
++			}
++			for (uint32_t ii = 0; ii < _count; ++ii)
++			{
++				_writes[ii].dstSet = set;
++			}
++			vkUpdateDescriptorSets(m_device, _count, _writes, 0, NULL);
++			CachedSet& entry = cache.sets[key];
++			entry.layout = layoutId;
++			entry.mask = mask;
++			entry.group = groupId;
++			entry.used = cache.serial;
++			entry.set = set;
++			entry.values.resize(_count);
++			bx::memCopy(entry.values.data(), values, size);
++			return set;
++		}
++#endif // BX_PLATFORM_ANDROID
++
+ 		VkDescriptorSet getDescriptorSet(const ProgramVK& _program, const RenderBind& _renderBind, VkBuffer _uniformBuffer, const float _palette[][4])
+ 		{
++#if BX_PLATFORM_ANDROID
++			VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
++#else
+ 			VkDescriptorSet descriptorSet = allocDescriptorSet(_program.m_descriptorSetLayout);
++#endif // BX_PLATFORM_ANDROID
+ 
+ 			VkDescriptorImageInfo  imageInfo[BGFX_CONFIG_MAX_TEXTURE_SAMPLERS];
+-			VkDescriptorBufferInfo bufferInfo[BGFX_CONFIG_MAX_TEXTURE_SAMPLERS];
+-
+-			constexpr uint32_t kMaxDescriptorSets = 2 * BGFX_CONFIG_MAX_TEXTURE_SAMPLERS + 2;
+-			VkWriteDescriptorSet wds[kMaxDescriptorSets] = {};
++			VkDescriptorBufferInfo bufferInfo[BGFX_CONFIG_MAX_TEXTURE_SAMPLERS + 2];
++
++			VkWriteDescriptorSet wds[kMaxDescriptorWrites] = {};
+ 
+ 			uint32_t wdsCount    = 0;
+ 			uint32_t bufferCount = 0;
+@@ -5537,6 +5736,18 @@
+ 				++bufferCount;
+ 			}
+ 
++#if BX_PLATFORM_ANDROID
++			descriptorSet = findOrWriteDescriptorSet(_program.m_descriptorSetLayout, wdsCount, wds);
++			if (VK_NULL_HANDLE != descriptorSet)
++			{
++				return descriptorSet;
++			}
++			descriptorSet = allocDescriptorSet(_program.m_descriptorSetLayout);
++			for (uint32_t ii = 0; ii < wdsCount; ++ii)
++			{
++				wds[ii].dstSet = descriptorSet;
++			}
++#endif // BX_PLATFORM_ANDROID
+ 			vkUpdateDescriptorSets(m_device, wdsCount, wds, 0, NULL);
+ 
+ 			VkDescriptorSet temp = descriptorSet;
+@@ -6061,11 +6272,71 @@
+ 		uint32_t m_videoDecodeQueueFamily;
+ 		VkQueue  m_videoDecodeQueue;
+ 
++		static constexpr uint32_t kMaxDescriptorWrites = 2 * BGFX_CONFIG_MAX_TEXTURE_SAMPLERS + 2;
+ 		static constexpr uint32_t kDescriptorPoolChunkSize = BGFX_CONFIG_RENDERER_VULKAN_DESCRIPTOR_SETS_PER_POOL;
+ 		static constexpr uint32_t kMaxDescriptorPoolChunks = 64;
+ 		VkDescriptorPool m_descriptorPool[BGFX_CONFIG_MAX_FRAME_LATENCY][kMaxDescriptorPoolChunks];
+ 		uint16_t m_numDescriptorPools[BGFX_CONFIG_MAX_FRAME_LATENCY];
+ 		uint16_t m_descriptorPoolIdx;
++#if BX_PLATFORM_ANDROID
++		enum DescriptorObjectKind : uint8_t
++		{
++			DescriptorLayout,
++			DescriptorBuffer,
++			DescriptorSampler,
++			DescriptorImageView,
++			DescriptorObjectCount
++		};
++		// Only share sets whose complete, concrete descriptor writes match. The digest
++		// is a lookup accelerator; a collision uses the normal transient allocator.
++		struct DescriptorValue
++		{
++			uint32_t binding;
++			uint32_t type;
++			uint64_t object;
++			uint64_t offset;
++			uint64_t range;
++		};
++		struct CachedSet
++		{
++			uint64_t layout;
++			uint64_t mask;
++			uint32_t group;
++			uint64_t used;
++			::VkDescriptorSet set;
++			stl::vector<DescriptorValue> values;
++		};
++		struct DescriptorCache
++		{
++			VkDescriptorPool pool = VK_NULL_HANDLE;
++			stl::unordered_map<uint32_t, CachedSet> sets;
++			stl::unordered_map<uint32_t, stl::vector<uint32_t> > freeGroups;
++			uint64_t serial = 0;
++			uint32_t lookups = 0;
++			uint32_t fallbacks = 0;
++			uint8_t staleVisits = 0;
++			bool full = false;
++		};
++		DescriptorCache m_cachedSets[BGFX_CONFIG_MAX_FRAME_LATENCY];
++		uint64_t m_nextObjectId = 0;
++		using ObjectIds = stl::unordered_map<uint64_t, uint64_t>;
++		ObjectIds m_objectIds[DescriptorObjectCount];
++
++		uint64_t descriptorObject(DescriptorObjectKind _kind, uint64_t _handle)
++		{
++			// Vulkan can recycle raw handle values after destruction. The destruction
++			// hook removes this mapping so the next lifetime receives a new key.
++			auto& ids = m_objectIds[_kind];
++			auto it = ids.find(_handle);
++			if (it != ids.end() )
++			{
++				return it->second;
++			}
++			const uint64_t id = ++m_nextObjectId;
++			ids.insert(stl::make_pair(_handle, id));
++			return id;
++		}
++#endif // BX_PLATFORM_ANDROID
+ 
+ 		typedef stl::unordered_map<uint32_t, VkDescriptorSet> DescriptorSetMap;
+ 		DescriptorSetMap m_descriptorSetMap;
+@@ -6264,12 +6535,35 @@
+ 		s_renderVK = NULL;
+ 	}
+ 
++	template<typename Ty>
++	static void invalidateCachedDescriptor(Ty& _obj)
++	{
++#if BX_PLATFORM_ANDROID
++		constexpr VkObjectType type = getType<Ty>();
++		constexpr auto kind = VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT == type ? RendererContextVK::DescriptorLayout
++			: VK_OBJECT_TYPE_BUFFER  == type ? RendererContextVK::DescriptorBuffer
++			: VK_OBJECT_TYPE_SAMPLER == type ? RendererContextVK::DescriptorSampler
++			: VK_OBJECT_TYPE_IMAGE_VIEW == type ? RendererContextVK::DescriptorImageView
++			: RendererContextVK::DescriptorObjectCount;
++		if constexpr (kind != RendererContextVK::DescriptorObjectCount)
++		{
++			auto& ids = s_renderVK->m_objectIds[kind];
++			auto it = ids.find(uint64_t(_obj.vk));
++			if (it != ids.end() )
++			{
++				ids.erase(it);
++			}
++		}
++#endif // BX_PLATFORM_ANDROID
++	}
++
+ #define VK_DESTROY_FUNC(_name)                                                          \
+ 	void vkDestroy(Vk##_name& _obj)                                                     \
+ 	{                                                                                   \
+ 		if (VK_NULL_HANDLE != _obj)                                                     \
+ 		{                                                                               \
+ 			BGFX_PROFILER_SCOPE("vkDestroy" #_name, kColorResource);                    \
++			invalidateCachedDescriptor(_obj);                                           \
+ 			vkDestroy##_name(s_renderVK->m_device, _obj.vk, s_renderVK->m_allocatorCb); \
+ 			_obj = VK_NULL_HANDLE;                                                      \
+ 		}                                                                               \

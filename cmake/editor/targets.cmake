@@ -13,15 +13,14 @@ if(ENGINE_ENABLE_ASSET_PIPELINE_DEPS OR "editor/modeling" IN_LIST ENGINE_SELECTE
     add_library(engine_editor_mesh STATIC src/engine/editor/mesh/mesh_tangents.cpp)
     target_compile_features(engine_editor_mesh PRIVATE cxx_std_20)
     target_include_directories(engine_editor_mesh PRIVATE "${PROJECT_SOURCE_DIR}/src/engine")
-    target_link_libraries(engine_editor_mesh PRIVATE engine::scene_data mikktspace::mikktspace)
+    target_link_libraries(engine_editor_mesh PRIVATE engine::resource mikktspace::mikktspace)
     engine_apply_options(engine_editor_mesh)
 endif()
 
 if(ENGINE_ENABLE_ASSET_PIPELINE_DEPS)
     target_sources(engine_editor_mesh PRIVATE src/engine/editor/mesh/mesh_lods.cpp
                                               src/engine/editor/mesh/meshlets.cpp)
-    target_link_libraries(engine_editor_mesh
-                          PRIVATE meshoptimizer::meshoptimizer engine::resource)
+    target_link_libraries(engine_editor_mesh PRIVATE meshoptimizer::meshoptimizer)
     get_target_property(_mesh_lod_toml_includes tomlplusplus::tomlplusplus
                         INTERFACE_INCLUDE_DIRECTORIES)
     target_include_directories(engine_editor_mesh SYSTEM PRIVATE ${_mesh_lod_toml_includes})
@@ -127,6 +126,7 @@ if(ENGINE_ENABLE_ASSET_PIPELINE_DEPS)
                 src/engine/editor/asset_pipeline/importers/material_importer.cpp
                 src/engine/editor/asset_pipeline/importers/scene_importer.cpp
                 src/engine/editor/asset_pipeline/importers/prefab_importer.cpp
+                src/engine/editor/asset_pipeline/texture_compaction.cpp
                 src/engine/editor/asset_pipeline/importers/texture_importer.cpp
                 src/engine/editor/asset_pipeline/importers/ktx_texture_importer.cpp
                 src/engine/editor/asset_pipeline/importers/light_probe_importer.cpp

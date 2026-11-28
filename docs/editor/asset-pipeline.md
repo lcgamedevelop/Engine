@@ -91,7 +91,8 @@ compression_level = 2
 mipmaps = true
 ```
 
-- `storage`：默认 `basis`，运行时按设备能力转码；显式 `native` 在编辑器提前转为目标平台数据，运行时只分块上传。native 的 `auto` 为 Windows/Linux BC7、macOS/iOS ASTC4x4、Android ETC2，HDR 为 RGBA16F；设备不支持时返回错误，不附带后备载荷。
+- `storage`：默认 `basis`，运行时按设备能力转码；显式 `native` 在编辑器提前转为目标 GPU 格式。native 的 `auto` 为 Windows/Linux BC7、macOS/iOS ASTC4x4、Android ETC2，HDR 为 RGBA16F；设备不支持时返回错误，不附带后备载荷。
+  导出原生纹理时，还可通过项目打包清单设置无损分块存储。见[原生纹理的无损存储](../plugins/editor/resource-build.md#原生纹理的无损存储)。
 - `format`：basis LDR 的 `auto` 按 GPU 与转码器能力选择，或明确 `rgba8` / `bc7` / `astc4x4` / `etc2`；HDR 只允许 `auto` / `rgba16f`，运行时保持 RGBA16F。显式格式不支持时返回失败。
 - `compression`：默认 UASTC；LDR 可选 ETC1S。UASTC LDR 可显式使用 `rdo_quality_scalar`（0.001..50，默认1，越小失真越少），ETC1S 使用 `quality`（1..255，默认128）。HDR 使用 UASTC HDR 4×4，不接受 LDR RDO 或 ETC1S 选项。
 - `compression_level`：UASTC LDR/HDR 0..4，ETC1S 0..6；`srgb` 省略时 LDR 默认 true、HDR 默认 false。法线、ORM 等 LDR 数据贴图显式设为 false；HDR 不允许 true。`mipmaps` 决定是否生成完整 mip 链。

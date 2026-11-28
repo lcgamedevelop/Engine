@@ -1,4 +1,5 @@
 #include "runtime/physics/physics_system.hpp"
+#include "runtime/resource/mesh_storage.hpp"
 #include "runtime/scene/scope_work.hpp"
 
 #include "runtime/physics/character_motor_driver.hpp"
@@ -475,10 +476,14 @@ bool make_shape(const schema::ColliderDataT& collider, const schema::MeshDataT* 
     }
     case schema::ColliderShape::mesh:
     {
-        if (mesh == nullptr || mesh->vertices.empty() || mesh->indices.empty() ||
-            mesh->indices.size() % 3 != 0 ||
+        if (!mesh || !mesh_storage::valid_encoding(*mesh))
+        {
+            return false;
+        }
+        const auto indices = mesh_storage::indices(*mesh);
+        if (mesh->vertices.empty() || indices.empty() || indices.size() % 3 != 0 ||
             mesh->vertices.size() > std::numeric_limits<std::uint32_t>::max() ||
-            mesh->indices.size() / 3 > std::numeric_limits<std::uint32_t>::max())
+            indices.size() / 3 > std::numeric_limits<std::uint32_t>::max())
         {
             return false;
         }
@@ -494,12 +499,12 @@ bool make_shape(const schema::ColliderDataT& collider, const schema::MeshDataT* 
             vertices.emplace_back(position.GetX(), position.GetY(), position.GetZ());
         }
         JPH::IndexedTriangleList triangles;
-        triangles.reserve(mesh->indices.size() / 3);
-        for (std::size_t index = 0; index < mesh->indices.size(); index += 3)
+        triangles.reserve(indices.size() / 3);
+        for (std::size_t index = 0; index < indices.size(); index += 3)
         {
-            const auto a = mesh->indices[index];
-            const auto b = mesh->indices[index + 1];
-            const auto c = mesh->indices[index + 2];
+            const auto a = indices[index];
+            const auto b = indices[index + 1];
+            const auto c = indices[index + 2];
             if (a >= vertices.size() || b >= vertices.size() || c >= vertices.size())
             {
                 return false;
@@ -1905,7 +1910,7 @@ struct PhysicsSystem::State final : JPH::ContactListener, JPH::CharacterContactL
             return false;
         }
         if (snapshot.transient_mesh && snapshot.transient_mesh->vertices.empty() &&
-            snapshot.transient_mesh->indices.empty())
+            mesh_storage::indices(*snapshot.transient_mesh).empty())
         {
             return true;
         }
@@ -2746,7 +2751,7 @@ bool PhysicsSystem::set_mesh_data(Collider collider, const schema::MeshDataT& me
     snapshot.mesh_parts.reset();
     // 拷贝隔离调用方后续修改；不发布未完成的 Jolt Shape。
     snapshot.transient_mesh = std::make_shared<const schema::MeshDataT>(mesh);
-    const bool empty = mesh.vertices.empty() && mesh.indices.empty();
+    const bool empty = mesh.vertices.empty() && mesh_storage::indices(mesh).empty();
     snapshot.shape_scale = snapshot.scale;
     if (!empty && !make_shape(*snapshot.collider, snapshot.transient_mesh.get(),
                               snapshot.shape_scale, snapshot.shape))

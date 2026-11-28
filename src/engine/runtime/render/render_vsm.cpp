@@ -78,6 +78,12 @@ bool RenderSystem::prepare_vsm(const render_detail::RenderFrameData& frame,
 {
     ENGINE_PROFILE_ZONE("Render.prepareVsm");
     output = {};
+    draw.vsm = {};
+    // A previous frame may have stopped after planning tiles but before publishing the page table.
+    if (vsm_cache_)
+    {
+        vsm_cache_->cancel_batch();
+    }
     const render_detail::LocalShadowLight* light = nullptr;
     for (const auto& item : frame.lights)
     {
@@ -104,7 +110,10 @@ bool RenderSystem::prepare_vsm(const render_detail::RenderFrameData& frame,
         if (vsm_cache_)
         {
             vsm_cache_->cancel_batch();
+            (void)vsm_cache_->status(vsm_status_);
         }
+        output = {};
+        draw.vsm = {};
         vsm_status_.state = state;
         vsm_status_.error_code = code;
         vsm_status_.error = error;
@@ -191,7 +200,7 @@ bool RenderSystem::prepare_vsm(const render_detail::RenderFrameData& frame,
     vsm_level_count_ = output.view.level_count;
     output.debug_options = vsm_options_;
     output.diagnostics = debug_requests_[std::size_t(RenderFeature::vsm_viewer)];
-    if (!vsm_pass_->draw_pages(frame, output, scene_resources_->targets().shadow) ||
+    if (!vsm_pass_->draw_pages(frame, output, scene_resources_->targets().shadow, *vsm_cache_) ||
         !vsm_pass_->binding(draw.vsm))
     {
         return fail(VsmState::failed, "vsm_draw_failed", "Cannot submit virtual shadow pages");
@@ -220,7 +229,12 @@ void RenderSystem::draw_vsm_viewer()
     }
     const auto* lighting =
         scene_resources_ && vsm_scene_id_ ? &scene_resources_->targets().clusters[2] : nullptr;
+    auto visible_status = vsm_status_;
+    if (vsm_cache_ && vsm_cache_->status(visible_status, true))
+    {
+        visible_status.resident_bytes = vsm_status_.resident_bytes;
+    }
     vsm_debug_visible_ =
-        vsm_viewer_->draw(vsm_status_, vsm_pass_.get(), lighting, vsm_options_, *frame_output_);
+        vsm_viewer_->draw(visible_status, vsm_pass_.get(), lighting, vsm_options_, *frame_output_);
 }
 } // namespace engine

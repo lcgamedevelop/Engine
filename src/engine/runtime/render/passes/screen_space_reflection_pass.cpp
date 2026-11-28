@@ -10,6 +10,7 @@
 #include "fs_ssr_trace.bin.h"
 #include "vs_hdr.bin.h"
 
+#include <SDL3/SDL_log.h>
 #include <bx/math.h>
 
 #include <algorithm>
@@ -19,9 +20,6 @@ namespace engine::render_detail
 {
 namespace
 {
-constexpr bgfx::ViewId first_depth_view = 114;
-constexpr bgfx::ViewId trace_view = 126;
-constexpr bgfx::ViewId composite_view = 127;
 constexpr std::uint32_t point_clamp = BGFX_SAMPLER_UVW_CLAMP | BGFX_SAMPLER_MIN_POINT |
                                       BGFX_SAMPLER_MAG_POINT | BGFX_SAMPLER_MIP_POINT;
 
@@ -86,7 +84,7 @@ bool ScreenSpaceReflectionPass::prepare(std::uint16_t width, std::uint16_t heigh
     const auto flags = BGFX_TEXTURE_RT | point_clamp;
     if (!valid_settings(settings) || caps == nullptr || width == 0 || height == 0 ||
         width > caps->limits.maxTextureSize || height > caps->limits.maxTextureSize ||
-        caps->limits.maxTextureSamplers < 8 || caps->limits.maxViews <= composite_view ||
+        caps->limits.maxTextureSamplers < 8 || caps->limits.maxViews <= ssr_composite_view ||
         !bgfx::isTextureValid(0, false, 1, bgfx::TextureFormat::R32F, flags) ||
         !bgfx::isTextureValid(0, false, 1, bgfx::TextureFormat::RGBA16F, flags))
     {
@@ -282,51 +280,86 @@ bool ScreenSpaceReflectionPass::render(const float* view, const float* projectio
         bgfx::setVertexBuffer(0, fullscreen_);
         bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A);
     };
-    const bool reuse_depth = depth_revision != 0 && depth_revision == cached_depth_revision_;
+    const bool reuse_depth = depth_revision != 0 && depth_revision == cached_depth_revision_ &&
+                             cached_depth_.idx == depth.idx;
     ENGINE_PROFILE_PLOT("Render.ssrDepthReused", static_cast<std::int64_t>(reuse_depth));
-    for (std::uint16_t level = 1; !reuse_depth && level < levels_; ++level)
+    FramePlanError error{};
+    if (levels_ != planned_levels_ || reuse_depth != planned_reuse_ || has_lut != planned_lut_ ||
+        !plan_.begin_cached_frame())
     {
-        const auto mip_width = std::max<std::uint16_t>(1, width_ >> level);
-        const auto mip_height = std::max<std::uint16_t>(1, height_ >> level);
-        const auto source_level = static_cast<std::uint16_t>(level - 1);
-        const auto previous_width = std::max<std::uint16_t>(1, width_ >> source_level);
-        const auto previous_height = std::max<std::uint16_t>(1, height_ >> source_level);
-        const float reduce[] = {
-            static_cast<float>(previous_width), static_cast<float>(previous_height),
-            static_cast<float>(source_level == 0 ? 0 : hierarchy_mip(source_level)), 0};
-        const float target[] = {static_cast<float>(mip_width), static_cast<float>(mip_height), 0,
-                                0};
-        const auto depth_view = static_cast<bgfx::ViewId>(first_depth_view + level);
-        set_view(depth_view, "SSR depth hierarchy", hierarchy_frames_[source_level], mip_width,
-                 mip_height);
-        bgfx::setUniform(uniforms_[3], reduce);
-        bgfx::setUniform(uniforms_[4], target);
-        bgfx::setTexture(2, samplers_[2], source_level == 0 ? depth : hierarchy_[source_level % 2],
-                         point_clamp);
-        bgfx::setVertexBuffer(0, fullscreen_);
-        bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A);
-        bgfx::submit(depth_view, programs_[0]);
+        const SsrGraphDeclaration declaration(ssr_local_versions, levels_, reuse_depth, has_lut);
+        if (!plan_.compile(declaration.passes(), declaration.imports(),
+                           {&ssr_local_versions.color, 1}, error))
+        {
+            planned_levels_ = 0;
+            SDL_LogError(SDL_LOG_CATEGORY_RENDER, "Cannot compile SSR pass %u: %s",
+                         static_cast<unsigned>(error.pass), error.reason);
+            return false;
+        }
+        planned_levels_ = levels_;
+        planned_reuse_ = reuse_depth;
+        planned_lut_ = has_lut;
+    }
+    const auto encode = [&](FramePassId pass)
+    {
+        if (pass < ssr_trace_view)
+        {
+            const auto level = static_cast<std::uint16_t>(pass - ssr_hiz_view);
+            const auto mip_width = std::max<std::uint16_t>(1, width_ >> level);
+            const auto mip_height = std::max<std::uint16_t>(1, height_ >> level);
+            const auto source_level = static_cast<std::uint16_t>(level - 1);
+            const auto previous_width = std::max<std::uint16_t>(1, width_ >> source_level);
+            const auto previous_height = std::max<std::uint16_t>(1, height_ >> source_level);
+            const float reduce[] = {
+                static_cast<float>(previous_width), static_cast<float>(previous_height),
+                static_cast<float>(source_level == 0 ? 0 : hierarchy_mip(source_level)), 0};
+            const float target[] = {static_cast<float>(mip_width), static_cast<float>(mip_height),
+                                    0, 0};
+            set_view(pass, "SSR depth hierarchy", hierarchy_frames_[source_level], mip_width,
+                     mip_height);
+            bgfx::setUniform(uniforms_[3], reduce);
+            bgfx::setUniform(uniforms_[4], target);
+            bgfx::setTexture(2, samplers_[2],
+                             source_level == 0 ? depth : hierarchy_[source_level % 2], point_clamp);
+            bgfx::setVertexBuffer(0, fullscreen_);
+            bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A);
+            bgfx::submit(pass, programs_[0]);
+            return true;
+        }
+        if (pass == ssr_trace_view)
+        {
+            set_view(pass, "SSR trace", reflection_frame_, trace_width_, trace_height_);
+            bind_common();
+            for (std::uint8_t index = 0; index < inputs.size(); ++index)
+            {
+                bgfx::setTexture(index, samplers_[index], inputs[index],
+                                 index == 0 || index == 5 ? BGFX_SAMPLER_UVW_CLAMP : point_clamp);
+            }
+            bgfx::setTexture(6, samplers_[6], levels_ > 2 ? hierarchy_[0] : depth, point_clamp);
+            bgfx::setTexture(7, samplers_[7], levels_ > 1 ? hierarchy_[1] : depth, point_clamp);
+            bgfx::submit(pass, programs_[1]);
+            return true;
+        }
+        set_view(pass, "SSR composite", color_frame_, width_, height_);
+        bind_common();
+        bgfx::setTexture(0, samplers_[0], scene_color, point_clamp);
+        bgfx::setTexture(1, samplers_[1], ibl_specular, point_clamp);
+        bgfx::setTexture(2, samplers_[2], depth, point_clamp);
+        bgfx::setTexture(3, samplers_[3], normal_roughness, point_clamp);
+        bgfx::setTexture(4, samplers_[4], reflection_, point_clamp);
+        bgfx::setTexture(5, samplers_[5], specular, point_clamp);
+        bgfx::submit(pass, programs_[2]);
+        return true;
+    };
+    if (!plan_.perform(encode, error))
+    {
+        cached_depth_revision_ = 0;
+        SDL_LogError(SDL_LOG_CATEGORY_RENDER, "Cannot execute SSR pass %u: %s",
+                     static_cast<unsigned>(error.pass), error.reason);
+        return false;
     }
     cached_depth_revision_ = depth_revision;
-    set_view(trace_view, "SSR trace", reflection_frame_, trace_width_, trace_height_);
-    bind_common();
-    for (std::uint8_t index = 0; index < inputs.size(); ++index)
-    {
-        bgfx::setTexture(index, samplers_[index], inputs[index],
-                         index == 0 || index == 5 ? BGFX_SAMPLER_UVW_CLAMP : point_clamp);
-    }
-    bgfx::setTexture(6, samplers_[6], levels_ > 2 ? hierarchy_[0] : depth, point_clamp);
-    bgfx::setTexture(7, samplers_[7], levels_ > 1 ? hierarchy_[1] : depth, point_clamp);
-    bgfx::submit(trace_view, programs_[1]);
-    set_view(composite_view, "SSR composite", color_frame_, width_, height_);
-    bind_common();
-    bgfx::setTexture(0, samplers_[0], scene_color, point_clamp);
-    bgfx::setTexture(1, samplers_[1], ibl_specular, point_clamp);
-    bgfx::setTexture(2, samplers_[2], depth, point_clamp);
-    bgfx::setTexture(3, samplers_[3], normal_roughness, point_clamp);
-    bgfx::setTexture(4, samplers_[4], reflection_, point_clamp);
-    bgfx::setTexture(5, samplers_[5], specular, point_clamp);
-    bgfx::submit(composite_view, programs_[2]);
+    cached_depth_ = depth;
     return true;
 }
 
@@ -340,17 +373,19 @@ void ScreenSpaceReflectionPass::release() noexcept
 {
     ENGINE_PROFILE_FUNCTION();
     cached_depth_revision_ = 0;
+    cached_depth_ = BGFX_INVALID_HANDLE;
+    planned_levels_ = 0;
     for (std::uint16_t index = 1; index < levels_; ++index)
     {
-        bgfx::setViewFrameBuffer(first_depth_view + index, BGFX_INVALID_HANDLE);
+        bgfx::setViewFrameBuffer(ssr_hiz_view + index, BGFX_INVALID_HANDLE);
     }
     if (bgfx::isValid(reflection_frame_))
     {
-        bgfx::setViewFrameBuffer(trace_view, BGFX_INVALID_HANDLE);
+        bgfx::setViewFrameBuffer(ssr_trace_view, BGFX_INVALID_HANDLE);
     }
     if (bgfx::isValid(color_frame_))
     {
-        bgfx::setViewFrameBuffer(composite_view, BGFX_INVALID_HANDLE);
+        bgfx::setViewFrameBuffer(ssr_composite_view, BGFX_INVALID_HANDLE);
     }
     for (auto& value : hierarchy_frames_)
     {

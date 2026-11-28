@@ -1,4 +1,5 @@
 #include "runtime/resource/codecs/scene_resource_codec.hpp"
+#include "runtime/resource/mesh_storage.hpp"
 #include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 #include "runtime/resource/codecs/resource_decode.hpp"
@@ -380,8 +381,8 @@ bool SceneResourceCodec::validate_node_dependencies(
                     if (!lightmap || !resource_detail::data<TextureResource>(lightmap) ||
                         resource_detail::data<TextureResource>(lightmap)->srgb ||
                         resource_detail::data<TextureResource>(lightmap)->cube_map ||
-                        resource_detail::data<MeshResource>(mesh)->lightmap_texcoords.size() !=
-                            resource_detail::data<MeshResource>(mesh)->vertices.size())
+                        mesh_storage::lightmap_texcoord_count(*resource_detail::data<MeshResource>(
+                            mesh)) != resource_detail::data<MeshResource>(mesh)->vertices.size())
                     {
                         return false;
                     }

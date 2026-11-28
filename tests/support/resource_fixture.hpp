@@ -3,6 +3,7 @@
 
 #include "resource_codecs.hpp"
 #include "runtime/resource/builtin_resources.hpp"
+#include "runtime/resource/mesh_storage.hpp"
 #include "runtime/resource/resource_loader.hpp"
 #include "runtime/schema/terrain_block_generated.h"
 
@@ -14,6 +15,7 @@
 #include <optional>
 #include <string>
 #include <system_error>
+#include <type_traits>
 
 namespace test_support
 {
@@ -119,6 +121,15 @@ std::optional<typename Codec::ResourceType::Data> builtin(std::string_view path)
         const auto* data = engine::resource_detail::data<typename Codec::ResourceType>(value.get());
         if (data)
         {
+            if constexpr (std::is_same_v<typename Codec::ResourceType::Data, engine::schema::MeshDataT>)
+            {
+                auto authored = *data;
+                if (!engine::mesh_storage::expand(authored))
+                {
+                    return {};
+                }
+                return authored;
+            }
             return *data;
         }
     }

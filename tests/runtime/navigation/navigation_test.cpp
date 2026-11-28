@@ -61,6 +61,8 @@ bool large_world_precision()
 {
     engine::NavigationSystem navigation(navigation_tasks);
     auto mesh = grid(24, 16);
+    mesh.indices16.assign(mesh.indices.begin(), mesh.indices.end());
+    mesh.indices.clear();
     std::array sources{engine::NavigationGeometry{&mesh}};
     const engine::Vec3 origin{4000.000013, 123.000017, -4000.000019};
     sources[0].transform[12] = origin.x();

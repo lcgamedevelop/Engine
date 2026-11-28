@@ -1,5 +1,6 @@
 #pragma once
 
+#include "runtime/render/frame_graph_plan.hpp"
 #include "runtime/render/passes/shadow_frame.hpp"
 
 #include <bgfx/bgfx.h>
@@ -43,13 +44,12 @@ public:
     ShadowPass& operator=(ShadowPass&&) = delete;
 
     [[nodiscard]] bool prepare(std::uint16_t size);
-    [[nodiscard]] bool draw(const RenderFrameData& frame_data, const RenderSettings& settings,
-                            ShadowFrame& frame, bgfx::TextureHandle fallback,
-                            const RenderConfig& config,
-                            std::span<const LocalShadowLight> local_lights,
-                            std::span<ClusterLight> lights, const float* camera_world,
-                            bgfx::ViewId base_view, ShadowAtlasView atlas_view,
-                            const std::span<const std::uint64_t>* caster_ids = nullptr);
+    [[nodiscard]] bool
+    draw(const RenderFrameData& frame_data, const RenderSettings& settings, ShadowFrame& frame,
+         bgfx::TextureHandle fallback, const RenderConfig& config,
+         std::span<const LocalShadowLight> local_lights, std::span<ClusterLight> lights,
+         const float* camera_world, bgfx::ViewId base_view, ShadowAtlasView atlas_view,
+         std::size_t observer, const std::span<const std::uint64_t>* caster_ids = nullptr);
     [[nodiscard]] bool draw_pages(const RenderFrameData& frame, std::span<const VsmPageDraw> pages,
                                   const VsmPageTarget& target);
     [[nodiscard]] bgfx::TextureHandle texture() const noexcept;
@@ -58,6 +58,28 @@ public:
     void release() noexcept;
 
 private:
+    // Four directional cascades plus 24 local spot/point faces per observer.
+    static constexpr std::size_t tile_capacity = 28;
+    struct AtlasTile
+    {
+        bgfx::ViewId view;
+        std::uint16_t x, y, size;
+        bool operator==(const AtlasTile&) const = default;
+    };
+    struct TileGraph
+    {
+        FrameGraphPlan plan;
+        std::array<AtlasTile, tile_capacity> layout{};
+        std::uint32_t reused = 0;
+        std::size_t count = 0;
+        [[nodiscard]] bool prepare(std::span<const VsmPageDraw> pages, std::uint32_t cached_mask);
+    };
+    [[nodiscard]] bool encode_pages(const RenderFrameData& frame,
+                                    std::span<const VsmPageDraw> pages, std::uint32_t reused,
+                                    const VsmPageTarget& target, TileGraph& graph);
+    std::array<TileGraph, 4> observer_tiles_;
+    TileGraph virtual_tiles_;
+
     struct LocalProjection
     {
         Vec3 position;

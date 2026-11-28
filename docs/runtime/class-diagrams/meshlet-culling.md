@@ -147,6 +147,8 @@ classDiagram
     class MeshletDataT {
         <<generated schema>>
         +indices uint32_t[]
+        +indices16 uint16_t[]
+        +uses_parent_indices bool
     }
     class Meshlet {
         <<generated schema>>
@@ -170,7 +172,7 @@ classDiagram
 
 以上类型由 `include/schemas/runtime/mesh.fbs` 唯一生成，命名空间为 `engine::schema`。
 `MeshDataT.meshlets` 与 `MeshLodDataT.meshlets` 为可空的独占生成对象；
-`MeshletDataT` 保存 `indices`、`meshlets` 和 `submeshes` 三个数组。
+`MeshletDataT` 保存簇描述和子网格范围。索引可借用所在 LOD 的顺序，也可独立保存为 16 或 32 位。[紧凑索引读取](mesh-utils.md#运行时网格的紧凑存储)
 
 - Meshlet 在单一 LOD 的单一材质子网格内生成；不跨材质边界。
   `submeshes` 是与该级原子网格顺序对应的 `MeshletRange`；无显式子网格时归一为槽 0 的一个范围。

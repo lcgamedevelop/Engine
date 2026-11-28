@@ -214,11 +214,15 @@ bool sync_lifetime()
     f.graph.set_memory_owner(a, {ResourceMemoryOwnerKind::scene, 11, 2});
     f.graph.set_memory_owner(b, {ResourceMemoryOwnerKind::scene_scope, 11, 3});
     ResourceMemorySnapshot root_sample, leaf_sample, top, released;
+    constexpr auto source_kind = static_cast<std::size_t>(schema::AssetKind::source);
     if (!f.graph.memory_snapshot({.guid = guid(4)}, root_sample) ||
         !f.graph.memory_snapshot({.guid = guid(1)}, leaf_sample) ||
         !f.graph.memory_snapshot({.limit = 1}, top) ||
         !expect(root_sample.entries.size() == 1 && root_sample.measured_payloads == 4 &&
                     root_sample.measured_cpu_payload_bytes == 4 &&
+                    root_sample.kinds[source_kind].measured_cpu_payload_bytes == 4 &&
+                    top.kinds[source_kind].measured_payloads == 4 &&
+                    top.kinds[source_kind].unmeasured_payloads == 0 &&
                     top.matching_entries == 4 && top.entries.size() == 1,
                 "memory snapshot counts shared records once and bounds the listed entries") ||
         !expect(leaf_sample.entries.size() == 1 && leaf_sample.entries[0].acquisitions == 1 &&

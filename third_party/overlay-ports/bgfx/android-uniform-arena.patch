@@ -1,0 +1,176 @@
+--- a/bgfx/src/renderer.h
++++ b/bgfx/src/renderer.h
+@@ -916,7 +916,7 @@
+ 		}
+ 
+ 		template<typename OffsetTy>
+-		void write(OffsetTy& _outSbo, const void* _vsData, uint32_t _vsSize, const void* _fsData = NULL, uint32_t _fsSize = 0)
++		const ChunkTy& write(OffsetTy& _outSbo, const void* _vsData, uint32_t _vsSize, const void* _fsData = NULL, uint32_t _fsSize = 0)
+ 		{
+ 			const uint32_t vsSize = bx::strideAlign(_vsSize, m_align);
+ 			const uint32_t fsSize = bx::strideAlign(_fsSize, m_align);
+@@ -942,6 +942,7 @@
+ 			{
+ 				bx::memCopy(&sbc.data[offset1], _fsData, _fsSize);
+ 			}
++			return sbc;
+ 		}
+ 
+ 		void begin()
+--- a/bgfx/src/renderer_vk.h
++++ b/bgfx/src/renderer_vk.h
+@@ -463,6 +463,9 @@
+ 		VkBuffer buffer;
+ 		DeviceMemoryAllocationVK deviceMem;
+ 		uint8_t* data;
++#if BX_PLATFORM_ANDROID
++		uint32_t uniformBase = 0;
++#endif // BX_PLATFORM_ANDROID
+ 	};
+ 
+ 	struct ChunkedScratchBufferVK : ChunkedScratchBufferT<ChunkedScratchBufferVK, VkBuffer, ChunkVK>
+@@ -474,6 +477,18 @@
+ 		void flushChunk(ChunkVK& _chunk, uint32_t _size);
+ 		uint32_t currentFrameInFlight() const;
+ 
++#if BX_PLATFORM_ANDROID
++		bool tryCreateUniformArena(uint32_t _chunkSize, uint32_t _numChunks);
++		void write(ChunkedScratchBufferOffset& _out, const void* _vsData, uint32_t _vsSize, const void* _fsData = NULL, uint32_t _fsSize = 0)
++		{
++			const ChunkVK& chunk = ChunkedScratchBufferT::write(_out, _vsData, _vsSize, _fsData, _fsSize);
++			_out.offsets[0] += chunk.uniformBase;
++			_out.offsets[1] += chunk.uniformBase;
++		}
++		ChunkVK m_initialArena;
++		uint32_t m_arenaChunksLeft = 0;
++		uint32_t m_nextArenaOffset = 0;
++#endif // BX_PLATFORM_ANDROID
+ 		VkBufferUsageFlags m_usage;
+ 	};
+ 
+--- a/bgfx/src/renderer_vk.cpp
++++ b/bgfx/src/renderer_vk.cpp
+@@ -6849,17 +6849,99 @@
+ 		}
+ 	}
+ 
++#if BX_PLATFORM_ANDROID
++	bool ChunkedScratchBufferVK::tryCreateUniformArena(uint32_t _chunkSize, uint32_t _numChunks)
++	{
++		const VkDevice device = s_renderVK->m_device;
++		const VkPhysicalDeviceLimits& limits = s_renderVK->m_deviceProperties.limits;
++		if (_numChunks < 2 || _chunkSize == 0 || _chunkSize % (1 << 20) != 0
++		|| _chunkSize % limits.minUniformBufferOffsetAlignment != 0 || _chunkSize % limits.nonCoherentAtomSize != 0
++		|| uint64_t(_chunkSize) * _numChunks > UINT32_MAX)
++		{
++			return false;
++		}
++
++		VkBufferCreateInfo info = {};
++		info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
++		info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
++		info.usage = m_usage;
++		info.size = _chunkSize;
++		VkBuffer probe = VK_NULL_HANDLE;
++		if (VK_SUCCESS != vkCreateBuffer(device, &info, s_renderVK->m_allocatorCb, &probe))
++		{
++			return false;
++		}
++		VkMemoryRequirements single;
++		vkGetBufferMemoryRequirements(device, probe, &single);
++		vkDestroy(probe);
++
++		info.size = uint64_t(_chunkSize) * _numChunks;
++		VkBuffer arena = VK_NULL_HANDLE;
++		if (VK_SUCCESS != vkCreateBuffer(device, &info, s_renderVK->m_allocatorCb, &arena))
++		{
++			return false;
++		}
++		VkMemoryRequirements aggregate;
++		vkGetBufferMemoryRequirements(device, arena, &aggregate);
++		if (aggregate.size != uint64_t(single.size) * _numChunks || aggregate.size > UINT32_MAX
++		|| aggregate.memoryTypeBits != single.memoryTypeBits)
++		{
++			vkDestroy(arena);
++			return false;
++		}
++		VkMemoryPropertyFlags flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
++		if (s_renderVK->selectMemoryType(aggregate.memoryTypeBits, flags) < 0)
++		{
++			flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
++		}
++		DeviceMemoryAllocationVK memory;
++		if (VK_SUCCESS != s_renderVK->allocateMemory(&aggregate, flags, &memory, true))
++		{
++			vkDestroy(arena);
++			return false;
++		}
++		void* data = NULL;
++		if (VK_SUCCESS != vkBindBufferMemory(device, arena, memory.mem, memory.offset)
++		|| VK_SUCCESS != vkMapMemory(device, memory.mem, memory.offset, info.size, 0, &data))
++		{
++			vkDestroy(arena);
++			freeDeviceMemory(memory);
++			return false;
++		}
++		m_initialArena.buffer = arena;
++		m_initialArena.deviceMem = memory;
++		m_initialArena.data = static_cast<uint8_t*>(data);
++		m_nextArenaOffset = 0;
++		m_arenaChunksLeft = _numChunks;
++		return true;
++	}
++
++#endif // BX_PLATFORM_ANDROID
+ 	void ChunkedScratchBufferVK::createUniform(uint32_t _chunkSize, uint32_t _numChunks)
+ 	{
+ 		const VkPhysicalDeviceLimits& deviceLimits = s_renderVK->m_deviceProperties.limits;
+ 		const uint32_t align = uint32_t(deviceLimits.minUniformBufferOffsetAlignment);
+ 
+ 		m_usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
++#if BX_PLATFORM_ANDROID
++		tryCreateUniformArena(_chunkSize, _numChunks);
++#endif // BX_PLATFORM_ANDROID
+ 		create(_chunkSize, _numChunks, align);
+ 	}
+ 
+ 	void ChunkedScratchBufferVK::createChunk(ChunkVK& _chunk)
+ 	{
++#if BX_PLATFORM_ANDROID
++		if (m_arenaChunksLeft != 0)
++		{
++			_chunk = m_initialArena;
++			_chunk.uniformBase = m_nextArenaOffset;
++			_chunk.data += m_nextArenaOffset;
++			m_nextArenaOffset += m_chunkSize;
++			--m_arenaChunksLeft;
++			return;
++		}
++#endif // BX_PLATFORM_ANDROID
+ 		const VkAllocationCallbacks* allocatorCb = s_renderVK->m_allocatorCb;
+ 		const VkDevice device = s_renderVK->m_device;
+ 
+@@ -6907,6 +6989,13 @@
+ 
+ 	void ChunkedScratchBufferVK::destroyChunk(ChunkVK& _chunk)
+ 	{
++#if BX_PLATFORM_ANDROID
++		// The zero-offset logical chunk owns the shared mapping and backing allocation.
++		if (0 != _chunk.uniformBase)
++		{
++			return;
++		}
++#endif // BX_PLATFORM_ANDROID
+ 		vkUnmapMemory(s_renderVK->m_device, _chunk.deviceMem.mem);
+ 
+ 		s_renderVK->release(_chunk.buffer);
+@@ -6923,6 +7012,9 @@
+ 		range.pNext  = NULL;
+ 		range.memory = _chunk.deviceMem.mem;
+ 		range.offset = _chunk.deviceMem.offset;
++#if BX_PLATFORM_ANDROID
++		range.offset += _chunk.uniformBase;
++#endif // BX_PLATFORM_ANDROID
+ 		range.size   = bx::alignUp(_size, align);
+ 		VK_CHECK(vkFlushMappedMemoryRanges(s_renderVK->m_device, 1, &range) );
+ 	}

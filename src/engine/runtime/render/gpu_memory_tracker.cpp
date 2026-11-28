@@ -238,21 +238,28 @@ bool GpuMemoryTracker::snapshot(std::string_view guid, std::uint32_t limit,
     output.overwritten_history = overwritten_history_;
     std::vector<const GpuMemoryEntry*> live;
     std::vector<const GpuMemoryEntry*> pending;
-    const auto collect = [&](const Entries& entries)
+    const auto collect = [&](const Entries& entries, bool owns_handles)
     {
         ENGINE_PROFILE_FUNCTION_PROBE();
         for (const auto& [id, entry] : entries)
         {
             (void)id;
+            if (owns_handles)
+            {
+                auto& usage = output.live_by_kind[static_cast<std::size_t>(entry.kind)];
+                ++usage.count;
+                usage.logical_bytes += entry.logical_bytes;
+                usage.shared_backing_bytes += entry.shared_backing_bytes;
+            }
             if (guid.empty() || entry.guid == guid)
             {
                 (entry.phase == GpuMemoryPhase::live ? live : pending).push_back(&entry);
             }
         }
     };
-    collect(live_);
-    collect(queued_);
-    collect(submitted_);
+    collect(live_, true);
+    collect(queued_, false);
+    collect(submitted_, false);
     output.matching_live = live.size();
     output.matching_pending = pending.size();
     largest(live, limit, output.live);

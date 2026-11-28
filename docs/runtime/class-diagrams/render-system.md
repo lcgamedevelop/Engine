@@ -4,7 +4,7 @@
 
 [按范围准备、首帧与截图](render-readiness.md)维护场景准备和观察的公开契约；本页维护渲染系统与内部绘制能力。
 
-准备预算和调用关系见[大场景准备关系](large-scene-preparation.md)。
+场景准备预算和调用关系见[大场景准备关系](large-scene-preparation.md)。设备创建时，`RenderSystem` 独占设备 View 计划以及帧输出与 HDR 调度器。场景资源和各效果拥有各自的计划，共用资源依赖编译器。[渲染图与提交范围](render-graph.md)
 
 WebGPU 仅面向 [Web 运行产物](web-host.md#异步-webgpu-表面)。[异步表面准备](#异步表面准备)通过私有状态区分设备待就绪与失败；present_movie_frame 与 render 共用 RenderSubmitStatus。
 
@@ -151,7 +151,8 @@ classDiagram
     }
     class SkinningPass {
         +prepare() bool
-        +dispatch(...) bool
+        +deform(geometry, matrices, palette, output) bool
+        +upload_vertices(vertices, output) bool
         +release() void
         +resource_count() uint32_t
     }
@@ -183,7 +184,7 @@ classDiagram
     GpuGeometry o-- Resource : 保留当前CPU资源版本
     GpuGeometry ..> MeshRenderer : 创建期间借用
     GpuMesh ..> SkinningPass : 提交本实例蒙皮
-    SkinningPass ..> GpuGeometry : dispatch期间借用源几何
+    SkinningPass ..> GpuGeometry : 蒙皮期间借用源几何
     SceneGpuResources *-- PassTargets : 按场景拥有目标
     PassTargets *-- ShadowPass
     PassTargets *-- AmbientOcclusionPass
@@ -209,9 +210,10 @@ classDiagram
                                    std::array<float, 3>& minimum,
                                    std::array<float, 3>& maximum) const noexcept;
 // SkinningPass
-[[nodiscard]] bool dispatch(const GpuGeometry& geometry,
-                            bgfx::DynamicVertexBufferHandle palette,
-                            bgfx::DynamicVertexBufferHandle output, std::uint32_t joint_count);
+[[nodiscard]] bool deform(const GpuGeometry& geometry, std::span<const std::array<float, 16>> matrices,
+                          bgfx::DynamicVertexBufferHandle& palette, bgfx::DynamicVertexBufferHandle& output);
+[[nodiscard]] bool upload_vertices(std::span<const GpuVertex> vertices,
+                                   bgfx::DynamicVertexBufferHandle& output);
 ```
 
 - `resources/` 保存逐类型 GPU 上传、绑定和释放；`passes/` 保存蒙皮、阴影、AO、HDR/Bloom。渲染私有辅助类型置于 `engine::render_detail`，不导出到核心根命名空间。
@@ -406,7 +408,7 @@ classDiagram
 - 阴影和主通道使用同一 DrawBatchKey / DrawBatch 数据约定和游标分块规则，选择各自的实际 Program 和必要状态；不为普通分组函数创建新类。`draw_meshes` 只消费本次帧数据与视图列表，不再查询 ECS 或重新解析 Material。
 - 新 `bind_material` 消费已经解析的数值和采样器绑定。动态帧纹理仍由 view 传入，且必须检查 binding 的 Shader/纹理身份属于当前有效 GPU 资源。GpuMesh 在销毁程序/纹理之前清理其绑定；不把 bgfx 句柄的数字相等当作跨设备代次身份相等。
 - `RenderViewStats` 的字段与现有 scene mesh 统计口径保持；本批阴影和后处理的总提交变化另取 bgfx 统计与私有采样，不混入旧字段制造 draw 数变化。
-- `RenderPreparation` 用 `pending_materials` 跟踪待重建槽；`target_description / target_stage` 对比分辨率、MSAA、效果、反射与捕获描述并按预算推进十个既有目标步骤。没有新增通用任务或渲染图框架。
+- `RenderPreparation` 用 `pending_materials` 跟踪待重建槽；`target_description / target_stage` 对比分辨率、MSAA、效果、反射与捕获描述并按预算推进十个既有目标步骤。后处理图在目标准备成功后编译和提交。
 
 既有清理方法、不可复制的 GPU 所有权、设备能力处理和同步/分步资源准备契约保持。替换前已保存基线程序，现行图与调用方同步；完整基准见[测试方案](../../testing.md#渲染性能基线)。
 
@@ -942,7 +944,18 @@ classDiagram
         +readback_ready()
         +reset()
     }
-    class GpuMemorySnapshot
+    class GpuMemorySnapshot {
+        +live_by_kind : array~GpuMemoryKindUsage~
+        +vsm_feedback_readback_bytes_total : uint64
+        +bgfx_texture_estimated_bytes : optional~uint64~
+        +bgfx_render_target_estimated_bytes : optional~uint64~
+    }
+    class GpuMemoryKindUsage {
+        +count : uint64
+        +logical_bytes : uint64
+        +shared_backing_bytes : uint64
+    }
+    GpuMemorySnapshot *-- GpuMemoryKindUsage : 按对象类型汇总
     class GpuTexture
     class GpuGeometry
     class StaticVertexPage
@@ -957,6 +970,6 @@ classDiagram
     GpuMemoryTracker ..> GpuMemorySnapshot : 按请求复制
 ```
 
-`memory_snapshot` 在渲染 API 线程按请求读取，关闭内存采集时返回不可用。一个会话跨场景，设备重建开启新会话。资源记录包含独立的分配 ID、类型、可用的资源 GUID、创建场景与范围以及估算容量。创建范围记录最先申请的场景，共享关系以资源图或顶点页 ID 为准。几何记录自己的逻辑大小，顶点页只汇总一次实际申请容量，驱动上报的设备用量独立读取。
+`memory_snapshot` 在渲染 API 线程按请求读取，关闭内存采集时返回不可用。一个会话跨场景，设备重建开启新会话。资源记录包含独立的分配 ID、类型、可用的资源 GUID、创建场景与范围以及估算容量。创建范围记录最先申请的场景，共享关系以资源图或顶点页 ID 为准。几何记录自己的逻辑大小，顶点页只汇总一次实际申请容量，驱动上报的设备用量独立读取。快照的 live_by_kind 按对象类型汇总尚未提交销毁的记录，合计与 live 总量一致。列表筛选 GUID 和数量上限只作用于明细。bgfx 单独上报普通纹理和渲染目标的逻辑存储估算，字段缺失表示没有读数。该渲染目标估算使用纹理格式和尺寸，未计入 MSAA 样本倍率。
 
 纹理最后一个渲染使用者离开时记业务释放，重新使用会撤销待退役状态。拥有者提交销毁后经过 bgfx 的命令消费边界才计入观测到的渲染端回收。普通截图明确记录正在等待读回和确认完成的时点。通用资源的驱动内部物理释放时点尚不可见。设备关闭时按实际后端排空完成记录。只保留有限的最近回收记录，快照报告已覆盖的数量及被覆盖的历史数。

@@ -1,7 +1,17 @@
 namespace engine.schema;
 
 enum TextureEncoding:ubyte { basis, native }
-enum TextureFormat:ubyte { auto_format, rgba8, bc7, astc4x4, etc2, rgba16f, rg16f }
+enum TextureFormat:ubyte { auto_format, rgba8, bc7, astc4x4, etc2, rgba16f, rg16f, etc2_rgb }
+
+enum TextureChunkEncoding:ubyte { raw, zstd, shuffled_zstd }
+
+struct TextureChunk {
+    offset:uint;
+    size:uint;
+    stored_offset:uint;
+    stored_size:uint;
+    encoding:TextureChunkEncoding;
+}
 
 struct TextureSubresourceData {
     mip:uint;
@@ -24,6 +34,8 @@ table TextureData {
     // Native 2D arrays use face as the layer index; cubes remain exactly six faces.
     array_layers:uint = 1;
     subresources:[TextureSubresourceData];
+    // Native logical offsets address the uncompressed GPU blocks.
+    chunks:[TextureChunk];
 }
 
 root_type TextureData;

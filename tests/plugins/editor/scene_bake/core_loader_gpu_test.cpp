@@ -8,6 +8,7 @@
 #include "runtime/engine_config.hpp"
 #include "runtime/render/render_system.hpp"
 #include "runtime/resource/codecs/texture_resource_codec.hpp"
+#include "runtime/resource/mesh_storage.hpp"
 #include "runtime/resource/types/mesh_resource.hpp"
 #include "runtime/scene/camera.hpp"
 #include "runtime/scene/environment_component.hpp"
@@ -156,6 +157,10 @@ bool exercise()
     }
     engine::schema::MeshDataT geometry = *builtin_cube.data<engine::MeshResource>();
     geometry.path = "meshes/bake-cube";
+    if (!expect(engine::mesh_storage::expand(geometry), "prepare editable lightmap UVs"))
+    {
+        return false;
+    }
     geometry.lightmap_texcoords = geometry.texcoords;
     const auto rebound_lightmap =
         color_texture("textures/rebinding-lightmap", 32, 32, {96, 96, 96, 255});

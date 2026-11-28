@@ -1,4 +1,5 @@
 #include "plugins/editor/modeling/modeling_commands.hpp"
+#include "runtime/resource/mesh_storage.hpp"
 #include "runtime/performance/function_profile.hpp"
 #include "runtime/performance/profiling.hpp"
 
@@ -1238,6 +1239,10 @@ struct ModelingCommands::State
                 record.mesh_revision = renderer.mesh_revision();
                 record.name = node.name();
                 record.compiled = *renderer.mesh_data();
+                if (!mesh_storage::expand(record.compiled))
+                {
+                    continue;
+                }
                 records.emplace(record.model_id, std::move(record));
             }
         }
