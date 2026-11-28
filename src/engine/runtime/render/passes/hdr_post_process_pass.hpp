@@ -29,6 +29,7 @@ public:
     HdrPostProcessPass(HdrPostProcessPass&&) = delete;
     HdrPostProcessPass& operator=(HdrPostProcessPass&&) = delete;
 
+    static void initialize_views();
     [[nodiscard]] bool prepare(std::uint16_t width, std::uint16_t height, bool bloom_enabled,
                                std::uint8_t samples, bool ssr_enabled);
     [[nodiscard]] bool begin_opaque_depth(const float* view, const float* projection);

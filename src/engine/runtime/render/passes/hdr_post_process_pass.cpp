@@ -25,6 +25,9 @@ namespace engine::render_detail
 namespace
 {
 
+constexpr std::array hdr_view_names = {"Bloom bright extraction", "Bloom vertical blur",
+                                       "HDR resolve and bloom horizontal blur"};
+constexpr std::array hdr_views = {hdr_bright_view, hdr_blur_view, hdr_resolve_view};
 constexpr std::uint8_t clear_palette = 0;
 constexpr std::uint32_t linear_clamp = BGFX_SAMPLER_UVW_CLAMP;
 constexpr std::uint64_t color_flags = BGFX_TEXTURE_RT | linear_clamp;
@@ -71,6 +74,13 @@ bool valid_settings(const RenderSettings& settings)
            settings.bloom_radius >= 0.25F && settings.bloom_radius <= 4.0F;
 }
 
+void set_post_view_state(bgfx::ViewId view)
+{
+    bgfx::setViewClear(view, BGFX_CLEAR_NONE);
+    bgfx::setViewTransform(view, nullptr, nullptr);
+    bgfx::setViewMode(view, bgfx::ViewMode::Sequential);
+}
+
 void set_post_view(bgfx::ViewId view, const char* name, bgfx::FrameBufferHandle framebuffer,
                    std::uint16_t width, std::uint16_t height)
 {
@@ -78,9 +88,7 @@ void set_post_view(bgfx::ViewId view, const char* name, bgfx::FrameBufferHandle 
     bgfx::setViewName(view, name);
     bgfx::setViewFrameBuffer(view, framebuffer);
     bgfx::setViewRect(view, 0, 0, width, height);
-    bgfx::setViewClear(view, BGFX_CLEAR_NONE);
-    bgfx::setViewTransform(view, nullptr, nullptr);
-    bgfx::setViewMode(view, bgfx::ViewMode::Sequential);
+    set_post_view_state(view);
 }
 
 } // namespace
@@ -89,6 +97,20 @@ HdrPostProcessPass::~HdrPostProcessPass() noexcept
 {
     ENGINE_PROFILE_FUNCTION();
     release();
+}
+
+void HdrPostProcessPass::initialize_views()
+{
+    // These three reserved views retain their state until device shutdown. Swap-chain resets
+    // invalidate framebuffer bindings, which each graph segment supplies on submission.
+    if (bgfx::getCaps()->limits.maxViews > hdr_resolve_view)
+    {
+        for (std::size_t i = 0; i < hdr_views.size(); ++i)
+        {
+            bgfx::setViewName(hdr_views[i], hdr_view_names[i]);
+            set_post_view_state(hdr_views[i]);
+        }
+    }
 }
 
 bool HdrPostProcessPass::initialize_resources()
@@ -430,13 +452,9 @@ bool HdrPostProcessPass::resolve(const RenderSettings& settings, const FrameOutp
     const Target bright{bloom_framebuffers_[0], bloom_widths_[0], bloom_heights_[0]};
     const Target blur{bloom_framebuffers_[1], bloom_widths_[1], bloom_heights_[1]};
     const Target output{display.target(), width_, height_};
-    const auto submit = [&](GraphPass pass, bgfx::ViewId view, const Target& target,
-                            bgfx::TextureHandle source, bgfx::TextureHandle bloom)
+    const auto submit = [&](GraphPass pass, bgfx::ViewId view, bgfx::TextureHandle source,
+                            bgfx::TextureHandle bloom)
     {
-        constexpr std::array names = {"Bloom bright extraction", "Bloom vertical blur",
-                                      "HDR resolve and bloom horizontal blur"};
-        const auto index = static_cast<std::size_t>(pass);
-        set_post_view(view, names[index], target.framebuffer, target.width, target.height);
         const float output_parameters[]{settings.hdr_enabled ? 1.0F : 0.0F, 0, 0, 0};
         const auto texel = pass == HdrPass::bright
                                ? std::array{1.0F / width_, 1.0F / height_, 0.0F, 0.0F}
@@ -451,27 +469,39 @@ bool HdrPostProcessPass::resolve(const RenderSettings& settings, const FrameOutp
         }
         bgfx::setVertexBuffer(0, fullscreen_);
         bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A);
-        bgfx::submit(view, programs_[index]);
+        bgfx::submit(view, programs_[pass]);
     };
 
 #if defined(ENGINE_ENABLE_TEST_SUPPORT)
     if (!graph)
     {
+#if defined(ENGINE_ENABLE_TRACY_FUNCTIONS)
         ENGINE_PROFILE_ZONE("Render.hdrLegacySubmit");
+#endif
+        const auto submit_legacy = [&](GraphPass pass, bgfx::ViewId view, const Target& target,
+                                       bgfx::TextureHandle source, bgfx::TextureHandle bloom)
+        {
+            set_post_view(view, hdr_view_names[pass], target.framebuffer, target.width,
+                          target.height);
+            submit(pass, view, source, bloom);
+        };
         if (settings.bloom_enabled)
         {
-            submit(HdrPass::bright, hdr_bright_view, bright, scene_color(), BGFX_INVALID_HANDLE);
-            submit(HdrPass::blur, hdr_blur_view, blur, bloom_colors_[0], BGFX_INVALID_HANDLE);
+            submit_legacy(HdrPass::bright, hdr_bright_view, bright, scene_color(),
+                          BGFX_INVALID_HANDLE);
+            submit_legacy(HdrPass::blur, hdr_blur_view, blur, bloom_colors_[0],
+                          BGFX_INVALID_HANDLE);
         }
-        submit(HdrPass::resolve, hdr_resolve_view, output, scene_color(),
-               settings.bloom_enabled ? bloom_colors_[1] : black_);
+        submit_legacy(HdrPass::resolve, hdr_resolve_view, output, scene_color(),
+                      settings.bloom_enabled ? bloom_colors_[1] : black_);
         return true;
     }
 #endif
-    GraphDeclaration declaration;
     FrameBindings bindings;
     {
+#if defined(ENGINE_ENABLE_TRACY_FUNCTIONS)
         ENGINE_PROFILE_ZONE("Render.graphDeclare");
+#endif
         // The device-wide order in RenderSystem contains 256 physical views.
         const auto max_views = static_cast<std::uint16_t>(
             std::min(bgfx::getCaps()->limits.maxViews, std::uint32_t{256}));
@@ -480,7 +510,6 @@ bool HdrPostProcessPass::resolve(const RenderSettings& settings, const FrameOutp
             SDL_LogError(SDL_LOG_CATEGORY_RENDER, "Cannot start the HDR render graph");
             return false;
         }
-        declaration = declare_hdr_graph(settings.bloom_enabled);
         bindings.textures[HdrSlot::scene] = scene_color().idx;
         bindings.textures[HdrSlot::black] = black_.idx;
         bindings.textures[HdrSlot::bright] = bloom_colors_[0].idx;
@@ -488,9 +517,11 @@ bool HdrPostProcessPass::resolve(const RenderSettings& settings, const FrameOutp
         bindings.textures[HdrSlot::output] = display.color().idx;
     }
     GraphError error;
-    if (graph->compile(declaration, bindings, error))
+    if (compile_hdr_graph(*graph, settings.bloom_enabled, bindings, error))
     {
+#if defined(ENGINE_ENABLE_TRACY_FUNCTIONS)
         ENGINE_PROFILE_ZONE("Render.graphExecute");
+#endif
         const std::array<Target, HdrSlot::count> targets{{{}, {}, bright, blur, output}};
         const auto encode = [&](const GraphPassDesc& segment)
         {
@@ -498,7 +529,10 @@ bool HdrPostProcessPass::resolve(const RenderSettings& settings, const FrameOutp
             const auto bloom = segment.reads[1] == graph_invalid_id
                                    ? bgfx::kInvalidHandle
                                    : bindings.textures[segment.reads[1]];
-            submit(segment.pass, segment.view, targets[segment.output], bgfx::TextureHandle{source},
+            const auto& target = targets[segment.output];
+            bgfx::setViewFrameBuffer(segment.view, target.framebuffer);
+            bgfx::setViewRect(segment.view, 0, 0, target.width, target.height);
+            submit(segment.pass, segment.view, bgfx::TextureHandle{source},
                    bgfx::TextureHandle{bloom});
             return true;
         };

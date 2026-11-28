@@ -64,8 +64,9 @@ bool graph_contract()
     GraphError error;
     const auto compile = [&](const GraphDeclaration& declaration)
     { return graph.begin(key) && graph.compile(declaration, bindings, error); };
-    const auto bloom = declare_hdr_graph(true);
-    if (!expect(compile(bloom) && !graph.cache_hit(), "first Bloom plan compiles") ||
+    const auto compile_hdr = [&](bool bloom)
+    { return graph.begin(key) && compile_hdr_graph(graph, bloom, bindings, error); };
+    if (!expect(compile_hdr(true) && !graph.cache_hit(), "first Bloom plan compiles") ||
         !expect(graph.plan().count == 3 && graph.plan().scheduled[0].view == hdr_bright_view &&
                     graph.plan().scheduled[1].view == hdr_blur_view &&
                     graph.plan().scheduled[2].view == hdr_resolve_view,
@@ -83,15 +84,15 @@ bool graph_contract()
     if (!expect(graph.execute(bindings, submit, error) && submissions == 3 &&
                     !graph.execute(bindings, submit, error) && submissions == 3,
                 "each compiled segment can run once per frame") ||
-        !expect(compile(bloom) && graph.cache_hit(), "identical topology reuses its plan"))
+        !expect(compile_hdr(true) && graph.cache_hit(), "identical topology reuses its plan"))
     {
         return false;
     }
     bindings.textures[HdrSlot::bright] = bindings.textures[HdrSlot::blur];
     if (!expect(!graph.execute(bindings, submit, error) && submissions == 3,
                 "binding drift aborts before any submission") ||
-        !expect(!compile(bloom), "a cached plan rechecks changed live aliases") ||
-        !expect(compile(declare_hdr_graph(false)) && !graph.cache_hit() &&
+        !expect(!compile_hdr(true), "a cached plan rechecks changed live aliases") ||
+        !expect(compile_hdr(false) && !graph.cache_hit() &&
                     graph.plan().count == 1 && graph.plan().scheduled[0].pass == HdrPass::resolve &&
                     graph.plan().intervals[HdrSlot::bright].first == GraphInterval::unused,
                 "disabled Bloom drops both draws and their physical bindings"))

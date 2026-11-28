@@ -31,7 +31,7 @@ struct HdrPass
 
 // The resolve shader always samples two textures. Black supplies its second input when Bloom
 // is off. The unused extraction and blur are pruned from this same declaration.
-[[nodiscard]] inline constexpr GraphDeclaration declare_hdr_graph(bool bloom_enabled) noexcept
+[[nodiscard]] consteval GraphDeclaration make_hdr_declaration(bool bloom_enabled) noexcept
 {
     GraphDeclaration declaration;
     declaration.pass_count = HdrPass::count;
@@ -51,5 +51,21 @@ struct HdrPass
         {HdrSlot::scene, bloom_enabled ? HdrSlot::blur : HdrSlot::black}};
     declaration.root = HdrSlot::output;
     return declaration;
+}
+inline constexpr auto hdr_without_bloom = make_hdr_declaration(false);
+inline constexpr auto hdr_with_bloom = make_hdr_declaration(true);
+
+[[nodiscard]] inline constexpr const GraphDeclaration&
+declare_hdr_graph(bool bloom_enabled) noexcept
+{
+    return bloom_enabled ? hdr_with_bloom : hdr_without_bloom;
+}
+
+[[nodiscard]] inline bool compile_hdr_graph(RenderGraph& graph, bool bloom_enabled,
+                                            const FrameBindings& bindings,
+                                            GraphError& error) noexcept
+{
+    return bloom_enabled ? graph.compile<hdr_with_bloom>(bindings, error)
+                         : graph.compile<hdr_without_bloom>(bindings, error);
 }
 } // namespace engine::render_detail

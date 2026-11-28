@@ -93,7 +93,9 @@ void record_use(FramePlan& plan, GraphSlot slot, std::uint8_t position) noexcept
 bool build_plan(const FrameKey& key, const GraphDeclaration& declaration, FramePlan& plan,
                 GraphError& error) noexcept
 {
+#if defined(ENGINE_ENABLE_TRACY_FUNCTIONS)
     ENGINE_PROFILE_ZONE("Render.graphCompileMiss");
+#endif
     if (declaration.pass_count > graph_pass_count || declaration.slot_count > graph_slot_count ||
         declaration.first_view > declaration.last_view)
     {
@@ -164,7 +166,9 @@ bool build_plan(const FrameKey& key, const GraphDeclaration& declaration, FrameP
 bool validate_bindings(const FramePlan& plan, std::size_t slots, const FrameBindings& bindings,
                        GraphError& error) noexcept
 {
+#if defined(ENGINE_ENABLE_TRACY_FUNCTIONS)
     ENGINE_PROFILE_ZONE("Render.graphValidateAliases");
+#endif
     for (std::size_t slot = 0; slot < slots; ++slot)
     {
         const auto first = plan.intervals[slot].first;
@@ -209,8 +213,8 @@ bool RenderGraph::begin(const FrameKey& key) noexcept
     return true;
 }
 
-bool RenderGraph::compile(const GraphDeclaration& declaration, const FrameBindings& bindings,
-                          GraphError& error) noexcept
+bool RenderGraph::compile_frame(const GraphDeclaration& declaration, bool immutable,
+                                const FrameBindings& bindings, GraphError& error) noexcept
 {
     error = {};
     if (phase_ != Phase::declaring)
@@ -221,16 +225,24 @@ bool RenderGraph::compile(const GraphDeclaration& declaration, const FrameBindin
     phase_ = Phase::idle;
     bool hit;
     {
+#if defined(ENGINE_ENABLE_TRACY_FUNCTIONS)
         ENGINE_PROFILE_ZONE("Render.graphCacheLookup");
-        hit = cached_ && cached_key_ == key_ && cached_declaration_ == declaration;
+#endif
+        const auto& previous = cached_immutable_ ? *cached_immutable_ : cached_declaration_;
+        hit = cached_ && cached_key_ == key_ &&
+              (immutable && cached_immutable_ ? cached_immutable_ == &declaration
+                                              : previous == declaration);
     }
     if (hit)
     {
         // Identical slot identities prove the same aliases and validity as the last success.
-        if (bindings_ != bindings &&
-            !validate_bindings(plan_, declaration.slot_count, bindings, error))
+        if (bindings_ != bindings)
         {
-            return false;
+            if (!validate_bindings(plan_, declaration.slot_count, bindings, error))
+            {
+                return false;
+            }
+            bindings_ = bindings;
         }
     }
     else
@@ -243,10 +255,14 @@ bool RenderGraph::compile(const GraphDeclaration& declaration, const FrameBindin
         }
         plan_ = candidate;
         cached_key_ = key_;
-        cached_declaration_ = declaration;
+        cached_immutable_ = immutable ? &declaration : nullptr;
+        if (!immutable)
+        {
+            cached_declaration_ = declaration;
+        }
+        bindings_ = bindings;
         cached_ = true;
     }
-    bindings_ = bindings;
     cache_hit_ = hit;
     phase_ = Phase::compiled;
     return true;
@@ -254,7 +270,9 @@ bool RenderGraph::compile(const GraphDeclaration& declaration, const FrameBindin
 
 bool RenderGraph::consume(const FrameBindings& bindings, GraphError& error) noexcept
 {
+#if defined(ENGINE_ENABLE_TRACY_FUNCTIONS)
     ENGINE_PROFILE_ZONE("Render.graphRecheckBindings");
+#endif
     error = {};
     if (phase_ != Phase::compiled)
     {
@@ -274,6 +292,7 @@ void RenderGraph::reset() noexcept
 {
     phase_ = Phase::idle;
     cached_ = false;
+    cached_immutable_ = nullptr;
     cache_hit_ = false;
     bindings_ = {};
     plan_ = {};

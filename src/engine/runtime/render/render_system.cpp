@@ -8,6 +8,7 @@
 #include "runtime/render/frame_counters.hpp"
 #include "runtime/render/gpu_memory_tracker.hpp"
 #include "runtime/render/passes/frame_output.hpp"
+#include "runtime/render/passes/hdr_post_process_pass.hpp"
 #include "runtime/render/passes/meshlet_cull_pass.hpp"
 
 #include "runtime/font/font_system.hpp"
@@ -607,6 +608,7 @@ bool RenderSystem::initialize_renderer()
     {
         return false;
     }
+    render_detail::HdrPostProcessPass::initialize_views();
     bgfx::setViewName(render_detail::main_view, "Main window");
     constexpr std::array shadow_names = {"Directional shadow 1", "Directional shadow 2",
                                          "Directional shadow 3", "Directional shadow 4"};

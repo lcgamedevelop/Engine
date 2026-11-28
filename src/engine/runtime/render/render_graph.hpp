@@ -95,7 +95,18 @@ public:
 
     [[nodiscard]] bool begin(const FrameKey& key) noexcept;
     [[nodiscard]] bool compile(const GraphDeclaration& declaration, const FrameBindings& bindings,
-                               GraphError& error) noexcept;
+                               GraphError& error) noexcept
+    {
+        return compile_frame(declaration, false, bindings, error);
+    }
+
+    // A value template parameter denotes a static immutable object. Its identity proves
+    // complete declaration equality; an ordinary mutable declaration always compares by value.
+    template <GraphDeclaration Declaration>
+    [[nodiscard]] bool compile(const FrameBindings& bindings, GraphError& error) noexcept
+    {
+        return compile_frame(Declaration, true, bindings, error);
+    }
 
     template <typename Submit>
     [[nodiscard]] bool execute(const FrameBindings& bindings, Submit&& submit, GraphError& error)
@@ -126,6 +137,8 @@ public:
     void reset() noexcept;
 
 private:
+    [[nodiscard]] bool compile_frame(const GraphDeclaration& declaration, bool immutable,
+                                     const FrameBindings& bindings, GraphError& error) noexcept;
     [[nodiscard]] bool consume(const FrameBindings& bindings, GraphError& error) noexcept;
 
     enum class Phase : std::uint8_t
@@ -139,6 +152,7 @@ private:
     FrameBindings bindings_{};
     FrameKey cached_key_{};
     GraphDeclaration cached_declaration_{};
+    const GraphDeclaration* cached_immutable_ = nullptr;
     FramePlan plan_{};
     bool cached_ = false;
     bool cache_hit_ = false;
