@@ -18,7 +18,7 @@ direction TB
 class RenderSystem
 class RenderGraph {
   +begin(FrameKey) bool
-  +compile(GraphCaps, GraphError) bool
+  +compile(GraphCaps, FrameBindings, GraphError) bool
   +execute(FrameBindings, GraphError) bool
 }
 class FramePlan {
@@ -31,9 +31,11 @@ class PassUse {
   +range
   +access
 }
+class FrameBindings
 RenderSystem *-- RenderGraph : owns
 RenderGraph *-- FramePlan : owns
 RenderGraph *-- PassUse : records
+RenderGraph ..> FrameBindings : borrows per frame
 ```
 
 运行时新增一个具有行为的私有类型 `engine::render_detail::RenderGraph`，由 `RenderSystem` 独占。图中其余新增项均为值记录。既有 Pass 拥有着色程序、持久目标和执行方法。通用编译部分只处理逻辑记录，执行部分在 runtime/render 内把记录落实为 bgfx 操作，首版共用一个执行实现。下表是拟议的模块内签名，输出参数用引用，带状态的操作均为 `[[nodiscard]]`。
@@ -42,14 +44,14 @@ RenderGraph *-- PassUse : records
 | --- | --- | --- |
 | 开帧 | `begin(const FrameKey&) -> bool` | 在准备成功后开始声明，生成非零图代次。清场景、正常绘制、影片各有自己的输出根。候选声明属本帧。 |
 | 描述资源 | `create(const ResourceDesc&, ResourceId&) -> bool`、`import(const ResourceDesc&, ExternalSlot, ResourceVersion&) -> bool` | 临时资源起初未定义；导入把外部槽映射到已有版本。调用方持有物理对象，实际句柄和内容有效性由本帧绑定表给出。 |
-| 登记通道 | `add_pass(const PassDesc&, PassId&) -> bool`、`read(PassId, ResourceVersion, const UseDesc&) -> bool`、`write(PassId, ResourceId, const UseDesc&, ResourceVersion&) -> bool` | PassDesc 含稳定通道键、视图/观察者角色、Raster/Compute/Copy 类别、记录命令的入口。读旧写新、覆盖、加载、解析均有明确用途。覆盖写产生新版本；保留内容的写入通过 `UseDesc.prior` 显式指定输入版本及其范围。写入失败返回无效版本。 |
+| 登记通道 | `add_pass(const PassDesc&, PassId&) -> bool`、`read(PassId, ResourceVersion, const UseDesc&) -> bool`、`write(PassId, ResourceId, const UseDesc&, ResourceVersion&) -> bool` | PassDesc 含通道键、观察者、执行阶段及命令入口。消耗 View 的通道另标 Raster、Compute 或 Copy。读旧写新、覆盖、加载、解析均有明确用途。保留内容的写入通过 `UseDesc.prior` 显式指定输入版本及其范围。写入失败返回无效版本。 |
 | 确认结果 | `export_version(ResourceVersion, ExternalSlot) -> bool`、`require(PassId, EffectToken) -> bool`、`order(PassId before, PassId after) -> bool` | 显示/供外部消费的版本和有副作用的作业是活跃根。外部拥有者负责跨帧保存。相同作业身份只能完成一次。外部槽属于调用方；导出时写入该槽的既有物理资源，必要的复制显式入图。 |
-| 编译与执行 | `compile(const GraphCaps&, GraphError&) -> bool`、`execute(const FrameBindings&, GraphError&) -> bool` | 编译校验并生成逻辑槽和 View 配额，执行在首条提交前核对本帧物理绑定和就绪状态。计划只存槽、范围、稳定键与顺序。回调使用当前帧借用的相机、绘制列表及物理资源；通过当前 Pass 的声明查找实际附件/缓冲。 |
+| 编译与执行 | `compile(const GraphCaps&, const FrameBindings&, GraphError&) -> bool`、`execute(const FrameBindings&, GraphError&) -> bool` | 编译借用本帧绑定，核对设备能力、输入覆盖、物理别名和输出保留区间，再分配 View。执行使用同一帧的绑定快照，首条命令前复核；若已变更，调用方重编。每个图代次最多执行一次，失败后以新代次重试。计划只存槽、范围、稳定键与顺序。回调使用当前帧借用的相机、绘制列表及物理资源；通过当前 Pass 的声明查找实际附件/缓冲。 |
 | 退出 | `reset() noexcept -> void` | 丢弃候选与计划，按 bgfx 生命周期退役图拥有的对象。由设备关闭、重建或拥有者析构调用，支持重复清理。 |
 
 `PassId / ResourceId / ResourceVersion` 是带代次的值句柄。资源版本另含逻辑资源身份与写序号。图拥有 `FramePlan` 与声明数组；计划引用声明中的整数槽。执行回调不捕获跨帧的 ECS 指针、栈引用或旧 GPU 句柄。保存在计划缓存里的入口用静态函数加本帧槽解析，供跨帧读取的诊断快照按值复制。
 
-`FrameKey` 描述设备代次、输出尺寸/格式/采样数、帧类型和视图配置。复用计划还要核对**完整声明的结构相等**，包括实际选用的通道、版本依赖、附件描述、输出根、外部保留槽、槽间物理别名关系与设备能力。由本帧绑定先按物理对象、代次和重叠子资源归组，把归组结果写入声明；执行前再次核对。两槽从独立对象变为同一目标时，须在提交前重编或明确拒绝该绑定。哈希仅用来加速比较。变动的矩阵、材质值、页号由绑定表传入；如实际视图数、读写范围或通道形状变了，更新相应声明并重编。图代次仍逐帧变化，命中缓存的计划重新映射到本帧槽位。
+`FrameKey` 描述设备代次、输出尺寸/格式/采样数、帧类型和视图配置。复用计划还要核对**完整声明的结构相等**，包括实际选用的通道、版本依赖、附件描述、输出根、外部保留槽、槽间物理别名关系与设备能力。`FrameBindings` 提供设备与资源代次、物理身份、访问范围和初始有效区域。编译按物理身份及重叠范围归组，缓存只保存这些关系及影响首读的有效性条件。两个不同的导出值若须同时保留，重叠的外部槽必须能改用独立存储，否则报告两个导出名和冲突范围。两槽从独立对象变为同一目标时，须在提交前重编或明确拒绝该绑定。哈希仅用来加速比较。变动的矩阵、材质值、页号由绑定表传入；如实际视图数、读写范围或通道形状变了，更新相应声明并重编。图代次仍逐帧变化，命中缓存的计划重新映射到本帧槽位。
 
 ## 编译和资源契约
 
@@ -57,8 +59,10 @@ RenderGraph *-- PassUse : records
 2. **确定内容从哪里来。** 首次读取或附件 Load 须有已定义的生产者或有效导入。局部清除、阴影页矩形、裁切、混色和模板测试都可能保留旧内容，登记“读旧版本、写新版本”。未触及的范围继承旧版本的定义状态，首次局部写只定义本次覆盖区域。附件的固定功能混色、深度或模板读改写可沿用同一物理附件；着色器同时采样旧颜色并写回该范围则需要独立目标。范围难以证明时按整份资源保守追踪。无法证明覆盖范围内已有有效内容时，选择完整初始化或拒绝读取。跨帧反馈以先前已发布版本导入，防止把时间上的依赖误建成本帧环。
 3. **从根裁剪、稳定排序。** 反向标记影响输出的通道及必须发生的副作用。历史更新、请求中的截图/烘焙回读、页表发布、插件有序绘制都可成为根。对存活节点拓扑排序，相同优先度沿用原调度次序。具有画家顺序、共面胜者、模板消耗或可见外部副作用的操作通过 `order(before, after) -> bool` 登记显式顺序边。遇到环，报告一条含通道和资源版本的闭合依赖链。纯顺序边只约束两端均存活的通道，必须执行的前置作业登记为根或由真实数据依赖保活。活跃性沿内容依赖回溯；物理上的反依赖和写入顺序在活跃通道之间补齐，避免为已被完整覆盖的旧写入保留绘制。
 4. **计算物理生命期。** 记录第一次写、最后一次读、需要保留的 aspect、附件 load/store 与 resolve。导入的 swapchain、图集、历史、GPU readback 继续归原拥有者。首版按原目标执行；开启复用后，同一个合规 bgfx 纹理可服务按 GPU 顺序互斥的两个瞬态版本，要求物理描述/访问能力匹配、后者全范围初始化。Framebuffer 的键包含物理附件身份及代次、子资源和 resolve 配置。CPU 到帧末、连续若干帧或收到提交序号均不能单独证明 GPU 已完成。跨帧优先沿用已有对象销毁和有序提交语义，缺少可靠完成契约时隔离在途对象。
-5. **映射到 bgfx。** 逻辑通道可展开为多个物理 View，Copy、Compute、Raster 有实际前后依赖时分别安排。单个 View 内遵守 bgfx 的分类和排序规则。首版保留各域当前占用的 View，检查实际能力与保留区间，在提交前一次生成 `setViewOrder`。每个活跃 View 重设目标、矩形、排序、清除和变换。图依据依赖选择已验证的提交序列；原生屏障与具体布局转换仍由后端完成。
-6. **发布与失败。** 检查完成后才发布候选计划；条件改变时，旧计划只可用于与原签名匹配的帧。句柄陈旧、未定义读取、能力缺失、反馈冲突、View 耗尽或目标分配失败，报告 Pass 名、资源版本、用途、平台和具体原因。沿用 `PassTargets` 在场景作用域内按预算分十步准备的契约。等待目标就绪时宿主返回 `RenderSubmitStatus::deferred`，分配或契约出错返回 `failed`，完整提交后返回 `submitted`。执行中途出错时，已编码 GPU 工作无法撤销；沿用现有帧收尾，标记部分写入的持久内容失效，取消受影响的发布/回读，下一帧显式重建。页缓存等纯 CPU 的候选状态随成功提交确认，需要 GPU 完成的业务回执则等待真正回读。
+5. **映射到 bgfx。** 逻辑通道可展开为多个物理 View，Copy、Compute、Raster 有实际前后依赖时分别安排。单个 View 内遵守 bgfx 的分类和排序规则。先校验活跃依赖能否映射到 bgfx 的阶段。`updateTexture` 类上传在各 View 之前生效；blit 属于指定 View，回读请求和完成轮询有各自的 API 时序。若本帧既需先采样旧页表，又要原地预上传新表，必须提供另一物理版本或有序 GPU 复制。没有等价路径时在提交前报告冲突。首版保留各域当前占用的 View，检查实际能力与保留区间，在提交前一次生成 `setViewOrder`。每个活跃 View 重设目标、矩形、排序、清除和变换。图依据依赖选择已验证的提交序列；原生屏障与具体布局转换仍由后端完成。
+6. **发布与失败。** 检查完成后才发布候选计划；条件改变时，旧计划只可用于与原签名匹配的帧。句柄陈旧、未定义读取、能力缺失、反馈冲突、View 耗尽或目标分配失败，报告 Pass 名、资源版本、用途、平台和具体原因。沿用 `PassTargets` 在场景作用域内按预算分十步准备的契约。等待目标就绪时宿主返回 `RenderSubmitStatus::deferred`，分配或契约出错返回 `failed`，完整提交后返回 `submitted`。执行中途出错时，已编码 GPU 工作无法撤销；沿用现有帧收尾，标记部分写入的持久内容失效，取消受影响的发布/回读，下一帧显式重建。持久内容由原缓存拥有者负责确认或作废。RVT/VSM 用候选映射生成本帧页表，登记可能覆盖的物理页。编码前失败直接丢弃候选；已有覆盖命令时，即使宿主仍提交这帧，也须作废涉及的旧映射并把相应页标脏。`RenderSystem` 在统一收尾中通知拥有者，整帧成功才提交新映射。截图、烘焙等请求由原业务按请求身份去重，GPU 完成后回执。现有 RVT 准备会推进真实映射，迁移该域之前要先具备候选与取消语义。[页缓存](../../../src/engine/runtime/render/rvt/virtual_texture_cache.cpp) · [页表上传](../../../src/engine/runtime/render/rvt/rvt_pass.cpp)
+
+**编译及失败验收。** 同规格外部纹理从独立对象改为同一 mip 时应重编或明确报错，两个独立 mip 可分别导出。构造旧页表采样与预上传的冲突，裁掉旧读取后应能编译。在页覆盖已编码时令扩展返回失败，下一帧被覆盖的旧页必须重新生成。给截图设未来的提交序号，验证当前帧照常显示、请求继续等待。
 
 ## Render Lab 的第一张图
 
@@ -90,7 +94,7 @@ flowchart TD
 
 **以 Bloom 为例。** View 135 从冻结的 HDR 场景色提取亮部，136 读取亮部并写纵向模糊，137 同时读取场景色与模糊纹理，完成横向滤波和色调映射。亮部纹理在 136 仍是输入，同一时刻 136 的输出必须有独立存储。关闭 Bloom 后，137 使用现有黑色占位纹理，135 和 136 随之退出活跃图。这个例子可以同时验出错误裁剪和错误复用。
 
-**截图会改变本帧的输出。** 普通帧可直接写交换链。收到屏幕截图请求时，在编译前选择可回读的 BGRA8 显示目标，场景与 UI 都写入该目标，随后分别呈现和复制回读。请求结束后下帧可恢复直出；同一分辨率下两条路径的根和物理槽不同。独立的线性 HDR 截图仍取色调映射前的场景图。[当前显示与回读](../../../src/engine/runtime/render/passes/frame_output.cpp)
+**截图会改变本帧的输出。** 普通帧可直接写交换链。本帧截图须同时满足设备代次、提交序号门槛、场景作用域与收集状态。未符合的请求继续排队。对符合的请求，在编译前选择可回读的 BGRA8 显示目标，场景与 UI 都写入该目标，随后分别呈现和复制回读。请求结束后下帧可恢复直出；同一分辨率下两条路径的根和物理槽不同。已选的辅助回读若不可用，按现有 `readback_unavailable` 结束该请求，显示继续提交；显示链自身的必需资源失效才上报整帧失败。独立的线性 HDR 截图仍取色调映射前的场景图。[截图请求选择与完成](../../../src/engine/runtime/render/render_observation.cpp)[当前显示与回读](../../../src/engine/runtime/render/passes/frame_output.cpp)
 
 **过渡期间的 View 约束。** UI 占用 200，显示与显示截图使用 202、203，独立捕获有 239、242、243 等 View，编辑器 IBL 作业占用 240、241。按当帧实际占用及保留的唯一 ID 核对 `maxViews` 和现有 256 槽范围。GPU 顺序以 `setViewOrder` 为准。图外提交者继续占用原槽；`RenderSystem` 汇总各方后一次提交整帧顺序。[现有槽位声明](../../../src/engine/runtime/render/render_constants.hpp)
 
