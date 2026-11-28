@@ -123,6 +123,7 @@ RenderSubmitStatus 区分提交、暂缓和失败，GameplayStopCause 显式区�
 - [渲染能力与调试控制](../runtime/class-diagrams/render-feature-controls.md)
 - [视图提交、剔除与静态实例化](../runtime/class-diagrams/render-submission.md)
 - [渲染系统](../runtime/class-diagrams/render-system.md)
+- [跨平台渲染图（待评审方案）](../runtime/class-diagrams/render-graph.md)
 - [按范围准备、首帧与截图](../runtime/class-diagrams/render-readiness.md)
 
 ## 场景与领域组件
