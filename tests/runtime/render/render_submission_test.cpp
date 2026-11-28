@@ -196,19 +196,28 @@ schema::MeshDataT grid()
     return mesh;
 }
 
-schema::MeshDataT triangle(const char* path, float center)
+schema::MeshDataT triangle(const char* path, float center, std::uint32_t clusters,
+                           std::uint32_t triangles_per_cluster)
 {
     schema::MeshDataT mesh;
     mesh.path = path;
     mesh.vertices.emplace_back(center - .375F, -.5F, 0, 0, 0, 1);
     mesh.vertices.emplace_back(center + .375F, -.5F, 0, 0, 0, 1);
     mesh.vertices.emplace_back(center, .5F, 0, 0, 0, 1);
-    mesh.indices = {0, 1, 2};
     mesh.meshlets = std::make_unique<schema::MeshletDataT>();
+    for (std::uint32_t cluster = 0; cluster < clusters; ++cluster)
+    {
+        const auto first = static_cast<std::uint32_t>(mesh.indices.size());
+        for (std::uint32_t i = 0; i < triangles_per_cluster; ++i)
+        {
+            mesh.indices.insert(mesh.indices.end(), {0, 1, 2});
+        }
+        mesh.meshlets->meshlets.emplace_back(first, triangles_per_cluster * 3,
+                                             schema::Vec3{center, 0, 0}, .7F,
+                                             schema::Vec3{0, 0, 1}, 0);
+    }
     mesh.meshlets->indices = mesh.indices;
-    mesh.meshlets->meshlets.emplace_back(0, 3, schema::Vec3{center, 0, 0}, .7F,
-                                         schema::Vec3{0, 0, 1}, 0);
-    mesh.meshlets->submeshes.emplace_back(0, 1);
+    mesh.meshlets->submeshes.emplace_back(0, clusters);
     return mesh;
 }
 
@@ -763,8 +772,10 @@ bool cross_mesh_indices(WindowSystem& window, RenderSystem& renderer, WorldSyste
         std::printf("GPU memory counts %llu shared backing bytes for the vertex page.\n",
                     static_cast<unsigned long long>(backing_bytes));
     }
-    return expect(direct_stats.draw_calls == 2 && merged_stats.meshlet_candidate_pairs == 2,
-                  "two distinct meshes and meshlet candidates share a submission");
+    const auto clusters = left.meshlets->meshlets.size() + right.meshlets->meshlets.size();
+    return expect(direct_stats.draw_calls == 2 && merged_stats.meshlet_candidate_pairs == clusters &&
+                      !merged_stats.meshlet_budget_fallbacks,
+                  "both meshes and every cluster enter the shared submission");
 }
 
 int test()
@@ -777,12 +788,15 @@ int test()
     engine::WorldSystem world(&services.loader);
     WindowSystem window;
     RenderConfig render_config;
-    render_config.maximum_meshlet_candidates = 16;
+    // The compaction fixture needs 26 pairs; the overflow fixture submits 28 in one batch.
+    render_config.maximum_meshlet_candidates = 26;
     RenderSystem renderer(window, &world, nullptr, nullptr, nullptr, render_config);
     test_support::ResourceFixture fixture;
     const auto geometry = grid();
-    const auto left_triangle = triangle("meshes/submission-left-triangle", -.625F);
-    const auto right_triangle = triangle("meshes/submission-right-triangle", .625F);
+    // The left mesh alone offers higher command savings per index. It must remain available
+    // for the cross-mesh draw with its adjacent right mesh on the same vertex page.
+    const auto left_triangle = triangle("meshes/submission-left-triangle", -.625F, 25, 1);
+    const auto right_triangle = triangle("meshes/submission-right-triangle", .625F, 1, 63);
     const auto left_probes = probes("lighting/submission-left", true);
     const auto right_probes = probes("lighting/submission-right", false);
     if (!(services.initialize(config) && services.prepare_builtins()) ||

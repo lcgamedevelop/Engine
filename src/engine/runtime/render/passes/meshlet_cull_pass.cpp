@@ -676,6 +676,7 @@ bool MeshletCullPass::dispatch(const RenderFrameData& frame, const SceneDrawView
         }
         first = end;
     }
+    const auto merged_count = candidates.size();
     for (std::size_t index = 0; index < work.size(); ++index)
     {
         const auto& batch = work[index];
@@ -685,15 +686,22 @@ bool MeshletCullPass::dispatch(const RenderFrameData& frame, const SceneDrawView
                 {index, 1, batch.compact_index_count, batch.output->command_count});
         }
     }
-    // Spend the shared index budget on the most Metal commands removed per copied index.
-    // Planning order is independent of submission order.
-    std::stable_sort(candidates.begin(), candidates.end(),
+    // First preserve complete cross-mesh runs. A cheaper single-mesh compaction inside a
+    // run would claim its batch and prevent the whole run from becoming a single draw.
+    // The two lists already occupy separate ranges in draw order.
+    const auto first_single = candidates.begin() + merged_count;
+    const auto command_density = [](const auto& a, const auto& b)
+    {
+        return std::uint64_t{a.commands - 1} * b.indices >
+               std::uint64_t{b.commands - 1} * a.indices;
+    };
+    std::stable_sort(candidates.begin(), first_single,
                      [](const auto& a, const auto& b)
                      {
-                         ENGINE_PROFILE_FUNCTION_PROBE();
-                         return std::uint64_t{a.commands - 1} * b.indices >
-                                std::uint64_t{b.commands - 1} * a.indices;
+                         return std::uint64_t{a.count - 1} * b.indices >
+                                std::uint64_t{b.count - 1} * a.indices;
                      });
+    std::stable_sort(first_single, candidates.end(), command_density);
     // Both regions start on a packed pair of 16-bit indices.
     const auto needed = static_cast<std::uint32_t>(std::min<std::uint64_t>(
         (index_demand + 1) & ~std::uint64_t{1}, maximum_index_region_capacity));
