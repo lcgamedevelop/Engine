@@ -13,6 +13,7 @@ if(VCPKG_TARGET_IS_ANDROID)
   set(bgfx_android_patches
     android-descriptor-reuse.patch
     android-uniform-arena.patch
+    android-buffer-readback.patch
   )
 endif()
 
